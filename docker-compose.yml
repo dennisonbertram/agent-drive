@@ -2,37 +2,13 @@ name: agent-drive
 
 services:
   postgres:
-    image: ghcr.io/cloudnative-pg/postgresql:17.11-standard-bookworm
-    user: root
-    entrypoint: ['/bin/bash', '-c']
-    command:
-      - >-
-        set -euo pipefail;
-        if [ ! -s "$${PGDATA}/PG_VERSION" ]; then
-        install -d -o postgres -g postgres "$${PGDATA}";
-        password_file=$$(mktemp);
-        printf '%s\n' "$${POSTGRES_PASSWORD}" > "$${password_file}";
-        chown postgres:postgres "$${password_file}";
-        su postgres -c "initdb --pgdata=$${PGDATA} --username=$${POSTGRES_USER} --pwfile=$${password_file} --auth-host=scram-sha-256 --auth-local=trust";
-        rm "$${password_file}";
-        su postgres -c "pg_ctl --pgdata=$${PGDATA} -o '-c listen_addresses=' -w start";
-        su postgres -c "createdb --username=$${POSTGRES_USER} --owner=$${POSTGRES_USER} $${POSTGRES_DB}";
-        su postgres -c "pg_ctl --pgdata=$${PGDATA} -m fast -w stop";
-        fi;
-        if ! grep -Fqx 'host all all 0.0.0.0/0 scram-sha-256' "$${PGDATA}/pg_hba.conf"; then
-        printf '%s\n' 'host all all 0.0.0.0/0 scram-sha-256' >> "$${PGDATA}/pg_hba.conf";
-        fi;
-        if ! grep -Fqx 'host all all ::/0 scram-sha-256' "$${PGDATA}/pg_hba.conf"; then
-        printf '%s\n' 'host all all ::/0 scram-sha-256' >> "$${PGDATA}/pg_hba.conf";
-        fi;
-        exec su postgres -c "postgres -D $${PGDATA} -c listen_addresses='*'"
+    image: postgres:17
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agent_drive}
       POSTGRES_USER: ${POSTGRES_USER:-agent_drive}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_drive_local_only}
-      PGDATA: /var/lib/postgresql/data
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -43,49 +19,32 @@ services:
       start_period: 5s
 
   minio:
-    image: ghcr.io/disaster37/minio:RELEASE.2025-10-15T17-29-55Z
+    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
     command: server /data --console-address ':9001'
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-agent_drive_local}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-agent_drive_local_secret}
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
     volumes:
       - minio-data:/data
     healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'mc alias set local http://127.0.0.1:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1 && mc ready local',
-        ]
+      test: ['CMD', 'mc', 'ready', 'local']
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
 
   minio-init:
-    image: ghcr.io/disaster37/minio:RELEASE.2025-10-15T17-29-55Z
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - >-
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER"
-        "$$MINIO_ROOT_PASSWORD" &&
-        mc mb --ignore-existing "local/$$S3_BUCKET" &&
-        while true; do sleep 3600; done
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    command: ['mb', '--ignore-existing', 'local/${S3_BUCKET:-agent-drive-local}']
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-agent_drive_local}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-agent_drive_local_secret}
-      S3_BUCKET: ${S3_BUCKET:-agent-drive-local}
+      MC_HOST_local: http://${S3_ACCESS_KEY_ID:-agent_drive_local}:${S3_SECRET_ACCESS_KEY:-agent_drive_local_secret}@minio:9000
     depends_on:
       minio:
         condition: service_healthy
-    healthcheck:
-      test: ['CMD-SHELL', 'mc stat "local/$$S3_BUCKET" >/dev/null 2>&1']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 5s
+    restart: 'no'
 
 volumes:
   postgres-data:

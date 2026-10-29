@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -65,5 +66,14 @@ describe('local service scaffold smoke (not product acceptance)', () => {
         }),
       );
     }
+
+    await expect(
+      objectStorage.send(
+        new HeadObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        }),
+      ),
+    ).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } });
   });
 });

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "lint": "eslint . && prettier --check .",
-    "typecheck": "pnpm --recursive --workspace-concurrency=1 typecheck",
+    "typecheck": "tsc --noEmit --project tsconfig.tools.json && pnpm --recursive --workspace-concurrency=1 typecheck",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:mcp": "vitest run --config vitest.mcp.config.ts",

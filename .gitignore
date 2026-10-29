@@ -6,7 +6,6 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
-apps/web/AGENTS.md
 .env
 .env.*
 !.env.example
