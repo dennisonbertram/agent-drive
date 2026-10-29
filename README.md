@@ -46,6 +46,23 @@ root credentials. MinIO's API is at `http://localhost:9000`, its console is at
 `docker compose down` when intentionally stopping them. To use alternate host ports, set
 `POSTGRES_HOST_PORT`, `MINIO_API_HOST_PORT`, and `MINIO_CONSOLE_HOST_PORT`.
 
+Apply the checked-in Phase 1 schema after the services are healthy:
+
+```sh
+DATABASE_URL=postgresql://agent_drive:agent_drive_local_only@127.0.0.1:5432/agent_drive \
+  pnpm --dir apps/web db:migrate
+```
+
+The first agent credential is created only by an explicit local operator command. It is never
+available through an unauthenticated HTTP endpoint:
+
+```sh
+pnpm --dir apps/web provision:local
+```
+
+The command requires a loopback `DATABASE_URL` and interactive account and agent names. It prints
+the high-entropy API token once; only its SHA-256 hash is stored.
+
 Install the local Playwright browser once:
 
 ```sh
