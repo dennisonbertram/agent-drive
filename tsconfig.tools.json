@@ -11,7 +11,8 @@
     "vitest.integration.config.ts",
     "vitest.mcp.config.ts",
     "vitest.unit.config.ts",
-    "tests/e2e/**/*.ts"
+    "tests/e2e/**/*.ts",
+    "tests/**/*.unit.test.ts"
   ],
   "exclude": ["node_modules", "apps", "packages"]
 }

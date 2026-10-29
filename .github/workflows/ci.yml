@@ -73,7 +73,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: docker compose up -d --wait
+      - run: pnpm services:up
       - run: pnpm test:integration
       - if: always()
         run: docker compose down -v

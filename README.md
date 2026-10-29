@@ -30,7 +30,7 @@ Start the local PostgreSQL and MinIO services and wait for their health checks a
 bucket initialization:
 
 ```sh
-docker compose up -d --wait
+pnpm services:up
 ```
 
 The Compose defaults and `.env.example` credentials are public local-development-only values; never
