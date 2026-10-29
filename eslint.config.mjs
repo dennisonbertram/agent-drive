@@ -16,7 +16,7 @@ const scopeToWeb = (configs, defaultFiles) =>
 
 export default defineConfig([
   ...scopeToWeb(nextVitals, ['apps/web/**/*.{js,jsx,mjs,ts,tsx,mts,cts}']),
-  ...scopeToWeb(nextTypescript, ['apps/web/**/*.{ts,tsx,mts,cts}']),
+  ...nextTypescript,
   {
     files: ['apps/web/**/*.{js,jsx,ts,tsx}'],
     settings: {

@@ -24,6 +24,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-agent_drive_local}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-agent_drive_local_secret}
+      MC_HOST_local: http://${S3_ACCESS_KEY_ID:-agent_drive_local}:${S3_SECRET_ACCESS_KEY:-agent_drive_local_secret}@127.0.0.1:9000
     ports:
       - '127.0.0.1:9000:9000'
       - '127.0.0.1:9001:9001'
