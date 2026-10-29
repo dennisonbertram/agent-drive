@@ -33,12 +33,18 @@ bucket initialization:
 pnpm services:up
 ```
 
+PostgreSQL uses the Docker Official Image published in Amazon ECR Public because Docker Hub pulls
+were rate-limited in the development environment. MinIO's documented Quay image returned an
+authorization error there, so Compose builds MinIO server and client from pinned upstream releases
+using Docker Official Go and Debian base images. No third-party MinIO mirror is used.
+
 The Compose defaults and `.env.example` credentials are public local-development-only values; never
 reuse them outside local development. The S3 access key and secret are also used as MinIO's local
 root credentials. MinIO's API is at `http://localhost:9000`, its console is at
 `http://localhost:9001`, and the database is at `localhost:5432`. Compose creates the
 `agent-drive-local` bucket. Keep these services running for local development; use
-`docker compose down` when intentionally stopping them.
+`docker compose down` when intentionally stopping them. To use alternate host ports, set
+`POSTGRES_HOST_PORT`, `MINIO_API_HOST_PORT`, and `MINIO_CONSOLE_HOST_PORT`.
 
 Install the local Playwright browser once:
 
@@ -49,14 +55,13 @@ pnpm exec playwright install chromium
 ### Checks
 
 ```sh
-pnpm lint
-pnpm typecheck
-pnpm test:unit
-pnpm test:integration
-pnpm test:mcp
-pnpm test:e2e
-pnpm build
+pnpm verify
 ```
+
+`pnpm verify` is the required local regression gate before merge. It runs lint, typecheck, unit,
+integration, MCP, Playwright, and build checks in that order. Start the Compose services with
+`pnpm services:up` and install the Playwright browser before running it. The GitHub Actions workflow
+is `workflow_dispatch` only; it does not run automatically on pull requests or pushes.
 
 `test:integration` requires the Compose services and verifies a PostgreSQL query plus MinIO
 put/get/delete. `test:mcp` verifies an in-memory SDK initialize handshake only. `test:e2e` starts
@@ -67,7 +72,8 @@ behavior.
 
 Copy `.env.example` to `.env` for local configuration. It lists the database connection and
 PostgreSQL credentials; MinIO root credentials and S3 endpoint, region, bucket, and access keys;
-Auth.js URL/secret and GitHub OAuth client ID/secret; the API base URL; the per-drive
+Clerk publishable and secret keys; the API base URL; the per-drive
 `AGENT_DRIVE_KEY_<DRIVE_NAME>` convention; and placeholder Stripe, sender, and email API settings.
-OAuth, billing, email, and drive-key placeholders are not used by the Phase 0 scaffold. A real
-drive key should be stored in a secure secret manager, not committed to `.env.example`.
+Clerk is the planned human-auth provider; GitHub OAuth can be configured as a Clerk provider.
+Authentication, billing, email, and drive-key placeholders are not used by the Phase 0 scaffold. A
+real drive key should be stored in a secure secret manager, not committed to `.env.example`.
