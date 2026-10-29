@@ -263,7 +263,9 @@ The smallest product a developer would pay $20/month for:
 - Epic 1: S1.1–S1.5
 - Epic 2: S2.1–S2.6, S2.9
 - Epic 3: S3.1, S3.2, S3.3
-- Epic 4: S4.1, S4.3 (secret redaction only), S4.5 (export only, simple filters)
+- Epic 4: S4.1 only, as a convention: traces are ordinary JSONL files under
+  `/traces`, with the schema defined in the skill. No trace-specific server
+  features in v1. Traces are still the headline of the launch pitch.
 - Epic 5: S5.1, S5.3, S5.5
 - Epic 6: S6.1
 - Epic 7: S7.1, S7.4
@@ -272,10 +274,25 @@ The smallest product a developer would pay $20/month for:
 - Epic 11: S11.1, S11.2, S11.5
 - Epic 12: S12.1, S12.2
 
-Deferred: per-user isolation (S5.2), agent-to-agent sharing and inboxes (S6.2,
+Deferred: trace redaction, labeling, query, and dataset export (S4.2–S4.7),
+per-user isolation (S5.2), agent-to-agent sharing and inboxes (S6.2,
 S6.3), AgentMail integration, full-text and semantic search, trace labeling,
 auto-capture hooks, BYO bucket, other backends, agent self-payment, reselling.
 
 ## Open questions
 
-TBD — see the questions asked in the session; answers will be recorded here.
+## Decisions (2026-10-29)
+
+- **First customer:** indie and agent developers. Self-serve sign-up, MCP
+  server and skill first, AgentMail-style plans.
+- **Payment:** a human pays in v1 (Stripe subscription plus usage). Agent
+  self-payment (S10.5) is a later phase.
+- **Storage:** hosted on our own S3 in v1. BYO bucket and other backends later.
+- **Traces:** technically just another file type, but likely the go-to-market
+  headline ("give your agents a drive; keep their traces for training").
+
+## Open questions
+
+- Trace schema: invent one, or adopt an existing format (for example
+  OpenTelemetry GenAI spans)? TBD.
+- Exact plan limits and overage prices: TBD after measuring S3 costs.
