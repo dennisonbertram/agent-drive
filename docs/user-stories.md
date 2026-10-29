@@ -1,6 +1,6 @@
 # Agent Drive — User Stories
 
-Status: draft for review (2026-10-29). Pricing numbers are proposals, not decisions.
+Status: agreed v1 scope (2026-10-29). Pricing numbers are proposals, not decisions.
 
 ## The idea
 
@@ -9,11 +9,14 @@ inboxes. They do not get their own storage. Today they borrow a human's Box or
 Google Drive account, which means human OAuth, human folder structures, and no
 clear record of which agent or machine wrote which file.
 
-Agent Drive is a drive built for agents. It is a paid MCP server and an HTTP API
-on top of object storage (Amazon S3 first; Cloudflare R2, Google Cloud Storage,
-or the customer's own bucket later), plus a skill that teaches agents when and
-how to use it. The model is AgentMail: one API call creates an inbox there; one
-call creates a drive here.
+Agent Drive is Google Drive for agents. It is a paid service on top of Amazon S3,
+used through an MCP server, a CLI, and a skill that teaches agents when and how
+to use it. The model is AgentMail: one call there creates an inbox; one call
+here creates a drive.
+
+**File contents are encrypted on the client before upload.** The Agent Drive
+server and S3 only ever hold ciphertext. The encryption key stays with the
+customer.
 
 AgentMail reference point (third-party pricing pages, not verified against
 agentmail.to): Free = 3 inboxes / 3,000 emails per month; Developer = $20/month
@@ -27,22 +30,37 @@ for 10 inboxes; Startup = $200/month for 150 inboxes; Enterprise = custom.
 - **Machine**: the host or sandbox an agent runs on. Recorded on every write so
   the same agent on two machines stays distinguishable.
 - **User**: the end user an agent is acting for, if any. Optional tag on writes.
-- **Drive**: a storage namespace with its own quota, keys, and policies. An agent
-  can have a private drive; a team of agents can share one.
-- **Key**: an API key scoped to one agent, one drive, and a set of permissions
-  (read, write, delete, share).
-- **Trace**: a structured record of an agent run (messages, tool calls, results,
-  outcome) stored for debugging, evaluation, or training.
+- **Drive**: a storage namespace with its own quota, API keys, and encryption key.
+- **API key**: authenticates an agent to the Agent Drive server, scoped to one
+  agent, one or more drives, and a set of permissions (read, write, delete, share).
+- **Drive key**: the secret that encrypts and decrypts a drive's file contents.
+  Generated on the client; never sent to the server.
+
+## Consequences of client-side encryption
+
+These are deliberate and shape the stories below:
+
+- The MCP server runs **locally** (stdio, installed with npm), because it must
+  hold the drive key to encrypt and decrypt. A hosted remote MCP server cannot
+  do this without seeing plaintext.
+- **Lose the drive key, lose the data.** The product must make key backup
+  obvious at drive creation.
+- The server **cannot** search file contents, generate previews, or scan for
+  malware. Search works on paths, tags, and metadata only.
+- Share links carry the decryption key in the URL fragment (`#k=…`), which
+  browsers do not send to servers. The share page decrypts in the browser.
+- In v1, paths, sizes, timestamps, tags, and authorship are stored in plaintext
+  so that listing, search, and the console work. Encrypting names too is a
+  later option.
 
 ## Personas
 
-1. **The agent** — the main user. Calls MCP tools; never sees a web page.
-2. **The developer** — builds agents; wires up the MCP server, keys, and skill.
+1. **The agent** — the main user. Calls MCP tools or the CLI; never sees a web page.
+2. **The developer** — builds agents; installs the MCP server, keys, and skill.
 3. **The operator / human owner** — wants to see, retrieve, and control what
    their agents stored.
-4. **The ML / evals engineer** — wants agent traces as clean datasets.
-5. **The admin / finance owner** — pays, sets limits, needs invoices and audit.
-6. **A receiving party** — a human or another agent that gets a file shared to it.
+4. **The admin / finance owner** — pays, sets limits, needs invoices and audit.
+5. **A receiving party** — a human or another agent that gets a file shared to it.
 
 ---
 
@@ -50,260 +68,175 @@ for 10 inboxes; Startup = $200/month for 150 inboxes; Enterprise = custom.
 
 - **S1.1** As a developer, I want to sign up and get an API key in under a
   minute, so that I can try Agent Drive without a sales call.
-  *Accept:* email or GitHub sign-up, free tier, key shown once, quickstart snippet.
+  *Accept:* GitHub or email sign-up, free tier, API key shown once.
 - **S1.2** As a developer, I want to add Agent Drive to Claude Code, Codex, or
-  any MCP client with one command or one config block, so that my agent has
-  storage immediately. *Accept:* remote MCP URL + key header; `claude mcp add`
-  example; works over Streamable HTTP.
-- **S1.3** As a developer, I want to create agent identities and drives through
-  the API, so that I can provision storage for each agent I deploy (the
-  AgentMail "create inbox" moment). *Accept:* `POST /agents`, `POST /drives`,
-  idempotent by client-supplied name.
-- **S1.4** As a developer, I want to issue a key per agent with narrow
-  permissions, so that a compromised agent can damage only its own drive.
+  any MCP client with one command, so that my agent has storage immediately.
+  *Accept:* `npx agent-drive mcp` works as a stdio MCP server; a
+  `claude mcp add` example is in the README.
+- **S1.3** As a developer, I want to create agents and drives through the CLI
+  or API, so that I can provision storage for each agent I deploy.
+  *Accept:* idempotent by client-supplied name.
+- **S1.4** As a developer, I want an API key per agent with narrow
+  permissions, so that a compromised agent can damage only its own drives.
 - **S1.5** As an agent, I want to call `whoami`, so that I know which agent,
-  drive, quota, and permissions I am operating under.
-- **S1.6** As an agent running in a fresh sandbox, I want the machine identity
-  attached automatically (from an env var or the key's registration), so that
-  my writes are labeled with where they came from without extra work.
+  drives, quota, and permissions I am operating under.
+- **S1.6** As an agent in a fresh sandbox, I want the machine identity attached
+  automatically (hostname or an env var), so that my writes are labeled with
+  where they came from.
 
-## Epic 2 — Core file operations (the MCP tools)
+## Epic 2 — Encryption and keys
 
-- **S2.1** As an agent, I want to write a file by path (`put`), so that I can
-  save outputs. Small text content goes inline; large files use a presigned
-  upload URL so bytes go straight to the bucket.
-- **S2.2** As an agent, I want to read a file (`get`), returning text inline when
-  small and a presigned download URL when large or binary.
-- **S2.3** As an agent, I want to `list` a folder with sizes, timestamps, and
-  author, so that I can find what I or other agents saved.
-- **S2.4** As an agent, I want to `move`, `copy`, and `delete` files, so that I
-  can keep my drive organized.
-- **S2.5** As an agent, I want to attach metadata (tags, a short description,
-  the user and task it relates to) when I write, so that later searches work.
-- **S2.6** As an agent, I want every overwrite to keep the prior version, so that
-  a bad write by me or another agent can be undone. *Accept:* `versions` and
-  `restore` tools; versions count toward quota.
-- **S2.7** As an agent, I want conditional writes (only if the file has not
-  changed since I read it), so that two agents editing one file do not silently
-  overwrite each other.
-- **S2.8** As an agent, I want `append` for logs and JSONL, so that I can stream
-  records without rewriting the whole file.
-- **S2.9** As an agent, I want clear, actionable errors (quota exceeded,
-  permission denied, file not found, payment required), so that I can recover or
-  tell my human what to do.
+- **S2.1** As a developer, I want a drive key generated on my machine when I
+  create a drive, and shown to me with a clear "save this" prompt, so that only
+  I can read my data.
+- **S2.2** As a developer, I want to give the drive key to an agent through an
+  env var or key file, so that agents on several machines can share one drive.
+- **S2.3** As an operator, I want proof that the server never sees plaintext:
+  stored objects and database rows contain no file contents.
+- **S2.4** As an operator, I want to rotate a drive key (re-encrypt with a new
+  key) after a leak. *(Later.)*
+- **S2.5** As an agent, I want a clear error when my drive key is missing or
+  wrong, instead of garbage data.
 
-## Epic 3 — Agent memory and work handoff
+## Epic 3 — Core file operations
 
-- **S3.1** As an agent, I want a persistent workspace that survives the end of
-  my session or sandbox, so that tomorrow's run can pick up today's notes,
-  plans, and partial results.
-- **S3.2** As an agent, I want a conventional layout (for example `/memory`,
-  `/work/<task-id>`, `/outputs`, `/traces`), so that I and other agents know
-  where things go without being told each time. The skill defines this.
-- **S3.3** As an agent finishing a long task, I want to write a handoff file
-  (state, next steps, open questions), so that another agent or a later session
-  can continue.
-- **S3.4** As a developer running ephemeral sandboxes, I want an agent to `sync`
-  a local directory to and from its drive, so that sandbox teardown does not
-  lose work.
-- **S3.5** As an agent, I want scratch files that expire automatically (TTL), so
-  that temporary data does not pile up and cost money.
+Exposed identically as MCP tools, CLI commands, and a client library.
 
-## Epic 4 — Traces for training and evaluation
+- **S3.1** As an agent, I want to write a file by path (`put`), so that I can
+  save outputs. Large files upload straight to S3 through presigned URLs.
+- **S3.2** As an agent, I want to read a file (`get`), returning text inline
+  when small and writing to a local path when large or binary.
+- **S3.3** As an agent, I want to `list` a folder with sizes, timestamps, and
+  author.
+- **S3.4** As an agent, I want to `move`, `copy`, and `delete` files.
+- **S3.5** As an agent, I want to attach tags and a short description when I
+  write (stored as plaintext metadata), so that later searches work.
+- **S3.6** As an agent, I want every overwrite to keep the prior version, with
+  `versions` and `restore`, so that a bad write can be undone. Versions count
+  toward quota.
+- **S3.7** As an agent, I want conditional writes (only if the file has not
+  changed since I read it), so that two agents do not silently overwrite each
+  other.
+- **S3.8** As an agent, I want clear, actionable errors (quota exceeded,
+  permission denied, not found, payment required).
 
-- **S4.1** As a developer, I want my Claude Code and Codex session transcripts
-  stored in their native format, unchanged, so that existing tools that read
-  those formats keep working and nothing is lost in conversion. We do not
-  invent a trace format. *Accept:* files are stored byte-for-byte; path
-  convention keeps the tool, machine, and project separate:
-  - Claude Code (source `~/.claude/projects/<project>/<session>.jsonl`) →
-    `/traces/claude-code/<machine>/<project>/<session>.jsonl`
-  - Codex (source `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) →
-    `/traces/codex/<machine>/YYYY/MM/DD/rollout-*.jsonl`
-- **S4.2** As a developer, I want my transcripts backed up automatically (a
-  Claude Code session-end hook, and a sync command for Codex and for
-  catch-up), so that I do not depend on the agent remembering to save them.
-  Re-running the backup uploads only new or grown files.
-- **S4.3** As an operator, I want secrets and personal data redacted from traces
-  before storage, so that the trace store is safe to share with an ML team.
-  *Accept:* default redaction of keys/tokens; configurable PII rules; redaction
-  is recorded in the trace metadata.
-- **S4.4** As an ML engineer, I want to label a trace (success, failure, rating,
-  free-text note), so that I can build preference and fine-tuning datasets.
-- **S4.5** As an ML engineer, I want to query traces by agent, machine, user,
-  model, date, outcome, and label, and export the result as one dataset (JSONL
-  or Parquet), so that I can feed a training or eval pipeline directly.
-- **S4.6** As an operator, I want to set retention per drive (for example keep
-  traces 90 days, labeled traces forever), so that storage cost stays bounded.
-- **S4.7** As a user whose data appears in traces, I want my data excluded from
-  training exports when I opt out or request deletion, so that the operator can
-  honor privacy requests. *Accept:* delete-by-user-tag across all drives.
+## Epic 4 — Agent workspace and handoff
+
+- **S4.1** As an agent, I want a persistent workspace that survives the end of
+  my session or sandbox, so that later runs can pick up notes and results.
+- **S4.2** As an agent, I want a conventional layout (`/memory`,
+  `/work/<task-id>`, `/outputs`, `/inbox`), defined by the skill.
+- **S4.3** As an agent finishing a long task, I want to write a handoff file
+  (state, next steps, open questions) another agent can continue from.
+- **S4.4** As a developer running ephemeral sandboxes, I want `sync` between a
+  local directory and a drive folder, so that teardown does not lose work.
+- **S4.5** As an agent, I want scratch files that expire (TTL). *(Later.)*
 
 ## Epic 5 — Keeping agents, users, and machines separate
 
-- **S5.1** As an operator, I want every file and version to record the agent,
-  machine, and user (if any) that wrote it, so that I can always answer "who
-  wrote this and from where."
-- **S5.2** As an operator running one agent for many end users, I want
-  per-user folders the agent can reach only while acting for that user, so that
-  one customer's data never leaks into another's session.
-- **S5.3** As an operator, I want shared team drives and private agent drives,
-  so that agents can collaborate where intended and stay isolated elsewhere.
-- **S5.4** As an agent, I want to filter list and search results by author,
-  machine, or user, so that I see only what is relevant to my current task.
-- **S5.5** As an admin, I want an audit log of every read, write, share, and
-  delete, with the key that did it, so that I can investigate incidents.
+- **S5.1** As an operator, I want every file version to record the agent,
+  machine, and user (if any) that wrote it.
+- **S5.2** As an operator, I want shared team drives and private agent drives.
+- **S5.3** As an agent, I want to filter list and search by author, machine, or
+  user.
+- **S5.4** As an admin, I want an audit log of every read, write, share, and
+  delete, with the API key that did it.
+- **S5.5** As an operator running one agent for many end users, I want
+  per-user folders the agent can reach only while acting for that user. *(Later.)*
 
-## Epic 6 — Sharing and handoff to others
+## Epic 6 — Sharing
 
 - **S6.1** As an agent, I want to create an expiring share link for a file, so
-  that I can hand a report to a human in chat, email, or a ticket.
-- **S6.2** As an agent, I want to share a file or folder with another agent's
-  identity (read or write), so that agents in a pipeline can pass work.
-- **S6.3** As an agent, I want each drive to have an inbox folder that others
-  can drop files into without reading the rest of my drive, so that humans and
-  agents can send me inputs.
-- **S6.4** As an agent using AgentMail, I want to save email attachments to my
-  drive and attach drive files to outgoing email by reference, so that the two
-  services work together. (Integration; not a dependency.)
-- **S6.5** As a receiving human, I want a share link to open a clean preview
-  page without creating an account.
+  that I can hand a result to a human. The link includes the decryption key in
+  the URL fragment; the share page decrypts in the browser.
+- **S6.2** As a receiving human, I want the link to open a download page with no
+  account required.
+- **S6.3** As an operator, I want to revoke a share link.
+- **S6.4** As an agent, I want to share a folder with another agent's identity.
+  *(Later.)*
 
 ## Epic 7 — Finding things
 
-- **S7.1** As an agent, I want to search by filename, path, tag, and metadata.
-- **S7.2** As an agent, I want full-text search over text files.
-- **S7.3** As an agent, I want semantic search ("find the pricing research from
-  last week"), so that I can recall material without knowing the path.
-  (Later; requires indexing cost decisions.)
-- **S7.4** As an agent, I want `recent` (what changed in this drive since a
-  time), so that I can catch up on what other agents did.
+- **S7.1** As an agent, I want to search by path, filename, tag, and author.
+- **S7.2** As an agent, I want `recent` (what changed in a drive since a time),
+  so that I can catch up on what other agents did.
+- Full-text and semantic search are not possible server-side with client-side
+  encryption. A local index is a later option.
 
 ## Epic 8 — Human console
 
-- **S8.1** As an operator, I want a web console to browse drives, preview
-  files, and download them, so that I can see what my agents produced.
-- **S8.2** As an operator, I want to manage agents, keys, and drives in the
-  console (create, rotate, revoke), so that I can respond quickly to a leak.
-- **S8.3** As an operator, I want to see usage per agent and per drive (storage,
-  egress, operations, cost), so that I know which agent is expensive.
-- **S8.4** As an operator, I want to restore deleted files and old versions from
-  the console.
+- **S8.1** As an operator, I want a web console to browse drives and download
+  files. Downloads decrypt in the browser after I enter or load the drive key.
+- **S8.2** As an operator, I want to create, rotate, and revoke agents and API
+  keys in the console.
+- **S8.3** As an operator, I want usage per agent and per drive (storage,
+  egress, operations, cost).
+- **S8.4** As an operator, I want to restore deleted files and old versions.
 
-## Epic 9 — Bring your own bucket
+## Epic 9 — Paying for it
 
-- **S9.1** As a company with data-residency rules, I want Agent Drive to store
-  bytes in my own S3 bucket, so that data never leaves my cloud account while
-  I still get the agent API, attribution, sharing, and traces. *Accept:* connect
-  via IAM role (no long-lived keys); Agent Drive stores metadata only.
-- **S9.2** As a developer, I want to pick a region (US, EU) for hosted drives.
-- **S9.3** As a developer, I want R2 and GCS as backends, so that I can avoid S3
-  egress pricing or stay in my existing cloud.
-
-## Epic 10 — Paying for it
-
-- **S10.1** As a developer, I want a free tier large enough to build a real
-  prototype, without a credit card.
-- **S10.2** As a developer, I want simple plans priced per agent drive plus
-  storage, similar to AgentMail, so that I can predict my bill.
-- **S10.3** As a developer, I want usage-based overage (storage GB-months,
-  egress GB, operations) instead of a hard stop, with an optional hard cap.
-- **S10.4** As an admin, I want spend limits per account, per agent, and per
-  drive, and alerts at thresholds, so that a looping agent cannot run up a bill.
-- **S10.5** As an agent with no account, I want to pay for storage myself
-  through a machine-payment protocol (for example HTTP 402 payments such as
-  x402, or a Stripe agent payment method), so that I can provision a drive
-  without a human sign-up. *Status:* option to evaluate; may not be in v1.
-- **S10.6** As an agent that hits its quota, I want a `payment required` error
-  that includes an upgrade link I can give my human, so that the fix is one
-  click for them.
-- **S10.7** As a finance owner, I want monthly invoices with per-agent cost
-  breakdown, and card or invoice billing.
-- **S10.8** As a platform company, I want to resell drives to my own customers
-  under my account (sub-accounts, usage export), so that I can build on Agent
-  Drive.
+- **S9.1** As a developer, I want a free tier large enough for a real prototype,
+  with no credit card.
+- **S9.2** As a developer, I want plans priced per drive plus storage, like
+  AgentMail, so that my bill is predictable.
+- **S9.3** As a developer, I want usage-based overage instead of a hard stop,
+  with an optional hard cap.
+- **S9.4** As an admin, I want spend limits and alerts per account, so that a
+  looping agent cannot run up a bill.
+- **S9.5** As an agent that hits its quota, I want a `payment required` error
+  with an upgrade link I can give my human.
+- **S9.6** As a finance owner, I want monthly invoices with per-agent breakdown.
+- **S9.7** As an agent with no account, I want to pay for a drive myself through
+  a machine-payment protocol (for example x402). *(Later.)*
 
 ### Pricing sketch (proposal)
 
-| Plan | Price | Agent drives | Storage included | Notes |
+| Plan | Price | Drives | Storage included | Notes |
 |---|---|---|---|---|
-| Free | $0 | 3 | 5 GB | No card; 30-day trace retention |
+| Free | $0 | 3 | 5 GB | No card |
 | Developer | $20/mo | 25 | 100 GB | Versioning, share links, overage billing |
-| Team | $200/mo | 250 | 1 TB | Trace datasets & export, audit log, SSO-lite |
-| Enterprise | Custom | Custom | Custom | BYO bucket, EU region, SOC 2, SLA |
+| Team | $200/mo | 250 | 1 TB | Audit log, team drives |
+| Enterprise | Custom | Custom | Custom | BYO bucket, EU region, SLA |
 
-Overage: storage, egress, and operations at a markup over the backend cost.
-Raw S3 Standard is roughly $0.023 per GB-month in us-east-1 (to verify before
-pricing). BYO-bucket customers pay a platform fee only, since they pay AWS
-directly.
+Overage covers storage, egress, and operations at a markup over S3 cost. Raw S3
+Standard is roughly $0.023 per GB-month in us-east-1 (to verify before pricing).
 
-## Epic 11 — Safety and governance
+## Epic 10 — Safety and governance
 
-- **S11.1** As an operator, I want all data encrypted at rest and in transit,
-  with per-account keys and optional customer-managed keys (Enterprise).
-- **S11.2** As an agent, I want file contents returned as data clearly marked as
+- **S10.1** As an operator, I want contents encrypted on the client (Epic 2)
+  and all traffic over TLS.
+- **S10.2** As an agent, I want file contents returned as data clearly marked as
   untrusted, so that instructions planted in a stored file do not hijack me.
-  The skill reinforces this.
-- **S11.3** As an operator, I want to block or quarantine dangerous uploads
-  (malware scan, size limits, type limits).
-- **S11.4** As an admin, I want account and drive deletion that removes all data,
-  versions, and backups within a stated period, with an export first.
-- **S11.5** As an admin, I want rate limits per key, so that one runaway agent
-  cannot degrade service for others.
+- **S10.3** As an admin, I want account and drive deletion that removes all
+  objects and versions within a stated period.
+- **S10.4** As an admin, I want rate limits per API key and size limits per
+  file.
 
-## Epic 12 — The skill
+## Epic 11 — The skill
 
-- **S12.1** As an agent, I want a skill that tells me when to save to Agent Drive
-  (finished outputs, memory, handoffs, traces) and when not to (secrets,
-  throwaway scratch), so that I use it consistently without being prompted.
-- **S12.2** As an agent, I want the skill to define the folder layout and naming
-  conventions from S3.2, and the trace schema from S4.1.
-- **S12.3** As a developer, I want the skill installable in Claude Code, Codex,
-  and other skill-aware clients, and readable as plain Markdown elsewhere.
+- **S11.1** As an agent, I want a skill that tells me when to save to Agent Drive
+  (finished outputs, memory, handoffs) and when not to (secrets, throwaway
+  scratch).
+- **S11.2** As an agent, I want the skill to define the folder layout from S4.2.
+- **S11.3** As a developer, I want the skill installable in Claude Code and
+  Codex, and readable as plain Markdown elsewhere.
 
----
+## Later (not v1)
 
-## Proposed v1 cut
-
-The smallest product a developer would pay $20/month for:
-
-- Epic 1: S1.1–S1.5
-- Epic 2: S2.1–S2.6, S2.9
-- Epic 3: S3.1, S3.2, S3.3
-- Epic 4: S4.1 and S4.2. Traces are the native Claude Code and Codex JSONL
-  files, stored unchanged under `/traces`. The only trace-specific piece is the
-  client-side backup (hook + sync); the server treats them as ordinary files.
-  Backing up Claude Code and Codex sessions is the headline of the launch pitch.
-- Epic 5: S5.1, S5.3, S5.5
-- Epic 6: S6.1
-- Epic 7: S7.1, S7.4
-- Epic 8: S8.1, S8.2, S8.3
-- Epic 10: S10.1, S10.2, S10.3, S10.4, S10.6
-- Epic 11: S11.1, S11.2, S11.5
-- Epic 12: S12.1, S12.2
-
-Deferred: trace redaction, labeling, query, and dataset export (S4.3–S4.7),
-per-user isolation (S5.2), agent-to-agent sharing and inboxes (S6.2,
-S6.3), AgentMail integration, full-text and semantic search, trace labeling,
-auto-capture hooks, BYO bucket, other backends, agent self-payment, reselling.
-
-## Open questions
+Bring-your-own bucket, R2/GCS backends, EU region, encrypted filenames, key
+rotation (S2.4), TTL scratch (S4.5), per-user isolation (S5.5), agent-to-agent
+sharing (S6.4), local full-text index, agent self-payment (S9.7), reselling
+and sub-accounts, AgentMail attachment integration.
 
 ## Decisions (2026-10-29)
 
-- **First customer:** indie and agent developers. Self-serve sign-up, MCP
-  server and skill first, AgentMail-style plans.
-- **Payment:** a human pays in v1 (Stripe subscription plus usage). Agent
-  self-payment (S10.5) is a later phase.
-- **Storage:** hosted on our own S3 in v1. BYO bucket and other backends later.
-- **Traces:** technically just another file type, but likely the go-to-market
-  headline ("give your agents a drive; keep their traces for training").
+- **First customer:** indie and agent developers, self-serve.
+- **Payment:** a human pays (Stripe subscription plus usage).
+- **Storage:** our own hosted S3.
+- **Product framing:** Google Drive for agents. Agent transcripts and training
+  traces are not part of the product.
+- **Encryption:** file contents are encrypted on the client before upload.
 
 ## Open questions
 
-- Trace format: decided — store Claude Code and Codex transcripts in their
-  native JSONL format; do not invent one.
-- Transcripts can contain secrets pasted into sessions. With redaction
-  deferred, v1 relies on encryption and private-by-default drives. Accept that
-  for launch, or pull basic secret redaction into v1? TBD.
 - Exact plan limits and overage prices: TBD after measuring S3 costs.
