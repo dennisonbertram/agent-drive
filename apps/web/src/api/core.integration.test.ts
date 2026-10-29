@@ -17,6 +17,7 @@ const root = 'http://agent-drive.test/api/v1';
 const accountIds: string[] = [];
 let driveId = '';
 let otherDriveId = '';
+let quotaDriveId = '';
 let manageToken = '';
 let writeToken = '';
 let readToken = '';
@@ -136,8 +137,21 @@ beforeAll(async () => {
   const first = await fixture('phase1-a', 'writer', 'drive', ['read', 'write', 'delete']);
   driveId = first.driveId;
   writeToken = first.token;
-  const read = await fixture('phase1-read', 'reader', 'read-drive', ['read'], [driveId]);
-  readToken = read.token;
+  readToken = key();
+  await pool.query(
+    `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+     VALUES ($1,$2,'read-only integration',$3,$4::uuid[],ARRAY['read']::text[])`,
+    [first.accountId, first.agentId, tokenHash(readToken), [driveId]],
+  );
+  const quotaDrive = await pool.query(
+    'INSERT INTO drives (account_id,name,quota_bytes) VALUES ($1,$2,4) RETURNING id',
+    [first.accountId, `quota-${randomUUID()}`],
+  );
+  quotaDriveId = quotaDrive.rows[0].id as string;
+  await pool.query(
+    'UPDATE api_keys SET drive_ids = array_append(drive_ids, $1::uuid) WHERE token_hash = $2',
+    [quotaDriveId, tokenHash(writeToken)],
+  );
   const manager = await fixture('phase1-manager', 'manager', 'manage', ['manage']);
   manageToken = manager.token;
   const other = await fixture('phase1-b', 'other', 'other-drive', ['read', 'write', 'delete']);
@@ -277,6 +291,17 @@ describe('Phase 1 core API', () => {
       ),
     );
     expect(commits.map((item) => item.status).sort()).toEqual([201, 409]);
+  });
+
+  it('returns the typed quota error when a commit would exceed the drive quota', async () => {
+    const result = await uploadCommit(
+      writeToken,
+      quotaDriveId,
+      '/too-large.bin',
+      Buffer.from('12345'),
+    );
+    expect(result.response.status).toBe(413);
+    expect(result.body.error.code).toBe('quota_exceeded');
   });
 
   it('enforces scopes, tenants, revocation, validation, management and immutable staging', async () => {
