@@ -1,0 +1,30 @@
+{
+  "name": "agent-drive",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "lint": "eslint . && prettier --check .",
+    "typecheck": "tsc --noEmit --project tsconfig.tools.json && pnpm --recursive --workspace-concurrency=1 typecheck",
+    "services:up": "docker compose build minio && docker compose up -d --wait postgres minio && docker compose run --rm minio-init",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test:unit && pnpm test:integration && pnpm test:mcp && pnpm test:e2e && pnpm build",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:mcp": "vitest run --config vitest.mcp.config.ts",
+    "test:e2e": "playwright test",
+    "build": "pnpm --recursive --workspace-concurrency=1 build"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.10.1",
+    "dotenv": "17.2.3",
+    "eslint": "10.13.0",
+    "eslint-config-next": "16.4.3",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

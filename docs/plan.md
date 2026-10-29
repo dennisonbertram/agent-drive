@@ -36,13 +36,13 @@ directly to S3 with presigned URLs. The API stores metadata and authorizes.
 - **Database:** Postgres (Neon through the Vercel Marketplace), Drizzle for
   schema and migrations.
 - **Object storage:** Amazon S3 via AWS SDK v3. MinIO in Docker for local
-  development and CI.
-- **Auth for humans:** GitHub OAuth (Auth.js). **Auth for agents:** API keys,
-  stored hashed, shown once.
-- **Billing:** Stripe (subscriptions + metered usage), test mode in CI.
+  development and opt-in Actions verification.
+- **Auth for humans:** Clerk (GitHub OAuth provider if configured). **Auth for
+  agents:** API keys, stored hashed, shown once.
+- **Billing:** Stripe (subscriptions + metered usage), test mode in local tests.
 - **MCP:** official `@modelcontextprotocol/sdk`, stdio transport.
 - **Tests:** Vitest for unit and integration, Playwright for console and share
-  page, GitHub Actions for CI.
+  page, and a local `pnpm verify` gate; GitHub Actions are manually dispatched.
 
 ### Encryption design (default)
 
@@ -64,21 +64,24 @@ directly to S3 with presigned URLs. The API stores metadata and authorizes.
 
 ## Phases
 
-Each phase ends with a merged PR (or a few), green CI, and the phase's tests
-added to the regression suite. Later phases must not break earlier phases'
-tests.
+Each phase ends with a merged PR (or a few), a successful `pnpm verify`, and
+the phase's tests added to the local regression suite. Later phases must not
+break earlier phases' tests.
 
-### Phase 0 — Repository and CI
+### Phase 0 — Repository and regression gate
 
 **Build:** pnpm workspace, TypeScript strict, lint, formatter, Vitest, a
-`docker-compose.yml` with Postgres and MinIO, GitHub Actions running lint,
-typecheck, and all tests on every PR. `.env.example` listing every variable.
+`docker-compose.yml` with Postgres and MinIO, and a GitHub Actions workflow
+that retains the checks for manual dispatch only. `pnpm verify` runs lint,
+typecheck, unit, integration, MCP, Playwright, and build checks in order.
+`.env.example` lists the known variables.
 
-**Test:** CI runs on a trivial test and passes; `docker compose up` brings up
-Postgres and MinIO locally.
+**Test:** `pnpm verify` passes its scaffold smoke tests; `pnpm services:up`
+brings up Postgres and MinIO locally and completes bucket initialization.
 
-**Regression:** CI is the regression gate for every later phase: all tests
-run on every PR, and `main` is protected (required checks).
+**Regression:** `pnpm verify` is the required local regression gate for every
+later phase. GitHub Actions are opt-in through `workflow_dispatch`; they do
+not run automatically on pull requests or pushes.
 
 ### Phase 1 — Core API and metadata (S1.3–S1.6, S3.1–S3.8 server side, S5.1–S5.4)
 
@@ -99,9 +102,9 @@ Audit event on every call.
   the other gets a conflict error.
 - Error shape tests for not found, permission denied, quota exceeded.
 
-**Regression:** these integration tests stay in CI permanently. Add an API
-contract snapshot (OpenAPI or typed route list) so accidental breaking changes
-show up in review.
+**Regression:** these integration tests stay in `pnpm verify` permanently. Add
+an API contract snapshot (OpenAPI or typed route list) so accidental breaking
+changes show up in review.
 
 ### Phase 2 — Client library, encryption, CLI (S1.3, S2.1–S2.3, S2.5, S3.*, S4.4)
 
@@ -143,21 +146,23 @@ README with `claude mcp add` and Codex config examples.
 - Manual live check (once): add the server to Claude Code, ask it to save and
   retrieve a file, confirm in the console.
 
-**Regression:** the MCP integration test and tool schema snapshot stay in CI.
+**Regression:** the MCP integration test and tool schema snapshot stay in
+`pnpm verify`.
 
 ### Phase 4 — Console and sign-up (S1.1, S8.1–S8.4)
 
-**Build:** GitHub sign-up, onboarding that creates a first drive (key generated
-in the browser) and API key, drive browser with in-browser decryption, agent
-and key management (create, revoke), usage page, version restore and trash.
+**Build:** Clerk sign-up (with GitHub as an optional Clerk provider), onboarding
+that creates a first drive (key generated in the browser) and API key, drive
+browser with in-browser decryption, agent and key management (create, revoke),
+usage page, version restore and trash.
 
 **Test:**
-- Playwright: sign up (test OAuth stub in CI), create drive, save key, upload
+- Playwright: sign up with the configured auth provider, create drive, save key, upload
   through the CLI, see the file in the console, download and compare bytes,
   revoke a key and confirm the CLI then fails.
 - Console without the drive key shows file names but cannot download contents.
 
-**Regression:** the Playwright journey runs in CI on every PR.
+**Regression:** the Playwright journey stays in `pnpm verify`.
 
 ### Phase 5 — Sharing (S6.1–S6.3)
 
@@ -172,7 +177,7 @@ Revoke and expiry enforced by the API.
 - Assert server request logs for the share page never contain the fragment.
 - A share link's key cannot decrypt a different file in the same drive.
 
-**Regression:** sharing tests join the CI suite.
+**Regression:** sharing tests join `pnpm verify`.
 
 ### Phase 6 — Billing and limits (S9.1–S9.6, S10.4)
 
@@ -188,8 +193,8 @@ rate limits; per-file size limit.
 - Spend cap reached → writes blocked, reads still allowed.
 - Rate limit returns 429 with retry-after.
 
-**Regression:** quota and billing tests join CI; Stripe webhook payload
-fixtures are committed so webhook handling is tested without the network.
+**Regression:** quota and billing tests join `pnpm verify`; Stripe webhook
+payload fixtures are committed so webhook handling is tested without the network.
 
 ### Phase 7 — Hardening and launch (S10.3, docs, deploy)
 
@@ -208,8 +213,9 @@ Vercel production deployment; README, quickstart, pricing page.
 
 ## Regression strategy (summary)
 
-- Every PR runs the full suite in CI: lint, typecheck, unit, integration
-  (Postgres + MinIO), MCP integration, Playwright. Required checks on `main`.
+- Before merge, run the full local gate with `pnpm verify`: lint, typecheck,
+  unit, integration (Postgres + MinIO), MCP integration, Playwright, and build.
+  GitHub Actions are manual opt-in only, not an automatic per-PR gate.
 - Permanent guard tests that must never be weakened: crypto test vectors,
   tamper detection, plaintext-never-leaves, cross-drive and revoked-key
   permission checks, share-key isolation.
