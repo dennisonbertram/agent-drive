@@ -111,12 +111,19 @@ for 10 inboxes; Startup = $200/month for 150 inboxes; Enterprise = custom.
 
 ## Epic 4 — Traces for training and evaluation
 
-- **S4.1** As an agent, I want to save a trace of my run in a standard format,
-  so that my developers can debug and train on it. *Accept:* one documented
-  JSONL schema (run id, agent, machine, user, model, messages, tool calls,
-  outcome, cost); accept common existing formats on import.
-- **S4.2** As a developer, I want traces captured automatically by a hook or SDK
-  wrapper, so that I do not depend on the agent remembering to save them.
+- **S4.1** As a developer, I want my Claude Code and Codex session transcripts
+  stored in their native format, unchanged, so that existing tools that read
+  those formats keep working and nothing is lost in conversion. We do not
+  invent a trace format. *Accept:* files are stored byte-for-byte; path
+  convention keeps the tool, machine, and project separate:
+  - Claude Code (source `~/.claude/projects/<project>/<session>.jsonl`) →
+    `/traces/claude-code/<machine>/<project>/<session>.jsonl`
+  - Codex (source `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) →
+    `/traces/codex/<machine>/YYYY/MM/DD/rollout-*.jsonl`
+- **S4.2** As a developer, I want my transcripts backed up automatically (a
+  Claude Code session-end hook, and a sync command for Codex and for
+  catch-up), so that I do not depend on the agent remembering to save them.
+  Re-running the backup uploads only new or grown files.
 - **S4.3** As an operator, I want secrets and personal data redacted from traces
   before storage, so that the trace store is safe to share with an ML team.
   *Accept:* default redaction of keys/tokens; configurable PII rules; redaction
@@ -263,9 +270,10 @@ The smallest product a developer would pay $20/month for:
 - Epic 1: S1.1–S1.5
 - Epic 2: S2.1–S2.6, S2.9
 - Epic 3: S3.1, S3.2, S3.3
-- Epic 4: S4.1 only, as a convention: traces are ordinary JSONL files under
-  `/traces`, with the schema defined in the skill. No trace-specific server
-  features in v1. Traces are still the headline of the launch pitch.
+- Epic 4: S4.1 and S4.2. Traces are the native Claude Code and Codex JSONL
+  files, stored unchanged under `/traces`. The only trace-specific piece is the
+  client-side backup (hook + sync); the server treats them as ordinary files.
+  Backing up Claude Code and Codex sessions is the headline of the launch pitch.
 - Epic 5: S5.1, S5.3, S5.5
 - Epic 6: S6.1
 - Epic 7: S7.1, S7.4
@@ -274,7 +282,7 @@ The smallest product a developer would pay $20/month for:
 - Epic 11: S11.1, S11.2, S11.5
 - Epic 12: S12.1, S12.2
 
-Deferred: trace redaction, labeling, query, and dataset export (S4.2–S4.7),
+Deferred: trace redaction, labeling, query, and dataset export (S4.3–S4.7),
 per-user isolation (S5.2), agent-to-agent sharing and inboxes (S6.2,
 S6.3), AgentMail integration, full-text and semantic search, trace labeling,
 auto-capture hooks, BYO bucket, other backends, agent self-payment, reselling.
@@ -293,6 +301,9 @@ auto-capture hooks, BYO bucket, other backends, agent self-payment, reselling.
 
 ## Open questions
 
-- Trace schema: invent one, or adopt an existing format (for example
-  OpenTelemetry GenAI spans)? TBD.
+- Trace format: decided — store Claude Code and Codex transcripts in their
+  native JSONL format; do not invent one.
+- Transcripts can contain secrets pasted into sessions. With redaction
+  deferred, v1 relies on encryption and private-by-default drives. Accept that
+  for launch, or pull basic secret redaction into v1? TBD.
 - Exact plan limits and overage prices: TBD after measuring S3 costs.
