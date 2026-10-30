@@ -1,4 +1,4 @@
-import { decryptFile, encryptFile } from './crypto.js';
+import { decryptFile, encryptFile, unwrapFileKey } from './crypto.js';
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -103,6 +103,17 @@ export type RecentEvent = {
   machineId: string | null;
   userId: string | null;
   createdAt: string;
+};
+
+export type Share = {
+  id: string;
+  path: string;
+  versionId: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  status?: 'active' | 'expired' | 'revoked';
+  url?: string;
 };
 
 export class AgentDriveApiError extends Error {
@@ -315,6 +326,49 @@ export class AgentDriveClient {
   ) {
     return this.request<Page<Version>>(
       this.pagePath(`drives/${encode(driveId)}/search`, limit, cursor, query),
+    );
+  }
+
+  async createShare(
+    driveId: string,
+    path: string,
+    options: { versionId?: string; expiresAt?: string } = {},
+  ) {
+    const created = await this.request<{
+      id: string;
+      path: string;
+      versionId: string;
+      wrappedKey: string;
+      expiresAt: string;
+      createdAt: string;
+    }>(`drives/${encode(driveId)}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({
+        path,
+        ...(options.versionId ? { versionId: options.versionId } : {}),
+        ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      }),
+    });
+    const fileKey = await unwrapFileKey(created.wrappedKey, this.keyFor(driveId));
+    return {
+      id: created.id,
+      path: created.path,
+      versionId: created.versionId,
+      expiresAt: created.expiresAt,
+      url: `${this.apiOrigin}/s/${created.id}#k=${fileKey}`,
+    };
+  }
+
+  async listShares(driveId: string, limit?: number, cursor?: string) {
+    return this.request<Page<Share>>(
+      this.pagePath(`drives/${encode(driveId)}/shares`, limit, cursor),
+    );
+  }
+
+  async revokeShare(driveId: string, shareId: string) {
+    return this.request<{ id: string; revokedAt: string }>(
+      `drives/${encode(driveId)}/shares/${encode(shareId)}`,
+      { method: 'DELETE' },
     );
   }
 

@@ -41,6 +41,7 @@ function parse(raw: string[]) {
       limit: { type: 'string' },
       cursor: { type: 'string' },
       version: { type: 'string' },
+      'expires-in': { type: 'string' },
     },
     allowPositionals: true,
     strict: true,
@@ -83,6 +84,26 @@ function requiredDrive(args: ReturnType<typeof parse>) {
 
 function limit(value: string | undefined) {
   return value === undefined ? undefined : Number(value);
+}
+
+export function parseShareExpiry(value: string, now?: number): string;
+export function parseShareExpiry(value: undefined, now?: number): undefined;
+export function parseShareExpiry(value: string | undefined, now = Date.now()) {
+  if (value === undefined) return undefined;
+  const match = /^([0-9]+)(m|h|d)$/u.exec(value);
+  if (!match) throw new Error('--expires-in must use a duration such as 30m, 24h, or 7d.');
+  const amount = Number(match[1]);
+  const multiplier = match[2] === 'm' ? 60_000 : match[2] === 'h' ? 3_600_000 : 86_400_000;
+  const milliseconds = amount * multiplier;
+  if (
+    !Number.isSafeInteger(milliseconds) ||
+    milliseconds < 2 * 60_000 ||
+    milliseconds > 30 * 86_400_000
+  )
+    throw new Error(
+      '--expires-in must be between 2m and 30d to allow for API request transit (API minimum: 60 seconds).',
+    );
+  return new Date(now + milliseconds).toISOString();
 }
 
 async function run(command: string, raw: string[]) {
@@ -189,6 +210,26 @@ async function run(command: string, raw: string[]) {
       await client.search(requiredDrive(args), query, limit(args.values.limit), args.values.cursor),
     );
   }
+  if (command === 'share') {
+    const driveId = requiredDrive(args);
+    if (args.positionals[0] === 'list')
+      return output(await client.listShares(driveId, limit(args.values.limit), args.values.cursor));
+    if (args.positionals[0] === 'revoke') {
+      const shareId = args.positionals[1];
+      if (!shareId) throw new Error('share revoke requires SHARE_ID.');
+      return output(await client.revokeShare(driveId, shareId));
+    }
+    const path = args.positionals[0];
+    if (!path) throw new Error('share requires PATH, or use share list/revoke.');
+    return output(
+      await client.createShare(driveId, path, {
+        ...(args.values.version ? { versionId: args.values.version } : {}),
+        ...(args.values['expires-in']
+          ? { expiresAt: parseShareExpiry(args.values['expires-in']) }
+          : {}),
+      }),
+    );
+  }
   if (command === 'put') {
     const local = args.positionals[0];
     const remote = args.positionals[1];
@@ -292,6 +333,9 @@ Commands:
   restore PATH --drive ID [--version ID]
   search --drive ID [--query TEXT] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   recent --drive ID [--since ISO_TIMESTAMP]
+  share PATH --drive ID [--version ID] [--expires-in 30m|24h|7d]
+  share list --drive ID
+  share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   mcp
 

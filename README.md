@@ -220,6 +220,28 @@ page memory only. Refreshing the page locks downloads until the key is loaded ag
 JSON files contain the secret in plaintext: keep them in a password manager or another secure
 location. The service cannot recover lost keys.
 
+### Encrypted share links
+
+Create an expiring share link from the CLI:
+
+```sh
+agent-drive share /reports/result.csv --drive DRIVE_ID --expires-in 24h
+agent-drive share list --drive DRIVE_ID
+agent-drive share revoke SHARE_ID --drive DRIVE_ID
+```
+
+MCP clients can use the `share` tool with a drive ID, path, and optional ISO expiry. The
+default lifetime is seven days; the API accepts lifetimes from 60 seconds through 30 days.
+The CLI accepts a minimum of 2 minutes to allow time for the request to reach the API.
+The response URL is `/s/<id>#k=<file-key>`. The file key is unwrapped locally and exists only
+in the URL fragment, which browsers do not send to the server. The public page fetches encrypted
+bytes through a short-lived presigned URL and decrypts them in the browser.
+
+Anyone who has the complete URL can decrypt the pinned file until it expires or is revoked.
+Revocation prevents new metadata requests and download URLs, but cannot recall data already
+downloaded or a presigned URL already issued (which can remain usable for at most 60 seconds).
+The server stores share metadata and never stores the file key.
+
 The console can browse names and metadata while locked. Downloads fetch ciphertext directly
 from object storage and decrypt locally; no drive key is sent to the API. Allow browser GET
 requests from the console's origin in the production bucket's CORS policy. Files currently

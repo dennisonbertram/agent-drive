@@ -15,6 +15,10 @@ export const API_CONTRACT = [
   'GET /api/v1/drives/:id/versions',
   'GET /api/v1/drives/:id/recent',
   'GET /api/v1/drives/:id/search',
+  'POST /api/v1/drives/:id/shares',
+  'GET /api/v1/drives/:id/shares',
+  'DELETE /api/v1/drives/:id/shares/:shareId',
+  'GET /api/shares/:id',
 ] as const;
 
 export type ApiContract = (typeof API_CONTRACT)[number];

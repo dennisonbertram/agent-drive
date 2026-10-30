@@ -14,7 +14,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { handleApiRequest } from '../../../apps/web/src/api/handler.js';
+import { handleApiRequest, handlePublicShareRequest } from '../../../apps/web/src/api/handler.js';
 import { AgentDriveClient } from './client.js';
 import { generateDriveKey } from './crypto.js';
 import { driveKeyEnvironmentName } from './config.js';
@@ -53,13 +53,16 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse) {
     else if (Array.isArray(value)) headers.set(name, value.join(', '));
   }
   const method = request.method ?? 'GET';
-  const result = await handleApiRequest(
-    new Request(`http://${request.headers.host}${request.url}`, {
-      method,
-      headers,
-      ...(method === 'GET' || method === 'HEAD' ? {} : { body: body as unknown as BodyInit }),
-    }),
-  );
+  const requestUrl = `http://${request.headers.host}${request.url}`;
+  const result = request.url?.startsWith('/api/shares/')
+    ? await handlePublicShareRequest(request.url.slice('/api/shares/'.length).split('?')[0]!)
+    : await handleApiRequest(
+        new Request(requestUrl, {
+          method,
+          headers,
+          ...(method === 'GET' || method === 'HEAD' ? {} : { body: body as unknown as BodyInit }),
+        }),
+      );
   response.statusCode = result.status;
   result.headers.forEach((value, key) => response.setHeader(key, value));
   response.end(Buffer.from(await result.arrayBuffer()));
@@ -165,7 +168,7 @@ beforeAll(async () => {
   driveId = drive.id;
   driveKey = generateDriveKey();
   scopedToken = (
-    await admin.createKey(target.id, 'mcp-rwd', [driveId], ['read', 'write', 'delete'])
+    await admin.createKey(target.id, 'mcp-rwd', [driveId], ['read', 'write', 'delete', 'share'])
   ).token!;
   readonlyToken = (await admin.createKey(target.id, 'mcp-read', [driveId], ['read'])).token!;
 });
@@ -343,10 +346,20 @@ describe('MCP product tools over stdio', () => {
       const share = await call(mcp.client, 'share', {
         driveId,
         path: '/mcp/marker.txt',
-        expiresAt: '2030-01-01T00:00:00.000Z',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       });
-      expect(share.result.isError).toBe(true);
-      expect(share.value).toMatchObject({ error: { code: 'not_implemented' } });
+      expect(share.result.isError).not.toBe(true);
+      const shareUrl = (share.value.data as { url: string }).url;
+      expect(/#k=[A-Za-z0-9_-]{43}$/u.test(shareUrl)).toBe(true);
+      const shareId = new URL(shareUrl).pathname.split('/').pop()!;
+      const publicResponse = await fetch(`${apiUrl}/api/shares/${shareId}`);
+      expect(publicResponse.status).toBe(200);
+      const revokeResponse = await fetch(`${apiUrl}/api/v1/drives/${driveId}/shares/${shareId}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${scopedToken}` },
+      });
+      expect(revokeResponse.status).toBe(200);
+      expect((await fetch(`${apiUrl}/api/shares/${shareId}`)).status).toBe(410);
       const search = await call(mcp.client, 'search', { driveId, q: '/mcp', limit: 1 });
       expect((search.value.data as { nextCursor: string | null }).nextCursor).toBeTruthy();
       const recent = await call(mcp.client, 'recent', {

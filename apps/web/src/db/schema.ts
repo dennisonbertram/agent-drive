@@ -166,6 +166,37 @@ export const versions = pgTable(
   ],
 );
 
+export const shares = pgTable(
+  'shares',
+  {
+    id: text('id').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => files.id, { onDelete: 'cascade' }),
+    versionId: uuid('version_id')
+      .notNull()
+      .references(() => versions.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
+    userId: text('user_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('shares_drive_created_idx').on(table.driveId, table.createdAt, table.id),
+    check('shares_expires_after_created_check', sql`${table.expiresAt} > ${table.createdAt}`),
+  ],
+);
+
 export const uploadIntents = pgTable(
   'upload_intents',
   {

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { getPool, withTransaction } from '../db/client';
 import { ApiError, errorFromDatabase, responseForError } from './errors';
@@ -37,7 +37,13 @@ type Auth = {
   userId?: string;
   accountName?: string;
 };
-type RequestContext = { auth?: Auth; action: string; status: number; errorCode?: string };
+type RequestContext = {
+  auth?: Auth;
+  accountId?: string | null;
+  action: string;
+  status: number;
+  errorCode?: string;
+};
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
@@ -186,6 +192,9 @@ function actionFor(method: string, parts: string[]) {
     'GET:search': 'drive.search',
     'GET:trash': 'drive.trash',
   };
+  if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'shares')
+    return `share.${method === 'POST' ? 'create' : method === 'GET' ? 'list' : 'unknown'}`;
+  if (parts.length === 4 && parts[0] === 'drives' && parts[2] === 'shares') return 'share.revoke';
   if (parts.length === 3 && parts[0] === 'drives')
     return actions[`${method}:${parts[2]}`] ?? 'unknown';
   return 'unknown';
@@ -198,7 +207,7 @@ async function audit(context: RequestContext) {
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       context.auth?.keyId ?? null,
-      context.auth?.accountId ?? null,
+      context.auth?.accountId ?? context.accountId ?? null,
       context.auth?.agentId ?? null,
       context.auth?.userId ?? null,
       context.action,
@@ -564,6 +573,144 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
     });
   }
   return undefined;
+}
+
+async function shareEndpoint(
+  request: Request,
+  auth: Auth,
+  driveId: string,
+  operation: string,
+  url: URL,
+) {
+  await ensureDrive(auth, driveId);
+  need(auth, 'share', driveId);
+  if (operation === 'shares' && request.method === 'POST') {
+    need(auth, 'read', driveId);
+    const body = await jsonBody(request);
+    const path = canonicalPath(body.path);
+    const versionId =
+      body.versionId === undefined
+        ? undefined
+        : uuid(typeof body.versionId === 'string' ? body.versionId : undefined, 'versionId');
+    const expiryInput =
+      body.expiresAt === undefined
+        ? undefined
+        : stringField(body, 'expiresAt', { required: true, max: 64 })!;
+    if (
+      expiryInput !== undefined &&
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u.test(expiryInput)
+    ) {
+      throw new ApiError('validation_error', 'expiresAt must be an ISO timestamp.');
+    }
+    const requestedExpiry =
+      expiryInput === undefined
+        ? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        : new Date(expiryInput);
+    const now = Date.now();
+    if (
+      Number.isNaN(requestedExpiry.getTime()) ||
+      requestedExpiry.getTime() < now + 60 * 1000 ||
+      requestedExpiry.getTime() > now + 30 * 24 * 60 * 60 * 1000
+    ) {
+      throw new ApiError(
+        'validation_error',
+        'expiresAt must be between 60 seconds and 30 days from now.',
+      );
+    }
+    const source = await getPool().query(
+      `SELECT f.id AS file_id, f.path, v.id AS version_id, v.wrapped_key
+         FROM files f
+         JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
+        WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL AND v.file_id = f.id`,
+      [driveId, path, versionId ?? null],
+    );
+    const file = source.rows[0] as Row | undefined;
+    if (!file) throw new ApiError('not_found', 'File not found.');
+    const id = randomBytes(16).toString('base64url');
+    const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
+    const result = await getPool().query(
+      `INSERT INTO shares
+        (id, account_id, drive_id, file_id, version_id, agent_id, api_key_id, user_id, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       RETURNING id, expires_at, created_at`,
+      [
+        id,
+        auth.accountId,
+        driveId,
+        file.file_id,
+        file.version_id,
+        auth.agentId,
+        auth.keyId,
+        userId,
+        requestedExpiry,
+      ],
+    );
+    return response(
+      {
+        id: result.rows[0].id,
+        path: file.path,
+        versionId: file.version_id,
+        wrappedKey: file.wrapped_key,
+        expiresAt: result.rows[0].expires_at,
+        createdAt: result.rows[0].created_at,
+      },
+      201,
+    );
+  }
+  if (operation === 'shares' && request.method === 'GET') {
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'share');
+    const params: unknown[] = [driveId];
+    let where = 's.drive_id = $1';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ` AND (s.created_at, s.id) > ($${params.length - 1}::timestamptz, $${params.length})`;
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT s.id, f.path, s.version_id, s.expires_at, s.revoked_at, s.created_at,
+              s.created_at::text AS cursor_created_at,
+              CASE WHEN s.revoked_at IS NOT NULL THEN 'revoked'
+                   WHEN s.expires_at <= now() THEN 'expired'
+                   ELSE 'active' END AS status
+         FROM shares s JOIN files f ON f.id = s.file_id
+        WHERE ${where}
+        ORDER BY s.created_at, s.id
+        LIMIT $${params.length}`,
+      params,
+    );
+    const output = collection(rows.rows as Row[], limit, (row) => row.cursor_created_at);
+    return response({
+      items: output.items.map((row) => ({
+        id: row.id,
+        path: row.path,
+        versionId: row.version_id,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        createdAt: row.created_at,
+        status: row.status,
+      })),
+      nextCursor: output.nextCursor,
+    });
+  }
+  if (operation === 'shares' && request.method === 'DELETE') {
+    throw new ApiError('not_found', 'Share not found.');
+  }
+  throw new ApiError('not_found', 'Endpoint not found.');
+}
+
+async function revokeShare(request: Request, auth: Auth, driveId: string, shareId: string) {
+  await ensureDrive(auth, driveId);
+  need(auth, 'share', driveId);
+  const result = await getPool().query(
+    `UPDATE shares
+        SET revoked_at = COALESCE(revoked_at, now())
+      WHERE id = $1 AND drive_id = $2 AND account_id = $3
+      RETURNING id, revoked_at`,
+    [shareId, driveId, auth.accountId],
+  );
+  if (!result.rows[0]) throw new ApiError('not_found', 'Share not found.');
+  return response({ id: result.rows[0].id, revokedAt: result.rows[0].revoked_at });
 }
 
 async function putIntent(request: Request, auth: Auth, driveId: string) {
@@ -1157,7 +1304,20 @@ async function handleRequest(request: Request, mode: RequestMode) {
       mode.kind === 'console' ? await consoleEndpoint(request, auth, relative, url) : undefined;
     const control = consoleOutput ?? (await controlPlane(request, auth, relative));
     if (control) output = control;
-    else if (relative[0] === 'drives' && relative.length === 3) {
+    else if (relative[0] === 'drives' && relative[2] === 'shares' && relative.length === 3) {
+      uuid(relative[1], 'drive id');
+      output = await shareEndpoint(request, auth, relative[1]!, relative[2]!, url);
+    } else if (
+      relative[0] === 'drives' &&
+      relative[2] === 'shares' &&
+      relative.length === 4 &&
+      request.method === 'DELETE'
+    ) {
+      uuid(relative[1], 'drive id');
+      if (!/^[A-Za-z0-9_-]{22}$/u.test(relative[3]!))
+        throw new ApiError('validation_error', 'share id is invalid.');
+      output = await revokeShare(request, auth, relative[1]!, relative[3]!);
+    } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
       output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url);
     } else {
@@ -1186,4 +1346,57 @@ export function handleApiRequest(request: Request) {
 
 export function handleConsoleApiRequest(request: Request, userId: string | null) {
   return handleRequest(request, { kind: 'console', userId });
+}
+
+const shareIdPattern = /^[A-Za-z0-9_-]{22}$/u;
+
+export async function handlePublicShareRequest(shareId: string) {
+  const context: RequestContext = { action: 'share.access', status: 500 };
+  let output: Response;
+  try {
+    if (!shareIdPattern.test(shareId))
+      throw new ApiError('not_found', 'This share link does not exist.');
+    const result = await getPool().query(
+      `SELECT s.id, s.account_id, s.expires_at, s.revoked_at,
+              f.path, f.deleted_at, v.object_key, v.ciphertext_size, now() AS db_now
+         FROM shares s
+         JOIN files f ON f.id = s.file_id
+         JOIN versions v ON v.id = s.version_id AND v.file_id = f.id
+        WHERE s.id = $1`,
+      [shareId],
+    );
+    const row = result.rows[0] as Row | undefined;
+    if (!row) throw new ApiError('not_found', 'This share link does not exist.');
+    context.accountId = row.account_id as string;
+    if (row.revoked_at) throw new ApiError('share_revoked', 'This share link has been revoked.');
+    if (new Date(row.expires_at).getTime() <= new Date(row.db_now).getTime())
+      throw new ApiError('share_expired', 'This share link has expired.');
+    if (row.deleted_at)
+      throw new ApiError('share_unavailable', 'This file is no longer available.');
+    const remainingSeconds = Math.floor(
+      (new Date(row.expires_at).getTime() - new Date(row.db_now).getTime()) / 1000,
+    );
+    if (remainingSeconds < 1)
+      throw new ApiError('share_expired', 'This share link is too close to expiry to download.');
+    output = response({
+      name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),
+      ciphertextSize: Number(row.ciphertext_size),
+      expiresAt: row.expires_at,
+      downloadUrl: await presignedDownload(String(row.object_key), Math.min(60, remainingSeconds)),
+    });
+    context.status = output.status;
+  } catch (error) {
+    const mapped = error instanceof ApiError ? error : errorFromDatabase(error);
+    output = responseForError(mapped);
+    context.status = mapped.status;
+    context.errorCode = mapped.code;
+  }
+  try {
+    await audit(context);
+  } catch {
+    return responseForError(
+      new ApiError('internal_error', 'The audit record could not be written.'),
+    );
+  }
+  return output;
 }
