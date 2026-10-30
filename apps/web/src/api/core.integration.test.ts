@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
 import { MAX_QUERY_LENGTH } from './validation';
@@ -562,6 +562,198 @@ describe('Phase 1 core API', () => {
     expect(scopedDrives.items.map((drive: { id: string }) => drive.id)).toContain(driveId);
   });
 
+  it('blocks writes at the spend cap while preserving reads and audits rate-limit responses', async () => {
+    await uploadCommit(
+      writeToken,
+      driveId,
+      '/spend-cap-readable.bin',
+      Buffer.from('read remains available'),
+    );
+    const restoreSource = await uploadCommit(
+      writeToken,
+      driveId,
+      '/spend-cap-restore.bin',
+      Buffer.from('restore is still a write'),
+    );
+    const stagedResponse = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+      path: '/spend-cap-commit.bin',
+      ciphertextSize: 1,
+      wrappedKey: 'opaque',
+    });
+    const staged = await json(stagedResponse);
+    const stagedUpload = await fetch(staged.uploadUrl as string, {
+      method: 'PUT',
+      body: new Uint8Array([42]),
+    });
+    expect(stagedUpload.ok).toBe(true);
+    const accountId = (await pool.query('SELECT account_id FROM drives WHERE id = $1', [driveId]))
+      .rows[0].account_id as string;
+    await pool.query(
+      `INSERT INTO billing_accounts (account_id, spend_cap_cents)
+       VALUES ($1, 0)
+       ON CONFLICT (account_id) DO UPDATE SET spend_cap_cents = 0`,
+      [accountId],
+    );
+    const read = await request(`/drives/${driveId}/get?path=%2Fspend-cap-readable.bin`, writeToken);
+    expect(read.status).toBe(200);
+    const blocked = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+      path: '/spend-cap-blocked.bin',
+      ciphertextSize: 1,
+      wrappedKey: 'opaque',
+    });
+    expect(blocked.status).toBe(402);
+    expect(
+      (
+        await request(`/drives/${driveId}/copy`, writeToken, 'POST', {
+          path: '/spend-cap-readable.bin',
+          destinationPath: '/spend-cap-copy.bin',
+        })
+      ).status,
+    ).toBe(402);
+    expect(
+      (
+        await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+          intentId: staged.intentId,
+        })
+      ).status,
+    ).toBe(402);
+    expect(
+      (
+        await request(`/drives/${driveId}/delete`, writeToken, 'POST', {
+          path: '/spend-cap-restore.bin',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(`/drives/${driveId}/restore`, writeToken, 'POST', {
+          path: '/spend-cap-restore.bin',
+          versionId: (restoreSource.body.version as Record<string, unknown>).id,
+        })
+      ).status,
+    ).toBe(402);
+    await pool.query('UPDATE billing_accounts SET spend_cap_cents = NULL WHERE account_id = $1', [
+      accountId,
+    ]);
+
+    const rateToken = key();
+    const rateKey = (
+      await pool.query(
+        `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+         VALUES ($1,$2,'rate-limit-integration',$3,$4::uuid[],ARRAY['read']::text[])
+         RETURNING id`,
+        [accountId, writeAgentId, tokenHash(rateToken), [driveId]],
+      )
+    ).rows[0].id as string;
+    vi.stubEnv('API_KEY_REQUESTS_PER_MINUTE', '1');
+    try {
+      expect((await request('/whoami', rateToken)).status).toBe(200);
+      const limited = await request('/whoami', rateToken);
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
+      const audit = await pool.query(
+        `SELECT action, outcome, error_code, http_status FROM audit_events
+          WHERE api_key_id = $1 AND error_code = 'rate_limited' AND http_status = 429
+          ORDER BY created_at DESC LIMIT 1`,
+        [rateKey],
+      );
+      expect(audit.rows[0]).toMatchObject({
+        action: 'whoami.read',
+        outcome: 'failure',
+        error_code: 'rate_limited',
+        http_status: 429,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    await pool.query('DELETE FROM api_keys WHERE id = $1', [rateKey]);
+  });
+
+  it('enforces the free retained-version allowance and serializes cross-drive reservations', async () => {
+    const overLimit = await fixture('phase6-free-overage', 'writer', 'drive', ['read', 'write']);
+    await pool.query('UPDATE drives SET quota_bytes = $2 WHERE id = $1', [
+      overLimit.driveId,
+      (6n * 1024n ** 3n).toString(),
+    ]);
+    const syntheticFile = (
+      await pool.query('INSERT INTO files (drive_id, path) VALUES ($1,$2) RETURNING id', [
+        overLimit.driveId,
+        '/synthetic-retained.bin',
+      ])
+    ).rows[0].id as string;
+    const freeAllowance = (5n * 1024n ** 3n).toString();
+    await pool.query(
+      `INSERT INTO versions (file_id, drive_id, object_key, ciphertext_size, wrapped_key, agent_id)
+       VALUES ($1,$2,$3,$4,'synthetic-metadata',$5)`,
+      [
+        syntheticFile,
+        overLimit.driveId,
+        `synthetic/${randomUUID()}`,
+        freeAllowance,
+        overLimit.agentId,
+      ],
+    );
+    const rejected = await request(`/drives/${overLimit.driveId}/put`, overLimit.token, 'POST', {
+      path: '/blocked-by-retained-versions.bin',
+      ciphertextSize: 1,
+      wrappedKey: 'opaque',
+    });
+    expect(rejected.status).toBe(402);
+    expect((await json(rejected)).error.upgradeUrl).toContain('/console/billing');
+
+    const reserving = await fixture('phase6-reservations', 'writer', 'first-drive', [
+      'read',
+      'write',
+    ]);
+    const secondDriveId = (
+      await pool.query('INSERT INTO drives (account_id, name) VALUES ($1,$2) RETURNING id', [
+        reserving.accountId,
+        `second-drive-${randomUUID()}`,
+      ])
+    ).rows[0].id as string;
+    await pool.query(
+      'UPDATE api_keys SET drive_ids = array_append(drive_ids, $1::uuid) WHERE token_hash = $2',
+      [secondDriveId, tokenHash(reserving.token)],
+    );
+    const reservationFile = (
+      await pool.query('INSERT INTO files (drive_id, path) VALUES ($1,$2) RETURNING id', [
+        reserving.driveId,
+        '/synthetic-near-limit.bin',
+      ])
+    ).rows[0].id as string;
+    const almostFiveGiB = (5n * 1024n ** 3n - 256n * 1024n ** 2n).toString();
+    await pool.query(
+      `INSERT INTO versions (file_id, drive_id, object_key, ciphertext_size, wrapped_key, agent_id)
+       VALUES ($1,$2,$3,$4,'synthetic-metadata',$5)`,
+      [
+        reservationFile,
+        reserving.driveId,
+        `synthetic/${randomUUID()}`,
+        almostFiveGiB,
+        reserving.agentId,
+      ],
+    );
+    const size = 200 * 1024 * 1024;
+    const results = await Promise.all([
+      request(`/drives/${reserving.driveId}/put`, reserving.token, 'POST', {
+        path: '/reservation-a.bin',
+        ciphertextSize: size,
+        wrappedKey: 'opaque',
+      }),
+      request(`/drives/${secondDriveId}/put`, reserving.token, 'POST', {
+        path: '/reservation-b.bin',
+        ciphertextSize: size,
+        wrappedKey: 'opaque',
+      }),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([201, 402]);
+    const pending = await pool.query(
+      'SELECT COALESCE(sum(ciphertext_size),0)::text AS bytes FROM upload_intents WHERE account_id = $1 AND committed_version_id IS NULL',
+      [reserving.accountId],
+    );
+    expect(pending.rows[0].bytes).toBe(String(size));
+  });
+
   it('treats percent and underscore in list prefixes literally', async () => {
     await uploadCommit(writeToken, driveId, '/literal%_marker/file.bin', Buffer.from('literal'));
     await uploadCommit(writeToken, driveId, '/literalXXmarker/other.bin', Buffer.from('wildcard'));
@@ -662,15 +854,14 @@ describe('Phase 1 core API', () => {
     expect(commits.map((item) => item.status).sort()).toEqual([201, 409]);
   });
 
-  it('returns the typed quota error when a commit would exceed the drive quota', async () => {
-    const result = await uploadCommit(
-      writeToken,
-      quotaDriveId,
-      '/too-large.bin',
-      Buffer.from('12345'),
-    );
-    expect(result.response.status).toBe(413);
-    expect(result.body.error.code).toBe('quota_exceeded');
+  it('rejects an upload intent that would exceed an explicit drive quota', async () => {
+    const intent = await request(`/drives/${quotaDriveId}/put`, writeToken, 'POST', {
+      path: '/too-large.bin',
+      ciphertextSize: 5,
+      wrappedKey: 'opaque',
+    });
+    expect(intent.status).toBe(413);
+    expect((await json(intent)).error.code).toBe('quota_exceeded');
   });
 
   it('enforces scopes, tenants, revocation, validation, management and immutable staging', async () => {

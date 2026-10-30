@@ -255,9 +255,42 @@ buffer in memory during download/decryption. Uploads use the CLI or MCP. Restori
 or deleted file creates a new immutable version. Agent access can be revoked by disabling all
 of its API keys; to rotate a key, issue a replacement, update the agent, then revoke the old key.
 
+Plan allowances are calendar-month limits: Free includes 3 drives, 5 GiB retained storage,
+5 GiB of authorized downloads, and 1 million successful API operations; Developer includes
+25 drives, 100 GiB, 100 GiB, and 10 million operations for a proposed $20 monthly base; Team
+includes 250 drives, 1 TiB (1024 GiB), 1 TiB, and 100 million operations for a proposed $200
+monthly base. Configured overage rates are cents per additional drive-month, retained GiB-month,
+egress GiB, and 1,000 successful operations, respectively. New drives use account limits by
+default. An upgrade does not change an explicitly configured or legacy per-drive cap.
+
 Usage reports encrypted committed bytes, including historical and deleted-file versions, and
-recorded API operation attempts. Storage is grouped by drive and version author. Egress and
-cost are explicitly unmetered until the billing phase; they are not reported as zero.
+recorded API operation attempts. Storage is grouped by drive and version author. Billing uses
+calendar-month peak retained storage and allocated drives, authorized-download bytes, and
+successful API operations. A presigned download URL gates the authorized-download allowance;
+it does not prove that bytes were transferred. Billable egress is calculated from observed S3
+response bytes in access logs. Metadata reads do not consume authorized-download allowance.
+Historical versions remain billable until deleted. Per-tier rates are snapshotted for each
+billing period, and the displayed base amount is a conservative estimate; Stripe proration and
+tax determine the final invoice. Spend caps block new writes based on the ledger's currently
+observed monthly amount; they do not block reads or make existing files unavailable. Delayed S3
+logs, monthly peak allocation, rate snapshots, spend caps, and bounded provider retries can
+require reconciliation. Alert delivery and Stripe meter reports are asynchronous.
+
+Paid-tier changes are made with the in-app plan controls. Use the billing portal for invoices,
+payment details, and cancellation.
+
+Billing is configured through the four `BILLING_*_CENTS` rate variables. Run
+`pnpm --dir apps/web billing:run` once manually during setup, then schedule it hourly through
+an external worker. Configure the S3 server-access-log bucket/prefix, Stripe monthly USD base
+prices at the specified proposal amounts, a one-cent-per-credit monthly metered usage price
+attached to an active sum meter with the configured event name, webhook signing secret, customer
+portal, trusted public HTTPS URL, and optional Resend sender/API key. Checkout is disabled by
+default unless rates, known Stripe prices, and the S3 log source are configured. The
+developer/team base amounts in policy are proposal defaults, not live pricing. Statements
+contain a monthly CSV-compatible breakdown; Stripe invoices remain the payment record. Missing
+S3, Stripe, or email configuration leaves durable delivery work pending and visible for operator
+reconciliation. Synthetic fixtures and test-mode signatures verify application wiring only;
+they do not prove production billing, email collection, or egress metering.
 
 The Playwright runner creates a random test-auth secret and enables a development-only provider
 stub in its dedicated server. `/api/test-session` requires that secret, a loopback hostname, and
@@ -273,5 +306,6 @@ PostgreSQL credentials; MinIO root credentials and S3 endpoint, region, bucket, 
 Clerk publishable and secret keys; the API base URL; the per-drive
 `AGENT_DRIVE_KEY_<DRIVE_ID>` convention; and placeholder Stripe, sender, and email API settings.
 Clerk is the human-auth provider; GitHub OAuth can be configured as a Clerk provider.
-Billing and email integrations remain staged work. A real drive key should be
+Billing checkout, metering, and email require the additional Stripe, S3 log, rate, and
+`API_KEY_REQUESTS_PER_MINUTE` variables listed in `.env.example`. A real drive key should be
 stored in a secure secret manager, not committed to `.env.example`.

@@ -25,6 +25,12 @@ describe('core API contract', () => {
         "GET /api/v1/drives/:id/shares",
         "DELETE /api/v1/drives/:id/shares/:shareId",
         "GET /api/shares/:id",
+        "GET /api/console/billing",
+        "PATCH /api/console/billing/settings",
+        "POST /api/console/billing/checkout",
+        "POST /api/console/billing/portal",
+        "GET /api/console/billing/statements",
+        "POST /api/stripe/webhook",
       ]
     `);
   });

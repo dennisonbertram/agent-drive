@@ -84,4 +84,42 @@ describe('AgentDriveClient transport guards', () => {
       new AgentDriveApiError('permission_denied', 403, 'no'),
     );
   });
+
+  it('preserves only safe actionable API metadata', async () => {
+    const responses = [
+      {
+        error: {
+          code: 'payment_required',
+          message: 'quota reached',
+          upgradeUrl: 'https://billing.example.test/console/billing',
+          retryAfter: 30,
+        },
+      },
+      {
+        error: {
+          code: 'payment_required',
+          message: 'quota reached',
+          upgradeUrl: 'http://remote.example.test/upgrade',
+          retryAfter: -1,
+        },
+      },
+    ];
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(responses[0]), { status: 402 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(responses[1]), { status: 402 }));
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      fetch: fetcher,
+    });
+    await expect(client.whoami()).rejects.toMatchObject({
+      upgradeUrl: 'https://billing.example.test/console/billing',
+      retryAfter: 30,
+    });
+    await expect(client.whoami()).rejects.toMatchObject({
+      upgradeUrl: undefined,
+      retryAfter: undefined,
+    });
+  });
 });

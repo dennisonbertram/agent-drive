@@ -117,12 +117,18 @@ export type Share = {
 };
 
 export class AgentDriveApiError extends Error {
+  readonly upgradeUrl: string | undefined;
+  readonly retryAfter: number | undefined;
+
   constructor(
     readonly code: string,
     readonly status: number,
     message: string,
+    details: { upgradeUrl?: string | undefined; retryAfter?: number | undefined } = {},
   ) {
     super(message);
+    this.upgradeUrl = details.upgradeUrl;
+    this.retryAfter = details.retryAfter;
     this.name = 'AgentDriveApiError';
   }
 }
@@ -148,6 +154,19 @@ function validateUrl(value: string, api: boolean) {
     throw new TypeError('Only HTTPS or exact localhost HTTP URLs are allowed.');
   }
   return parsed;
+}
+
+function validatedUpgradeUrl(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  try {
+    return validateUrl(value, false).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function validatedRetryAfter(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function encode(value: string) {
@@ -205,12 +224,25 @@ export class AgentDriveClient {
     if (!response.ok) {
       const error =
         body && typeof body === 'object' && 'error' in body
-          ? (body as { error?: { code?: string; message?: string } }).error
+          ? (
+              body as {
+                error?: {
+                  code?: string;
+                  message?: string;
+                  upgradeUrl?: unknown;
+                  retryAfter?: unknown;
+                };
+              }
+            ).error
           : undefined;
       throw new AgentDriveApiError(
         error?.code ?? 'internal_error',
         response.status,
         error?.message ?? `Agent Drive request failed with HTTP ${response.status}.`,
+        {
+          upgradeUrl: validatedUpgradeUrl(error?.upgradeUrl),
+          retryAfter: validatedRetryAfter(error?.retryAfter),
+        },
       );
     }
     return body as T;
@@ -334,7 +366,7 @@ export class AgentDriveClient {
     path: string,
     options: { versionId?: string; expiresAt?: string } = {},
   ) {
-    const query = new URLSearchParams({ path });
+    const query = new URLSearchParams({ path, metadataOnly: '1' });
     if (options.versionId) query.set('versionId', options.versionId);
     const selected = await this.request<{ id: string; wrappedKey: string }>(
       `drives/${encode(driveId)}/get?${query.toString()}`,

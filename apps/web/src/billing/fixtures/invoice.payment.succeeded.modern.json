@@ -1,0 +1,19 @@
+{
+  "id": "evt_invoice_fixture",
+  "object": "event",
+  "api_version": "2025-08-27.basil",
+  "created": 1800000001,
+  "livemode": false,
+  "type": "invoice.payment_succeeded",
+  "data": {
+    "object": {
+      "id": "in_fixture",
+      "object": "invoice",
+      "customer": "cus_fixture",
+      "parent": {
+        "type": "subscription_details",
+        "subscription_details": { "subscription": "sub_fixture" }
+      }
+    }
+  }
+}

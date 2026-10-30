@@ -351,13 +351,15 @@ if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
   });
 } else {
   run(name, raw).catch((error: unknown) => {
-    const message =
-      error instanceof AgentDriveApiError
-        ? error.message
-        : error instanceof Error
-          ? error.message
-          : 'Command failed.';
-    process.stderr.write(`${message}\n`);
+    if (error instanceof AgentDriveApiError) {
+      const details = [
+        error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
+        error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
+      ].filter(Boolean);
+      process.stderr.write(`${[error.message, ...details].join('\n')}\n`);
+    } else {
+      process.stderr.write(`${error instanceof Error ? error.message : 'Command failed.'}\n`);
+    }
     process.exitCode = 1;
   });
 }

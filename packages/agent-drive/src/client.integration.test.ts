@@ -179,6 +179,11 @@ beforeAll(async () => {
   ]);
   accountId = account.rows[0].id as string;
   fixtureAccounts.push(accountId);
+  await database.query(
+    `INSERT INTO billing_accounts (account_id, plan, subscription_status)
+     VALUES ($1, 'developer', 'active')`,
+    [accountId],
+  );
   const manager = await database.query(
     'INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id',
     [accountId, `manager-${randomUUID()}`],
@@ -219,6 +224,53 @@ afterAll(async () => {
 });
 
 describe('Phase 2 client and CLI against the real API and services', () => {
+  it('prints safe upgrade and retry metadata in CLI errors', async () => {
+    const errorServer = createServer((request, response) => {
+      const invalid = request.headers.authorization === 'Bearer cli-invalid-metadata-token';
+      response.writeHead(invalid ? 429 : 402, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          error: {
+            code: invalid ? 'rate_limited' : 'payment_required',
+            message: invalid ? 'Try again later.' : 'The account needs a paid plan.',
+            upgradeUrl: invalid
+              ? 'http://remote.example.test/upgrade'
+              : 'https://billing.example.test/console/billing',
+            retryAfter: invalid ? -1 : 30,
+          },
+        }),
+      );
+    });
+    await new Promise<void>((resolveListen, reject) => {
+      errorServer.once('error', reject);
+      errorServer.listen(0, '127.0.0.1', resolveListen);
+    });
+    try {
+      const address = errorServer.address();
+      if (!address || typeof address === 'string') throw new Error('Error server failed to bind.');
+      const result = await runCli(['whoami'], {
+        ...process.env,
+        AGENT_DRIVE_API_URL: `http://127.0.0.1:${address.port}`,
+        AGENT_DRIVE_API_KEY: 'cli-error-fixture-token',
+        AGENT_DRIVE_CONFIG: join(tempRoot, 'cli-error-config.json'),
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Upgrade: https://billing.example.test/console/billing');
+      expect(result.stderr).toContain('Retry after: 30 seconds');
+      const invalidMetadata = await runCli(['whoami'], {
+        ...process.env,
+        AGENT_DRIVE_API_URL: `http://127.0.0.1:${address.port}`,
+        AGENT_DRIVE_API_KEY: 'cli-invalid-metadata-token',
+        AGENT_DRIVE_CONFIG: join(tempRoot, 'cli-invalid-error-config.json'),
+      });
+      expect(invalidMetadata.status).toBe(1);
+      expect(invalidMetadata.stderr).not.toContain('Upgrade:');
+      expect(invalidMetadata.stderr).not.toContain('Retry after:');
+    } finally {
+      await new Promise<void>((resolveClose) => errorServer.close(() => resolveClose()));
+    }
+  });
+
   it('keeps plaintext out of API, every public database row, and raw fixture objects', async () => {
     const marker = `PHASE2-PLAINTEXT-${randomUUID()}-${randomBytes(12).toString('hex')}`;
     const driveKey = generateDriveKey();
@@ -353,6 +405,15 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       apiKey: scoped.token!,
       driveKey,
     });
+    const currentPeriodAuthorization = async () =>
+      (
+        await database.query<{ authorized_egress_bytes: string }>(
+          `SELECT authorized_egress_bytes::text FROM billing_periods
+            WHERE account_id = (SELECT account_id FROM drives WHERE id = $1)
+              AND period_start = date_trunc('month', now())`,
+          [drive.id],
+        )
+      ).rows[0]!.authorized_egress_bytes;
     const path = `/${'界'.repeat(1023)}`;
     const encodedQuery = new URLSearchParams({ path }).toString();
     expect(path.length).toBe(1024);
@@ -382,7 +443,9 @@ describe('Phase 2 client and CLI against the real API and services', () => {
 
     let selectedVersionId = '';
     let racedVersionId = '';
+    let metadataOnly = '';
     let postedBody: Record<string, unknown> | undefined;
+    const authorizedBeforeShare = await currentPeriodAuthorization();
     const clientWithVersionRace = new AgentDriveClient({
       apiUrl,
       apiKey: scoped.token!,
@@ -390,6 +453,7 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       fetch: async (input, init) => {
         const url = new URL(input instanceof Request ? input.url : input.toString());
         if (url.pathname.endsWith('/get')) {
+          metadataOnly = url.searchParams.get('metadataOnly') ?? '';
           const response = await fetch(input, init);
           selectedVersionId = ((await response.clone().json()) as { id: string }).id;
           return response;
@@ -409,10 +473,12 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     expect(selectedVersionId).toBe(firstVersion.id);
     expect(racedVersionId).not.toBe(firstVersion.id);
     expect(postedBody?.versionId).toBe(firstVersion.id);
+    expect(metadataOnly).toBe('1');
     expect(share.versionId).toBe(firstVersion.id);
     const stored = await database.query('SELECT version_id FROM shares WHERE id = $1', [share.id]);
     expect(stored.rows[0]?.version_id).toBe(firstVersion.id);
     expect(await countShares()).toBe(1);
+    expect(await currentPeriodAuthorization()).toBe(authorizedBeforeShare);
   });
 
   it('runs the CLI login, provisioning, encrypted file, restore, sync, and wrong-key acceptance flow', async () => {

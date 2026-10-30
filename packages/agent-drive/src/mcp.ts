@@ -15,6 +15,8 @@ const apiErrors: Record<string, string> = {
   not_found: 'The requested resource was not found.',
   conflict: 'The operation conflicts with the current remote state.',
   quota_exceeded: 'The drive quota would be exceeded.',
+  payment_required: 'The account requires a billing plan or payment action.',
+  rate_limited: 'The API key has exceeded its request rate limit.',
   internal_error: 'The Agent Drive request failed.',
   storage_error: 'The object storage request failed.',
 };
@@ -45,6 +47,8 @@ function failure(error: unknown) {
             error: {
               code: error.code,
               message: apiErrors[error.code] ?? 'Agent Drive request failed.',
+              ...(error.upgradeUrl ? { upgradeUrl: error.upgradeUrl } : {}),
+              ...(error.retryAfter === undefined ? {} : { retryAfter: error.retryAfter }),
             },
           }),
         },
