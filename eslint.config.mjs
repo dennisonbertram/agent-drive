@@ -31,9 +31,6 @@ export default defineConfig([
         rootDir: 'apps/web/',
       },
     },
-    rules: {
-      '@next/next/no-html-link-for-pages': 'off',
-    },
   },
   globalIgnores([
     '.next/**',

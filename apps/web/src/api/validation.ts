@@ -14,19 +14,37 @@ export function objectBody(value: unknown): Record<string, unknown> {
 export async function jsonBody(request: Request): Promise<Record<string, unknown>> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (contentLength > MAX_BODY_BYTES) {
+    await request.body?.cancel().catch(() => undefined);
     throw new ApiError('validation_error', 'The JSON body is too large.');
   }
-  let text: string;
+  const reader = request.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
   try {
-    text = await request.text();
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw new ApiError('validation_error', 'The JSON body is too large.');
+      }
+      chunks.push(value);
+    }
   } catch {
+    if (reader && length > MAX_BODY_BYTES) {
+      throw new ApiError('validation_error', 'The JSON body is too large.');
+    }
     throw new ApiError('validation_error', 'The JSON body could not be read.');
   }
-  if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
-    throw new ApiError('validation_error', 'The JSON body is too large.');
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   try {
-    return objectBody(JSON.parse(text));
+    return objectBody(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
   } catch {
     throw new ApiError('validation_error', 'The request body must be valid JSON.');
   }
@@ -91,7 +109,8 @@ export function prefix(value: string | null): string {
     !value.startsWith('/') ||
     value.length > 1024 ||
     value.includes('\u0000') ||
-    value.includes('//')
+    value.includes('//') ||
+    value.includes('\\')
   ) {
     throw new ApiError('validation_error', 'prefix must be a canonical absolute POSIX prefix.');
   }
@@ -129,7 +148,7 @@ export function page(url: URL) {
     throw new ApiError('validation_error', `limit must be between 1 and ${MAX_PAGE_SIZE}.`);
   }
   const cursor = url.searchParams.get('cursor');
-  if (cursor && cursor.length > 512) throw new ApiError('validation_error', 'cursor is too long.');
+  if (cursor && cursor.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
   return { limit: parsed, cursor: cursor ?? undefined };
 }
 
@@ -137,10 +156,35 @@ export function encodeCursor(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
 }
 
-export function decodeCursor<T>(value: string | undefined): T | undefined {
+export type CursorPayload = { value: string; id: string };
+
+export function decodeCursor(
+  value: string | undefined,
+  kind: 'name' | 'path' | 'timestamp',
+): CursorPayload | undefined {
   if (!value) return undefined;
+  if (value.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
   try {
-    return JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as T;
+    const decoded = Buffer.from(value, 'base64url');
+    if (decoded.toString('base64url') !== value) throw new Error('non-canonical cursor');
+    const parsed: unknown = JSON.parse(decoded.toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error('invalid cursor');
+    const record = parsed as Record<string, unknown>;
+    if (
+      Object.keys(record).length !== 2 ||
+      typeof record.value !== 'string' ||
+      record.value.length === 0 ||
+      record.value.length > (kind === 'path' ? 1024 : 128) ||
+      typeof record.id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(record.id)
+    ) {
+      throw new Error('invalid cursor');
+    }
+    if (kind === 'path') canonicalPath(record.value, 'cursor path');
+    if (kind === 'timestamp' && Number.isNaN(Date.parse(record.value)))
+      throw new Error('invalid timestamp');
+    return { value: record.value, id: record.id };
   } catch {
     throw new ApiError('validation_error', 'cursor is invalid.');
   }
@@ -149,4 +193,16 @@ export function decodeCursor<T>(value: string | undefined): T | undefined {
 export function escapedLike(value: string): string {
   if (value.length > 128) throw new ApiError('validation_error', 'q is too long.');
   return `%${value.replace(/[\\%_]/g, '\\$&')}%`;
+}
+
+export function escapeLikeLiteral(value: string) {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+export function queryValue(url: URL, name: string, max = 256) {
+  const value = url.searchParams.get(name);
+  if (value !== null && (value.length > max || value.includes('\u0000'))) {
+    throw new ApiError('validation_error', `${name} is too long or invalid.`);
+  }
+  return value;
 }

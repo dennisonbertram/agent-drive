@@ -38,7 +38,7 @@ export function responseForError(error: unknown) {
       : new ApiError('internal_error', 'An internal error occurred.');
   return Response.json(
     { error: { code: apiError.code, message: apiError.message } },
-    { status: apiError.status },
+    { status: apiError.status, headers: { 'Cache-Control': 'no-store' } },
   );
 }
 

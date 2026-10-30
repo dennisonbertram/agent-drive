@@ -6,12 +6,14 @@ import {
   boundedSize,
   canonicalPath,
   decodeCursor,
+  escapeLikeLiteral,
   encodeCursor,
   escapedLike,
   jsonBody,
   optionalString,
   page,
   prefix,
+  queryValue,
   stringField,
   tags,
   uuid,
@@ -19,7 +21,7 @@ import {
 import {
   copyObject,
   deleteObject,
-  objectSize,
+  objectInfo,
   presignedDownload,
   presignedUpload,
 } from './storage';
@@ -95,7 +97,7 @@ async function machineId(client: PoolClient, auth: Auth, request: Request) {
 }
 
 function response(data: unknown, status = 200) {
-  return Response.json(data, { status });
+  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
 function rowVersion(row: Row) {
@@ -117,14 +119,31 @@ function errorStatus(error: unknown) {
   return error instanceof ApiError ? error.status : 500;
 }
 
-function actionFor(pathname: string) {
-  const parts = pathname
-    .replace(/^\/api\/v1\/?/, '')
-    .split('/')
-    .filter(Boolean);
-  if (parts.length === 0) return 'unknown';
-  if (parts[0] === 'drives' && parts[2]) return `drives.${parts[2]}`;
-  return parts[0] ?? 'unknown';
+function actionFor(method: string, parts: string[]) {
+  if (parts.length === 1 && parts[0] === 'whoami' && method === 'GET') return 'whoami.read';
+  if (parts.length === 1 && parts[0] === 'agents' && method === 'GET') return 'agents.list';
+  if (parts.length === 1 && parts[0] === 'agents' && method === 'POST') return 'agents.create';
+  if (parts.length === 1 && parts[0] === 'drives' && method === 'GET') return 'drives.list';
+  if (parts.length === 1 && parts[0] === 'drives' && method === 'POST') return 'drives.create';
+  if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') return 'keys.list';
+  if (parts.length === 1 && parts[0] === 'keys' && method === 'POST') return 'keys.create';
+  if (parts.length === 2 && parts[0] === 'keys' && method === 'DELETE') return 'keys.revoke';
+  const actions: Record<string, string> = {
+    'POST:put': 'drive.put',
+    'POST:commit': 'drive.commit',
+    'GET:get': 'drive.get',
+    'GET:list': 'drive.list',
+    'POST:move': 'drive.move',
+    'POST:copy': 'drive.copy',
+    'POST:delete': 'drive.delete',
+    'POST:restore': 'drive.restore',
+    'GET:versions': 'drive.versions',
+    'GET:recent': 'drive.recent',
+    'GET:search': 'drive.search',
+  };
+  if (parts.length === 3 && parts[0] === 'drives')
+    return actions[`${method}:${parts[2]}`] ?? 'unknown';
+  return 'unknown';
 }
 
 async function audit(context: RequestContext) {
@@ -145,7 +164,9 @@ async function audit(context: RequestContext) {
 }
 
 async function ensureDrive(auth: Auth, driveId: string) {
-  need(auth, 'read', driveId);
+  if (!auth.driveIds.includes(driveId)) {
+    throw new ApiError('permission_denied', 'The API key is not scoped to this drive.');
+  }
   const result = await getPool().query(
     'SELECT id, account_id, name, quota_bytes FROM drives WHERE id = $1',
     [driveId],
@@ -157,38 +178,80 @@ async function ensureDrive(auth: Auth, driveId: string) {
   return result.rows[0] as Row;
 }
 
+function collection(
+  rows: Row[],
+  limit: number,
+  valueOf: (row: Row) => string,
+  idOf: (row: Row) => string = (row) => row.id,
+) {
+  const items = rows.slice(0, limit);
+  const last = items[items.length - 1];
+  return {
+    items,
+    nextCursor:
+      rows.length > limit && last ? encodeCursor({ value: valueOf(last), id: idOf(last) }) : null,
+  };
+}
+
+function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
+  const clauses: string[] = [];
+  if (includeQuery) {
+    const q = queryValue(url, 'q', 128);
+    params.push(escapedLike(q ?? ''));
+    clauses.push(`f.path ILIKE $${params.length} ESCAPE '\\'`);
+  }
+  const tag = queryValue(url, 'tag', 64);
+  const agentId = queryValue(url, 'agentId', 64);
+  const machine = queryValue(url, 'machine', 128);
+  const user = queryValue(url, 'user', 256);
+  if (tag) {
+    params.push(tag);
+    clauses.push(`$${params.length} = ANY(v.tags)`);
+  }
+  if (agentId) {
+    params.push(uuid(agentId, 'agentId'));
+    clauses.push(`v.agent_id = $${params.length}`);
+  }
+  if (machine) {
+    params.push(machine);
+    clauses.push(`v.machine_id IN (SELECT id FROM machines WHERE name = $${params.length})`);
+  }
+  if (user) {
+    params.push(user);
+    clauses.push(`v.user_id = $${params.length}`);
+  }
+  return clauses.map((clause) => ` AND ${clause}`).join('');
+}
+
 async function controlPlane(request: Request, auth: Auth, parts: string[]) {
   const method = request.method;
-  if (parts[0] === 'whoami' && method === 'GET') {
-    const drives = auth.scopes.includes('manage')
-      ? await getPool().query(
-          'SELECT id, name, quota_bytes FROM drives WHERE account_id = $1 ORDER BY name, id LIMIT 100',
-          [auth.accountId],
-        )
-      : await getPool().query(
-          'SELECT id, name, quota_bytes FROM drives WHERE account_id = $1 AND id = ANY($2::uuid[]) ORDER BY name, id LIMIT 100',
-          [auth.accountId, auth.driveIds],
-        );
+  if (parts.length === 1 && parts[0] === 'whoami' && method === 'GET') {
     return response({
       accountId: auth.accountId,
       agentId: auth.agentId,
       keyId: auth.keyId,
       scopes: auth.scopes,
-      drives: drives.rows,
+      driveIds: auth.scopes.includes('manage') ? null : auth.driveIds,
     });
   }
-  if (parts[0] === 'agents' && method === 'GET') {
+  if (parts.length === 1 && parts[0] === 'agents' && method === 'GET') {
     manage(auth);
-    return response(
-      (
-        await getPool().query(
-          'SELECT id, name, created_at FROM agents WHERE account_id = $1 ORDER BY name, id LIMIT 100',
-          [auth.accountId],
-        )
-      ).rows,
+    const { limit, cursor } = page(new URL(request.url));
+    const decoded = decodeCursor(cursor, 'name');
+    const params: unknown[] = [auth.accountId];
+    let where = 'account_id = $1';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ' AND (name, id) > ($2, $3::uuid)';
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT id, name, created_at FROM agents WHERE ${where} ORDER BY name, id LIMIT $${params.length}`,
+      params,
     );
+    return response(collection(rows.rows as Row[], limit, (row) => row.name));
   }
-  if (parts[0] === 'agents' && method === 'POST') {
+  if (parts.length === 1 && parts[0] === 'agents' && method === 'POST') {
     manage(auth);
     const body = await jsonBody(request);
     const name = stringField(body, 'name', { required: true, max: 128 })!;
@@ -200,16 +263,25 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     );
     return response(result.rows[0], 200);
   }
-  if (parts[0] === 'drives' && parts.length === 1 && method === 'GET') {
-    manage(auth);
-    return response(
-      (
-        await getPool().query(
-          'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 ORDER BY name, id LIMIT 100',
-          [auth.accountId],
-        )
-      ).rows,
+  if (parts.length === 1 && parts[0] === 'drives' && method === 'GET') {
+    if (!auth.scopes.includes('manage')) need(auth, 'read');
+    const { limit, cursor } = page(new URL(request.url));
+    const decoded = decodeCursor(cursor, 'name');
+    const params: unknown[] = [
+      auth.accountId,
+      auth.scopes.includes('manage') ? null : auth.driveIds,
+    ];
+    let where = 'account_id = $1 AND ($2::uuid[] IS NULL OR id = ANY($2::uuid[]))';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ' AND (name, id) > ($3, $4::uuid)';
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT id, name, quota_bytes, created_at FROM drives WHERE ${where} ORDER BY name, id LIMIT $${params.length}`,
+      params,
     );
+    return response(collection(rows.rows as Row[], limit, (row) => row.name));
   }
   if (parts[0] === 'drives' && parts.length === 1 && method === 'POST') {
     manage(auth);
@@ -225,18 +297,26 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     );
     return response(result.rows[0], 200);
   }
-  if (parts[0] === 'keys' && parts.length === 1 && method === 'GET') {
+  if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') {
     manage(auth);
-    return response(
-      (
-        await getPool().query(
-          'SELECT id, agent_id, label, drive_ids, scopes, revoked_at, created_at FROM api_keys WHERE account_id = $1 ORDER BY created_at, id LIMIT 100',
-          [auth.accountId],
-        )
-      ).rows,
+    const { limit, cursor } = page(new URL(request.url));
+    const decoded = decodeCursor(cursor, 'timestamp');
+    const params: unknown[] = [auth.accountId];
+    let where = 'account_id = $1';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ' AND (created_at, id) > ($2::timestamptz, $3::uuid)';
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT id, agent_id, label, drive_ids, scopes, revoked_at, created_at,
+              created_at::text AS cursor_created_at
+         FROM api_keys WHERE ${where} ORDER BY created_at, id LIMIT $${params.length}`,
+      params,
     );
+    return response(collection(rows.rows as Row[], limit, (row) => row.cursor_created_at));
   }
-  if (parts[0] === 'keys' && parts.length === 1 && method === 'POST') {
+  if (parts.length === 1 && parts[0] === 'keys' && method === 'POST') {
     manage(auth);
     const body = await jsonBody(request);
     const agentId = uuid(stringField(body, 'agentId', { required: true }), 'agentId');
@@ -274,7 +354,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     );
     return response({ ...result.rows[0], token }, 201);
   }
-  if (parts[0] === 'keys' && parts.length === 2 && method === 'DELETE') {
+  if (parts.length === 2 && parts[0] === 'keys' && method === 'DELETE') {
     manage(auth);
     const keyId = uuid(parts[1], 'key id');
     const result = await getPool().query(
@@ -305,10 +385,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
     mode === 'version'
       ? uuid(typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined, 'ifVersionId')
       : null;
-  const drive = await ensureDrive(
-    { ...auth, scopes: ['read', 'write'], driveIds: [driveId] },
-    driveId,
-  );
+  const drive = await ensureDrive(auth, driveId);
   const machine = await withTransaction((client) => machineId(client, auth, request));
   const id = randomUUID();
   const stagingKey = `staging/${auth.accountId}/${driveId}/${id}`;
@@ -367,14 +444,15 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   }
   if (new Date(source.expires_at).getTime() < Date.now())
     throw new ApiError('conflict', 'The upload intent has expired.');
-  let size: number;
+  let staged: { size: number; etag: string | undefined };
   try {
-    size = await objectSize(source.staging_key);
+    staged = await objectInfo(source.staging_key);
   } catch {
     throw new ApiError('conflict', 'The staged ciphertext is not available.');
   }
-  if (size !== Number(source.ciphertext_size))
+  if (staged.size !== Number(source.ciphertext_size) || !staged.etag)
     throw new ApiError('conflict', 'Uploaded ciphertext size does not match the intent.');
+  const stagedEtag = staged.etag;
   const versionId = randomUUID();
   const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
   let copied = false;
@@ -397,6 +475,8 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         );
         return { version: existingVersion.rows[0] as Row, idempotent: true };
       }
+      if (new Date(lockedIntent.expires_at).getTime() < Date.now())
+        throw new ApiError('conflict', 'The upload intent has expired.');
       const fileResult = await client.query(
         'SELECT id, current_version_id, deleted_at FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE',
         [driveId, source.path],
@@ -424,7 +504,21 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       ) {
         throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
       }
-      await copyObject(lockedIntent.staging_key, finalKey);
+      try {
+        await copyObject(lockedIntent.staging_key, finalKey, stagedEtag);
+      } catch (error) {
+        const status =
+          typeof error === 'object' && error !== null && '$metadata' in error
+            ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+            : undefined;
+        const name =
+          typeof error === 'object' && error !== null && 'name' in error
+            ? String((error as { name: unknown }).name)
+            : '';
+        if (status === 412 || name === 'PreconditionFailed')
+          throw new ApiError('conflict', 'The staged ciphertext changed before commit.');
+        throw error;
+      }
       copied = true;
       const fileId = file?.id ?? randomUUID();
       if (!file) {
@@ -503,12 +597,13 @@ async function fileEndpoint(
     need(auth, 'read', driveId);
     const { limit, cursor } = page(url);
     const p = prefix(url.searchParams.get('prefix'));
-    const decoded = decodeCursor<{ path: string; id: string }>(cursor);
-    const params: unknown[] = [driveId, `${p}%`];
-    let clause = `f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2`;
+    const decoded = decodeCursor(cursor, 'path');
+    const params: unknown[] = [driveId, `${escapeLikeLiteral(p)}%`];
+    let clause = `f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2 ESCAPE '\\'`;
+    clause += appendFileFilters(url, params, true);
     if (decoded) {
-      params.push(decoded.path, decoded.id);
-      clause += ` AND (f.path, f.id) > ($3, $4::uuid)`;
+      params.push(decoded.value, decoded.id);
+      clause += ` AND (f.path, f.id) > ($${params.length - 1}, $${params.length}::uuid)`;
     }
     params.push(limit + 1);
     const rows = await getPool().query(
@@ -521,18 +616,31 @@ async function fileEndpoint(
       items,
       nextCursor:
         rows.rows.length > limit
-          ? encodeCursor({ path: items.at(-1).path, id: items.at(-1).id })
+          ? encodeCursor({ value: items.at(-1).path, id: items.at(-1).id })
           : null,
     });
   }
   if (operation === 'versions' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'timestamp');
+    const params: unknown[] = [driveId, path];
+    let cursorClause = '';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      cursorClause = ` AND (v.created_at, v.id) < ($3::timestamptz, $4::uuid)`;
+    }
+    params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE f.drive_id = $1 AND f.path = $2 ORDER BY v.created_at DESC, v.id DESC LIMIT 100`,
-      [driveId, path],
+      `SELECT v.*, f.path, v.created_at::text AS cursor_created_at
+         FROM versions v JOIN files f ON f.id = v.file_id
+        WHERE f.drive_id = $1 AND f.path = $2${cursorClause}
+        ORDER BY v.created_at DESC, v.id DESC LIMIT $${params.length}`,
+      params,
     );
-    return response(rows.rows.map(rowVersion));
+    const output = collection(rows.rows as Row[], limit, (row) => row.cursor_created_at);
+    return response({ ...output, items: output.items.map(rowVersion) });
   }
   if (operation === 'recent' && request.method === 'GET') {
     need(auth, 'read', driveId);
@@ -540,44 +648,48 @@ async function fileEndpoint(
     const since = sinceValue ? new Date(sinceValue) : new Date(0);
     if (Number.isNaN(since.getTime()))
       throw new ApiError('validation_error', 'since must be an ISO timestamp.');
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'timestamp');
+    const params: unknown[] = [driveId, since];
+    let cursorClause = '';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      cursorClause = ` AND (v.created_at, v.id) > ($3::timestamptz, $4::uuid)`;
+    }
+    params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.drive_id = $1 AND v.created_at > $2 ORDER BY v.created_at, v.id LIMIT 100`,
-      [driveId, since],
+      `SELECT v.*, f.path, v.created_at::text AS cursor_created_at
+         FROM versions v JOIN files f ON f.id = v.file_id
+        WHERE v.drive_id = $1 AND v.created_at > $2${cursorClause}
+        ORDER BY v.created_at, v.id LIMIT $${params.length}`,
+      params,
     );
-    return response(rows.rows.map(rowVersion));
+    const output = collection(rows.rows as Row[], limit, (row) => row.cursor_created_at);
+    return response({ ...output, items: output.items.map(rowVersion) });
   }
   if (operation === 'search' && request.method === 'GET') {
     need(auth, 'read', driveId);
-    const q = url.searchParams.get('q') ?? '';
-    const pattern = escapedLike(q);
-    const tag = url.searchParams.get('tag');
-    const agentId = url.searchParams.get('agentId');
-    const machine = url.searchParams.get('machine');
-    const user = url.searchParams.get('user');
-    const params: unknown[] = [driveId, pattern];
-    let where = `f.drive_id = $1 AND f.deleted_at IS NULL AND f.path ILIKE $2 ESCAPE '\\'`;
-    if (tag) {
-      params.push(tag);
-      where += ` AND $${params.length} = ANY(v.tags)`;
+    const params: unknown[] = [driveId];
+    let where = 'f.drive_id = $1 AND f.deleted_at IS NULL';
+    where += appendFileFilters(url, params, true);
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'path');
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ` AND (f.path, f.id) > ($${params.length - 1}, $${params.length}::uuid)`;
     }
-    if (agentId) {
-      params.push(uuid(agentId, 'agentId'));
-      where += ` AND v.agent_id = $${params.length}`;
-    }
-    if (machine) {
-      params.push(machine);
-      where += ` AND v.machine_id IN (SELECT id FROM machines WHERE name = $${params.length})`;
-    }
-    if (user) {
-      params.push(user);
-      where += ` AND v.user_id = $${params.length}`;
-    }
-    params.push(100);
+    params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT v.*, f.path FROM files f JOIN versions v ON v.id = f.current_version_id WHERE ${where} ORDER BY f.path, f.id LIMIT $${params.length}`,
+      `SELECT v.*, f.path, f.id AS file_id FROM files f JOIN versions v ON v.id = f.current_version_id WHERE ${where} ORDER BY f.path, f.id LIMIT $${params.length}`,
       params,
     );
-    return response(rows.rows.map(rowVersion));
+    const output = collection(
+      rows.rows as Row[],
+      limit,
+      (row) => row.path,
+      (row) => row.file_id,
+    );
+    return response({ ...output, items: output.items.map(rowVersion) });
   }
   if (operation === 'move' && request.method === 'POST') {
     need(auth, 'write', driveId);
@@ -612,6 +724,7 @@ async function fileEndpoint(
 }
 
 async function derivedVersion(request: Request, auth: Auth, driveId: string, restore: boolean) {
+  need(auth, 'read', driveId);
   need(auth, 'write', driveId);
   const body = await jsonBody(request);
   const sourcePath = canonicalPath(body.path);
@@ -622,6 +735,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
     body.versionId === undefined
       ? undefined
       : uuid(typeof body.versionId === 'string' ? body.versionId : undefined, 'versionId');
+  const userId = optionalString(body, 'userId', 256) ?? null;
   const machine = await withTransaction((client) => machineId(client, auth, request));
   let copiedKey: string | undefined;
   let result: Row;
@@ -681,7 +795,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
           row.wrapped_key,
           auth.agentId,
           machine,
-          row.user_id,
+          userId,
           row.tags,
           row.description,
         ],
@@ -701,17 +815,23 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 
 export async function handleApiRequest(request: Request) {
   const url = new URL(request.url);
-  const context: RequestContext = { action: actionFor(url.pathname), status: 500 };
+  const rawPath = url.pathname;
+  const validBase =
+    rawPath.startsWith('/api/v1/') && !rawPath.includes('//') && !rawPath.endsWith('/');
+  const relative = validBase ? rawPath.slice('/api/v1/'.length).split('/') : [];
+  const context: RequestContext = { action: actionFor(request.method, relative), status: 500 };
   let output: Response;
   try {
+    if (!validBase || url.search.length > 8192) {
+      throw new ApiError(
+        url.search.length > 8192 ? 'validation_error' : 'not_found',
+        url.search.length > 8192 ? 'The query string is too long.' : 'Endpoint not found.',
+      );
+    }
     context.auth = await authenticate(request);
-    const relative = url.pathname
-      .replace(/^\/api\/v1\/?/, '')
-      .split('/')
-      .filter(Boolean);
     const control = await controlPlane(request, context.auth, relative);
     if (control) output = control;
-    else if (relative[0] === 'drives' && relative.length >= 3) {
+    else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
       output = await fileEndpoint(request, context.auth, relative[1]!, relative[2]!, url);
     } else {

@@ -67,20 +67,21 @@ export async function presignedDownload(key: string) {
   );
 }
 
-export async function objectSize(key: string) {
+export async function objectInfo(key: string) {
   const settings = config();
   const response = await storageClient().send(
     new HeadObjectCommand({ Bucket: settings.bucket, Key: key }),
   );
-  return response.ContentLength ?? 0;
+  return { size: response.ContentLength ?? 0, etag: response.ETag };
 }
 
-export async function copyObject(source: string, target: string) {
+export async function copyObject(source: string, target: string, etag?: string) {
   const settings = config();
   await storageClient().send(
     new CopyObjectCommand({
       Bucket: settings.bucket,
       CopySource: `${settings.bucket}/${source.split('/').map(encodeURIComponent).join('/')}`,
+      ...(etag ? { CopySourceIfMatch: etag } : {}),
       Key: target,
     }),
   );

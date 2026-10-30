@@ -18,3 +18,8 @@ export const API_CONTRACT = [
 ] as const;
 
 export type ApiContract = (typeof API_CONTRACT)[number];
+
+export type Page<T> = {
+  items: T[];
+  nextCursor: string | null;
+};
