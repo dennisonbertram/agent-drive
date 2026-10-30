@@ -5,6 +5,27 @@ Google Drive for agents: encrypted file storage on S3, used through an MCP serve
 - [User stories](docs/user-stories.md)
 - [Build plan](docs/plan.md)
 - [Phase 1 API contract](docs/api.md)
+- [Client encryption format](docs/crypto.md)
+- [CLI and sync](docs/cli.md)
+
+## Phase 2 client quickstart
+
+Install the workspace package, provision a management API key, then log in without putting the
+token in shell history:
+
+```sh
+export AGENT_DRIVE_API_URL=http://127.0.0.1:3000
+export AGENT_DRIVE_API_KEY=... # local development only
+printf '%s' "$AGENT_DRIVE_API_KEY" | pnpm exec agent-drive login --api "$AGENT_DRIVE_API_URL" --token-stdin
+```
+
+Create a drive and **back up the printed drive key immediately**. The server cannot recover it:
+
+```sh
+pnpm exec agent-drive drive create --name my-drive
+```
+
+The client encrypts bytes before uploading. Drive keys never go to the API or object storage.
 
 ## Phase 0 foundation
 

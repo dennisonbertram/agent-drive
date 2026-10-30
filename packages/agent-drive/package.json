@@ -3,12 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "agent-drive": "./dist/cli.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "import": "./dist/crypto.js"
     }
   },
   "bin": {

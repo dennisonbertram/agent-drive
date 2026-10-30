@@ -293,11 +293,17 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
       body.quotaBytes === undefined ? 5_368_709_120 : boundedSize(body.quotaBytes, 'quotaBytes');
     const result = await getPool().query(
       `INSERT INTO drives (account_id, name, quota_bytes) VALUES ($1, $2, $3)
-       ON CONFLICT (account_id, name) DO UPDATE SET name = EXCLUDED.name
+       ON CONFLICT (account_id, name) DO NOTHING
        RETURNING id, name, quota_bytes, created_at`,
       [auth.accountId, name, quota],
     );
-    return response(result.rows[0], 200);
+    if (result.rows[0]) return response({ ...result.rows[0], created: true }, 200);
+    const existing = await getPool().query(
+      'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND name = $2',
+      [auth.accountId, name],
+    );
+    if (!existing.rows[0]) throw new ApiError('internal_error', 'The drive could not be created.');
+    return response({ ...existing.rows[0], created: false }, 200);
   }
   if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') {
     manage(auth);

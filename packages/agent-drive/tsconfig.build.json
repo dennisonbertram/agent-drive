@@ -7,5 +7,5 @@
     "rootDir": "src",
     "sourceMap": true
   },
-  "include": ["src/index.ts", "src/cli.ts"]
+  "include": ["src/index.ts", "src/cli.ts", "src/crypto.ts"]
 }
