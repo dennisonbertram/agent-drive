@@ -230,3 +230,33 @@ export const auditEvents = pgTable(
     check('audit_events_outcome_check', sql`${table.outcome} IN ('success', 'failure')`),
   ],
 );
+
+export const fileEvents = pgTable(
+  'file_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => files.id),
+    operation: text('operation').notNull(),
+    path: text('path').notNull(),
+    previousPath: text('previous_path'),
+    versionId: uuid('version_id').references(() => versions.id),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id),
+    machineId: uuid('machine_id').references(() => machines.id),
+    userId: text('user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('file_events_drive_created_idx').on(table.driveId, table.createdAt, table.id),
+    check(
+      'file_events_operation_check',
+      sql`${table.operation} IN ('put', 'copy', 'restore', 'move', 'delete')`,
+    ),
+  ],
+);

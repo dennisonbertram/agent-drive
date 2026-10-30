@@ -6,6 +6,8 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest } from './handler';
+import { cleanupExpiredUploads } from './upload-cleanup';
+import type { RecentFileEvent } from './contract';
 
 const pool = new Pool({
   connectionString:
@@ -23,6 +25,8 @@ let writeToken = '';
 let writeOnlyToken = '';
 let deleteOnlyToken = '';
 let readToken = '';
+let writeAgentId = '';
+let otherAgentId = '';
 let otherToken = '';
 let revokedKeyId = '';
 let revokedToken = '';
@@ -143,6 +147,7 @@ beforeAll(async () => {
   driveId = first.driveId;
   writeToken = first.token;
   writeKeyId = first.keyId;
+  writeAgentId = first.agentId;
   copyAgentId = (
     await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id', [
       first.accountId,
@@ -188,6 +193,7 @@ beforeAll(async () => {
   manageToken = manager.token;
   const other = await fixture('phase1-b', 'other', 'other-drive', ['read', 'write', 'delete']);
   otherDriveId = other.driveId;
+  otherAgentId = other.agentId;
   otherToken = other.token;
   const revoked = await fixture('phase1-revoked', 'revoked', 'revoked-drive', ['read'], [driveId]);
   revokedKeyId = revoked.keyId;
@@ -203,6 +209,10 @@ afterAll(async () => {
       [id],
     );
     for (const artifact of artifacts.rows) await deleteObject(artifact.key).catch(() => undefined);
+    await pool.query(
+      'DELETE FROM file_events WHERE drive_id IN (SELECT id FROM drives WHERE account_id = $1)',
+      [id],
+    );
     await pool.query(
       'DELETE FROM versions WHERE drive_id IN (SELECT id FROM drives WHERE account_id = $1)',
       [id],
@@ -220,6 +230,10 @@ describe('Phase 1 core API', () => {
     });
     expect(first.response.status).toBe(201);
     const firstVersion = first.body.version.id as string;
+    const firstEventCount = await pool.query(
+      'SELECT count(*)::int AS count FROM file_events WHERE version_id = $1',
+      [firstVersion],
+    );
     const get = await request(`/drives/${driveId}/get?path=%2Ffolder%2Ffile.bin`, writeToken);
     const getBody = await json(get);
     expect(get.status).toBe(200);
@@ -234,6 +248,12 @@ describe('Phase 1 core API', () => {
     });
     expect(repeatedCommit.status).toBe(200);
     expect((await json(repeatedCommit)).version.id).toBe(firstVersion);
+    const retryEventCount = await pool.query(
+      'SELECT count(*)::int AS count FROM file_events WHERE version_id = $1',
+      [firstVersion],
+    );
+    expect(firstEventCount.rows[0].count).toBe(1);
+    expect(retryEventCount.rows[0].count).toBe(1);
     const immutable = await json(
       await request(
         `/drives/${driveId}/get?path=%2Ffolder%2Ffile.bin&versionId=${firstVersion}`,
@@ -259,16 +279,27 @@ describe('Phase 1 core API', () => {
       destinationPath: '/copy.bin',
     });
     expect(copied.status).toBe(201);
-    const moved = await request(`/drives/${driveId}/move`, writeToken, 'POST', {
-      path: '/copy.bin',
-      destinationPath: '/moved.bin',
-    });
+    const recentBeforeMove = (await json(
+      await request(`/drives/${driveId}/recent?limit=100`, writeToken),
+    )) as { items: RecentFileEvent[] };
+    expect(recentBeforeMove.items.some((event) => event.operation === 'put')).toBe(true);
+    expect(recentBeforeMove.items.some((event) => event.operation === 'copy')).toBe(true);
+    const recentSince = (await pool.query('SELECT clock_timestamp()::text AS since')).rows[0]
+      .since as string;
+    const moved = await request(
+      `/drives/${driveId}/move`,
+      writeToken,
+      'POST',
+      {
+        path: '/copy.bin',
+        destinationPath: '/moved.bin',
+        userId: 'move-user',
+      },
+      { 'x-agent-drive-machine': 'move-machine' },
+    );
     expect(moved.status).toBe(200);
     expect(
       (await json(await request(`/drives/${driveId}/search?q=moved`, writeToken))).items.length,
-    ).toBeGreaterThan(0);
-    expect(
-      (await json(await request(`/drives/${driveId}/recent`, writeToken))).items.length,
     ).toBeGreaterThan(0);
     const versions = await json(
       await request(`/drives/${driveId}/versions?path=%2Ffolder%2Ffile.bin&limit=1`, writeToken),
@@ -283,9 +314,56 @@ describe('Phase 1 core API', () => {
     );
     expect(nextVersions.items).toHaveLength(1);
     expect(
-      (await request(`/drives/${driveId}/delete`, writeToken, 'POST', { path: '/folder/file.bin' }))
-        .status,
+      (
+        await request(
+          `/drives/${driveId}/delete`,
+          writeToken,
+          'POST',
+          { path: '/folder/file.bin', userId: 'delete-user' },
+          { 'x-agent-drive-machine': 'delete-machine' },
+        )
+      ).status,
     ).toBe(200);
+    const recentPage = (await json(
+      await request(
+        `/drives/${driveId}/recent?since=${encodeURIComponent(recentSince)}&limit=1`,
+        writeToken,
+      ),
+    )) as { items: RecentFileEvent[]; nextCursor: string | null };
+    expect(recentPage.items).toHaveLength(1);
+    expect(recentPage.nextCursor).toEqual(expect.any(String));
+    const recentCursor = recentPage.nextCursor;
+    if (recentCursor === null) throw new Error('Expected a recent events cursor.');
+    const nextRecentPage = (await json(
+      await request(
+        `/drives/${driveId}/recent?since=${encodeURIComponent(recentSince)}&limit=1&cursor=${encodeURIComponent(recentCursor)}`,
+        writeToken,
+      ),
+    )) as { items: RecentFileEvent[]; nextCursor: string | null };
+    expect(nextRecentPage.items).toHaveLength(1);
+    expect(nextRecentPage.nextCursor).toBeNull();
+    const recentEvents = [...recentPage.items, ...nextRecentPage.items];
+    const moveEvent = recentEvents.find((event) => event.operation === 'move');
+    const deleteEvent = recentEvents.find((event) => event.operation === 'delete');
+    if (!moveEvent || !deleteEvent) throw new Error('Expected move and delete events.');
+    expect(moveEvent).toMatchObject({
+      path: '/moved.bin',
+      previousPath: '/copy.bin',
+      agentId: writeAgentId,
+      userId: 'move-user',
+    });
+    expect(moveEvent.machineId).toEqual(expect.any(String));
+    expect(moveEvent.versionId).toEqual(expect.any(String));
+    expect(deleteEvent).toMatchObject({
+      path: '/folder/file.bin',
+      agentId: writeAgentId,
+      userId: 'delete-user',
+    });
+    expect(deleteEvent.previousPath).toBeNull();
+    expect(deleteEvent.machineId).toEqual(expect.any(String));
+    expect(deleteEvent.versionId).toEqual(expect.any(String));
+    expect(JSON.stringify(recentEvents)).not.toContain('opaque-wrapped-key');
+    expect(JSON.stringify(recentEvents)).not.toContain('objects/');
     expect(
       (await request(`/drives/${driveId}/get?path=%2Ffolder%2Ffile.bin`, writeToken)).status,
     ).toBe(404);
@@ -297,6 +375,10 @@ describe('Phase 1 core API', () => {
         })
       ).status,
     ).toBe(201);
+    const restoredRecent = (await json(
+      await request(`/drives/${driveId}/recent?limit=100`, writeToken),
+    )) as { items: RecentFileEvent[] };
+    expect(restoredRecent.items.some((event) => event.operation === 'restore')).toBe(true);
     await uploadCommit(writeToken, driveId, '/folder/second.bin', Buffer.from('second'));
     const listed = await json(
       await request(`/drives/${driveId}/list?prefix=%2Ffolder&limit=1`, writeToken),
@@ -377,6 +459,19 @@ describe('Phase 1 core API', () => {
       agent_id: copyAgentId,
       user_id: 'actor-user',
       name: 'copy-machine',
+    });
+    const recent = (await json(
+      await request(`/drives/${driveId}/recent?limit=100`, copyToken),
+    )) as { items: RecentFileEvent[] };
+    expect(
+      recent.items.find(
+        (event) => event.operation === 'copy' && event.path === '/attributed-copy.bin',
+      ),
+    ).toMatchObject({
+      versionId,
+      agentId: copyAgentId,
+      machineId: expect.any(String),
+      userId: 'actor-user',
     });
   });
 
@@ -501,7 +596,7 @@ describe('Phase 1 core API', () => {
     const created = await request('/keys', manageToken, 'POST', {
       agentId,
       label: 'api-created',
-      driveIds: [driveId],
+      driveIds: [driveId, driveId],
       scopes: ['read'],
     });
     expect(created.status).toBe(201);
@@ -509,8 +604,23 @@ describe('Phase 1 core API', () => {
     expect(keysPage.items).toHaveLength(1);
     expect(keysPage.nextCursor).toEqual(expect.any(String));
     const key = await json(created);
+    expect(key.drive_ids).toEqual([driveId]);
     const storedKey = await pool.query('SELECT account_id FROM api_keys WHERE id = $1', [key.id]);
     expect(storedKey.rows[0].account_id).toBe(manager.accountId);
+    const otherAgentGrant = await request('/keys', manageToken, 'POST', {
+      agentId: otherAgentId,
+      label: 'cross-account-agent',
+      driveIds: [driveId],
+      scopes: ['read'],
+    });
+    expect(otherAgentGrant.status).toBe(404);
+    const otherDriveGrant = await request('/keys', manageToken, 'POST', {
+      agentId,
+      label: 'cross-account-drive',
+      driveIds: [otherDriveId],
+      scopes: ['read'],
+    });
+    expect(otherDriveGrant.status).toBe(404);
     const revoked = await request(`/keys/${key.id}`, manageToken, 'DELETE');
     expect(revoked.status).toBe(200);
     expect((await request('/whoami', key.token)).status).toBe(401);
@@ -533,5 +643,60 @@ describe('Phase 1 core API', () => {
       expect.arrayContaining(['token', 'wrapped_key', 'signed_url', 'request_body']),
     );
     expect(JSON.stringify(events.rows)).not.toContain(writeToken);
+  });
+
+  it('cleans expired staged uploads without deleting committed objects', async () => {
+    const committed = await uploadCommit(
+      writeToken,
+      driveId,
+      '/cleanup-retained.bin',
+      Buffer.from('retained-ciphertext'),
+    );
+    const finalObject = await pool.query('SELECT object_key FROM versions WHERE id = $1', [
+      committed.body.version.id,
+    ]);
+    const committedIntent = await pool.query(
+      'SELECT staging_key FROM upload_intents WHERE id = $1',
+      [committed.intentId],
+    );
+    expect(finalObject.rows[0].object_key).toMatch(/^objects\//u);
+
+    const stagedResponse = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+      path: '/cleanup-expired.bin',
+      ciphertextSize: 13,
+      wrappedKey: 'opaque',
+    });
+    const stagedIntent = await json(stagedResponse);
+    const upload = await fetch(stagedIntent.uploadUrl, {
+      method: 'PUT',
+      body: Buffer.from('staged-object'),
+    });
+    expect(upload.ok).toBe(true);
+    const abandonedIntent = await pool.query(
+      'SELECT staging_key FROM upload_intents WHERE id = $1',
+      [stagedIntent.intentId],
+    );
+    await pool.query(
+      "UPDATE upload_intents SET expires_at = now() - interval '61 seconds' WHERE id = $1",
+      [committed.intentId],
+    );
+    await pool.query(
+      "UPDATE upload_intents SET expires_at = now() - interval '61 seconds' WHERE id = $1",
+      [stagedIntent.intentId],
+    );
+    const owner = await pool.query('SELECT account_id FROM drives WHERE id = $1', [driveId]);
+    const removed = await cleanupExpiredUploads(2, owner.rows[0].account_id as string);
+    expect(removed).toBe(2);
+    const remaining = await pool.query('SELECT id FROM upload_intents WHERE id = ANY($1::uuid[])', [
+      [committed.intentId, stagedIntent.intentId],
+    ]);
+    expect(remaining.rows).toHaveLength(0);
+    await expect(objectInfo(abandonedIntent.rows[0].staging_key)).rejects.toMatchObject({
+      $metadata: { httpStatusCode: 404 },
+    });
+    expect((await objectInfo(finalObject.rows[0].object_key)).size).toBe(
+      Buffer.byteLength('retained-ciphertext'),
+    );
+    expect(committedIntent.rows[0].staging_key).toMatch(/^staging\//u);
   });
 });

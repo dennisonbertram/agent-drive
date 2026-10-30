@@ -7,6 +7,7 @@ import {
   escapeLikeLiteral,
   jsonBody,
   MAX_BODY_BYTES,
+  secureTransportAllowed,
 } from './validation';
 
 describe('API validation helpers', () => {
@@ -41,5 +42,15 @@ describe('API validation helpers', () => {
   it('escapes SQL LIKE wildcard characters and rejects noncanonical paths', () => {
     expect(escapeLikeLiteral('/a%_b\\c')).toBe('/a\\%\\_b\\\\c');
     expect(() => canonicalPath('/a/../b')).toThrow(ApiError);
+  });
+
+  it('requires the request URL to be HTTPS in production', () => {
+    const insecureRequest = new Request('http://agent-drive.test/api/v1/whoami', {
+      headers: { 'x-forwarded-proto': 'https' },
+    });
+    const secureRequest = new Request('https://agent-drive.test/api/v1/whoami');
+    expect(secureTransportAllowed(new URL(insecureRequest.url).protocol, 'production')).toBe(false);
+    expect(secureTransportAllowed(new URL(secureRequest.url).protocol, 'production')).toBe(true);
+    expect(secureTransportAllowed(new URL(insecureRequest.url).protocol, 'test')).toBe(true);
   });
 });

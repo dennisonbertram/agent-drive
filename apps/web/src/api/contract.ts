@@ -23,3 +23,17 @@ export type Page<T> = {
   items: T[];
   nextCursor: string | null;
 };
+
+export type FileEventOperation = 'put' | 'copy' | 'restore' | 'move' | 'delete';
+
+export type RecentFileEvent = {
+  id: string;
+  operation: FileEventOperation;
+  path: string;
+  previousPath: string | null;
+  versionId: string | null;
+  agentId: string;
+  machineId: string | null;
+  userId: string | null;
+  createdAt: string;
+};

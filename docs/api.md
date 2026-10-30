@@ -30,6 +30,19 @@ drives endpoint for names and quota details.
 File `list` and `search` accept `agentId`, `machine`, and `user` filters; `list` also accepts a
 literal path `prefix` and optional path query `q`. `%` and `_` in a prefix are treated literally.
 `versions`, `recent`, and `search` use the same bounded pagination envelope as other collections.
+`recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) ordered by
+timestamp and ID. Its optional `since` timestamp is exclusive. Each event includes the current
+`path`, `previousPath` for moves, version and actor IDs, and `createdAt`; it never includes object
+keys, wrapped keys, or signed URLs. Move and delete accept an optional `userId` in the request body;
+the machine actor is taken from `x-agent-drive-machine`.
+
+Production API requests must use HTTPS based on the request URL protocol; forwarded headers cannot
+override this check. HTTP is allowed in local and test environments.
+
+Expired upload staging is cleaned opportunistically on new upload requests. Operators should also
+run `pnpm --dir apps/web maintenance:cleanup-expired-uploads` periodically for idle installations
+and configure a one-day object-store lifecycle rule limited to `staging/`. Immutable `objects/`
+must not be covered by that rule.
 
 Audit entries contain the authenticated key/account/agent IDs, fixed route action, outcome, safe
 error code, and HTTP status. They omit bodies, tokens, wrapped keys, object URLs, and paths. If the

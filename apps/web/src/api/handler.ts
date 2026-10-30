@@ -15,6 +15,7 @@ import {
   prefix,
   queryValue,
   stringField,
+  secureTransportAllowed,
   tags,
   uuid,
 } from './validation';
@@ -25,6 +26,7 @@ import {
   presignedDownload,
   presignedUpload,
 } from './storage';
+import { cleanupExpiredUploads } from './upload-cleanup';
 
 type Auth = {
   keyId: string;
@@ -321,11 +323,15 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     const body = await jsonBody(request);
     const agentId = uuid(stringField(body, 'agentId', { required: true }), 'agentId');
     const label = stringField(body, 'label', { required: true, max: 128 })!;
-    const drives = Array.isArray(body.driveIds)
-      ? body.driveIds.map((value) => uuid(typeof value === 'string' ? value : undefined, 'driveId'))
-      : [];
-    if (!Array.isArray(body.driveIds) || drives.length > 100)
+    if (!Array.isArray(body.driveIds) || body.driveIds.length > 100)
       throw new ApiError('validation_error', 'driveIds must be an array of UUIDs.');
+    const drives = [
+      ...new Set(
+        body.driveIds.map((value) =>
+          uuid(typeof value === 'string' ? value : undefined, 'driveId'),
+        ),
+      ),
+    ];
     if (
       !Array.isArray(body.scopes) ||
       body.scopes.length === 0 ||
@@ -386,6 +392,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
       ? uuid(typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined, 'ifVersionId')
       : null;
   const drive = await ensureDrive(auth, driveId);
+  await cleanupExpiredUploads();
   const machine = await withTransaction((client) => machineId(client, auth, request));
   const id = randomUUID();
   const stagingKey = `staging/${auth.accountId}/${driveId}/${id}`;
@@ -458,16 +465,19 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   let copied = false;
   try {
     const result = await withTransaction(async (client) => {
-      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
-        driveId,
-        auth.accountId,
-      ]);
       const lockedIntentResult = await client.query(
-        'SELECT * FROM upload_intents WHERE id = $1 FOR UPDATE',
-        [intentId],
+        `SELECT * FROM upload_intents
+          WHERE id = $1 AND drive_id = $2 AND api_key_id = $3
+          FOR UPDATE`,
+        [intentId, driveId, auth.keyId],
       );
       const lockedIntent = lockedIntentResult.rows[0] as Row | undefined;
       if (!lockedIntent) throw new ApiError('not_found', 'Upload intent not found.');
+      const lockedDrive = await client.query(
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
       if (lockedIntent.committed_version_id) {
         const existingVersion = await client.query(
           'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
@@ -553,6 +563,20 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         versionId,
         intentId,
       ]);
+      await client.query(
+        `INSERT INTO file_events
+          (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
+         VALUES ($1, $2, 'put', $3, $4, $5, $6, $7)`,
+        [
+          driveId,
+          fileId,
+          lockedIntent.path,
+          versionId,
+          lockedIntent.agent_id,
+          lockedIntent.machine_id,
+          lockedIntent.user_id,
+        ],
+      );
       const version = await client.query(
         'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
         [versionId],
@@ -644,9 +668,9 @@ async function fileEndpoint(
   }
   if (operation === 'recent' && request.method === 'GET') {
     need(auth, 'read', driveId);
-    const sinceValue = url.searchParams.get('since');
-    const since = sinceValue ? new Date(sinceValue) : new Date(0);
-    if (Number.isNaN(since.getTime()))
+    const sinceValue = queryValue(url, 'since', 128);
+    const since = sinceValue ?? new Date(0).toISOString();
+    if (Number.isNaN(Date.parse(since)))
       throw new ApiError('validation_error', 'since must be an ISO timestamp.');
     const { limit, cursor } = page(url);
     const decoded = decodeCursor(cursor, 'timestamp');
@@ -654,18 +678,32 @@ async function fileEndpoint(
     let cursorClause = '';
     if (decoded) {
       params.push(decoded.value, decoded.id);
-      cursorClause = ` AND (v.created_at, v.id) > ($3::timestamptz, $4::uuid)`;
+      cursorClause = ` AND (created_at, id) > ($3::timestamptz, $4::uuid)`;
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT v.*, f.path, v.created_at::text AS cursor_created_at
-         FROM versions v JOIN files f ON f.id = v.file_id
-        WHERE v.drive_id = $1 AND v.created_at > $2${cursorClause}
-        ORDER BY v.created_at, v.id LIMIT $${params.length}`,
+      `SELECT id, operation, path, previous_path, version_id, agent_id, machine_id, user_id,
+              created_at, created_at::text AS cursor_created_at
+         FROM file_events
+        WHERE drive_id = $1 AND created_at > $2${cursorClause}
+        ORDER BY created_at, id LIMIT $${params.length}`,
       params,
     );
     const output = collection(rows.rows as Row[], limit, (row) => row.cursor_created_at);
-    return response({ ...output, items: output.items.map(rowVersion) });
+    return response({
+      ...output,
+      items: output.items.map((row) => ({
+        id: row.id,
+        operation: row.operation,
+        path: row.path,
+        previousPath: row.previous_path,
+        versionId: row.version_id,
+        agentId: row.agent_id,
+        machineId: row.machine_id,
+        userId: row.user_id,
+        createdAt: row.created_at,
+      })),
+    });
   }
   if (operation === 'search' && request.method === 'GET') {
     need(auth, 'read', driveId);
@@ -696,25 +734,59 @@ async function fileEndpoint(
     const body = await jsonBody(request);
     const from = canonicalPath(body.path);
     const to = canonicalPath(body.destinationPath, 'destinationPath');
-    const result = await getPool().query(
-      `UPDATE files SET path = $1 WHERE drive_id = $2 AND path = $3 AND deleted_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM files WHERE drive_id = $2 AND path = $1) RETURNING id, path`,
-      [to, driveId, from],
-    );
-    if (!result.rows[0])
-      throw new ApiError('conflict', 'The source is missing or the destination exists.');
-    return response(result.rows[0]);
+    const userId = optionalString(body, 'userId', 256) ?? null;
+    const moved = await withTransaction(async (client) => {
+      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
+        driveId,
+        auth.accountId,
+      ]);
+      const machine = await machineId(client, auth, request);
+      const result = await client.query(
+        `UPDATE files SET path = $1 WHERE drive_id = $2 AND path = $3 AND deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM files WHERE drive_id = $2 AND path = $1)
+         RETURNING id, path, current_version_id`,
+        [to, driveId, from],
+      );
+      const file = result.rows[0] as Row | undefined;
+      if (!file) throw new ApiError('conflict', 'The source is missing or the destination exists.');
+      await client.query(
+        `INSERT INTO file_events
+          (drive_id, file_id, operation, path, previous_path, version_id, agent_id, machine_id, user_id)
+         VALUES ($1, $2, 'move', $3, $4, $5, $6, $7, $8)`,
+        [driveId, file.id, to, from, file.current_version_id, auth.agentId, machine, userId],
+      );
+      return { id: file.id, path: file.path };
+    });
+    return response(moved);
   }
   if (operation === 'delete' && request.method === 'POST') {
     need(auth, 'delete', driveId);
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
-    const result = await getPool().query(
-      'UPDATE files SET deleted_at = now() WHERE drive_id = $1 AND path = $2 AND deleted_at IS NULL RETURNING id, path, deleted_at',
-      [driveId, path],
-    );
-    if (!result.rows[0]) throw new ApiError('not_found', 'File not found.');
-    return response(result.rows[0]);
+    const userId = optionalString(body, 'userId', 256) ?? null;
+    const deleted = await withTransaction(async (client) => {
+      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
+        driveId,
+        auth.accountId,
+      ]);
+      const machine = await machineId(client, auth, request);
+      const result = await client.query(
+        `UPDATE files SET deleted_at = now()
+          WHERE drive_id = $1 AND path = $2 AND deleted_at IS NULL
+          RETURNING id, path, current_version_id, deleted_at`,
+        [driveId, path],
+      );
+      const file = result.rows[0] as Row | undefined;
+      if (!file) throw new ApiError('not_found', 'File not found.');
+      await client.query(
+        `INSERT INTO file_events
+          (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
+         VALUES ($1, $2, 'delete', $3, $4, $5, $6, $7)`,
+        [driveId, file.id, file.path, file.current_version_id, auth.agentId, machine, userId],
+      );
+      return { id: file.id, path: file.path, deleted_at: file.deleted_at };
+    });
+    return response(deleted);
   }
   if (operation === 'copy' && request.method === 'POST')
     return derivedVersion(request, auth, driveId, false);
@@ -800,6 +872,21 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
           row.description,
         ],
       );
+      await client.query(
+        `INSERT INTO file_events
+          (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          driveId,
+          fileId,
+          restore ? 'restore' : 'copy',
+          destinationPath,
+          versionId,
+          auth.agentId,
+          machine,
+          userId,
+        ],
+      );
       const output = await client.query(
         'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
         [versionId],
@@ -822,6 +909,9 @@ export async function handleApiRequest(request: Request) {
   const context: RequestContext = { action: actionFor(request.method, relative), status: 500 };
   let output: Response;
   try {
+    if (!secureTransportAllowed(url.protocol, process.env.NODE_ENV)) {
+      throw new ApiError('permission_denied', 'HTTPS is required for API requests.');
+    }
     if (!validBase || url.search.length > 8192) {
       throw new ApiError(
         url.search.length > 8192 ? 'validation_error' : 'not_found',

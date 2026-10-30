@@ -4,6 +4,10 @@ export const MAX_BODY_BYTES = 256 * 1024;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_PAGE_SIZE = 100;
 
+export function secureTransportAllowed(protocol: string, environment: string | undefined) {
+  return environment !== 'production' || protocol === 'https:';
+}
+
 export function objectBody(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApiError('validation_error', 'The JSON body must be an object.');
