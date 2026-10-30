@@ -176,8 +176,8 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         createdAt: null,
       };
     if (currentKey) {
-      if (!currentKey.startsWith(`checkout/${accountId}/${plan}/`))
-        throw new ApiError('conflict', 'A different checkout is already in progress.');
+      if (!currentKey.startsWith(`checkout/${accountId}/${plan}/`) && !currentSession)
+        throw new ApiError('conflict', 'Resume the previous plan checkout before changing plans.');
       if (
         !currentSession &&
         (!createdAt || Date.now() - createdAt.getTime() >= 23 * 60 * 60 * 1000)
@@ -303,8 +303,18 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   }
   if (reserved.portal) return createPortal(accountId);
   if (reserved.sessionId) {
-    const previous = await client.checkout.sessions.retrieve(reserved.sessionId);
-    if (previous.status === 'open' && previous.url) return { url: previous.url };
+    let previous = await client.checkout.sessions.retrieve(reserved.sessionId);
+    if (previous.status === 'open') {
+      if (reserved.idempotencyKey?.startsWith(`checkout/${accountId}/${plan}/`)) {
+        if (previous.url) return { url: previous.url };
+        throw new ApiError('internal_error', 'Stripe did not return a checkout URL.');
+      }
+      previous = await client.checkout.sessions.expire(
+        previous.id,
+        {},
+        { idempotencyKey: `checkout-expire/${previous.id}` },
+      );
+    }
     if (previous.status !== 'expired')
       throw new ApiError('conflict', 'Checkout completed; subscription status is being updated.');
     await withTransaction(async (db) => {
