@@ -163,8 +163,9 @@ Production S3 deployments should configure the equivalent one-day lifecycle rule
 `staging/` prefix. Never apply this expiration to immutable `objects/`; Phase 7 will add production
 lifecycle enforcement.
 
-The first agent credential is created only by an explicit local operator command. It is never
-available through an unauthenticated HTTP endpoint:
+For CLI-only local development without Clerk, bootstrap an account with the explicit operator
+command below. The human console instead provisions an account after an authenticated sign-in.
+Neither path exposes credentials through an unauthenticated HTTP endpoint:
 
 ```sh
 pnpm --dir apps/web provision:local
@@ -192,8 +193,50 @@ is `workflow_dispatch` only; it does not run automatically on pull requests or p
 
 `test:integration` requires the Compose services and verifies a PostgreSQL query plus MinIO
 put/get/delete. `test:mcp` exercises all MCP tools through a spawned stdio server against the local
-API adapter and services. `test:e2e` starts the local web placeholder and checks it renders.
-Console/browser product flows remain later-phase work.
+API adapter and services. `test:e2e` starts a dedicated local web server and exercises account
+onboarding, browser-generated drive-key recovery, real CLI uploads, byte-for-byte browser
+downloads, locked/wrong-key states, version restore, trash recovery, and API-key revocation.
+Only the authentication provider is stubbed; database, storage, CLI, and encryption are real.
+Browser traces are disabled because the journey displays one-time test secrets. This regression
+does not prove a live Clerk OAuth handshake or a live Claude Code session.
+
+### Human console
+
+Configure `DATABASE_URL` and the `S3_*` variables in the web app's environment. Next.js reads
+app-local variables from `apps/web/.env.local`; the root `.env` used by Docker Compose is not
+automatically loaded by Next.js. Add the Agent Drive Clerk instance's
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` securely to the web environment.
+Do not reuse credentials from another application. Enable GitHub in that instance's Clerk
+dashboard if GitHub sign-in is desired; Clerk handles the provider callback and session.
+
+```sh
+pnpm --filter @agent-drive/web dev
+```
+
+Visit `/sign-up`, then `/console`. Create a drive, save its recovery key, create an agent,
+and issue a scoped API key. The API key authorizes server operations; the separate drive key
+decrypts file contents. The browser generates the drive key using Web Crypto and keeps it in
+page memory only. Refreshing the page locks downloads until the key is loaded again. Recovery
+JSON files contain the secret in plaintext: keep them in a password manager or another secure
+location. The service cannot recover lost keys.
+
+The console can browse names and metadata while locked. Downloads fetch ciphertext directly
+from object storage and decrypt locally; no drive key is sent to the API. Allow browser GET
+requests from the console's origin in the production bucket's CORS policy. Files currently
+buffer in memory during download/decryption. Uploads use the CLI or MCP. Restoring a historical
+or deleted file creates a new immutable version. Agent access can be revoked by disabling all
+of its API keys; to rotate a key, issue a replacement, update the agent, then revoke the old key.
+
+Usage reports encrypted committed bytes, including historical and deleted-file versions, and
+recorded API operation attempts. Storage is grouped by drive and version author. Egress and
+cost are explicitly unmetered until the billing phase; they are not reported as zero.
+
+The Playwright runner creates a random test-auth secret and enables a development-only provider
+stub in its dedicated server. `/api/test-session` requires that secret, a loopback hostname, and
+a synthetic `e2e_` identity. Cookies are signed, short-lived, and HTTP-only. Production never
+accepts these identities, even if test variables are accidentally configured. Never enable
+`AGENT_DRIVE_TEST_AUTH` on a shared development server. A running app on port 3100 must be
+stopped before `pnpm test:e2e`; the test runner intentionally does not reuse arbitrary servers.
 
 ### Environment variables
 
@@ -201,6 +244,6 @@ Copy `.env.example` to `.env` for local configuration. It lists the database con
 PostgreSQL credentials; MinIO root credentials and S3 endpoint, region, bucket, and access keys;
 Clerk publishable and secret keys; the API base URL; the per-drive
 `AGENT_DRIVE_KEY_<DRIVE_ID>` convention; and placeholder Stripe, sender, and email API settings.
-Clerk is the planned human-auth provider; GitHub OAuth can be configured as a Clerk provider.
-Authentication, billing, and email integrations remain staged work. A real drive key should be
+Clerk is the human-auth provider; GitHub OAuth can be configured as a Clerk provider.
+Billing and email integrations remain staged work. A real drive key should be
 stored in a secure secret manager, not committed to `.env.example`.

@@ -29,11 +29,13 @@ import {
 import { cleanupExpiredUploads } from './upload-cleanup';
 
 type Auth = {
-  keyId: string;
+  keyId: string | null;
   accountId: string;
   agentId: string;
   scopes: string[];
   driveIds: string[];
+  userId?: string;
+  accountName?: string;
 };
 type RequestContext = { auth?: Auth; action: string; status: number; errorCode?: string };
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
@@ -70,6 +72,41 @@ async function authenticate(request: Request): Promise<Auth> {
     scopes: row.scopes ?? [],
     driveIds: row.drive_ids ?? [],
   };
+}
+
+async function authenticateConsole(userId: string): Promise<Auth> {
+  if (!userId || userId.length > 256 || /[\u0000-\u001f\u007f]/u.test(userId)) {
+    throw new ApiError('unauthorized', 'The console session is invalid.');
+  }
+  return withTransaction(async (client) => {
+    const account = await client.query(
+      `INSERT INTO accounts (name, external_clerk_user_id)
+       VALUES ('Personal workspace', $1)
+       ON CONFLICT (external_clerk_user_id) WHERE external_clerk_user_id IS NOT NULL
+       DO UPDATE SET external_clerk_user_id = EXCLUDED.external_clerk_user_id
+       RETURNING id, name`,
+      [userId],
+    );
+    const accountId = account.rows[0].id as string;
+    const agent = await client.query(
+      `INSERT INTO agents (account_id, name) VALUES ($1, '__console__')
+       ON CONFLICT (account_id, name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+      [accountId],
+    );
+    const drives = await client.query('SELECT id FROM drives WHERE account_id = $1 ORDER BY id', [
+      accountId,
+    ]);
+    return {
+      keyId: null,
+      accountId,
+      accountName: account.rows[0].name as string,
+      agentId: agent.rows[0].id as string,
+      scopes: [...scopeNames],
+      driveIds: drives.rows.map((row) => row.id as string),
+      userId,
+    };
+  });
 }
 
 function need(auth: Auth, scope: string, driveId?: string) {
@@ -122,6 +159,9 @@ function errorStatus(error: unknown) {
 }
 
 function actionFor(method: string, parts: string[]) {
+  if (parts.length === 1 && parts[0] === 'session' && method === 'GET')
+    return 'console.session.read';
+  if (parts.length === 1 && parts[0] === 'usage' && method === 'GET') return 'console.usage.read';
   if (parts.length === 1 && parts[0] === 'whoami' && method === 'GET') return 'whoami.read';
   if (parts.length === 1 && parts[0] === 'agents' && method === 'GET') return 'agents.list';
   if (parts.length === 1 && parts[0] === 'agents' && method === 'POST') return 'agents.create';
@@ -130,6 +170,8 @@ function actionFor(method: string, parts: string[]) {
   if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') return 'keys.list';
   if (parts.length === 1 && parts[0] === 'keys' && method === 'POST') return 'keys.create';
   if (parts.length === 2 && parts[0] === 'keys' && method === 'DELETE') return 'keys.revoke';
+  if (parts.length === 3 && parts[0] === 'agents' && parts[2] === 'revoke' && method === 'POST')
+    return 'agents.revoke';
   const actions: Record<string, string> = {
     'POST:put': 'drive.put',
     'POST:commit': 'drive.commit',
@@ -142,6 +184,7 @@ function actionFor(method: string, parts: string[]) {
     'GET:versions': 'drive.versions',
     'GET:recent': 'drive.recent',
     'GET:search': 'drive.search',
+    'GET:trash': 'drive.trash',
   };
   if (parts.length === 3 && parts[0] === 'drives')
     return actions[`${method}:${parts[2]}`] ?? 'unknown';
@@ -151,12 +194,13 @@ function actionFor(method: string, parts: string[]) {
 async function audit(context: RequestContext) {
   await getPool().query(
     `INSERT INTO audit_events
-      (api_key_id, account_id, agent_id, action, outcome, error_code, http_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      (api_key_id, account_id, agent_id, user_id, action, outcome, error_code, http_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       context.auth?.keyId ?? null,
       context.auth?.accountId ?? null,
       context.auth?.agentId ?? null,
+      context.auth?.userId ?? null,
       context.action,
       context.status >= 400 ? 'failure' : 'success',
       context.errorCode ?? null,
@@ -375,6 +419,149 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     );
     if (!result.rows[0]) throw new ApiError('not_found', 'API key not found.');
     return response(result.rows[0]);
+  }
+  return undefined;
+}
+
+async function consoleEndpoint(request: Request, auth: Auth, parts: string[], url: URL) {
+  if (parts.length === 1 && parts[0] === 'session' && request.method === 'GET') {
+    return response({
+      account: { id: auth.accountId, name: auth.accountName ?? 'Personal workspace' },
+      userId: auth.userId,
+    });
+  }
+  if (parts.length === 1 && parts[0] === 'usage' && request.method === 'GET') {
+    const driveUsage = await getPool().query(
+      `WITH version_usage AS (
+         SELECT v.drive_id, COALESCE(SUM(v.ciphertext_size), 0)::bigint AS storage_bytes,
+                COUNT(*)::int AS versions
+           FROM versions v JOIN drives owned ON owned.id = v.drive_id
+          WHERE owned.account_id = $1
+          GROUP BY v.drive_id
+       ), live_usage AS (
+         SELECT f.drive_id, COUNT(*)::int AS live_files
+           FROM files f JOIN drives owned ON owned.id = f.drive_id
+          WHERE owned.account_id = $1 AND f.deleted_at IS NULL
+          GROUP BY f.drive_id
+       )
+       SELECT d.id, d.name, d.quota_bytes,
+              COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
+              COALESCE(lu.live_files, 0)::int AS live_files,
+              COALESCE(vu.versions, 0)::int AS versions
+         FROM drives d
+         LEFT JOIN version_usage vu ON vu.drive_id = d.id
+         LEFT JOIN live_usage lu ON lu.drive_id = d.id
+        WHERE d.account_id = $1
+        ORDER BY d.name, d.id`,
+      [auth.accountId],
+    );
+    const agentUsage = await getPool().query(
+      `WITH version_usage AS (
+         SELECT v.agent_id, COALESCE(SUM(v.ciphertext_size), 0)::bigint AS storage_bytes,
+                COUNT(*)::int AS versions
+           FROM versions v JOIN drives owned ON owned.id = v.drive_id
+          WHERE owned.account_id = $1
+          GROUP BY v.agent_id
+       ), operation_usage AS (
+         SELECT agent_id, COUNT(*)::int AS operations
+           FROM audit_events
+          WHERE account_id = $1 AND agent_id IS NOT NULL
+          GROUP BY agent_id
+       )
+       SELECT a.id, a.name,
+              COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
+              COALESCE(vu.versions, 0)::int AS versions,
+              COALESCE(ou.operations, 0)::int AS operations
+         FROM agents a
+         LEFT JOIN version_usage vu ON vu.agent_id = a.id
+         LEFT JOIN operation_usage ou ON ou.agent_id = a.id
+        WHERE a.account_id = $1
+        ORDER BY a.name, a.id`,
+      [auth.accountId],
+    );
+    const drives = (driveUsage.rows as Row[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      quotaBytes: Number(row.quota_bytes),
+      storageBytes: Number(row.storage_bytes),
+      liveFiles: Number(row.live_files),
+      versions: Number(row.versions),
+    }));
+    const agents = (agentUsage.rows as Row[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      storageBytes: Number(row.storage_bytes),
+      versions: Number(row.versions),
+      operations: Number(row.operations),
+    }));
+    return response({
+      drives,
+      agents,
+      storageBytes: drives.reduce((total, drive) => total + drive.storageBytes, 0),
+      operations: agents.reduce((total, agent) => total + agent.operations, 0),
+      egressBytes: null,
+      cost: null,
+    });
+  }
+  if (
+    parts.length === 3 &&
+    parts[0] === 'agents' &&
+    parts[2] === 'revoke' &&
+    request.method === 'POST'
+  ) {
+    const agentId = uuid(parts[1], 'agent id');
+    const result = await withTransaction(async (client) => {
+      const agent = await client.query(
+        'SELECT id FROM agents WHERE id = $1 AND account_id = $2 FOR UPDATE',
+        [agentId, auth.accountId],
+      );
+      if (!agent.rows[0]) throw new ApiError('not_found', 'Agent not found.');
+      const revoked = await client.query(
+        `UPDATE api_keys
+            SET revoked_at = COALESCE(revoked_at, now())
+          WHERE agent_id = $1 AND account_id = $2 AND revoked_at IS NULL
+          RETURNING id`,
+        [agentId, auth.accountId],
+      );
+      return revoked.rowCount ?? 0;
+    });
+    return response({ id: agentId, revokedKeys: result });
+  }
+  if (
+    parts.length === 3 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'trash' &&
+    request.method === 'GET'
+  ) {
+    const driveId = uuid(parts[1], 'drive id');
+    await ensureDrive(auth, driveId);
+    need(auth, 'read', driveId);
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'path');
+    const params: unknown[] = [driveId];
+    let where = 'drive_id = $1 AND deleted_at IS NOT NULL';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      where += ` AND (path, id) > ($${params.length - 1}, $${params.length}::uuid)`;
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT id, path, deleted_at
+         FROM files
+        WHERE ${where}
+        ORDER BY path, id
+        LIMIT $${params.length}`,
+      params,
+    );
+    const output = collection(rows.rows as Row[], limit, (row) => row.path);
+    return response({
+      nextCursor: output.nextCursor,
+      items: output.items.map((row) => ({
+        id: row.id,
+        path: row.path,
+        deletedAt: row.deleted_at,
+      })),
+    });
   }
   return undefined;
 }
@@ -740,7 +927,7 @@ async function fileEndpoint(
     const body = await jsonBody(request);
     const from = canonicalPath(body.path);
     const to = canonicalPath(body.destinationPath, 'destinationPath');
-    const userId = optionalString(body, 'userId', 256) ?? null;
+    const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const moved = await withTransaction(async (client) => {
       await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
         driveId,
@@ -769,7 +956,7 @@ async function fileEndpoint(
     need(auth, 'delete', driveId);
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
-    const userId = optionalString(body, 'userId', 256) ?? null;
+    const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const deleted = await withTransaction(async (client) => {
       await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
         driveId,
@@ -813,7 +1000,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
     body.versionId === undefined
       ? undefined
       : uuid(typeof body.versionId === 'string' ? body.versionId : undefined, 'versionId');
-  const userId = optionalString(body, 'userId', 256) ?? null;
+  const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
   const machine = await withTransaction((client) => machineId(client, auth, request));
   let copiedKey: string | undefined;
   let result: Row;
@@ -906,17 +1093,52 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   return response({ version: rowVersion(result) }, 201);
 }
 
-export async function handleApiRequest(request: Request) {
+type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
+
+function consoleRouteAllowed(method: string, parts: string[]) {
+  if (
+    method === 'GET' &&
+    parts.length === 1 &&
+    ['session', 'usage', 'whoami', 'drives', 'agents', 'keys'].includes(parts[0]!)
+  )
+    return true;
+  if (method === 'POST' && parts.length === 1 && ['drives', 'agents', 'keys'].includes(parts[0]!))
+    return true;
+  if (method === 'DELETE' && parts.length === 2 && parts[0] === 'keys') return true;
+  if (method === 'POST' && parts.length === 3 && parts[0] === 'agents' && parts[2] === 'revoke')
+    return true;
+  if (parts.length !== 3 || parts[0] !== 'drives') return false;
+  if (
+    method === 'GET' &&
+    ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)
+  )
+    return true;
+  return method === 'POST' && ['delete', 'restore', 'move', 'copy'].includes(parts[2]!);
+}
+
+function requireConsoleOrigin(request: Request, url: URL) {
+  if (request.method === 'GET') return;
+  if (request.headers.get('origin') !== url.origin) {
+    throw new ApiError('permission_denied', 'A same-origin request is required.');
+  }
+}
+
+async function handleRequest(request: Request, mode: RequestMode) {
   const url = new URL(request.url);
   const rawPath = url.pathname;
-  const validBase =
-    rawPath.startsWith('/api/v1/') && !rawPath.includes('//') && !rawPath.endsWith('/');
-  const relative = validBase ? rawPath.slice('/api/v1/'.length).split('/') : [];
+  const base = mode.kind === 'console' ? '/api/console/' : '/api/v1/';
+  const validBase = rawPath.startsWith(base) && !rawPath.includes('//') && !rawPath.endsWith('/');
+  const relative = validBase ? rawPath.slice(base.length).split('/') : [];
   const context: RequestContext = { action: actionFor(request.method, relative), status: 500 };
   let output: Response;
   try {
     if (!secureTransportAllowed(url.protocol, process.env.NODE_ENV)) {
       throw new ApiError('permission_denied', 'HTTPS is required for API requests.');
+    }
+    if (mode.kind === 'console') {
+      if (!mode.userId) throw new ApiError('unauthorized', 'A console session is required.');
+      context.auth = await authenticateConsole(mode.userId);
+      requireConsoleOrigin(request, url);
     }
     if (!validBase || url.search.length > 8192) {
       throw new ApiError(
@@ -924,12 +1146,20 @@ export async function handleApiRequest(request: Request) {
         url.search.length > 8192 ? 'The query string is too long.' : 'Endpoint not found.',
       );
     }
-    context.auth = await authenticate(request);
-    const control = await controlPlane(request, context.auth, relative);
+    if (mode.kind === 'bearer') context.auth = await authenticate(request);
+    else {
+      if (!consoleRouteAllowed(request.method, relative))
+        throw new ApiError('not_found', 'Endpoint not found.');
+    }
+    const auth = context.auth;
+    if (!auth) throw new ApiError('internal_error', 'The request actor is unavailable.');
+    const consoleOutput =
+      mode.kind === 'console' ? await consoleEndpoint(request, auth, relative, url) : undefined;
+    const control = consoleOutput ?? (await controlPlane(request, auth, relative));
     if (control) output = control;
     else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
-      output = await fileEndpoint(request, context.auth, relative[1]!, relative[2]!, url);
+      output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url);
     } else {
       throw new ApiError('not_found', 'Endpoint not found.');
     }
@@ -948,4 +1178,12 @@ export async function handleApiRequest(request: Request) {
     );
   }
   return output;
+}
+
+export function handleApiRequest(request: Request) {
+  return handleRequest(request, { kind: 'bearer' });
+}
+
+export function handleConsoleApiRequest(request: Request, userId: string | null) {
+  return handleRequest(request, { kind: 'console', userId });
 }

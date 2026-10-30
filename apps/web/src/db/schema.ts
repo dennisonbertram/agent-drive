@@ -219,6 +219,7 @@ export const auditEvents = pgTable(
     apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
     accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'set null' }),
     agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    userId: text('user_id'),
     action: text('action').notNull(),
     outcome: text('outcome').notNull(),
     errorCode: text('error_code'),

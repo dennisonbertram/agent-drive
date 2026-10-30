@@ -1,9 +1,11 @@
 import type { Metadata } from 'next';
+import { ClerkProvider } from '@clerk/nextjs';
+import { clerkConfigured } from '@/src/console/auth';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Agent Drive',
-  description: 'Repository foundation for Agent Drive.',
+  description: 'Encrypted, persistent workspaces for independent agents.',
 };
 
 export default function RootLayout({
@@ -13,7 +15,20 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {clerkConfigured() ? (
+          <ClerkProvider
+            signInUrl="/sign-in"
+            signUpUrl="/sign-up"
+            signInFallbackRedirectUrl="/console"
+            signUpFallbackRedirectUrl="/console"
+          >
+            {children}
+          </ClerkProvider>
+        ) : (
+          children
+        )}
+      </body>
     </html>
   );
 }
