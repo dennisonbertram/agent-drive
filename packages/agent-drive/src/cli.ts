@@ -12,6 +12,7 @@ import {
   writeConfig,
 } from './config.js';
 import { syncDirectory } from './sync.js';
+import { runMcp } from './mcp.js';
 
 function parse(raw: string[]) {
   return parseArgs({
@@ -292,12 +293,18 @@ Commands:
   search --drive ID [--query TEXT] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   recent --drive ID [--since ISO_TIMESTAMP]
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
+  mcp
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, and AGENT_DRIVE_MACHINE.
 `;
 if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
   process.stdout.write(help);
+} else if (name === 'mcp') {
+  runMcp().catch(() => {
+    process.stderr.write('MCP server failed to start.\n');
+    process.exitCode = 1;
+  });
 } else {
   run(name, raw).catch((error: unknown) => {
     const message =

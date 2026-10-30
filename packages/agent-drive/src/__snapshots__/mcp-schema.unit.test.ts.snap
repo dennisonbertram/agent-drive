@@ -1,0 +1,420 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas, and annotations stable 1`] = `
+[
+  {
+    "annotations": {
+      "openWorldHint": true,
+    },
+    "description": "Copy a remote file or version to a new path.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "destinationPath": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "userId": {
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+        "destinationPath",
+      ],
+      "type": "object",
+    },
+    "name": "copy",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Soft-delete a remote file.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "userId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "delete",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+    },
+    "description": "Download and fully decrypt a file. Use outputPath for large or binary data; otherwise returns small printable UTF-8 text.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "outputPath": {
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "get",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "List one page of file metadata in a drive.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "agentId": {
+          "type": "string",
+        },
+        "cursor": {
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "machine": {
+          "type": "string",
+        },
+        "prefix": {
+          "type": "string",
+        },
+        "tag": {
+          "type": "string",
+        },
+        "user": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+      ],
+      "type": "object",
+    },
+    "name": "list",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+    },
+    "description": "Move a remote file to a new path.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "destinationPath": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "userId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+        "destinationPath",
+      ],
+      "type": "object",
+    },
+    "name": "move",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Encrypt and upload a text or local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "description": {
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "ifVersionId": {
+          "type": "string",
+        },
+        "localPath": {
+          "type": "string",
+        },
+        "overwrite": {
+          "type": "boolean",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "tags": {
+          "items": {
+            "type": "string",
+          },
+          "type": "array",
+        },
+        "text": {
+          "type": "string",
+        },
+        "userId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "put",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "List one page of recent drive events, optionally since an ISO timestamp.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cursor": {
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "since": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+      ],
+      "type": "object",
+    },
+    "name": "recent",
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "openWorldHint": true,
+    },
+    "description": "Restore the current file or a selected version.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "userId": {
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "restore",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Search one page of file versions by text and attribution metadata.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "agentId": {
+          "type": "string",
+        },
+        "cursor": {
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "machine": {
+          "type": "string",
+        },
+        "q": {
+          "type": "string",
+        },
+        "tag": {
+          "type": "string",
+        },
+        "user": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+      ],
+      "type": "object",
+    },
+    "name": "search",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+    },
+    "description": "Share-link creation is not available until the Phase 5 sharing backend exists.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "expiresAt": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+        "expiresAt",
+      ],
+      "type": "object",
+    },
+    "name": "share",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "List one page of versions for a remote path.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "cursor": {
+          "type": "string",
+        },
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "limit": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+      },
+      "required": [
+        "driveId",
+        "path",
+      ],
+      "type": "object",
+    },
+    "name": "versions",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Return the authenticated account, agent, scopes, and authorized drive IDs.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {},
+      "type": "object",
+    },
+    "name": "whoami",
+  },
+]
+`;

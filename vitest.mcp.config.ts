@@ -5,5 +5,6 @@ export default defineConfig({
     include: ['packages/agent-drive/src/mcp.integration.test.ts'],
     environment: 'node',
     testTimeout: 30_000,
+    hookTimeout: 120_000,
   },
 });
