@@ -10,6 +10,7 @@ import {
   encodeCursor,
   escapedLike,
   jsonBody,
+  MAX_QUERY_LENGTH,
   optionalString,
   page,
   prefix,
@@ -1288,10 +1289,12 @@ async function handleRequest(request: Request, mode: RequestMode) {
       context.auth = await authenticateConsole(mode.userId);
       requireConsoleOrigin(request, url);
     }
-    if (!validBase || url.search.length > 8192) {
+    if (!validBase || url.search.length > MAX_QUERY_LENGTH) {
       throw new ApiError(
-        url.search.length > 8192 ? 'validation_error' : 'not_found',
-        url.search.length > 8192 ? 'The query string is too long.' : 'Endpoint not found.',
+        url.search.length > MAX_QUERY_LENGTH ? 'validation_error' : 'not_found',
+        url.search.length > MAX_QUERY_LENGTH
+          ? 'The query string is too long.'
+          : 'Endpoint not found.',
       );
     }
     if (mode.kind === 'bearer') context.auth = await authenticate(request);

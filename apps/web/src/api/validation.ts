@@ -1,6 +1,8 @@
 import { ApiError } from './errors';
 
 export const MAX_BODY_BYTES = 256 * 1024;
+// Percent-encoding can expand a 1024-character Unicode path to 9216 characters.
+export const MAX_QUERY_LENGTH = 16 * 1024;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_PAGE_SIZE = 100;
 

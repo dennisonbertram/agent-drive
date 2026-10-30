@@ -353,7 +353,10 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       apiKey: scoped.token!,
       driveKey,
     });
-    const path = '/share/preflight.txt';
+    const path = `/${'界'.repeat(1023)}`;
+    const encodedQuery = new URLSearchParams({ path }).toString();
+    expect(path.length).toBe(1024);
+    expect(encodedQuery.length).toBeGreaterThan(8192);
     const firstVersion = await writer.put(drive.id, path, Buffer.from('first version'));
     const countShares = async () =>
       Number(

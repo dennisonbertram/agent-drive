@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
+import { MAX_QUERY_LENGTH } from './validation';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import type { RecentFileEvent } from './contract';
 import {
@@ -709,6 +710,12 @@ describe('Phase 1 core API', () => {
     expect((await request('/whoami', key(), 'GET')).status).toBe(401);
     expect((await request('/whoami', revokedToken)).status).toBe(401);
     expect((await request('/whoami', writeToken)).status).toBe(200);
+  });
+
+  it('rejects query strings larger than the configured maximum', async () => {
+    const result = await request(`/whoami?${'x'.repeat(MAX_QUERY_LENGTH + 1)}`, writeToken);
+    expect(result.status).toBe(400);
+    expect((await json(result)).error.code).toBe('validation_error');
   });
 
   it('creates and revokes a key through HTTP management routes', async () => {
