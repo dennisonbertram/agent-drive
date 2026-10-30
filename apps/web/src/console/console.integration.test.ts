@@ -1,0 +1,324 @@
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { Pool } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { handleApiRequest, handleConsoleApiRequest } from '../api/handler';
+
+const pool = new Pool({
+  connectionString:
+    process.env.DATABASE_URL ??
+    'postgresql://agent_drive:agent_drive_local_only@localhost:5432/agent_drive',
+});
+const db = drizzle(pool);
+const consoleOrigin = 'http://console.test';
+const apiOrigin = 'http://api.test';
+const suffix = randomUUID().replaceAll('-', '_');
+const ownerUserId = `e2e_owner_${suffix}`;
+const otherUserId = `e2e_other_${suffix}`;
+const accountIds: string[] = [];
+let ownerAccountId = '';
+let ownerConsoleAgentId = '';
+let otherConsoleAgentId = '';
+let ownerDriveId = '';
+let otherDriveId = '';
+let managedAgentId = '';
+
+function token() {
+  return `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
+}
+
+async function json(response: Response) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (await response.json()) as Record<string, any>;
+}
+
+function consoleRequest(
+  userId: string | null,
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  origin: string | null = consoleOrigin,
+  headers: HeadersInit = {},
+) {
+  const requestHeaders = new Headers(headers);
+  if (body !== undefined) requestHeaders.set('content-type', 'application/json');
+  if (method !== 'GET' && origin !== null) requestHeaders.set('origin', origin);
+  const init: RequestInit = { method, headers: requestHeaders };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  return handleConsoleApiRequest(new Request(`${consoleOrigin}/api/console${path}`, init), userId);
+}
+
+function apiRequest(path: string, apiKey?: string, method = 'GET', body?: unknown) {
+  const headers = new Headers();
+  if (apiKey) headers.set('authorization', `Bearer ${apiKey}`);
+  if (body !== undefined) headers.set('content-type', 'application/json');
+  const init: RequestInit = { method, headers };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  return handleApiRequest(new Request(`${apiOrigin}/api/v1${path}`, init));
+}
+
+beforeAll(async () => {
+  await migrate(db, { migrationsFolder: resolve(process.cwd(), 'apps/web/drizzle') });
+
+  const firstSession = await json(await consoleRequest(ownerUserId, '/session'));
+  const otherSession = await json(await consoleRequest(otherUserId, '/session'));
+  ownerAccountId = firstSession.account.id as string;
+  accountIds.push(ownerAccountId, otherSession.account.id as string);
+
+  ownerConsoleAgentId = (
+    await pool.query("SELECT id FROM agents WHERE account_id = $1 AND name = '__console__'", [
+      ownerAccountId,
+    ])
+  ).rows[0].id as string;
+  otherConsoleAgentId = (
+    await pool.query("SELECT id FROM agents WHERE account_id = $1 AND name = '__console__'", [
+      otherSession.account.id,
+    ])
+  ).rows[0].id as string;
+
+  const ownerDrive = await json(
+    await consoleRequest(ownerUserId, '/drives', 'POST', { name: `owner-${suffix}` }),
+  );
+  const otherDrive = await json(
+    await consoleRequest(otherUserId, '/drives', 'POST', { name: `other-${suffix}` }),
+  );
+  ownerDriveId = ownerDrive.id as string;
+  otherDriveId = otherDrive.id as string;
+  managedAgentId = (
+    await json(
+      await consoleRequest(ownerUserId, '/agents', 'POST', {
+        name: `managed-${suffix}`,
+      }),
+    )
+  ).id as string;
+});
+
+afterAll(async () => {
+  if (accountIds.length) {
+    await pool.query('DELETE FROM audit_events WHERE account_id = ANY($1::uuid[])', [accountIds]);
+    await pool.query(
+      'DELETE FROM file_events WHERE drive_id IN (SELECT id FROM drives WHERE account_id = ANY($1::uuid[]))',
+      [accountIds],
+    );
+    await pool.query(
+      'DELETE FROM versions WHERE drive_id IN (SELECT id FROM drives WHERE account_id = ANY($1::uuid[]))',
+      [accountIds],
+    );
+    await pool.query('DELETE FROM accounts WHERE id = ANY($1::uuid[])', [accountIds]);
+  }
+  await pool.end();
+});
+
+describe('Phase 4 console API', () => {
+  it('bootstraps idempotently, isolates owners, rejects header bypasses, and enforces CSRF', async () => {
+    const accounts = await pool.query('SELECT id FROM accounts WHERE external_clerk_user_id = $1', [
+      ownerUserId,
+    ]);
+    const consoleAgents = await pool.query(
+      "SELECT id FROM agents WHERE account_id = $1 AND name = '__console__'",
+      [ownerAccountId],
+    );
+    expect(accounts.rows).toHaveLength(1);
+    expect(consoleAgents.rows).toHaveLength(1);
+    await pool.query('UPDATE accounts SET name = $1 WHERE id = $2', [
+      'Renamed workspace',
+      ownerAccountId,
+    ]);
+    const repeatedSession = await json(await consoleRequest(ownerUserId, '/session'));
+    expect(repeatedSession.account).toEqual({ id: ownerAccountId, name: 'Renamed workspace' });
+
+    const drives = await json(await consoleRequest(ownerUserId, '/drives'));
+    expect(drives.items.map((drive: { id: string }) => drive.id)).toContain(ownerDriveId);
+    expect(drives.items.map((drive: { id: string }) => drive.id)).not.toContain(otherDriveId);
+    expect((await consoleRequest(ownerUserId, `/drives/${otherDriveId}/list`)).status).toBe(403);
+
+    const bypass = await consoleRequest(null, '/session', 'GET', undefined, null, {
+      authorization: `Bearer ${token()}`,
+      'x-user-id': ownerUserId,
+    });
+    expect(bypass.status).toBe(401);
+    expect(
+      (
+        await handleApiRequest(
+          new Request(`${apiOrigin}/api/v1/whoami`, {
+            headers: { 'x-user-id': ownerUserId },
+          }),
+        )
+      ).status,
+    ).toBe(401);
+
+    expect(
+      (
+        await consoleRequest(
+          ownerUserId,
+          '/drives',
+          'POST',
+          { name: `missing-origin-${suffix}` },
+          null,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await consoleRequest(
+          ownerUserId,
+          '/drives',
+          'POST',
+          { name: `foreign-origin-${suffix}` },
+          'https://attacker.test',
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await pool.query("SELECT id FROM drives WHERE account_id = $1 AND name LIKE '%-origin-%'", [
+          ownerAccountId,
+        ])
+      ).rows,
+    ).toHaveLength(0);
+  });
+
+  it('revokes only the owner agent keys and preserves read-only bearer behavior', async () => {
+    const created = await json(
+      await consoleRequest(ownerUserId, '/keys', 'POST', {
+        agentId: managedAgentId,
+        label: `read-only-${suffix}`,
+        driveIds: [ownerDriveId],
+        scopes: ['read'],
+      }),
+    );
+    expect((await apiRequest('/whoami', created.token)).status).toBe(200);
+    expect((await apiRequest(`/drives/${ownerDriveId}/list`, created.token)).status).toBe(200);
+    expect(
+      (
+        await apiRequest(`/drives/${ownerDriveId}/delete`, created.token, 'POST', {
+          path: '/not-allowed',
+        })
+      ).status,
+    ).toBe(403);
+
+    const attributedAudit = await pool.query(
+      'SELECT id FROM audit_events WHERE api_key_id = $1 AND account_id = $2 ORDER BY id DESC LIMIT 1',
+      [created.id, ownerAccountId],
+    );
+    expect(attributedAudit.rows).toHaveLength(1);
+    await pool.query('DELETE FROM api_keys WHERE id = $1 AND account_id = $2', [
+      created.id,
+      ownerAccountId,
+    ]);
+    const retainedAudit = await pool.query(
+      'SELECT api_key_id, user_id FROM audit_events WHERE id = $1',
+      [attributedAudit.rows[0].id],
+    );
+    expect(retainedAudit.rows[0]).toEqual({ api_key_id: null, user_id: null });
+
+    const activeKey = await json(
+      await consoleRequest(ownerUserId, '/keys', 'POST', {
+        agentId: managedAgentId,
+        label: `revocation-${suffix}`,
+        driveIds: [ownerDriveId],
+        scopes: ['read'],
+      }),
+    );
+    expect(
+      (await consoleRequest(ownerUserId, `/agents/${otherConsoleAgentId}/revoke`, 'POST', {}))
+        .status,
+    ).toBe(404);
+    const revoked = await json(
+      await consoleRequest(ownerUserId, `/agents/${managedAgentId}/revoke`, 'POST', {}),
+    );
+    expect(revoked).toEqual({ id: managedAgentId, revokedKeys: 1 });
+    expect((await apiRequest('/whoami', activeKey.token)).status).toBe(401);
+  });
+
+  it('paginates trash, overrides submitted attribution, and reports isolated usage', async () => {
+    const deletedFileId = randomUUID();
+    const deletedVersionId = randomUUID();
+    const liveFileId = randomUUID();
+    const firstLiveVersionId = randomUUID();
+    const currentLiveVersionId = randomUUID();
+    await pool.query(
+      `INSERT INTO files (id, drive_id, path, current_version_id, deleted_at)
+       VALUES ($1, $2, '/trash-a.bin', $3, now()),
+              ($4, $2, '/trash-b.bin', $5, NULL)`,
+      [deletedFileId, ownerDriveId, deletedVersionId, liveFileId, currentLiveVersionId],
+    );
+    await pool.query(
+      `INSERT INTO versions
+        (id, file_id, drive_id, object_key, ciphertext_size, wrapped_key, agent_id)
+       VALUES ($1, $2, $3, $4, 10, 'wrapped', $5),
+              ($6, $7, $3, $8, 20, 'wrapped', $5),
+              ($9, $7, $3, $10, 30, 'wrapped', $5)`,
+      [
+        deletedVersionId,
+        deletedFileId,
+        ownerDriveId,
+        `test/${suffix}/deleted`,
+        ownerConsoleAgentId,
+        firstLiveVersionId,
+        liveFileId,
+        `test/${suffix}/history`,
+        currentLiveVersionId,
+        `test/${suffix}/current`,
+      ],
+    );
+
+    expect(
+      (
+        await consoleRequest(ownerUserId, `/drives/${ownerDriveId}/delete`, 'POST', {
+          path: '/trash-b.bin',
+          userId: 'client-controlled-user',
+        })
+      ).status,
+    ).toBe(200);
+    const firstPage = await json(
+      await consoleRequest(ownerUserId, `/drives/${ownerDriveId}/trash?limit=1`),
+    );
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+    const secondPage = await json(
+      await consoleRequest(
+        ownerUserId,
+        `/drives/${ownerDriveId}/trash?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+      ),
+    );
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+    expect([...firstPage.items, ...secondPage.items].map((item) => item.path)).toEqual([
+      '/trash-a.bin',
+      '/trash-b.bin',
+    ]);
+
+    const event = await pool.query(
+      "SELECT user_id FROM file_events WHERE drive_id = $1 AND operation = 'delete' AND path = '/trash-b.bin'",
+      [ownerDriveId],
+    );
+    expect(event.rows[0].user_id).toBe(ownerUserId);
+
+    const usage = await json(await consoleRequest(ownerUserId, '/usage'));
+    expect(usage.egressBytes).toBeNull();
+    expect(usage.cost).toBeNull();
+    expect(usage.storageBytes).toBe(60);
+    expect(usage.drives.find((drive: { id: string }) => drive.id === ownerDriveId)).toMatchObject({
+      storageBytes: 60,
+      liveFiles: 0,
+      versions: 3,
+    });
+    expect(
+      usage.agents.find((agent: { id: string }) => agent.id === ownerConsoleAgentId),
+    ).toMatchObject({
+      storageBytes: 60,
+      versions: 3,
+      operations: expect.any(Number),
+    });
+
+    const audits = await pool.query(
+      'SELECT api_key_id, user_id FROM audit_events WHERE account_id = $1 AND user_id = $2',
+      [ownerAccountId, ownerUserId],
+    );
+    expect(audits.rows.length).toBeGreaterThan(0);
+    expect(audits.rows.every((row) => row.api_key_id === null)).toBe(true);
+  });
+});

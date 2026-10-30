@@ -15,6 +15,13 @@
       "when": 1793319465167,
       "tag": "0001_yielding_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793368069485,
+      "tag": "0002_whole_the_executioner",
+      "breakpoints": true
     }
   ]
 }
