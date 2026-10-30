@@ -270,6 +270,20 @@ export async function authorizeDownload(
   });
 }
 
+export async function enforceReadBudget(accountId: string) {
+  await withTransaction(async (client) => {
+    const state = await billingState(client, accountId);
+    if (
+      state.current.operations >= PLANS[state.account.plan].operations &&
+      (state.account.plan === 'free' ||
+        !state.rates ||
+        !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
+    ) {
+      paymentRequired('Your monthly API operation allowance has been reached.');
+    }
+  });
+}
+
 export async function enforceKeyRateLimit(keyId: string | null) {
   if (!keyId) return;
   const raw = process.env.API_KEY_REQUESTS_PER_MINUTE ?? '600';

@@ -262,6 +262,9 @@ includes 250 drives, 1 TiB (1024 GiB), 1 TiB, and 100 million operations for a p
 monthly base. Configured overage rates are cents per additional drive-month, retained GiB-month,
 egress GiB, and 1,000 successful operations, respectively. New drives use account limits by
 default. An upgrade does not change an explicitly configured or legacy per-drive cap.
+The operation allowance gates file reads (including public shares) as well as writes when
+overage billing is unavailable. Account controls, billing recovery, and deletion remain available.
+This operation quota is separate from the spending cap, which only blocks writes.
 
 Usage reports encrypted committed bytes, including historical and deleted-file versions, and
 recorded API operation attempts. Storage is grouped by drive and version author. Billing uses

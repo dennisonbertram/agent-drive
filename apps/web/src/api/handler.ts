@@ -32,6 +32,7 @@ import {
   authorizeDownload,
   billingSummary,
   enforceKeyRateLimit,
+  enforceReadBudget,
   enforceWriteBudget,
   lockBillingAccount,
 } from '../billing/ledger';
@@ -1098,6 +1099,10 @@ async function fileEndpoint(
   url: URL,
 ) {
   const drive = await ensureDrive(auth, driveId);
+  if (request.method === 'GET') {
+    need(auth, 'read', driveId);
+    await enforceReadBudget(auth.accountId);
+  }
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
@@ -1554,6 +1559,7 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
+    await enforceReadBudget(String(row.account_id));
     if (metadataOnly) {
       output = response({
         name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),
