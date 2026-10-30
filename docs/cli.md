@@ -27,6 +27,12 @@ step; a management key is not silently granted drive access.
 
 `sync LOCAL_DIRECTORY --drive ID --prefix /folder` is upload-only. It skips symlinks, never
 deletes remote files, stores private SHA-256/version manifests outside the uploaded directory,
-skips unchanged files, and refuses to overwrite a remote version changed since the manifest.
-It reads each local file once and hashes the exact bytes uploaded. Corrupt or unreadable manifests
-fail rather than resetting conflict history. It is not a download or destructive mirror.
+skips unchanged files, and refuses unknown remote files unless `--overwrite-existing` is supplied
+for deliberate initial adoption. That flag still uses a current-version guard; files with existing
+manifest history always conflict if their remote version changed. It reads each local file once and
+hashes the exact bytes uploaded. Corrupt or unreadable manifests fail rather than resetting conflict
+history. Sync state is stored in a private sibling directory named `<config-path>.state`; an
+existing state directory with unsafe permissions is rejected without changing its mode. Config
+updates use an exclusive `<config-path>.lock` directory. A crashed CLI may leave that lock; remove
+it manually only after confirming no Agent Drive CLI process is active. It is not a download or
+destructive mirror.

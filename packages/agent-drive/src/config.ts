@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, rm, rmdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { hostname, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -54,16 +54,66 @@ export async function readConfig(): Promise<AgentDriveConfig> {
 }
 
 export async function writeConfig(config: AgentDriveConfig) {
-  await readConfig();
   const path = configPath();
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(directory, 0o700);
+  const lockPath = `${path}.lock`;
+  const timeoutAt = Date.now() + 10_000;
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (!isCode(error, 'EEXIST')) {
+        throw new Error(`Unable to acquire configuration lock at ${lockPath}.`);
+      }
+      if (Date.now() >= timeoutAt) {
+        throw new Error(
+          `Timed out waiting for configuration lock at ${lockPath}. If no Agent Drive command is running, remove the stale lock directory manually.`,
+        );
+      }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    }
+  }
+
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  await chmod(temporary, 0o600);
-  await rename(temporary, path);
-  await chmod(path, 0o600);
+  let temporaryCreated = false;
+  try {
+    const current = await readConfig();
+    const mergedDriveKeys = { ...current.driveKeys, ...config.driveKeys };
+    const merged: AgentDriveConfig = {
+      ...current,
+      ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined)),
+      ...(current.driveKeys || config.driveKeys ? { driveKeys: mergedDriveKeys } : {}),
+    };
+    const handle = await open(temporary, 'wx', 0o600);
+    temporaryCreated = true;
+    try {
+      await handle.chmod(0o600);
+      await handle.writeFile(`${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+    await chmod(path, 0o600);
+  } finally {
+    try {
+      if (temporaryCreated) await rm(temporary, { force: true });
+    } finally {
+      try {
+        await rmdir(lockPath);
+      } catch (error) {
+        if (!isCode(error, 'ENOENT')) {
+          throw new Error(`Unable to release configuration lock at ${lockPath}.`);
+        }
+      }
+    }
+  }
+}
+
+function isCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 export function machineName() {

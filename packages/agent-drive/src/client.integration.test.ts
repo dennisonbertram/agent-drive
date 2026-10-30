@@ -368,6 +368,32 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     expect(rootScriptHelp.status).toBe(0);
     expect(rootScriptHelp.stdout).toContain('Agent Drive CLI');
 
+    const concurrentConfig = join(tempRoot, 'concurrent-config', 'config.json');
+    const concurrentEnvironment: NodeJS.ProcessEnv = {
+      ...baseEnvironment,
+      AGENT_DRIVE_CONFIG: concurrentConfig,
+    };
+    const concurrentLoginEnvironment = { ...concurrentEnvironment };
+    delete concurrentLoginEnvironment.AGENT_DRIVE_API_KEY;
+    const concurrentLogin = await runCli(
+      ['login', '--api', apiUrl, '--token-stdin'],
+      concurrentLoginEnvironment,
+      managementToken,
+    );
+    expect(concurrentLogin.status).toBe(0);
+    const concurrentNames = [`parallel-a-${randomUUID()}`, `parallel-b-${randomUUID()}`];
+    const concurrentDrives = await Promise.all(
+      concurrentNames.map(async (name) =>
+        parsedOutput(await runCli(['drive', 'create', '--name', name], concurrentEnvironment)),
+      ),
+    );
+    const concurrentSaved = JSON.parse(await readFile(concurrentConfig, 'utf8')) as {
+      driveKeys: Record<string, string>;
+    };
+    for (const drive of concurrentDrives) {
+      expect(concurrentSaved.driveKeys[String(drive.id)]).toBe(String(drive.driveKey));
+    }
+
     const agent = parsedOutput(
       await runCli(['agent', 'create', '--name', `cli-agent-${randomUUID()}`], baseEnvironment),
     );
@@ -505,6 +531,47 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     expect(machineSearch.items).toEqual(
       expect.arrayContaining([expect.objectContaining({ path: '/cli/file.txt' })]),
     );
+
+    const adoptionRoot = join(tempRoot, 'adoption-source');
+    await mkdirSafe(adoptionRoot);
+    const adoptionFile = join(adoptionRoot, 'existing.txt');
+    const remoteBytes = Buffer.from('remote before adoption\n');
+    const adoptionBytes = Buffer.from('local adopted bytes\n');
+    await writeFile(adoptionFile, adoptionBytes);
+    const client = new AgentDriveClient({
+      apiUrl,
+      apiKey: cliScopedToken,
+      driveKey: cliDriveKey,
+    });
+    await client.put(cliDriveId, '/adoption/existing.txt', remoteBytes, { mode: 'create' });
+    const refusedAdoption = await runCli(
+      ['sync', adoptionRoot, '--drive', cliDriveId, '--prefix', '/adoption'],
+      cliEnvironment,
+    );
+    expect(refusedAdoption.status).not.toBe(0);
+    expect(refusedAdoption.stderr).toContain('no local sync history');
+    expect(Buffer.from((await client.get(cliDriveId, '/adoption/existing.txt')).bytes)).toEqual(
+      remoteBytes,
+    );
+    const adopted = parsedOutput(
+      await runCli(
+        [
+          'sync',
+          adoptionRoot,
+          '--drive',
+          cliDriveId,
+          '--prefix',
+          '/adoption',
+          '--overwrite-existing',
+        ],
+        cliEnvironment,
+      ),
+    );
+    expect(adopted.uploaded).toBe(1);
+    expect(Buffer.from((await client.get(cliDriveId, '/adoption/existing.txt')).bytes)).toEqual(
+      adoptionBytes,
+    );
+
     const binaryFile = join(tempRoot, 'cli-binary.txt');
     await writeFile(binaryFile, Buffer.from([0, 0x41, 0x1b]));
     expect(
@@ -562,7 +629,7 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       ifVersionId: syncVersion,
     });
     const conflict = await runCli(
-      ['sync', syncRoot, '--drive', cliDriveId, '--prefix', '/sync'],
+      ['sync', syncRoot, '--drive', cliDriveId, '--prefix', '/sync', '--overwrite-existing'],
       cliEnvironment,
     );
     expect(conflict.status).not.toBe(0);

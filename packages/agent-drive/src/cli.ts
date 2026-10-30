@@ -29,6 +29,7 @@ function parse(raw: string[]) {
       output: { type: 'string' },
       'if-version': { type: 'string' },
       overwrite: { type: 'boolean' },
+      'overwrite-existing': { type: 'boolean' },
       prefix: { type: 'string' },
       description: { type: 'string' },
       user: { type: 'string' },
@@ -93,8 +94,7 @@ async function run(command: string, raw: string[]) {
       throw new Error('Set AGENT_DRIVE_API_URL and AGENT_DRIVE_API_KEY, or use --token-stdin.');
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
     const who = await client.whoami();
-    const saved = await readConfig();
-    await writeConfig({ ...saved, apiUrl, apiKey });
+    await writeConfig({ apiUrl, apiKey });
     output(who);
     return;
   }
@@ -110,7 +110,7 @@ async function run(command: string, raw: string[]) {
     const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
     if (drive.created) {
       const key = generateDriveKey();
-      await writeConfig({ ...saved, driveKeys: { ...saved.driveKeys, [drive.id]: key } });
+      await writeConfig({ driveKeys: { [drive.id]: key } });
       output({
         ...drive,
         driveKey: key,
@@ -261,7 +261,11 @@ async function run(command: string, raw: string[]) {
   if (command === 'sync') {
     if (!args.positionals[0]) throw new Error('sync requires LOCAL_DIRECTORY.');
     return output(
-      await syncDirectory(client, requiredDrive(args), args.positionals[0], args.values.prefix),
+      await syncDirectory(client, requiredDrive(args), args.positionals[0], args.values.prefix, {
+        ...(args.values['overwrite-existing'] === undefined
+          ? {}
+          : { overwriteExisting: args.values['overwrite-existing'] }),
+      }),
     );
   }
   throw new Error('Unknown command.');
@@ -287,7 +291,7 @@ Commands:
   restore PATH --drive ID [--version ID]
   search --drive ID [--query TEXT] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   recent --drive ID [--since ISO_TIMESTAMP]
-  sync LOCAL_DIRECTORY --drive ID [--prefix PATH]
+  sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, and AGENT_DRIVE_MACHINE.
