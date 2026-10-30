@@ -178,7 +178,7 @@ export default function SettingsClient() {
       setDriveConfirmation('');
       setAccountConfirmation('');
       setNotice(
-        `${kind === 'drive' ? 'Drive' : 'Account'} deletion accepted. Access is disabled; the background purge is pending. Request ${deletion.id}.`,
+        `${kind === 'drive' ? 'Drive' : 'Account'} deletion accepted. Access is disabled. See request history below for the current cleanup status. Request ${deletion.id}.`,
       );
       try {
         await reload();
