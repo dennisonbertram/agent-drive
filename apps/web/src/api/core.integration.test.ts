@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PLANS } from '../billing/policy';
+import { getPool } from '../db/client';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
 import { MAX_QUERY_LENGTH } from './validation';
@@ -108,6 +109,33 @@ async function fixture(
     [accountId, agentId, 'integration', tokenHash(token), ids, scopes],
   );
   return { accountId, agentId, driveId: id, token, keyId: keyRow.rows[0].id as string };
+}
+
+async function operationBudgetFixture(label: string) {
+  const reader = await fixture(label, `${label}-agent`, `${label}-drive`, ['read']);
+  const path = `/${label}-${randomUUID()}.bin`;
+  const fileId = (
+    await pool.query<{ id: string }>(
+      'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+      [reader.driveId, path],
+    )
+  ).rows[0]!.id;
+  const versionId = (
+    await pool.query<{ id: string }>(
+      `INSERT INTO versions
+         (file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+       VALUES ($1,$2,$3,1,'opaque-wrapped-key',$4) RETURNING id`,
+      [fileId, reader.driveId, `objects/${label}/${randomUUID()}`, reader.agentId],
+    )
+  ).rows[0]!.id;
+  await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, versionId]);
+  await pool.query(
+    `INSERT INTO billing_accounts (account_id,plan,spend_cap_cents)
+     VALUES ($1,'free',0)
+     ON CONFLICT (account_id) DO UPDATE SET plan='free', spend_cap_cents=0`,
+    [reader.accountId],
+  );
+  return { ...reader, fileId, versionId, path };
 }
 
 async function uploadCommit(
@@ -224,6 +252,7 @@ afterAll(async () => {
       [id],
     );
     for (const artifact of artifacts.rows) await deleteObject(artifact.key).catch(() => undefined);
+    await pool.query('DELETE FROM audit_events WHERE account_id = $1', [id]);
     await pool.query(
       'DELETE FROM file_events WHERE drive_id IN (SELECT id FROM drives WHERE account_id = $1)',
       [id],
@@ -1098,6 +1127,183 @@ describe('Phase 1 core API', () => {
           })
         ).status,
       ).toBe(200);
+    } finally {
+      freePlan.operations = originalOperationsLimit;
+    }
+  });
+
+  it('admits only one simultaneous read into the final operation slot', async () => {
+    const reader = await operationBudgetFixture('phase6-read-race');
+    const freePlan = PLANS.free as unknown as { operations: bigint };
+    const originalOperationsLimit = freePlan.operations;
+    freePlan.operations = 1n;
+
+    const appPool = getPool();
+    const queryDescriptor = Object.getOwnPropertyDescriptor(appPool, 'query');
+    const originalQuery = appPool.query;
+    let releaseCompletion: () => void = () => {};
+    const completionGate = new Promise<void>((resolveGate) => {
+      releaseCompletion = resolveGate;
+    });
+    let completionBlocked = false;
+    let blockNextCompletion = true;
+    const interceptedQuery = async (...args: unknown[]) => {
+      if (
+        blockNextCompletion &&
+        typeof args[0] === 'string' &&
+        args[0].includes('UPDATE audit_events SET outcome = $2')
+      ) {
+        blockNextCompletion = false;
+        completionBlocked = true;
+        await completionGate;
+      }
+      return Reflect.apply(originalQuery, appPool, args);
+    };
+    appPool.query = interceptedQuery as typeof appPool.query;
+
+    let firstRequest: Promise<Response> | undefined;
+    try {
+      const first = request(
+        `/drives/${reader.driveId}/get?path=${encodeURIComponent(reader.path)}`,
+        reader.token,
+      );
+      firstRequest = first;
+      await vi.waitFor(() => expect(completionBlocked).toBe(true));
+
+      const pendingAtBarrier = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM audit_events
+          WHERE account_id = $1 AND outcome = 'pending'`,
+        [reader.accountId],
+      );
+      expect(pendingAtBarrier.rows[0]!.count).toBe(1);
+
+      const secondResponse = await request(
+        `/drives/${reader.driveId}/get?path=${encodeURIComponent(reader.path)}`,
+        reader.token,
+      );
+      expect(secondResponse.status).toBe(402);
+      expect((await json(secondResponse)).error).toMatchObject({
+        code: 'payment_required',
+        upgradeUrl: expect.stringContaining('/console/billing'),
+      });
+
+      releaseCompletion();
+      expect((await first).status).toBe(200);
+      const remaining = await pool.query<{ outcome: string; count: number }>(
+        `SELECT outcome, count(*)::int AS count FROM audit_events
+          WHERE account_id = $1 GROUP BY outcome`,
+        [reader.accountId],
+      );
+      expect(remaining.rows).toEqual(
+        expect.arrayContaining([
+          { outcome: 'success', count: 1 },
+          { outcome: 'failure', count: 1 },
+        ]),
+      );
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM audit_events WHERE account_id = $1 AND outcome = 'pending'",
+            [reader.accountId],
+          )
+        ).rows,
+      ).toHaveLength(0);
+    } finally {
+      releaseCompletion();
+      if (firstRequest) await firstRequest.catch(() => undefined);
+      if (queryDescriptor) Object.defineProperty(appPool, 'query', queryDescriptor);
+      else Reflect.deleteProperty(appPool, 'query');
+      freePlan.operations = originalOperationsLimit;
+    }
+  });
+
+  it('releases a read slot when an admitted data request fails', async () => {
+    const reader = await operationBudgetFixture('phase6-read-failure');
+    const freePlan = PLANS.free as unknown as { operations: bigint };
+    const originalOperationsLimit = freePlan.operations;
+    freePlan.operations = 1n;
+
+    try {
+      const failed = await request(
+        `/drives/${reader.driveId}/get?path=%2Fmissing-file.bin`,
+        reader.token,
+      );
+      expect(failed.status).toBe(404);
+      const failure = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM audit_events
+          WHERE account_id = $1 AND outcome = 'failure'`,
+        [reader.accountId],
+      );
+      expect(failure.rows[0]!.count).toBe(1);
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM audit_events WHERE account_id = $1 AND outcome = 'pending'",
+            [reader.accountId],
+          )
+        ).rows,
+      ).toHaveLength(0);
+
+      const admitted = await request(
+        `/drives/${reader.driveId}/get?path=${encodeURIComponent(reader.path)}`,
+        reader.token,
+      );
+      expect(admitted.status).toBe(200);
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM audit_events WHERE account_id = $1 AND outcome = 'pending'",
+            [reader.accountId],
+          )
+        ).rows,
+      ).toHaveLength(0);
+    } finally {
+      freePlan.operations = originalOperationsLimit;
+    }
+  });
+
+  it('charges public-share reads against the same operation allowance as authenticated reads', async () => {
+    const reader = await operationBudgetFixture('phase6-public-read');
+    const shareId = randomUUID().replaceAll('-', '').slice(0, 22);
+    await pool.query(
+      `INSERT INTO shares
+         (id,account_id,drive_id,file_id,version_id,agent_id,api_key_id,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now() + interval '1 day')`,
+      [
+        shareId,
+        reader.accountId,
+        reader.driveId,
+        reader.fileId,
+        reader.versionId,
+        reader.agentId,
+        reader.keyId,
+      ],
+    );
+    const freePlan = PLANS.free as unknown as { operations: bigint };
+    const originalOperationsLimit = freePlan.operations;
+    freePlan.operations = 1n;
+
+    try {
+      const authenticated = await request(
+        `/drives/${reader.driveId}/get?path=${encodeURIComponent(reader.path)}`,
+        reader.token,
+      );
+      expect(authenticated.status).toBe(200);
+
+      const publicShare = await handlePublicShareRequest(shareId, true);
+      expect(publicShare.status).toBe(402);
+      expect((await json(publicShare)).error).toMatchObject({
+        code: 'payment_required',
+        upgradeUrl: expect.stringContaining('/console/billing'),
+      });
+      expect(
+        (
+          await pool.query(
+            "SELECT id FROM audit_events WHERE account_id = $1 AND outcome = 'pending'",
+            [reader.accountId],
+          )
+        ).rows,
+      ).toHaveLength(0);
     } finally {
       freePlan.operations = originalOperationsLimit;
     }

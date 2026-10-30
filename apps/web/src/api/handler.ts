@@ -32,7 +32,7 @@ import {
   authorizeDownload,
   billingSummary,
   enforceKeyRateLimit,
-  enforceReadBudget,
+  enforceOperationBudget,
   enforceWriteBudget,
   lockBillingAccount,
 } from '../billing/ledger';
@@ -59,6 +59,7 @@ type RequestContext = {
   action: string;
   status: number;
   errorCode?: string;
+  auditId?: string;
 };
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,6 +67,21 @@ type Row = QueryResultRow & Record<string, any>;
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
+const quotaControlledActions = new Set([
+  'drives.create',
+  'drive.put',
+  'drive.commit',
+  'drive.get',
+  'drive.list',
+  'drive.versions',
+  'drive.recent',
+  'drive.search',
+  'drive.trash',
+  'drive.move',
+  'drive.copy',
+  'drive.restore',
+  'share.create',
+]);
 
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
@@ -233,22 +249,46 @@ function actionFor(method: string, parts: string[]) {
   return 'unknown';
 }
 
-async function audit(context: RequestContext) {
-  await getPool().query(
+async function audit(
+  context: RequestContext,
+  client: PoolClient | ReturnType<typeof getPool> = getPool(),
+  pending = false,
+) {
+  const outcome = pending ? 'pending' : context.status >= 400 ? 'failure' : 'success';
+  if (context.auditId && !pending) {
+    const updated = await client.query(
+      `UPDATE audit_events SET outcome = $2, error_code = $3, http_status = $4
+       WHERE id = $1 AND outcome = 'pending'`,
+      [context.auditId, outcome, context.errorCode ?? null, context.status],
+    );
+    if (updated.rowCount !== 1) throw new Error('The reserved audit event was not found.');
+    return context.auditId;
+  }
+  const inserted = await client.query<{ id: string }>(
     `INSERT INTO audit_events
       (api_key_id, account_id, agent_id, user_id, action, outcome, error_code, http_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [
       context.auth?.keyId ?? null,
       context.auth?.accountId ?? context.accountId ?? null,
       context.auth?.agentId ?? null,
       context.auth?.userId ?? null,
       context.action,
-      context.status >= 400 ? 'failure' : 'success',
+      outcome,
       context.errorCode ?? null,
-      context.status,
+      pending ? 102 : context.status,
     ],
   );
+  return inserted.rows[0]!.id;
+}
+
+async function reserveOperation(context: RequestContext) {
+  const accountId = context.auth?.accountId ?? context.accountId;
+  if (!accountId) throw new Error('An account is required to reserve an operation.');
+  context.auditId = await withTransaction(async (client) => {
+    await enforceOperationBudget(client, accountId);
+    return audit(context, client, true);
+  });
 }
 
 async function ensureDrive(auth: Auth, driveId: string) {
@@ -1099,10 +1139,6 @@ async function fileEndpoint(
   url: URL,
 ) {
   const drive = await ensureDrive(auth, driveId);
-  if (request.method === 'GET') {
-    need(auth, 'read', driveId);
-    await enforceReadBudget(auth.accountId);
-  }
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
@@ -1486,6 +1522,7 @@ async function handleRequest(request: Request, mode: RequestMode) {
     const auth = context.auth;
     if (!auth) throw new ApiError('internal_error', 'The request actor is unavailable.');
     await enforceKeyRateLimit(auth.keyId);
+    if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console' ? await consoleEndpoint(request, auth, relative, url) : undefined;
     const control = consoleOutput ?? (await controlPlane(request, auth, relative));
@@ -1559,7 +1596,7 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
-    await enforceReadBudget(String(row.account_id));
+    await reserveOperation(context);
     if (metadataOnly) {
       output = response({
         name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),

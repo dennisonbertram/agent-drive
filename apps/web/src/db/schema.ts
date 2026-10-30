@@ -263,7 +263,7 @@ export const auditEvents = pgTable(
   },
   (table) => [
     index('audit_events_account_created_idx').on(table.accountId, table.createdAt),
-    check('audit_events_outcome_check', sql`${table.outcome} IN ('success', 'failure')`),
+    check('audit_events_outcome_check', sql`${table.outcome} IN ('pending', 'success', 'failure')`),
   ],
 );
 

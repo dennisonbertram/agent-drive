@@ -265,6 +265,11 @@ default. An upgrade does not change an explicitly configured or legacy per-drive
 The operation allowance gates file reads (including public shares) as well as writes when
 overage billing is unavailable. Account controls, billing recovery, and deletion remain available.
 This operation quota is separate from the spending cap, which only blocks writes.
+Quota-controlled requests reserve a pending audit record under the account lock before running.
+Completion changes it atomically to success or failure: pending requests consume capacity but
+are not billed. A crashed process can leave a pending record consuming capacity for that month;
+operators should reconcile those records before marking them failed. Audit timestamps for
+reserved operations record admission time, keeping month-boundary accounting consistent.
 
 Usage reports encrypted committed bytes, including historical and deleted-file versions, and
 recorded API operation attempts. Storage is grouped by drive and version author. Billing uses

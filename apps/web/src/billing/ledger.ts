@@ -79,11 +79,13 @@ export async function billingState(client: PoolClient, accountId: string, period
     drives: string;
     storage: string;
     operations: string;
+    pending_operations: string;
     egress: string;
   }>(
     `SELECT (SELECT count(*) FROM drives WHERE account_id = $1 AND created_at < $3)::text AS drives,
        (SELECT COALESCE(sum(v.ciphertext_size),0) FROM versions v JOIN drives d ON d.id = v.drive_id WHERE d.account_id = $1 AND v.created_at < $3)::text AS storage,
        (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'success')::text AS operations,
+       (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'pending')::text AS pending_operations,
        (SELECT COALESCE(sum(bytes_sent),0) FROM billing_egress_events WHERE account_id = $1 AND occurred_at >= $2 AND occurred_at < $3)::text AS egress`,
     [accountId, start, end],
   );
@@ -143,6 +145,7 @@ export async function billingState(client: PoolClient, accountId: string, period
     account: { ...account, plan: periodRow.plan },
     period: periodRow,
     current: usage,
+    pendingOperations: BigInt(row.pending_operations),
     start,
     end,
     rates: decodeRates(periodRow.rates),
@@ -194,7 +197,7 @@ export async function enforceWriteBudget(
       BigInt(state.period.peak_storage_bytes),
       stored + BigInt(pending.rows[0]!.bytes),
     ),
-    operations: state.current.operations + 1n,
+    operations: state.current.operations + max(1n, state.pendingOperations),
     egressBytes: state.current.egressBytes,
   };
   const rates = state.rates;
@@ -270,18 +273,16 @@ export async function authorizeDownload(
   });
 }
 
-export async function enforceReadBudget(accountId: string) {
-  await withTransaction(async (client) => {
-    const state = await billingState(client, accountId);
-    if (
-      state.current.operations >= PLANS[state.account.plan].operations &&
-      (state.account.plan === 'free' ||
-        !state.rates ||
-        !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
-    ) {
-      paymentRequired('Your monthly API operation allowance has been reached.');
-    }
-  });
+export async function enforceOperationBudget(client: PoolClient, accountId: string) {
+  const state = await billingState(client, accountId);
+  if (
+    state.current.operations + state.pendingOperations >= PLANS[state.account.plan].operations &&
+    (state.account.plan === 'free' ||
+      !state.rates ||
+      !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
+  ) {
+    paymentRequired('Your monthly API operation allowance has been reached.');
+  }
 }
 
 export async function enforceKeyRateLimit(keyId: string | null) {
