@@ -10,7 +10,12 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
           { key: 'Cache-Control', value: 'no-store' },
           { key: 'X-Robots-Tag', value: 'noindex' },
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000' },
         ],
+      },
+      {
+        source: '/api/shares/:path*',
+        headers: [{ key: 'Strict-Transport-Security', value: 'max-age=31536000' }],
       },
     ];
   },

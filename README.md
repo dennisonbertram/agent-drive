@@ -242,6 +242,12 @@ Revocation prevents new metadata requests and download URLs, but cannot recall d
 downloaded or a presigned URL already issued (which can remain usable for at most 60 seconds).
 The server stores share metadata and never stores the file key.
 
+Public share pages and APIs require HTTPS in production. Terminate TLS at Vercel or a
+TLS-terminating reverse proxy. Development permits HTTP only on exact loopback hosts
+(`localhost`, `127.0.0.1`, or `[::1]`). A server-side 403 and HSTS header cannot prevent
+active interception of a first HTTP visit; client-generated links use HTTPS except for
+those loopback development hosts.
+
 The console can browse names and metadata while locked. Downloads fetch ciphertext directly
 from object storage and decrypt locally; no drive key is sent to the API. Allow browser GET
 requests from the console's origin in the production bucket's CORS policy. Files currently
