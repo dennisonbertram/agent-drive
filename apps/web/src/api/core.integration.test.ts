@@ -4,6 +4,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { PLANS } from '../billing/policy';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
 import { MAX_QUERY_LENGTH } from './validation';
@@ -1036,5 +1037,69 @@ describe('Phase 1 core API', () => {
       Buffer.byteLength('retained-ciphertext'),
     );
     expect(committedIntent.rows[0].staging_key).toMatch(/^staging\//u);
+  });
+
+  it('limits data reads at the operation boundary without blocking controls or deletion', async () => {
+    const reader = await fixture('phase6-read-budget', 'read-budget-agent', 'read-budget-drive', [
+      'read',
+      'manage',
+      'delete',
+    ]);
+    const fileId = (
+      await pool.query<{ id: string }>(
+        'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+        [reader.driveId, '/operation-budget.bin'],
+      )
+    ).rows[0]!.id;
+    const versionId = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO versions
+           (file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+         VALUES ($1,$2,$3,1,'opaque-wrapped-key',$4) RETURNING id`,
+        [fileId, reader.driveId, `objects/read-budget/${randomUUID()}`, reader.agentId],
+      )
+    ).rows[0]!.id;
+    await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, versionId]);
+    await pool.query(
+      `INSERT INTO billing_accounts (account_id,plan,spend_cap_cents)
+       VALUES ($1,'free',0)
+       ON CONFLICT (account_id) DO UPDATE SET plan='free', spend_cap_cents=0`,
+      [reader.accountId],
+    );
+
+    const freePlan = PLANS.free as unknown as { operations: bigint };
+    const originalOperationsLimit = freePlan.operations;
+    freePlan.operations = 1n;
+    try {
+      const allowed = await request(
+        `/drives/${reader.driveId}/get?path=%2Foperation-budget.bin`,
+        reader.token,
+      );
+      expect(allowed.status).toBe(200);
+
+      const blocked = await request(
+        `/drives/${reader.driveId}/get?path=%2Foperation-budget.bin`,
+        reader.token,
+      );
+      expect(blocked.status).toBe(402);
+      expect((await json(blocked)).error).toMatchObject({
+        code: 'payment_required',
+        upgradeUrl: expect.stringContaining('/console/billing'),
+      });
+
+      const managed = await request('/agents', reader.token, 'POST', {
+        name: `read-budget-managed-${randomUUID()}`,
+      });
+      expect(managed.status).toBe(200);
+      expect(
+        (
+          await request(`/drives/${reader.driveId}/delete`, reader.token, 'POST', {
+            path: '/operation-budget.bin',
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      freePlan.operations = originalOperationsLimit;
+    }
   });
 });

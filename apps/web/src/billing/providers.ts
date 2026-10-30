@@ -336,27 +336,30 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   let session: Stripe.Checkout.Session;
   try {
     session = await client.checkout.sessions.create(
-    {
-      mode: 'subscription',
-      customer,
-      client_reference_id: accountId,
-      line_items: [{ price, quantity: 1 }, { price: usage }],
-      subscription_data: {
-        billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
-        proration_behavior: 'create_prorations',
-        metadata: { accountId, plan },
+      {
+        mode: 'subscription',
+        customer,
+        client_reference_id: accountId,
+        line_items: [{ price, quantity: 1 }, { price: usage }],
+        subscription_data: {
+          billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
+          proration_behavior: 'create_prorations',
+          metadata: { accountId, plan },
+        },
+        success_url: `${billingOrigin()}/console/billing?checkout=success`,
+        cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
       },
-      success_url: `${billingOrigin()}/console/billing?checkout=success`,
-      cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
-    },
-    { idempotencyKey: reserved.idempotencyKey! },
-  );
+      { idempotencyKey: reserved.idempotencyKey! },
+    );
   } catch (error) {
     const failure = error as { type?: string; param?: string };
     const now = new Date();
     if (
       failure.type === 'StripeInvalidRequestError' &&
-      ['subscription_data[billing_cycle_anchor]', 'subscription_data.billing_cycle_anchor'].includes(failure.param ?? '') &&
+      [
+        'subscription_data[billing_cycle_anchor]',
+        'subscription_data.billing_cycle_anchor',
+      ].includes(failure.param ?? '') &&
       reserved.createdAt &&
       nextMonthStart(reserved.createdAt) <= Math.floor(now.getTime() / 1000)
     ) {
@@ -365,7 +368,12 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         `UPDATE billing_accounts SET checkout_created_at = $3
          WHERE account_id = $1 AND checkout_idempotency_key = $2
            AND checkout_session_id IS NULL AND checkout_created_at < $4`,
-        [accountId, reserved.idempotencyKey, now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))],
+        [
+          accountId,
+          reserved.idempotencyKey,
+          now,
+          new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
+        ],
       );
       if (renewed.rowCount) return createCheckout(accountId, plan);
       throw new ApiError('conflict', 'Checkout changed during recovery. Please retry.');

@@ -16,6 +16,7 @@ const stripeMocks = vi.hoisted(() => ({
   subscriptionUpdate: vi.fn(),
   checkoutCreate: vi.fn(),
   checkoutRetrieve: vi.fn(),
+  checkoutExpire: vi.fn(),
 }));
 
 vi.mock('stripe', () => ({
@@ -28,7 +29,11 @@ vi.mock('stripe', () => ({
       update: stripeMocks.subscriptionUpdate,
     };
     checkout = {
-      sessions: { create: stripeMocks.checkoutCreate, retrieve: stripeMocks.checkoutRetrieve },
+      sessions: {
+        create: stripeMocks.checkoutCreate,
+        retrieve: stripeMocks.checkoutRetrieve,
+        expire: stripeMocks.checkoutExpire,
+      },
     };
   },
 }));
@@ -486,6 +491,226 @@ it('uses a persisted checkout idempotency key for concurrent session creation', 
       ])
     ).rows[0].checkout_session_id,
   ).toBe('cs_fixture');
+});
+
+it('expires an abandoned Developer checkout before switching plans and rejects completed sessions', async () => {
+  await pool.query(
+    `UPDATE billing_accounts
+        SET checkout_idempotency_key = NULL, checkout_session_id = NULL, checkout_created_at = NULL
+      WHERE account_id = $1`,
+    [checkoutAccountId],
+  );
+  stripeMocks.checkoutCreate.mockReset();
+  stripeMocks.checkoutRetrieve.mockReset();
+  stripeMocks.checkoutExpire.mockReset();
+  stripeMocks.checkoutCreate.mockImplementation(async (params) => {
+    const developer = params.line_items[0]!.price === 'price_developer_fixture';
+    return {
+      id: developer ? 'cs_abandoned_developer' : 'cs_replacement_team',
+      url: developer
+        ? 'https://checkout.example.test/developer'
+        : 'https://checkout.example.test/team',
+    };
+  });
+  stripeMocks.checkoutRetrieve.mockImplementation(async (id: string) =>
+    id === 'cs_abandoned_developer'
+      ? { id, status: 'open', url: 'https://checkout.example.test/developer' }
+      : { id, status: 'complete', url: 'https://checkout.example.test/team' },
+  );
+  stripeMocks.checkoutExpire.mockResolvedValue({
+    id: 'cs_abandoned_developer',
+    status: 'expired',
+  });
+
+  try {
+    await expect(createCheckout(checkoutAccountId, 'developer')).resolves.toEqual({
+      url: 'https://checkout.example.test/developer',
+    });
+    await expect(createCheckout(checkoutAccountId, 'team')).resolves.toEqual({
+      url: 'https://checkout.example.test/team',
+    });
+
+    expect(stripeMocks.checkoutExpire).toHaveBeenCalledWith(
+      'cs_abandoned_developer',
+      {},
+      { idempotencyKey: 'checkout-expire/cs_abandoned_developer' },
+    );
+    expect(stripeMocks.checkoutExpire.mock.invocationCallOrder[0]).toBeLessThan(
+      stripeMocks.checkoutCreate.mock.invocationCallOrder[1]!,
+    );
+    expect(stripeMocks.checkoutCreate).toHaveBeenCalledTimes(2);
+    expect(stripeMocks.checkoutCreate.mock.calls[0]![0].line_items[0]).toMatchObject({
+      price: 'price_developer_fixture',
+    });
+    expect(stripeMocks.checkoutCreate.mock.calls[1]![0].line_items[0]).toMatchObject({
+      price: 'price_team_fixture',
+    });
+
+    await expect(createCheckout(checkoutAccountId, 'developer')).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'Checkout completed; subscription status is being updated.',
+    });
+    expect(stripeMocks.checkoutCreate).toHaveBeenCalledTimes(2);
+    expect(stripeMocks.checkoutExpire).toHaveBeenCalledTimes(1);
+  } finally {
+    await pool.query(
+      `UPDATE billing_accounts
+          SET checkout_idempotency_key = NULL, checkout_session_id = NULL, checkout_created_at = NULL
+        WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    stripeMocks.checkoutCreate.mockReset();
+    stripeMocks.checkoutRetrieve.mockReset();
+    stripeMocks.checkoutExpire.mockReset();
+  }
+});
+
+it('requires resuming the original plan when a persisted checkout session ID is missing', async () => {
+  const idempotencyKey = `checkout/${checkoutAccountId}/developer/unknown-session`;
+  await pool.query(
+    `UPDATE billing_accounts
+        SET checkout_idempotency_key = $2, checkout_session_id = NULL, checkout_created_at = now()
+      WHERE account_id = $1`,
+    [checkoutAccountId, idempotencyKey],
+  );
+  stripeMocks.checkoutCreate.mockReset();
+
+  try {
+    await expect(createCheckout(checkoutAccountId, 'team')).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'Resume the previous plan checkout before changing plans.',
+    });
+    expect(stripeMocks.checkoutCreate).not.toHaveBeenCalled();
+  } finally {
+    await pool.query(
+      `UPDATE billing_accounts
+          SET checkout_idempotency_key = NULL, checkout_session_id = NULL, checkout_created_at = NULL
+        WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    stripeMocks.checkoutCreate.mockReset();
+  }
+});
+
+it('recovers a month-boundary anchor validation error with the same checkout key', async () => {
+  const originalCreatedAt = new Date('2026-01-31T23:50:00.000Z');
+  const now = new Date('2026-02-01T00:05:00.000Z');
+  const idempotencyKey = `checkout/${checkoutAccountId}/developer/month-boundary`;
+  await pool.query(
+    `UPDATE billing_accounts
+        SET checkout_idempotency_key = $2, checkout_session_id = NULL, checkout_created_at = $3
+      WHERE account_id = $1`,
+    [checkoutAccountId, idempotencyKey, originalCreatedAt],
+  );
+  const anchorError = Object.assign(new Error('billing cycle anchor is in the past'), {
+    type: 'StripeInvalidRequestError',
+    param: 'subscription_data[billing_cycle_anchor]',
+  });
+  stripeMocks.checkoutCreate.mockReset();
+  stripeMocks.checkoutCreate.mockRejectedValueOnce(anchorError).mockResolvedValueOnce({
+    id: 'cs_month_boundary_recovered',
+    url: 'https://checkout.example.test/recovered',
+  });
+  vi.useFakeTimers({ toFake: ['Date'] });
+
+  try {
+    vi.setSystemTime(now);
+    await expect(createCheckout(checkoutAccountId, 'developer')).resolves.toEqual({
+      url: 'https://checkout.example.test/recovered',
+    });
+
+    const [firstParams, firstOptions] = stripeMocks.checkoutCreate.mock.calls[0]!;
+    const [secondParams, secondOptions] = stripeMocks.checkoutCreate.mock.calls[1]!;
+    expect(firstParams.subscription_data.billing_cycle_anchor).toBe(
+      Math.floor(Date.UTC(2026, 1, 1) / 1000),
+    );
+    expect(firstParams.subscription_data.billing_cycle_anchor).toBeLessThan(now.getTime() / 1000);
+    expect(secondParams.subscription_data.billing_cycle_anchor).toBe(
+      Math.floor(Date.UTC(2026, 2, 1) / 1000),
+    );
+    expect(secondParams.subscription_data.billing_cycle_anchor).toBeGreaterThan(
+      now.getTime() / 1000,
+    );
+    expect(firstOptions.idempotencyKey).toBe(idempotencyKey);
+    expect(secondOptions.idempotencyKey).toBe(idempotencyKey);
+
+    const recovered = await pool.query<{
+      checkout_idempotency_key: string;
+      checkout_session_id: string;
+      checkout_created_at: Date;
+    }>(
+      `SELECT checkout_idempotency_key, checkout_session_id, checkout_created_at
+         FROM billing_accounts WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    expect(recovered.rows[0]).toEqual({
+      checkout_idempotency_key: idempotencyKey,
+      checkout_session_id: 'cs_month_boundary_recovered',
+      checkout_created_at: now,
+    });
+  } finally {
+    vi.useRealTimers();
+    await pool.query(
+      `UPDATE billing_accounts
+          SET checkout_idempotency_key = NULL, checkout_session_id = NULL, checkout_created_at = NULL
+        WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    stripeMocks.checkoutCreate.mockReset();
+  }
+});
+
+it.each([
+  [
+    'an unrelated Stripe validation error',
+    Object.assign(new Error('unrelated parameter is invalid'), {
+      type: 'StripeInvalidRequestError',
+      param: 'subscription_data[trial_end]',
+    }),
+  ],
+  ['a network error', new Error('connection reset')],
+])('does not renew the checkout reservation after %s', async (_label, failure) => {
+  const originalCreatedAt = new Date('2026-01-31T23:50:00.000Z');
+  const now = new Date('2026-02-01T00:05:00.000Z');
+  const idempotencyKey = `checkout/${checkoutAccountId}/developer/fail-safe`;
+  await pool.query(
+    `UPDATE billing_accounts
+        SET checkout_idempotency_key = $2, checkout_session_id = NULL, checkout_created_at = $3
+      WHERE account_id = $1`,
+    [checkoutAccountId, idempotencyKey, originalCreatedAt],
+  );
+  stripeMocks.checkoutCreate.mockReset();
+  stripeMocks.checkoutCreate.mockRejectedValueOnce(failure);
+  vi.useFakeTimers({ toFake: ['Date'] });
+
+  try {
+    vi.setSystemTime(now);
+    await expect(createCheckout(checkoutAccountId, 'developer')).rejects.toBe(failure);
+    expect(stripeMocks.checkoutCreate).toHaveBeenCalledTimes(1);
+    const unchanged = await pool.query<{
+      checkout_idempotency_key: string;
+      checkout_session_id: string | null;
+      checkout_created_at: Date;
+    }>(
+      `SELECT checkout_idempotency_key, checkout_session_id, checkout_created_at
+         FROM billing_accounts WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    expect(unchanged.rows[0]).toEqual({
+      checkout_idempotency_key: idempotencyKey,
+      checkout_session_id: null,
+      checkout_created_at: originalCreatedAt,
+    });
+  } finally {
+    vi.useRealTimers();
+    await pool.query(
+      `UPDATE billing_accounts
+          SET checkout_idempotency_key = NULL, checkout_session_id = NULL, checkout_created_at = NULL
+        WHERE account_id = $1`,
+      [checkoutAccountId],
+    );
+    stripeMocks.checkoutCreate.mockReset();
+  }
 });
 
 it('updates the existing base item for a paid-tier change and makes repeated targets a no-op', async () => {
