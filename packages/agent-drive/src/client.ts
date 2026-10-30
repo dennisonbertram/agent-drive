@@ -1,4 +1,4 @@
-import { decryptFile, encryptFile } from './crypto.js';
+import { decryptFile, encryptFile, unwrapFileKey } from './crypto.js';
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -103,6 +103,17 @@ export type RecentEvent = {
   machineId: string | null;
   userId: string | null;
   createdAt: string;
+};
+
+export type Share = {
+  id: string;
+  path: string;
+  versionId: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  status?: 'active' | 'expired' | 'revoked' | 'unavailable';
+  url?: string;
 };
 
 export class AgentDriveApiError extends Error {
@@ -315,6 +326,53 @@ export class AgentDriveClient {
   ) {
     return this.request<Page<Version>>(
       this.pagePath(`drives/${encode(driveId)}/search`, limit, cursor, query),
+    );
+  }
+
+  async createShare(
+    driveId: string,
+    path: string,
+    options: { versionId?: string; expiresAt?: string } = {},
+  ) {
+    const query = new URLSearchParams({ path });
+    if (options.versionId) query.set('versionId', options.versionId);
+    const selected = await this.request<{ id: string; wrappedKey: string }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+    );
+    const fileKey = await unwrapFileKey(selected.wrappedKey, this.keyFor(driveId));
+    const created = await this.request<{
+      id: string;
+      path: string;
+      versionId: string;
+      expiresAt: string;
+      createdAt: string;
+    }>(`drives/${encode(driveId)}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({
+        path,
+        versionId: selected.id,
+        ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
+      }),
+    });
+    return {
+      id: created.id,
+      path: created.path,
+      versionId: created.versionId,
+      expiresAt: created.expiresAt,
+      url: `${this.apiOrigin}/s/${created.id}#k=${fileKey}`,
+    };
+  }
+
+  async listShares(driveId: string, limit?: number, cursor?: string) {
+    return this.request<Page<Share>>(
+      this.pagePath(`drives/${encode(driveId)}/shares`, limit, cursor),
+    );
+  }
+
+  async revokeShare(driveId: string, shareId: string) {
+    return this.request<{ id: string; revokedAt: string }>(
+      `drives/${encode(driveId)}/shares/${encode(shareId)}`,
+      { method: 'DELETE' },
     );
   }
 

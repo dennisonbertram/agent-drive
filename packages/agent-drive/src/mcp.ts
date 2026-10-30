@@ -332,29 +332,22 @@ export function createMcpServer(client: AgentDriveClient) {
   server.registerTool(
     'share',
     {
-      description: 'Share-link creation is not available until the Phase 5 sharing backend exists.',
+      description: 'Create an expiring encrypted share link for a remote file.',
       inputSchema: {
         driveId: id,
         path,
         versionId: z.string().optional(),
-        expiresAt: z.string().datetime(),
+        expiresAt: z.string().datetime().optional(),
       },
       annotations: { openWorldHint: true },
     },
-    async () => ({
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: {
-              code: 'not_implemented',
-              message: 'Sharing is not available yet; it requires the Phase 5 sharing backend.',
-            },
-          }),
-        },
-      ],
-      isError: true,
-    }),
+    async (args) =>
+      safely(() =>
+        client.createShare(args.driveId, args.path, {
+          ...(args.versionId ? { versionId: args.versionId } : {}),
+          ...(args.expiresAt ? { expiresAt: args.expiresAt } : {}),
+        }),
+      ),
   );
   return server;
 }

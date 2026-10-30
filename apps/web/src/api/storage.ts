@@ -56,13 +56,13 @@ export async function presignedUpload(key: string, size: number) {
   );
 }
 
-export async function presignedDownload(key: string) {
+export async function presignedDownload(key: string, expiresIn = 600) {
   const settings = config();
   return getSignedUrl(
     storageClient(),
     new GetObjectCommand({ Bucket: settings.bucket, Key: key }),
     {
-      expiresIn: 600,
+      expiresIn,
     },
   );
 }

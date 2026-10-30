@@ -5,6 +5,9 @@ export type ErrorCode =
   | 'not_found'
   | 'conflict'
   | 'quota_exceeded'
+  | 'share_revoked'
+  | 'share_expired'
+  | 'share_unavailable'
   | 'internal_error';
 
 const statuses: Record<ErrorCode, number> = {
@@ -14,6 +17,9 @@ const statuses: Record<ErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   quota_exceeded: 413,
+  share_revoked: 410,
+  share_expired: 410,
+  share_unavailable: 410,
   internal_error: 500,
 };
 

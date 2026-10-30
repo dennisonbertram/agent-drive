@@ -7,7 +7,8 @@ import {
   decodeDriveKey,
   decryptFile,
   generateDriveKey,
-} from '../../../../packages/agent-drive/src/crypto';
+} from '../../../../../packages/agent-drive/src/crypto.ts';
+import { validateDownloadUrl } from '@/src/share/url';
 
 type Drive = { id: string; name: string; quota_bytes: string | number };
 type Agent = { id: string; name: string };
@@ -292,15 +293,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
       `drives/${selected}/get?path=${encodeURIComponent(file.path)}`,
     );
-    const url = new URL(metadata.downloadUrl);
-    if (
-      url.username ||
-      url.password ||
-      url.hash ||
-      (url.protocol !== 'https:' &&
-        !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
-    )
-      throw new Error('The download URL is not secure.');
+    const url = validateDownloadUrl(metadata.downloadUrl);
     const response = await fetch(url, {
       credentials: 'omit',
       redirect: 'error',

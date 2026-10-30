@@ -339,7 +339,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
     "annotations": {
       "openWorldHint": true,
     },
-    "description": "Share-link creation is not available until the Phase 5 sharing backend exists.",
+    "description": "Create an expiring encrypted share link for a remote file.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -363,7 +363,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "required": [
         "driveId",
         "path",
-        "expiresAt",
       ],
       "type": "object",
     },

@@ -29,7 +29,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm --filter @agent-drive/web dev --hostname localhost --port 3100',
+    command:
+      "bash -o pipefail -c 'mkdir -p test-results; pnpm --filter @agent-drive/web dev --hostname localhost --port 3100 2>&1 | tee test-results/web-server.log'",
     url: 'http://localhost:3100',
     reuseExistingServer: false,
     env: {
@@ -41,6 +42,8 @@ export default defineConfig({
       S3_BUCKET: process.env.S3_BUCKET,
       S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
       S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: '',
+      CLERK_SECRET_KEY: '',
     },
     timeout: 120_000,
   },

@@ -337,6 +337,84 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     }
   }, 120_000);
 
+  it('unwraps before creating a share and pins the version selected by preflight', async () => {
+    const manager = new AgentDriveClient({ apiUrl, apiKey: managementToken });
+    const agent = await manager.createAgent(`share-client-${randomUUID()}`);
+    const drive = await manager.createDrive(`share-client-${randomUUID()}`);
+    const driveKey = generateDriveKey();
+    const scoped = await manager.createKey(
+      agent.id,
+      'share-client',
+      [drive.id],
+      ['read', 'write', 'share'],
+    );
+    const writer = new AgentDriveClient({
+      apiUrl,
+      apiKey: scoped.token!,
+      driveKey,
+    });
+    const path = `/${'界'.repeat(1023)}`;
+    const encodedQuery = new URLSearchParams({ path }).toString();
+    expect(path.length).toBe(1024);
+    expect(encodedQuery.length).toBeGreaterThan(8192);
+    const firstVersion = await writer.put(drive.id, path, Buffer.from('first version'));
+    const countShares = async () =>
+      Number(
+        (
+          await database.query('SELECT count(*)::int AS count FROM shares WHERE drive_id = $1', [
+            drive.id,
+          ])
+        ).rows[0]?.count,
+      );
+    const missingKeyClient = new AgentDriveClient({ apiUrl, apiKey: scoped.token! });
+    await expect(missingKeyClient.createShare(drive.id, path)).rejects.toMatchObject({
+      code: 'missing_drive_key',
+    });
+    const wrongKeyClient = new AgentDriveClient({
+      apiUrl,
+      apiKey: scoped.token!,
+      driveKey: generateDriveKey(),
+    });
+    await expect(wrongKeyClient.createShare(drive.id, path)).rejects.toMatchObject({
+      code: 'decryption_failed',
+    });
+    expect(await countShares()).toBe(0);
+
+    let selectedVersionId = '';
+    let racedVersionId = '';
+    let postedBody: Record<string, unknown> | undefined;
+    const clientWithVersionRace = new AgentDriveClient({
+      apiUrl,
+      apiKey: scoped.token!,
+      driveKey,
+      fetch: async (input, init) => {
+        const url = new URL(input instanceof Request ? input.url : input.toString());
+        if (url.pathname.endsWith('/get')) {
+          const response = await fetch(input, init);
+          selectedVersionId = ((await response.clone().json()) as { id: string }).id;
+          return response;
+        }
+        if (url.pathname.endsWith('/shares') && init?.method === 'POST') {
+          racedVersionId = (
+            await writer.put(drive.id, path, Buffer.from('new current version'), {
+              mode: 'overwrite',
+            })
+          ).id;
+          postedBody = JSON.parse(String(init.body)) as Record<string, unknown>;
+        }
+        return fetch(input, init);
+      },
+    });
+    const share = await clientWithVersionRace.createShare(drive.id, path);
+    expect(selectedVersionId).toBe(firstVersion.id);
+    expect(racedVersionId).not.toBe(firstVersion.id);
+    expect(postedBody?.versionId).toBe(firstVersion.id);
+    expect(share.versionId).toBe(firstVersion.id);
+    const stored = await database.query('SELECT version_id FROM shares WHERE id = $1', [share.id]);
+    expect(stored.rows[0]?.version_id).toBe(firstVersion.id);
+    expect(await countShares()).toBe(1);
+  });
+
   it('runs the CLI login, provisioning, encrypted file, restore, sync, and wrong-key acceptance flow', async () => {
     const config = join(tempRoot, 'cli-config', 'config.json');
     const baseEnvironment: NodeJS.ProcessEnv = {

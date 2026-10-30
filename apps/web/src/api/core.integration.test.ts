@@ -5,9 +5,16 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { copyObject, deleteObject, objectInfo } from './storage';
-import { handleApiRequest } from './handler';
+import { handleApiRequest, handlePublicShareRequest } from './handler';
+import { MAX_QUERY_LENGTH } from './validation';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import type { RecentFileEvent } from './contract';
+import {
+  decryptWithFileKey,
+  encryptFile,
+  generateDriveKey,
+  unwrapFileKey,
+} from '../../../../packages/agent-drive/src/crypto.js';
 
 const pool = new Pool({
   connectionString:
@@ -25,6 +32,7 @@ let writeToken = '';
 let writeOnlyToken = '';
 let deleteOnlyToken = '';
 let readToken = '';
+let shareToken = '';
 let writeAgentId = '';
 let otherAgentId = '';
 let otherToken = '';
@@ -159,6 +167,12 @@ beforeAll(async () => {
     `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
      VALUES ($1,$2,'copy-attribution',$3,$4::uuid[],ARRAY['read','write']::text[])`,
     [first.accountId, copyAgentId, tokenHash(copyToken), [driveId]],
+  );
+  shareToken = key();
+  await pool.query(
+    `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+     VALUES ($1,$2,'share integration',$3,$4::uuid[],ARRAY['read','share','delete']::text[])`,
+    [first.accountId, first.agentId, tokenHash(shareToken), [driveId]],
   );
   writeOnlyToken = key();
   deleteOnlyToken = key();
@@ -395,6 +409,133 @@ describe('Phase 1 core API', () => {
     expect(next.nextCursor).toBeNull();
   });
 
+  it('creates, scopes, expires, revokes, and audits encrypted shares without storing file keys', async () => {
+    const driveKey = generateDriveKey();
+    const plaintextA = new TextEncoder().encode('share A bytes');
+    const encryptedA = await encryptFile(plaintextA, driveKey);
+    const uploadedA = await uploadCommit(
+      writeToken,
+      driveId,
+      '/sharing/a.txt',
+      Buffer.from(encryptedA.ciphertext),
+      { wrappedKey: encryptedA.wrappedKey },
+    );
+    const fileKeyA = await unwrapFileKey(encryptedA.wrappedKey, driveKey);
+    const plaintextB = new TextEncoder().encode('different file B');
+    const encryptedB = await encryptFile(plaintextB, driveKey);
+    await uploadCommit(writeToken, driveId, '/sharing/b.txt', Buffer.from(encryptedB.ciphertext), {
+      wrappedKey: encryptedB.wrappedKey,
+    });
+    expect(await decryptWithFileKey(new Uint8Array(encryptedA.ciphertext), fileKeyA)).toEqual(
+      plaintextA,
+    );
+    await expect(
+      decryptWithFileKey(new Uint8Array(encryptedB.ciphertext), fileKeyA),
+    ).rejects.toMatchObject({ code: 'decryption_failed' });
+
+    expect(
+      (
+        await request(`/drives/${driveId}/shares`, readToken, 'POST', {
+          path: '/sharing/a.txt',
+        })
+      ).status,
+    ).toBe(403);
+    expect((await request(`/drives/${otherDriveId}/shares`, shareToken, 'GET')).status).toBe(403);
+    for (const expiresAt of [
+      new Date(Date.now() + 30_000).toISOString(),
+      new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString(),
+    ]) {
+      expect(
+        (
+          await request(`/drives/${driveId}/shares`, shareToken, 'POST', {
+            path: '/sharing/a.txt',
+            expiresAt,
+          })
+        ).status,
+      ).toBe(400);
+    }
+    expect((await handlePublicShareRequest('invalid')).status).toBe(404);
+
+    const createdResponse = await request(`/drives/${driveId}/shares`, shareToken, 'POST', {
+      path: '/sharing/a.txt',
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await json(createdResponse);
+    expect(created.id).toMatch(/^[A-Za-z0-9_-]{22}$/u);
+    const shareId = created.id as string;
+    const publicResponse = await handlePublicShareRequest(shareId);
+    expect(publicResponse.status).toBe(200);
+    const publicBody = await json(publicResponse);
+    expect(publicBody.name).toBe('a.txt');
+    expect(new URL(publicBody.downloadUrl as string).searchParams.get('X-Amz-Expires')).toBe('60');
+    const listed = await json(await request(`/drives/${driveId}/shares`, shareToken));
+    expect(listed.items.some((item: { id: string }) => item.id === shareId)).toBe(true);
+    const downloaded = await fetch(publicBody.downloadUrl as string);
+    expect(
+      await decryptWithFileKey(new Uint8Array(await downloaded.arrayBuffer()), fileKeyA),
+    ).toEqual(plaintextA);
+
+    const revokedOnce = await request(`/drives/${driveId}/shares/${shareId}`, shareToken, 'DELETE');
+    const revokedAt = (await json(revokedOnce)).revokedAt;
+    const revokedTwice = await request(
+      `/drives/${driveId}/shares/${shareId}`,
+      shareToken,
+      'DELETE',
+    );
+    expect((await json(revokedTwice)).revokedAt).toBe(revokedAt);
+    const revoked = await handlePublicShareRequest(shareId);
+    expect(revoked.status).toBe(410);
+    expect((await json(revoked)).error.code).toBe('share_revoked');
+
+    const expiring = await json(
+      await request(`/drives/${driveId}/shares`, shareToken, 'POST', {
+        path: '/sharing/a.txt',
+        expiresAt: new Date(Date.now() + 90_000).toISOString(),
+      }),
+    );
+    await pool.query(
+      `UPDATE shares
+          SET created_at = now() - interval '2 seconds',
+              expires_at = now() - interval '1 second'
+        WHERE id = $1`,
+      [expiring.id],
+    );
+    const expired = await handlePublicShareRequest(expiring.id as string);
+    expect(expired.status).toBe(410);
+    expect((await json(expired)).error.code).toBe('share_expired');
+
+    const unavailable = await json(
+      await request(`/drives/${driveId}/shares`, shareToken, 'POST', { path: '/sharing/a.txt' }),
+    );
+    await request(`/drives/${driveId}/delete`, shareToken, 'POST', { path: '/sharing/a.txt' });
+    const trashed = await handlePublicShareRequest(unavailable.id as string);
+    expect(trashed.status).toBe(410);
+    expect((await json(trashed)).error.code).toBe('share_unavailable');
+    const trashedShare = (
+      await json(await request(`/drives/${driveId}/shares`, shareToken))
+    ).items.find((item: { id: string }) => item.id === unavailable.id);
+    expect(trashedShare).toMatchObject({ status: 'unavailable' });
+    const missing = await handlePublicShareRequest(randomUUID().replaceAll('-', '_').slice(0, 22));
+    expect(missing.status).toBe(404);
+    expect((await json(missing)).error.message).toBe('This share link does not exist.');
+
+    const stored = await pool.query(
+      `SELECT (SELECT COALESCE(json_agg(shares), '[]'::json) FROM shares WHERE drive_id = $1) AS shares,
+              (SELECT COALESCE(json_agg(audit_events), '[]'::json) FROM audit_events
+                WHERE account_id = (SELECT account_id FROM drives WHERE id = $1)
+                  AND action LIKE 'share.%') AS events`,
+      [driveId],
+    );
+    expect(
+      (stored.rows[0].events as Array<{ action: string; outcome: string }>).some(
+        (event) => event.action === 'share.access' && event.outcome === 'success',
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(stored.rows[0]).includes(fileKeyA)).toBe(false);
+    expect(JSON.stringify(stored.rows[0]).includes(driveKey)).toBe(false);
+    void uploadedA;
+  });
+
   it('allows write-only commits and delete-only deletes without granting read', async () => {
     const written = await uploadCommit(
       writeOnlyToken,
@@ -569,6 +710,12 @@ describe('Phase 1 core API', () => {
     expect((await request('/whoami', key(), 'GET')).status).toBe(401);
     expect((await request('/whoami', revokedToken)).status).toBe(401);
     expect((await request('/whoami', writeToken)).status).toBe(200);
+  });
+
+  it('rejects query strings larger than the configured maximum', async () => {
+    const result = await request(`/whoami?${'x'.repeat(MAX_QUERY_LENGTH + 1)}`, writeToken);
+    expect(result.status).toBe(400);
+    expect((await json(result)).error.code).toBe('validation_error');
   });
 
   it('creates and revokes a key through HTTP management routes', async () => {

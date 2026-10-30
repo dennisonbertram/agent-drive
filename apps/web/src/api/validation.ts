@@ -1,6 +1,8 @@
 import { ApiError } from './errors';
 
 export const MAX_BODY_BYTES = 256 * 1024;
+// Percent-encoding can expand a 1024-character Unicode path to 9216 characters.
+export const MAX_QUERY_LENGTH = 16 * 1024;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_PAGE_SIZE = 100;
 
@@ -164,7 +166,7 @@ export type CursorPayload = { value: string; id: string };
 
 export function decodeCursor(
   value: string | undefined,
-  kind: 'name' | 'path' | 'timestamp',
+  kind: 'name' | 'path' | 'timestamp' | 'share',
 ): CursorPayload | undefined {
   if (!value) return undefined;
   if (value.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
@@ -181,12 +183,16 @@ export function decodeCursor(
       record.value.length === 0 ||
       record.value.length > (kind === 'path' ? 1024 : 128) ||
       typeof record.id !== 'string' ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(record.id)
+      !(kind === 'share'
+        ? /^[A-Za-z0-9_-]{22}$/u.test(record.id)
+        : /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+            record.id,
+          ))
     ) {
       throw new Error('invalid cursor');
     }
     if (kind === 'path') canonicalPath(record.value, 'cursor path');
-    if (kind === 'timestamp' && Number.isNaN(Date.parse(record.value)))
+    if ((kind === 'timestamp' || kind === 'share') && Number.isNaN(Date.parse(record.value)))
       throw new Error('invalid timestamp');
     return { value: record.value, id: record.id };
   } catch {

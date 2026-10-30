@@ -39,6 +39,16 @@ describe('API validation helpers', () => {
     expect(() => decodeCursor(encodeCursor({ sql: 'invalid' }), 'path')).toThrow(ApiError);
   });
 
+  it('validates share cursor timestamps and identifiers', () => {
+    const value = '2025-01-02T03:04:05.000Z';
+    const id = 'A'.repeat(22);
+    const cursor = encodeCursor({ value, id });
+    expect(decodeCursor(cursor, 'share')).toEqual({ value, id });
+    expect(() => decodeCursor(encodeCursor({ value: 'not-a-date', id }), 'share')).toThrow(
+      ApiError,
+    );
+  });
+
   it('escapes SQL LIKE wildcard characters and rejects noncanonical paths', () => {
     expect(escapeLikeLiteral('/a%_b\\c')).toBe('/a\\%\\_b\\\\c');
     expect(() => canonicalPath('/a/../b')).toThrow(ApiError);
