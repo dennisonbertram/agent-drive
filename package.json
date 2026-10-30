@@ -15,6 +15,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:mcp": "vitest run --config vitest.mcp.config.ts",
     "test:e2e": "playwright test",
+    "agent-drive": "node packages/agent-drive/dist/cli.js",
     "build": "pnpm --recursive --workspace-concurrency=1 build"
   },
   "devDependencies": {
