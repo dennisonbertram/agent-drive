@@ -272,6 +272,10 @@ calendar-month peak retained storage and allocated drives, authorized-download b
 successful API operations. A presigned download URL gates the authorized-download allowance;
 it does not prove that bytes were transferred. Billable egress is calculated from observed S3
 response bytes in access logs. Metadata reads do not consume authorized-download allowance.
+Presigned URLs remain reusable until their short expiry, so authorized-download allowances
+are not hard caps on bytes served by S3. Replayed transfers are metered when logs arrive.
+Deployments needing an exact per-transfer ceiling require an additional download gateway;
+the direct-S3 v1 architecture does not provide one.
 Historical versions remain billable until deleted. Per-tier rates are snapshotted for each
 billing period, and the displayed base amount is a conservative estimate; Stripe proration and
 tax determine the final invoice. Spend caps block new writes based on the ledger's currently

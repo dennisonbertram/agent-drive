@@ -333,7 +333,9 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
       ? process.env.STRIPE_DEVELOPER_PRICE_ID!
       : process.env.STRIPE_TEAM_PRICE_ID!;
   const usage = process.env.STRIPE_USAGE_PRICE_ID!;
-  const session = await client.checkout.sessions.create(
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await client.checkout.sessions.create(
     {
       mode: 'subscription',
       customer,
@@ -349,6 +351,27 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
     },
     { idempotencyKey: reserved.idempotencyKey! },
   );
+  } catch (error) {
+    const failure = error as { type?: string; param?: string };
+    const now = new Date();
+    if (
+      failure.type === 'StripeInvalidRequestError' &&
+      ['subscription_data[billing_cycle_anchor]', 'subscription_data.billing_cycle_anchor'].includes(failure.param ?? '') &&
+      reserved.createdAt &&
+      nextMonthStart(reserved.createdAt) <= Math.floor(now.getTime() / 1000)
+    ) {
+      // Stripe does not persist idempotency results for parameter validation failures.
+      const renewed = await getPool().query(
+        `UPDATE billing_accounts SET checkout_created_at = $3
+         WHERE account_id = $1 AND checkout_idempotency_key = $2
+           AND checkout_session_id IS NULL AND checkout_created_at < $4`,
+        [accountId, reserved.idempotencyKey, now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))],
+      );
+      if (renewed.rowCount) return createCheckout(accountId, plan);
+      throw new ApiError('conflict', 'Checkout changed during recovery. Please retry.');
+    }
+    throw error;
+  }
   if (!session.url) throw new ApiError('internal_error', 'Stripe did not return a checkout URL.');
   await getPool().query(
     'UPDATE billing_accounts SET checkout_session_id = $2 WHERE account_id = $1 AND checkout_idempotency_key = $3',
