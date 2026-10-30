@@ -1,0 +1,2 @@
+ALTER TABLE "drives" ALTER COLUMN "quota_bytes" SET DEFAULT 9007199254740991;--> statement-breakpoint
+CREATE INDEX "billing_meter_reports_account_period_idx" ON "billing_meter_reports" USING btree ("account_id","period_start");

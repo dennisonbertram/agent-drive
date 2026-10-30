@@ -54,15 +54,30 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse) {
   }
   const method = request.method ?? 'GET';
   const requestUrl = `http://${request.headers.host}${request.url}`;
-  const result = request.url?.startsWith('/api/shares/')
-    ? await handlePublicShareRequest(request.url.slice('/api/shares/'.length).split('?')[0]!)
-    : await handleApiRequest(
-        new Request(requestUrl, {
-          method,
-          headers,
-          ...(method === 'GET' || method === 'HEAD' ? {} : { body: body as unknown as BodyInit }),
-        }),
-      );
+  const result =
+    request.headers.authorization === 'Bearer mcp-rate-limit-fixture'
+      ? Response.json(
+          {
+            error: {
+              code: 'rate_limited',
+              message: 'UNTRUSTED_SERVER_TEXT',
+              retryAfter: 45,
+              upgradeUrl: 'http://remote.example.test/upgrade',
+            },
+          },
+          { status: 429 },
+        )
+      : request.url?.startsWith('/api/shares/')
+        ? await handlePublicShareRequest(request.url.slice('/api/shares/'.length).split('?')[0]!)
+        : await handleApiRequest(
+            new Request(requestUrl, {
+              method,
+              headers,
+              ...(method === 'GET' || method === 'HEAD'
+                ? {}
+                : { body: body as unknown as BodyInit }),
+            }),
+          );
   response.statusCode = result.status;
   result.headers.forEach((value, key) => response.setHeader(key, value));
   response.end(Buffer.from(await result.arrayBuffer()));
@@ -415,6 +430,45 @@ describe('MCP product tools over stdio', () => {
       expect(JSON.stringify(result.value)).not.toContain(driveKey);
     } finally {
       await readonly.client.close();
+    }
+
+    await database.query('UPDATE billing_accounts SET spend_cap_cents = 0 WHERE account_id = $1', [
+      accountId,
+    ]);
+    const paymentRequired = await openMcp(scopedToken, driveKey);
+    try {
+      const result = await call(paymentRequired.client, 'put', {
+        driveId,
+        path: '/billing-cap.txt',
+        text: 'blocked by spend cap',
+      });
+      expect(result.result.isError).toBe(true);
+      expect(result.value).toMatchObject({
+        error: {
+          code: 'payment_required',
+          message: 'The account requires a billing plan or payment action.',
+          upgradeUrl: expect.any(String),
+        },
+      });
+      expect(JSON.stringify(result.value)).not.toContain('configured spend cap');
+    } finally {
+      await paymentRequired.client.close();
+    }
+
+    const limited = await openMcp('mcp-rate-limit-fixture');
+    try {
+      const result = await call(limited.client, 'whoami');
+      expect(result.value).toMatchObject({
+        error: {
+          code: 'rate_limited',
+          message: 'The API key has exceeded its request rate limit.',
+          retryAfter: 45,
+        },
+      });
+      expect(JSON.stringify(result.value)).not.toContain('UNTRUSTED_SERVER_TEXT');
+      expect(result.value.error).not.toHaveProperty('upgradeUrl');
+    } finally {
+      await limited.client.close();
     }
 
     const tables = await database.query<{ tablename: string }>(

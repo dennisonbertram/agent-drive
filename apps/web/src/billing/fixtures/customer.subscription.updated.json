@@ -1,0 +1,33 @@
+{
+  "id": "evt_subscription_fixture",
+  "object": "event",
+  "api_version": "2025-08-27.basil",
+  "created": 1800000000,
+  "livemode": false,
+  "type": "customer.subscription.updated",
+  "data": {
+    "object": {
+      "id": "sub_fixture",
+      "object": "subscription",
+      "customer": "cus_fixture",
+      "status": "active",
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_base_fixture",
+            "object": "subscription_item",
+            "quantity": 1,
+            "price": { "id": "price_developer_fixture", "object": "price" }
+          },
+          {
+            "id": "si_usage_fixture",
+            "object": "subscription_item",
+            "price": { "id": "price_usage_fixture", "object": "price" }
+          }
+        ]
+      },
+      "metadata": { "accountId": "account_fixture" }
+    }
+  }
+}

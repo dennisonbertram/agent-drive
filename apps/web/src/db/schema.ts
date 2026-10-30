@@ -4,7 +4,9 @@ import {
   check,
   index,
   integer,
+  jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -73,7 +75,9 @@ export const drives = pgTable(
       .notNull()
       .references(() => accounts.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    quotaBytes: bigint('quota_bytes', { mode: 'number' }).notNull().default(5_368_709_120),
+    quotaBytes: bigint('quota_bytes', { mode: 'number' })
+      .notNull()
+      .default(Number.MAX_SAFE_INTEGER),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
@@ -259,7 +263,7 @@ export const auditEvents = pgTable(
   },
   (table) => [
     index('audit_events_account_created_idx').on(table.accountId, table.createdAt),
-    check('audit_events_outcome_check', sql`${table.outcome} IN ('success', 'failure')`),
+    check('audit_events_outcome_check', sql`${table.outcome} IN ('pending', 'success', 'failure')`),
   ],
 );
 
@@ -290,5 +294,190 @@ export const fileEvents = pgTable(
       'file_events_operation_check',
       sql`${table.operation} IN ('put', 'copy', 'restore', 'move', 'delete')`,
     ),
+  ],
+);
+
+export const billingAccounts = pgTable(
+  'billing_accounts',
+  {
+    accountId: uuid('account_id')
+      .primaryKey()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    plan: text('plan').notNull().default('free'),
+    stripeCustomerId: text('stripe_customer_id'),
+    stripeSubscriptionId: text('stripe_subscription_id'),
+    subscriptionStatus: text('subscription_status'),
+    spendCapCents: bigint('spend_cap_cents', { mode: 'bigint' }),
+    alertThresholdCents: bigint('alert_threshold_cents', { mode: 'bigint' }),
+    alertEmail: text('alert_email'),
+    stripeEventCreated: bigint('stripe_event_created', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    stripeEventId: text('stripe_event_id'),
+    checkoutIdempotencyKey: text('checkout_idempotency_key'),
+    checkoutSessionId: text('checkout_session_id'),
+    checkoutCreatedAt: timestamp('checkout_created_at', { withTimezone: true, mode: 'date' }),
+  },
+  (table) => [
+    uniqueIndex('billing_accounts_stripe_customer_unique').on(table.stripeCustomerId),
+    uniqueIndex('billing_accounts_stripe_subscription_unique').on(table.stripeSubscriptionId),
+    check('billing_accounts_plan_check', sql`${table.plan} IN ('free', 'developer', 'team')`),
+    check(
+      'billing_accounts_spend_cap_nonnegative',
+      sql`${table.spendCapCents} IS NULL OR ${table.spendCapCents} >= 0`,
+    ),
+    check(
+      'billing_accounts_alert_threshold_nonnegative',
+      sql`${table.alertThresholdCents} IS NULL OR ${table.alertThresholdCents} >= 0`,
+    ),
+  ],
+);
+
+export const billingPeriods = pgTable(
+  'billing_periods',
+  {
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    periodStart: timestamp('period_start', { withTimezone: true, mode: 'date' }).notNull(),
+    plan: text('plan').notNull(),
+    peakDrives: bigint('peak_drives', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    peakStorageBytes: bigint('peak_storage_bytes', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    authorizedEgressBytes: bigint('authorized_egress_bytes', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    baselineCents: bigint('baseline_cents', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    earnedCents: bigint('earned_cents', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    baseCents: bigint('base_cents', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+    rates: jsonb('rates').$type<Record<string, string>>(),
+    statement: jsonb('statement').$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.accountId, table.periodStart], name: 'billing_periods_pk' }),
+    check('billing_periods_plan_check', sql`${table.plan} IN ('free', 'developer', 'team')`),
+    check('billing_periods_peak_drives_nonnegative', sql`${table.peakDrives} >= 0`),
+    check('billing_periods_peak_storage_nonnegative', sql`${table.peakStorageBytes} >= 0`),
+    check(
+      'billing_periods_authorized_egress_nonnegative',
+      sql`${table.authorizedEgressBytes} >= 0`,
+    ),
+    check('billing_periods_baseline_nonnegative', sql`${table.baselineCents} >= 0`),
+    check('billing_periods_earned_nonnegative', sql`${table.earnedCents} >= 0`),
+    check('billing_periods_base_nonnegative', sql`${table.baseCents} >= 0`),
+  ],
+);
+
+export const billingEgressEvents = pgTable(
+  'billing_egress_events',
+  {
+    id: text('id').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    driveId: uuid('drive_id').references(() => drives.id, { onDelete: 'set null' }),
+    objectKey: text('object_key').notNull(),
+    bytesSent: bigint('bytes_sent', { mode: 'bigint' }).notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'date' }).notNull(),
+  },
+  (table) => [
+    index('billing_egress_account_time_idx').on(table.accountId, table.occurredAt),
+    index('billing_egress_agent_time_idx').on(table.agentId, table.occurredAt),
+    check('billing_egress_bytes_nonnegative', sql`${table.bytesSent} >= 0`),
+  ],
+);
+
+export const apiKeyRateLimits = pgTable(
+  'api_key_rate_limits',
+  {
+    apiKeyId: uuid('api_key_id')
+      .primaryKey()
+      .references(() => apiKeys.id, { onDelete: 'cascade' }),
+    windowStart: timestamp('window_start', { withTimezone: true, mode: 'date' }).notNull(),
+    requests: integer('requests').notNull(),
+  },
+  (table) => [check('api_key_rate_limits_requests_positive', sql`${table.requests} > 0`)],
+);
+
+export const billingMeterReports = pgTable(
+  'billing_meter_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    periodStart: timestamp('period_start', { withTimezone: true, mode: 'date' }).notNull(),
+    stripeCustomerId: text('stripe_customer_id').notNull(),
+    cents: bigint('cents', { mode: 'bigint' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    firstAttemptAt: timestamp('first_attempt_at', { withTimezone: true, mode: 'date' }),
+    leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
+    reportedAt: timestamp('reported_at', { withTimezone: true, mode: 'date' }),
+    lastError: text('last_error'),
+  },
+  (table) => [
+    index('billing_meter_reports_pending_idx').on(table.leaseUntil, table.createdAt),
+    index('billing_meter_reports_account_period_idx').on(table.accountId, table.periodStart),
+    check('billing_meter_reports_cents_positive', sql`${table.cents} > 0`),
+  ],
+);
+
+export const billingNotifications = pgTable(
+  'billing_notifications',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    periodStart: timestamp('period_start', { withTimezone: true, mode: 'date' }).notNull(),
+    thresholdCents: bigint('threshold_cents', { mode: 'bigint' }).notNull(),
+    email: text('email').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    firstAttemptAt: timestamp('first_attempt_at', { withTimezone: true, mode: 'date' }),
+    leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
+    sentAt: timestamp('sent_at', { withTimezone: true, mode: 'date' }),
+    lastError: text('last_error'),
+  },
+  (table) => [
+    uniqueIndex('billing_notifications_account_period_threshold_unique').on(
+      table.accountId,
+      table.periodStart,
+      table.thresholdCents,
+    ),
+    index('billing_notifications_pending_idx').on(table.leaseUntil, table.createdAt),
+    check('billing_notifications_threshold_nonnegative', sql`${table.thresholdCents} >= 0`),
+  ],
+);
+
+export const stripeEvents = pgTable('stripe_events', {
+  id: text('id').primaryKey(),
+  created: bigint('created', { mode: 'bigint' }).notNull(),
+  type: text('type').notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+    .notNull()
+    .defaultNow(),
+});
+
+export const billingLogObjects = pgTable(
+  'billing_log_objects',
+  {
+    objectKey: text('object_key').notNull(),
+    etag: text('etag').notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.objectKey, table.etag], name: 'billing_log_objects_pk' }),
   ],
 );

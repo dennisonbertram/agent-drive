@@ -28,6 +28,21 @@ import {
   presignedUpload,
 } from './storage';
 import { cleanupExpiredUploads } from './upload-cleanup';
+import {
+  authorizeDownload,
+  billingSummary,
+  enforceKeyRateLimit,
+  enforceOperationBudget,
+  enforceWriteBudget,
+  lockBillingAccount,
+} from '../billing/ledger';
+import {
+  checkoutConfigured,
+  createCheckout,
+  createPortal,
+  egressMeteringConfigured,
+  emailConfigured,
+} from '../billing/providers';
 
 type Auth = {
   keyId: string | null;
@@ -44,12 +59,29 @@ type RequestContext = {
   action: string;
   status: number;
   errorCode?: string;
+  auditId?: string;
 };
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage']);
+const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
+const quotaControlledActions = new Set([
+  'drives.create',
+  'drive.put',
+  'drive.commit',
+  'drive.get',
+  'drive.list',
+  'drive.versions',
+  'drive.recent',
+  'drive.search',
+  'drive.trash',
+  'drive.move',
+  'drive.copy',
+  'drive.restore',
+  'share.create',
+]);
 
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
@@ -128,6 +160,22 @@ function manage(auth: Auth) {
   need(auth, 'manage');
 }
 
+function driveQuota(value: unknown, fallback: bigint) {
+  if (value === undefined) return Number(fallback);
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new ApiError('validation_error', 'quotaBytes must be a positive safe integer.');
+  }
+  return value;
+}
+
+function billingFlags() {
+  return {
+    checkoutConfigured: checkoutConfigured(),
+    egressMeteringConfigured: egressMeteringConfigured(),
+    emailConfigured: emailConfigured(),
+  };
+}
+
 async function machineId(client: PoolClient, auth: Auth, request: Request) {
   const name = request.headers.get('x-agent-drive-machine') ?? 'unknown';
   if (!/^[\p{L}\p{N}][\p{L}\p{N} ._:@-]{0,127}$/u.test(name)) {
@@ -201,22 +249,46 @@ function actionFor(method: string, parts: string[]) {
   return 'unknown';
 }
 
-async function audit(context: RequestContext) {
-  await getPool().query(
+async function audit(
+  context: RequestContext,
+  client: PoolClient | ReturnType<typeof getPool> = getPool(),
+  pending = false,
+) {
+  const outcome = pending ? 'pending' : context.status >= 400 ? 'failure' : 'success';
+  if (context.auditId && !pending) {
+    const updated = await client.query(
+      `UPDATE audit_events SET outcome = $2, error_code = $3, http_status = $4
+       WHERE id = $1 AND outcome = 'pending'`,
+      [context.auditId, outcome, context.errorCode ?? null, context.status],
+    );
+    if (updated.rowCount !== 1) throw new Error('The reserved audit event was not found.');
+    return context.auditId;
+  }
+  const inserted = await client.query<{ id: string }>(
     `INSERT INTO audit_events
       (api_key_id, account_id, agent_id, user_id, action, outcome, error_code, http_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
     [
       context.auth?.keyId ?? null,
       context.auth?.accountId ?? context.accountId ?? null,
       context.auth?.agentId ?? null,
       context.auth?.userId ?? null,
       context.action,
-      context.status >= 400 ? 'failure' : 'success',
+      outcome,
       context.errorCode ?? null,
-      context.status,
+      pending ? 102 : context.status,
     ],
   );
+  return inserted.rows[0]!.id;
+}
+
+async function reserveOperation(context: RequestContext) {
+  const accountId = context.auth?.accountId ?? context.accountId;
+  if (!accountId) throw new Error('An account is required to reserve an operation.');
+  context.auditId = await withTransaction(async (client) => {
+    await enforceOperationBudget(client, accountId);
+    return audit(context, client, true);
+  });
 }
 
 async function ensureDrive(auth: Auth, driveId: string) {
@@ -343,21 +415,23 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     manage(auth);
     const body = await jsonBody(request);
     const name = stringField(body, 'name', { required: true, max: 128 })!;
-    const quota =
-      body.quotaBytes === undefined ? 5_368_709_120 : boundedSize(body.quotaBytes, 'quotaBytes');
-    const result = await getPool().query(
-      `INSERT INTO drives (account_id, name, quota_bytes) VALUES ($1, $2, $3)
-       ON CONFLICT (account_id, name) DO NOTHING
-       RETURNING id, name, quota_bytes, created_at`,
-      [auth.accountId, name, quota],
-    );
-    if (result.rows[0]) return response({ ...result.rows[0], created: true }, 200);
-    const existing = await getPool().query(
-      'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND name = $2',
-      [auth.accountId, name],
-    );
-    if (!existing.rows[0]) throw new ApiError('internal_error', 'The drive could not be created.');
-    return response({ ...existing.rows[0], created: false }, 200);
+    const result = await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
+      const existing = await client.query(
+        'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND name = $2',
+        [auth.accountId, name],
+      );
+      if (existing.rows[0]) return { ...existing.rows[0], created: false };
+      await enforceWriteBudget(client, auth.accountId, { drives: 1n });
+      const quota = driveQuota(body.quotaBytes, DEFAULT_DRIVE_QUOTA_BYTES);
+      const created = await client.query(
+        `INSERT INTO drives (account_id, name, quota_bytes) VALUES ($1, $2, $3)
+         RETURNING id, name, quota_bytes, created_at`,
+        [auth.accountId, name, quota],
+      );
+      return { ...created.rows[0], created: true };
+    });
+    return response(result, 200);
   }
   if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') {
     manage(auth);
@@ -434,6 +508,84 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
 }
 
 async function consoleEndpoint(request: Request, auth: Auth, parts: string[], url: URL) {
+  if (parts.length === 1 && parts[0] === 'billing' && request.method === 'GET') {
+    return response({ ...(await billingSummary(auth.accountId)), ...billingFlags() });
+  }
+  if (
+    parts.length === 2 &&
+    parts[0] === 'billing' &&
+    parts[1] === 'settings' &&
+    request.method === 'PATCH'
+  ) {
+    const body = await jsonBody(request);
+    const parseCents = (value: unknown, field: string) => {
+      if (value === null) return null;
+      if (
+        typeof value !== 'number' ||
+        !Number.isSafeInteger(value) ||
+        value < 0 ||
+        value > 1_000_000_000
+      )
+        throw new ApiError('validation_error', `${field} must be a nonnegative integer of cents.`);
+      return value;
+    };
+    const spendCapCents = parseCents(body.spendCapCents, 'spendCapCents');
+    const alertThresholdCents = parseCents(body.alertThresholdCents, 'alertThresholdCents');
+    const alertEmail =
+      body.alertEmail === null
+        ? null
+        : stringField(body, 'alertEmail', { required: true, max: 254 });
+    if (alertEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(alertEmail))
+      throw new ApiError('validation_error', 'alertEmail must be a valid email address.');
+    if (alertThresholdCents !== null && !alertEmail)
+      throw new ApiError('validation_error', 'alertEmail is required with alertThresholdCents.');
+    await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
+      await client.query(
+        `UPDATE billing_accounts
+            SET spend_cap_cents = $2, alert_threshold_cents = $3, alert_email = $4
+          WHERE account_id = $1`,
+        [auth.accountId, spendCapCents, alertThresholdCents, alertEmail],
+      );
+    });
+    return response({ ...(await billingSummary(auth.accountId)), ...billingFlags() });
+  }
+  if (
+    parts.length === 2 &&
+    parts[0] === 'billing' &&
+    parts[1] === 'checkout' &&
+    request.method === 'POST'
+  ) {
+    const body = await jsonBody(request);
+    const plan = stringField(body, 'plan', { required: true, max: 16 });
+    if (plan !== 'developer' && plan !== 'team')
+      throw new ApiError('validation_error', 'plan must be developer or team.');
+    return response(await createCheckout(auth.accountId, plan));
+  }
+  if (
+    parts.length === 2 &&
+    parts[0] === 'billing' &&
+    parts[1] === 'portal' &&
+    request.method === 'POST'
+  ) {
+    return response(await createPortal(auth.accountId));
+  }
+  if (
+    parts.length === 2 &&
+    parts[0] === 'billing' &&
+    parts[1] === 'statements' &&
+    request.method === 'GET'
+  ) {
+    const rows = await getPool().query(
+      `SELECT period_start, statement FROM billing_periods
+        WHERE account_id = $1 AND statement IS NOT NULL
+        ORDER BY period_start DESC`,
+      [auth.accountId],
+    );
+    return response({
+      items: rows.rows.map((row) => ({ periodStart: row.period_start, statement: row.statement })),
+    });
+  }
   if (parts.length === 1 && parts[0] === 'session' && request.method === 'GET') {
     return response({
       account: { id: auth.accountId, name: auth.accountName ?? 'Personal workspace' },
@@ -441,6 +593,8 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
     });
   }
   if (parts.length === 1 && parts[0] === 'usage' && request.method === 'GET') {
+    const billing = await billingSummary(auth.accountId);
+    const observedEgressConfigured = egressMeteringConfigured();
     const driveUsage = await getPool().query(
       `WITH version_usage AS (
          SELECT v.drive_id, COALESCE(SUM(v.ciphertext_size), 0)::bigint AS storage_bytes,
@@ -457,13 +611,15 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
        SELECT d.id, d.name, d.quota_bytes,
               COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
               COALESCE(lu.live_files, 0)::int AS live_files,
+              COALESCE((SELECT sum(e.bytes_sent) FROM billing_egress_events e
+                WHERE e.drive_id = d.id AND e.occurred_at >= $2 AND e.occurred_at < $3), 0)::text AS egress_bytes,
               COALESCE(vu.versions, 0)::int AS versions
          FROM drives d
          LEFT JOIN version_usage vu ON vu.drive_id = d.id
          LEFT JOIN live_usage lu ON lu.drive_id = d.id
         WHERE d.account_id = $1
         ORDER BY d.name, d.id`,
-      [auth.accountId],
+      [auth.accountId, billing.periodStart, billing.periodEnd],
     );
     const agentUsage = await getPool().query(
       `WITH version_usage AS (
@@ -473,21 +629,29 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
           WHERE owned.account_id = $1
           GROUP BY v.agent_id
        ), operation_usage AS (
-         SELECT agent_id, COUNT(*)::int AS operations
-           FROM audit_events
-          WHERE account_id = $1 AND agent_id IS NOT NULL
+         SELECT e.agent_id, COUNT(*)::int AS operations
+           FROM audit_events e
+          WHERE e.account_id = $1 AND e.agent_id IS NOT NULL
+            AND e.created_at >= $2 AND e.created_at < $3 AND e.outcome = 'success'
+          GROUP BY e.agent_id
+       ), egress_usage AS (
+         SELECT agent_id, COALESCE(sum(bytes_sent),0)::text AS egress_bytes
+           FROM billing_egress_events
+          WHERE account_id = $1 AND occurred_at >= $2 AND occurred_at < $3
           GROUP BY agent_id
        )
        SELECT a.id, a.name,
               COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
               COALESCE(vu.versions, 0)::int AS versions,
-              COALESCE(ou.operations, 0)::int AS operations
+              COALESCE(ou.operations, 0)::int AS operations,
+              eu.egress_bytes
          FROM agents a
          LEFT JOIN version_usage vu ON vu.agent_id = a.id
          LEFT JOIN operation_usage ou ON ou.agent_id = a.id
+         LEFT JOIN egress_usage eu ON eu.agent_id = a.id
         WHERE a.account_id = $1
         ORDER BY a.name, a.id`,
-      [auth.accountId],
+      [auth.accountId, billing.periodStart, billing.periodEnd],
     );
     const drives = (driveUsage.rows as Row[]).map((row) => ({
       id: row.id,
@@ -496,6 +660,7 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
       storageBytes: Number(row.storage_bytes),
       liveFiles: Number(row.live_files),
       versions: Number(row.versions),
+      egressBytes: observedEgressConfigured ? String(row.egress_bytes) : null,
     }));
     const agents = (agentUsage.rows as Row[]).map((row) => ({
       id: row.id,
@@ -503,14 +668,16 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
       storageBytes: Number(row.storage_bytes),
       versions: Number(row.versions),
       operations: Number(row.operations),
+      egressBytes: observedEgressConfigured ? String(row.egress_bytes ?? 0) : null,
     }));
     return response({
       drives,
       agents,
       storageBytes: drives.reduce((total, drive) => total + drive.storageBytes, 0),
-      operations: agents.reduce((total, agent) => total + agent.operations, 0),
-      egressBytes: null,
-      cost: null,
+      operations: Number(billing.operations),
+      egressBytes: observedEgressConfigured ? billing.egressBytes : null,
+      egressMeteringConfigured: observedEgressConfigured,
+      cost: billing.overageConfigured ? billing.totalCents : null,
     });
   }
   if (
@@ -735,33 +902,58 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
       : null;
   const drive = await ensureDrive(auth, driveId);
   await cleanupExpiredUploads();
-  const machine = await withTransaction((client) => machineId(client, auth, request));
   const id = randomUUID();
   const stagingKey = `staging/${auth.accountId}/${driveId}/${id}`;
-  const result = await getPool().query(
-    `INSERT INTO upload_intents
-      (id, api_key_id, account_id, agent_id, machine_id, drive_id, path, staging_key, ciphertext_size,
-       wrapped_key, conditional_mode, base_version_id, user_id, tags, description, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now() + interval '10 minutes')
-     RETURNING id, expires_at`,
-    [
-      id,
-      auth.keyId,
-      auth.accountId,
-      auth.agentId,
-      machine,
-      drive.id,
-      path,
-      stagingKey,
-      ciphertextSize,
-      wrappedKey,
-      mode,
-      baseVersionId,
-      userId ?? null,
-      fileTags,
-      description ?? null,
-    ],
-  );
+  const result = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id, quota_bytes FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    await enforceWriteBudget(client, auth.accountId, {
+      bytes: BigInt(ciphertextSize),
+      reserveOnly: true,
+    });
+    const used = await client.query<{ bytes: string }>(
+      `SELECT (
+         (SELECT COALESCE(sum(ciphertext_size),0) FROM versions WHERE drive_id = $1) +
+         (SELECT COALESCE(sum(ciphertext_size),0) FROM upload_intents
+           WHERE drive_id = $1 AND committed_version_id IS NULL AND expires_at > now())
+       )::text AS bytes`,
+      [driveId],
+    );
+    const usedBytes = BigInt(used.rows[0]!.bytes);
+    const quotaBytes = BigInt(lockedDrive.rows[0].quota_bytes);
+    if (usedBytes + BigInt(ciphertextSize) > quotaBytes) {
+      throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
+    }
+    const machine = await machineId(client, auth, request);
+    return client.query(
+      `INSERT INTO upload_intents
+        (id, api_key_id, account_id, agent_id, machine_id, drive_id, path, staging_key, ciphertext_size,
+         wrapped_key, conditional_mode, base_version_id, user_id, tags, description, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now() + interval '10 minutes')
+       RETURNING id, expires_at`,
+      [
+        id,
+        auth.keyId,
+        auth.accountId,
+        auth.agentId,
+        machine,
+        drive.id,
+        path,
+        stagingKey,
+        ciphertextSize,
+        wrappedKey,
+        mode,
+        baseVersionId,
+        userId ?? null,
+        fileTags,
+        description ?? null,
+      ],
+    );
+  });
   try {
     const uploadUrl = await presignedUpload(stagingKey, ciphertextSize);
     return response(
@@ -807,6 +999,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   let copied = false;
   try {
     const result = await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
       const lockedIntentResult = await client.query(
         `SELECT * FROM upload_intents
           WHERE id = $1 AND drive_id = $2 AND api_key_id = $3
@@ -827,6 +1020,10 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         );
         return { version: existingVersion.rows[0] as Row, idempotent: true };
       }
+      await enforceWriteBudget(client, auth.accountId, {
+        bytes: BigInt(lockedIntent.ciphertext_size),
+        excludeIntentId: intentId,
+      });
       if (new Date(lockedIntent.expires_at).getTime() < Date.now())
         throw new ApiError('conflict', 'The upload intent has expired.');
       const fileResult = await client.query(
@@ -957,7 +1154,11 @@ async function fileEndpoint(
     );
     const row = result.rows[0] as Row | undefined;
     if (!row) throw new ApiError('not_found', 'File not found.');
-    return response({ ...rowVersion(row), downloadUrl: await presignedDownload(row.object_key) });
+    if (url.searchParams.get('metadataOnly') === '1') return response(rowVersion(row));
+    const downloadUrl = await authorizeDownload(auth.accountId, BigInt(row.ciphertext_size), () =>
+      presignedDownload(row.object_key),
+    );
+    return response({ ...rowVersion(row), downloadUrl });
   }
   if (operation === 'list' && request.method === 'GET') {
     need(auth, 'read', driveId);
@@ -1078,6 +1279,8 @@ async function fileEndpoint(
     const to = canonicalPath(body.destinationPath, 'destinationPath');
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const moved = await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
+      await enforceWriteBudget(client, auth.accountId);
       await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
         driveId,
         auth.accountId,
@@ -1150,11 +1353,12 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       ? undefined
       : uuid(typeof body.versionId === 'string' ? body.versionId : undefined, 'versionId');
   const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
-  const machine = await withTransaction((client) => machineId(client, auth, request));
   let copiedKey: string | undefined;
   let result: Row;
   try {
     result = await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
+      const machine = await machineId(client, auth, request);
       await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
         driveId,
         auth.accountId,
@@ -1166,6 +1370,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       );
       const row = source.rows[0] as Row | undefined;
       if (!row) throw new ApiError('not_found', 'Source file or version not found.');
+      await enforceWriteBudget(client, auth.accountId, { bytes: BigInt(row.ciphertext_size) });
       const existing = await client.query(
         'SELECT id FROM files WHERE drive_id = $1 AND path = $2',
         [driveId, destinationPath],
@@ -1245,6 +1450,18 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
 
 function consoleRouteAllowed(method: string, parts: string[]) {
+  if (method === 'GET' && parts.length === 1 && parts[0] === 'billing') return true;
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'billing' && parts[1] === 'statements')
+    return true;
+  if (method === 'PATCH' && parts.length === 2 && parts[0] === 'billing' && parts[1] === 'settings')
+    return true;
+  if (
+    method === 'POST' &&
+    parts.length === 2 &&
+    parts[0] === 'billing' &&
+    ['checkout', 'portal'].includes(parts[1]!)
+  )
+    return true;
   if (
     method === 'GET' &&
     parts.length === 1 &&
@@ -1304,6 +1521,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     const auth = context.auth;
     if (!auth) throw new ApiError('internal_error', 'The request actor is unavailable.');
+    await enforceKeyRateLimit(auth.keyId);
+    if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console' ? await consoleEndpoint(request, auth, relative, url) : undefined;
     const control = consoleOutput ?? (await controlPlane(request, auth, relative));
@@ -1354,7 +1573,7 @@ export function handleConsoleApiRequest(request: Request, userId: string | null)
 
 const shareIdPattern = /^[A-Za-z0-9_-]{22}$/u;
 
-export async function handlePublicShareRequest(shareId: string) {
+export async function handlePublicShareRequest(shareId: string, metadataOnly = false) {
   const context: RequestContext = { action: 'share.access', status: 500 };
   let output: Response;
   try {
@@ -1377,17 +1596,31 @@ export async function handlePublicShareRequest(shareId: string) {
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
-    const remainingSeconds = Math.floor(
-      (new Date(row.expires_at).getTime() - new Date(row.db_now).getTime()) / 1000,
-    );
-    if (remainingSeconds < 1)
-      throw new ApiError('share_expired', 'This share link is too close to expiry to download.');
-    output = response({
-      name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),
-      ciphertextSize: Number(row.ciphertext_size),
-      expiresAt: row.expires_at,
-      downloadUrl: await presignedDownload(String(row.object_key), Math.min(60, remainingSeconds)),
-    });
+    await reserveOperation(context);
+    if (metadataOnly) {
+      output = response({
+        name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),
+        ciphertextSize: Number(row.ciphertext_size),
+        expiresAt: row.expires_at,
+      });
+    } else {
+      const remainingSeconds = Math.floor(
+        (new Date(row.expires_at).getTime() - new Date(row.db_now).getTime()) / 1000,
+      );
+      if (remainingSeconds < 1)
+        throw new ApiError('share_expired', 'This share link is too close to expiry to download.');
+      const downloadUrl = await authorizeDownload(
+        String(row.account_id),
+        BigInt(row.ciphertext_size),
+        () => presignedDownload(String(row.object_key), Math.min(60, remainingSeconds)),
+      );
+      output = response({
+        name: String(row.path).slice(String(row.path).lastIndexOf('/') + 1),
+        ciphertextSize: Number(row.ciphertext_size),
+        expiresAt: row.expires_at,
+        downloadUrl,
+      });
+    }
     context.status = output.status;
   } catch (error) {
     const mapped = error instanceof ApiError ? error : errorFromDatabase(error);

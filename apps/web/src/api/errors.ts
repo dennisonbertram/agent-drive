@@ -5,6 +5,8 @@ export type ErrorCode =
   | 'not_found'
   | 'conflict'
   | 'quota_exceeded'
+  | 'payment_required'
+  | 'rate_limited'
   | 'share_revoked'
   | 'share_expired'
   | 'share_unavailable'
@@ -17,6 +19,8 @@ const statuses: Record<ErrorCode, number> = {
   not_found: 404,
   conflict: 409,
   quota_exceeded: 413,
+  payment_required: 402,
+  rate_limited: 429,
   share_revoked: 410,
   share_expired: 410,
   share_unavailable: 410,
@@ -30,6 +34,7 @@ export class ApiError extends Error {
     readonly code: ErrorCode,
     message: string,
     status = statuses[code],
+    readonly details: { upgradeUrl?: string; retryAfter?: number } = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -43,8 +48,16 @@ export function responseForError(error: unknown) {
       ? error
       : new ApiError('internal_error', 'An internal error occurred.');
   return Response.json(
-    { error: { code: apiError.code, message: apiError.message } },
-    { status: apiError.status, headers: { 'Cache-Control': 'no-store' } },
+    { error: { code: apiError.code, message: apiError.message, ...apiError.details } },
+    {
+      status: apiError.status,
+      headers: {
+        'Cache-Control': 'no-store',
+        ...(apiError.details.retryAfter === undefined
+          ? {}
+          : { 'Retry-After': String(apiError.details.retryAfter) }),
+      },
+    },
   );
 }
 

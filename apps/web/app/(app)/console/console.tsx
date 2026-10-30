@@ -387,6 +387,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               {item === 'Files' && <span className="nav-count">{drives.length}</span>}
             </button>
           ))}
+          <Link className="nav-item" href="/console/billing">
+            <span aria-hidden="true">$</span>Billing &amp; limits
+          </Link>
         </nav>
         <div className="sidebar-bottom">
           <div className="privacy-note">
@@ -873,12 +876,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <article className="panel stat">
                       <p>API OPERATIONS</p>
                       <strong>{usage.operations.toLocaleString()}</strong>
-                      <small>Recorded attempts, including failures</small>
+                      <small>Successful operations this calendar month</small>
                     </article>
                     <article className="panel stat">
                       <p>EGRESS & COST</p>
-                      <strong className="pending-stat">Not metered yet</strong>
-                      <small>Billing meters arrive with the billing phase</small>
+                      <Link className="button secondary" href="/console/billing">
+                        Billing &amp; limits
+                      </Link>
+                      <small>Monthly estimates, observed transfers, and spending controls</small>
                     </article>
                   </div>
                   <section className="panel">
@@ -891,14 +896,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <div className="split">
                           <strong>{item.name}</strong>
                           <span>
-                            {size(item.storageBytes)} / {size(item.quotaBytes)}
+                            {size(item.storageBytes)}
+                            {item.quotaBytes === Number.MAX_SAFE_INTEGER
+                              ? ' · account limits apply'
+                              : ` / ${size(item.quotaBytes)}`}
                           </span>
                         </div>
-                        <progress
-                          value={item.storageBytes}
-                          max={item.quotaBytes}
-                          aria-label={`${item.name} storage usage`}
-                        />
+                        {item.quotaBytes !== Number.MAX_SAFE_INTEGER && (
+                          <progress
+                            value={item.storageBytes}
+                            max={item.quotaBytes}
+                            aria-label={`${item.name} storage usage`}
+                          />
+                        )}
                         <small>
                           {item.liveFiles} live files · {item.versions} stored versions
                         </small>

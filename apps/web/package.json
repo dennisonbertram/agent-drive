@@ -8,6 +8,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
+    "billing:run": "tsx src/billing/maintenance-cli.ts",
     "maintenance:cleanup-expired-uploads": "tsx src/api/cleanup-expired-uploads-cli.ts",
     "provision:local": "node scripts/provision.mjs --local"
   },
@@ -19,7 +20,8 @@
     "next": "16.4.3",
     "pg": "8.23.1",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "stripe": "18.5.0"
   },
   "devDependencies": {
     "@types/pg": "8.15.5",

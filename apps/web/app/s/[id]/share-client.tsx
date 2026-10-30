@@ -13,7 +13,7 @@ type ShareMetadata = {
   name: string;
   ciphertextSize: number;
   expiresAt: string;
-  downloadUrl: string;
+  downloadUrl?: string;
 };
 
 const errorHeadings: Record<string, string> = {
@@ -32,12 +32,15 @@ class ShareError extends Error {
   }
 }
 
-async function fetchShare(id: string): Promise<ShareMetadata> {
-  const response = await fetch(`/api/shares/${encodeURIComponent(id)}`, {
-    cache: 'no-store',
-    credentials: 'omit',
-    redirect: 'error',
-  });
+async function fetchShare(id: string, download = false): Promise<ShareMetadata> {
+  const response = await fetch(
+    `/api/shares/${encodeURIComponent(id)}${download ? '' : '?metadataOnly=1'}`,
+    {
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+    },
+  );
   if (!response.ok) {
     const body = (await response.json()) as { error?: { code?: string } };
     throw new ShareError(body.error?.code ?? 'unavailable');
@@ -90,7 +93,8 @@ export default function ShareClient({ id }: { id: string }) {
     if (!share || !fileKey) return;
     setBusy(true);
     try {
-      const metadata = await fetchShare(id);
+      const metadata = await fetchShare(id, true);
+      if (!metadata.downloadUrl) throw new Error('The download could not be authorized.');
       const response = await fetch(validateDownloadUrl(metadata.downloadUrl), {
         credentials: 'omit',
         redirect: 'error',

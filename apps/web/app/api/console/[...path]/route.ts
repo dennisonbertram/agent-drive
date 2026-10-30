@@ -15,6 +15,10 @@ export function POST(request: Request) {
   return handle(request);
 }
 
+export function PATCH(request: Request) {
+  return handle(request);
+}
+
 export function DELETE(request: Request) {
   return handle(request);
 }

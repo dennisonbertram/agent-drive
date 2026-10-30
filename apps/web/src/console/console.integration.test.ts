@@ -321,4 +321,61 @@ describe('Phase 4 console API', () => {
     expect(audits.rows.length).toBeGreaterThan(0);
     expect(audits.rows.every((row) => row.api_key_id === null)).toBe(true);
   });
+
+  it('protects billing settings with console auth and same-origin checks', async () => {
+    const summary = await json(await consoleRequest(ownerUserId, '/billing'));
+    expect(summary).toMatchObject({
+      checkoutConfigured: expect.any(Boolean),
+      egressMeteringConfigured: expect.any(Boolean),
+      emailConfigured: expect.any(Boolean),
+    });
+    expect(summary.rates === null || typeof summary.rates === 'object').toBe(true);
+    expect(summary.checkoutRates === null || typeof summary.checkoutRates === 'object').toBe(true);
+
+    expect(
+      (
+        await consoleRequest(ownerUserId, '/billing/settings', 'PATCH', {
+          spendCapCents: 2500,
+          alertThresholdCents: 500,
+          alertEmail: 'billing@example.test',
+        })
+      ).status,
+    ).toBe(200);
+    const settings = await json(await consoleRequest(ownerUserId, '/billing'));
+    expect(settings).toMatchObject({
+      spendCapCents: '2500',
+      alertThresholdCents: '500',
+      alertEmail: 'billing@example.test',
+    });
+    expect(
+      (
+        await consoleRequest(ownerUserId, '/billing/settings', 'PATCH', {
+          spendCapCents: 2500,
+          alertThresholdCents: 500,
+          alertEmail: null,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await consoleRequest(
+          ownerUserId,
+          '/billing/settings',
+          'PATCH',
+          { spendCapCents: 2000, alertThresholdCents: null, alertEmail: null },
+          null,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await consoleRequest(ownerUserId, '/billing/settings', 'PATCH', {
+          spendCapCents: Number.MAX_SAFE_INTEGER,
+          alertThresholdCents: null,
+          alertEmail: null,
+        })
+      ).status,
+    ).toBe(400);
+    expect((await apiRequest('/billing')).status).toBe(401);
+  });
 });
