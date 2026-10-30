@@ -962,7 +962,7 @@ legend {
     grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
-    position: static;
+    position: relative;
     height: auto;
     padding: 16px;
   }
@@ -971,7 +971,21 @@ legend {
   }
   .workspace-label,
   .nav-label,
+  .privacy-note {
+    display: none;
+  }
   .sidebar-bottom {
+    margin: 0;
+    padding: 0;
+  }
+  .profile-row {
+    position: absolute;
+    top: 18px;
+    right: 16px;
+    padding: 0;
+    border: 0;
+  }
+  .profile-row > span:last-child {
     display: none;
   }
   .sidebar nav {

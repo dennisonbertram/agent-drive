@@ -129,6 +129,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
 
     const viewport = page.viewportSize()!;
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('.profile-row')).toBeVisible();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
