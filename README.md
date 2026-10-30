@@ -50,11 +50,57 @@ pnpm agent-drive get /sample.txt --drive DRIVE_ID --output ./sample.downloaded.t
 
 The CLI encrypts bytes before uploading. Drive keys never go to the API or object storage.
 
+## MCP server
+
+Build the private workspace package from this checkout and configure your MCP host to run the
+compiled local CLI. Agent Drive reads API credentials and drive keys from its private config file
+or environment variables; it never accepts a drive key as a command-line argument. Changes to the
+saved configuration require restarting the MCP process.
+
+Claude Code (replace the checkout path and config path with local absolute paths):
+
+```sh
+claude mcp add --transport stdio agent-drive \
+  --env AGENT_DRIVE_CONFIG=/ABSOLUTE/PATH/.config/agent-drive/config.json \
+  -- node /ABSOLUTE/PATH/agent-drive/packages/agent-drive/dist/cli.js mcp
+```
+
+Codex (`~/.codex/config.toml`), forwarding credential variables from the local environment rather
+than placing their values in the TOML file:
+
+```toml
+[mcp_servers.agent-drive]
+command = "node"
+args = ["/ABSOLUTE/PATH/agent-drive/packages/agent-drive/dist/cli.js", "mcp"]
+env_vars = ["AGENT_DRIVE_API_URL", "AGENT_DRIVE_API_KEY", "AGENT_DRIVE_CONFIG", "AGENT_DRIVE_KEY"]
+```
+
+Set `AGENT_DRIVE_API_URL` and `AGENT_DRIVE_API_KEY` securely in the environment or use the saved
+config created by `pnpm agent-drive login`. Per-drive key environment variables use
+`AGENT_DRIVE_KEY_<DRIVE_ID>` and take precedence over `AGENT_DRIVE_KEY`, then saved drive keys.
+Drive keys and API credentials are secrets; never paste them into prompts, handoffs, or source
+control. The API key needs the scopes required by the tools you intend to use.
+
+Install the included skill into your working project's skill directory (or read
+`skills/agent-drive/SKILL.md` directly). From this checkout, choose your host:
+
+```sh
+# Claude Code project skill
+mkdir -p .claude/skills
+cp -R skills/agent-drive .claude/skills/
+# Codex project skill
+mkdir -p .agents/skills
+cp -R skills/agent-drive .agents/skills/
+```
+
+The `share` tool explicitly returns `not_implemented` until the Phase 5 sharing backend exists.
+Live Claude Code verification remains pending until the Phase 4 console/manual validation work;
+no Claude binary or external service is installed or invoked by this repository's tests.
+
 ## Local development environment
 
-The repository includes the Phase 1 authenticated API and Phase 2 encrypted client/CLI. Product
-MCP tools remain planned for Phase 3; the current MCP handshake and browser smoke checks are
-scaffold-level tests, not product acceptance.
+The repository includes the Phase 1 authenticated API, Phase 2 encrypted client/CLI, and Phase 3
+MCP tools and skill.
 
 ### Requirements
 
@@ -145,9 +191,9 @@ integration, MCP, Playwright, and build checks in that order. Start the Compose 
 is `workflow_dispatch` only; it does not run automatically on pull requests or pushes.
 
 `test:integration` requires the Compose services and verifies a PostgreSQL query plus MinIO
-put/get/delete. `test:mcp` verifies an in-memory SDK initialize handshake only. `test:e2e` starts
-the local web placeholder and checks it renders. These smoke checks do not assert any product
-behavior.
+put/get/delete. `test:mcp` exercises all MCP tools through a spawned stdio server against the local
+API adapter and services. `test:e2e` starts the local web placeholder and checks it renders.
+Console/browser product flows remain later-phase work.
 
 ### Environment variables
 
