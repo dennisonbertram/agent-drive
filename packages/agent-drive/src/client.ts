@@ -112,7 +112,7 @@ export type Share = {
   expiresAt: string;
   revokedAt: string | null;
   createdAt: string;
-  status?: 'active' | 'expired' | 'revoked';
+  status?: 'active' | 'expired' | 'revoked' | 'unavailable';
   url?: string;
 };
 
@@ -334,22 +334,26 @@ export class AgentDriveClient {
     path: string,
     options: { versionId?: string; expiresAt?: string } = {},
   ) {
+    const query = new URLSearchParams({ path });
+    if (options.versionId) query.set('versionId', options.versionId);
+    const selected = await this.request<{ id: string; wrappedKey: string }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+    );
+    const fileKey = await unwrapFileKey(selected.wrappedKey, this.keyFor(driveId));
     const created = await this.request<{
       id: string;
       path: string;
       versionId: string;
-      wrappedKey: string;
       expiresAt: string;
       createdAt: string;
     }>(`drives/${encode(driveId)}/shares`, {
       method: 'POST',
       body: JSON.stringify({
         path,
-        ...(options.versionId ? { versionId: options.versionId } : {}),
+        versionId: selected.id,
         ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
       }),
     });
-    const fileKey = await unwrapFileKey(created.wrappedKey, this.keyFor(driveId));
     return {
       id: created.id,
       path: created.path,
