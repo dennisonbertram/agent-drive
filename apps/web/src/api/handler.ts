@@ -672,6 +672,7 @@ async function shareEndpoint(
               s.created_at::text AS cursor_created_at,
               CASE WHEN s.revoked_at IS NOT NULL THEN 'revoked'
                    WHEN s.expires_at <= now() THEN 'expired'
+                   WHEN f.deleted_at IS NOT NULL THEN 'unavailable'
                    ELSE 'active' END AS status
          FROM shares s JOIN files f ON f.id = s.file_id
         WHERE ${where}

@@ -510,6 +510,10 @@ describe('Phase 1 core API', () => {
     const trashed = await handlePublicShareRequest(unavailable.id as string);
     expect(trashed.status).toBe(410);
     expect((await json(trashed)).error.code).toBe('share_unavailable');
+    const trashedShare = (
+      await json(await request(`/drives/${driveId}/shares`, shareToken))
+    ).items.find((item: { id: string }) => item.id === unavailable.id);
+    expect(trashedShare).toMatchObject({ status: 'unavailable' });
     const missing = await handlePublicShareRequest(randomUUID().replaceAll('-', '_').slice(0, 22));
     expect(missing.status).toBe(404);
     expect((await json(missing)).error.message).toBe('This share link does not exist.');
