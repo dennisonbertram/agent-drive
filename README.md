@@ -7,8 +7,10 @@ Google Drive for agents: encrypted file storage on S3, used through an MCP serve
 - [Phase 1 API contract](docs/api.md)
 - [Client encryption format](docs/crypto.md)
 - [CLI and sync](docs/cli.md)
+- [Product quickstart](docs/quickstart.md)
+- [Deployment, deletion maintenance, and release gates](docs/deployment.md)
 
-## Phase 2 client quickstart
+## Client quickstart
 
 After applying the database migration and provisioning a local management key as described below,
 build the workspace CLI:
@@ -93,14 +95,16 @@ mkdir -p .agents/skills
 cp -R skills/agent-drive .agents/skills/
 ```
 
-The `share` tool explicitly returns `not_implemented` until the Phase 5 sharing backend exists.
-Live Claude Code verification remains pending until the Phase 4 console/manual validation work;
-no Claude binary or external service is installed or invoked by this repository's tests.
+The `share` tool creates expiring encrypted links through the implemented sharing backend.
+The stdio regression tests use a real local API and storage, not a live Claude Code session;
+no Claude binary or external service is installed or invoked by those tests.
 
 ## Local development environment
 
-The repository includes the Phase 1 authenticated API, Phase 2 encrypted client/CLI, and Phase 3
-MCP tools and skill.
+The repository includes the authenticated storage API, encrypted client/CLI, MCP tools and skill,
+human console, encrypted sharing, billing controls, and deletion/audit interfaces. Hosted
+authentication, payments, storage configuration, and deployment require dedicated configuration
+and live acceptance; local regression tests are not evidence of a production launch.
 
 ### Requirements
 
@@ -136,7 +140,7 @@ root credentials. MinIO's API is at `http://localhost:9000`, its console is at
 `docker compose down` when intentionally stopping them. To use alternate host ports, set
 `POSTGRES_HOST_PORT`, `MINIO_API_HOST_PORT`, and `MINIO_CONSOLE_HOST_PORT`.
 
-Apply the checked-in Phase 1 schema after the services are healthy:
+Apply all checked-in schema migrations after the services are healthy:
 
 ```sh
 DATABASE_URL=postgresql://agent_drive:agent_drive_local_only@127.0.0.1:5432/agent_drive \
@@ -160,8 +164,8 @@ docker compose run --rm minio-init ilm rule add \
 ```
 
 Production S3 deployments should configure the equivalent one-day lifecycle rule for the exact
-`staging/` prefix. Never apply this expiration to immutable `objects/`; Phase 7 will add production
-lifecycle enforcement.
+`staging/` prefix. Never apply this expiration to immutable `objects/`; the production template
+and maintenance requirements are documented in the [deployment runbook](docs/deployment.md).
 
 For CLI-only local development without Clerk, bootstrap an account with the explicit operator
 command below. The human console instead provisions an account after an authenticated sign-in.

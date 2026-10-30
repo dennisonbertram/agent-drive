@@ -30,11 +30,13 @@ import {
 import { cleanupExpiredUploads } from './upload-cleanup';
 import {
   authorizeDownload,
+  billingState,
   billingSummary,
   enforceKeyRateLimit,
   enforceOperationBudget,
   enforceWriteBudget,
   lockBillingAccount,
+  queueBillingDeliveries,
 } from '../billing/ledger';
 import {
   checkoutConfigured,
@@ -97,9 +99,10 @@ function bearer(request: Request) {
 
 async function authenticate(request: Request): Promise<Auth> {
   const result = await getPool().query(
-    `SELECT id, account_id, agent_id, scopes, drive_ids
-       FROM api_keys
-      WHERE token_hash = $1 AND revoked_at IS NULL`,
+    `SELECT k.id, k.account_id, k.agent_id, k.scopes, k.drive_ids
+       FROM api_keys k
+       JOIN accounts a ON a.id=k.account_id AND a.deleting_at IS NULL
+      WHERE k.token_hash = $1 AND k.revoked_at IS NULL`,
     [hashToken(bearer(request))],
   );
   const row = result.rows[0] as Row | undefined;
@@ -118,6 +121,37 @@ async function authenticateConsole(userId: string): Promise<Auth> {
     throw new ApiError('unauthorized', 'The console session is invalid.');
   }
   return withTransaction(async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [userId]);
+    const userHash = hashToken(userId);
+    if (
+      (
+        await client.query('SELECT 1 FROM console_user_tombstones WHERE external_user_hash = $1', [
+          userHash,
+        ])
+      ).rowCount
+    )
+      throw new ApiError('unauthorized', 'The console session is invalid.');
+    const existing = await client.query(
+      'SELECT id, name, deleting_at FROM accounts WHERE external_clerk_user_id = $1',
+      [userId],
+    );
+    if (existing.rows[0]?.deleting_at) {
+      const agent = await client.query(
+        "SELECT id FROM agents WHERE account_id = $1 AND name = '__console__'",
+        [existing.rows[0].id],
+      );
+      if (!agent.rows[0])
+        throw new ApiError('unauthorized', 'The console session is no longer valid.');
+      return {
+        keyId: null,
+        accountId: existing.rows[0].id as string,
+        accountName: existing.rows[0].name as string,
+        agentId: agent.rows[0]?.id as string,
+        scopes: [...scopeNames],
+        driveIds: [],
+        userId,
+      };
+    }
     const account = await client.query(
       `INSERT INTO accounts (name, external_clerk_user_id)
        VALUES ('Personal workspace', $1)
@@ -194,6 +228,21 @@ function response(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
+function deletionJobOutput(row: Row) {
+  return {
+    deletion: {
+      id: row.id,
+      kind: row.kind,
+      targetId: row.target_id,
+      status: row.completed_at ? 'complete' : row.last_error ? 'blocked' : 'pending',
+      requestedAt: row.requested_at,
+      notBefore: row.not_before,
+      completedAt: row.completed_at,
+      lastError: row.last_error,
+    },
+  };
+}
+
 function rowVersion(row: Row) {
   return {
     id: row.id,
@@ -214,6 +263,13 @@ function errorStatus(error: unknown) {
 }
 
 function actionFor(method: string, parts: string[]) {
+  if (parts.length === 1 && parts[0] === 'deletions' && method === 'GET')
+    return 'console.deletions.list';
+  if (parts.length === 1 && parts[0] === 'audit' && method === 'GET') return 'console.audit.list';
+  if (parts.length === 1 && parts[0] === 'account' && method === 'DELETE')
+    return 'console.account.delete';
+  if (parts.length === 2 && parts[0] === 'drives' && method === 'DELETE')
+    return 'console.drive.delete';
   if (parts.length === 1 && parts[0] === 'session' && method === 'GET')
     return 'console.session.read';
   if (parts.length === 1 && parts[0] === 'usage' && method === 'GET') return 'console.usage.read';
@@ -296,7 +352,9 @@ async function ensureDrive(auth: Auth, driveId: string) {
     throw new ApiError('permission_denied', 'The API key is not scoped to this drive.');
   }
   const result = await getPool().query(
-    'SELECT id, account_id, name, quota_bytes FROM drives WHERE id = $1',
+    `SELECT d.id, d.account_id, d.name, d.quota_bytes
+       FROM drives d JOIN accounts a ON a.id = d.account_id
+      WHERE d.id = $1 AND d.deleting_at IS NULL AND a.deleting_at IS NULL`,
     [driveId],
   );
   if (!result.rows[0]) throw new ApiError('not_found', 'Drive not found.');
@@ -406,7 +464,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, name, quota_bytes, created_at FROM drives WHERE ${where} ORDER BY name, id LIMIT $${params.length}`,
+      `SELECT id, name, quota_bytes, created_at FROM drives WHERE deleting_at IS NULL AND ${where} ORDER BY name, id LIMIT $${params.length}`,
       params,
     );
     return response(collection(rows.rows as Row[], limit, (row) => row.name));
@@ -418,7 +476,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     const result = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
       const existing = await client.query(
-        'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND name = $2',
+        'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name = $2',
         [auth.accountId, name],
       );
       if (existing.rows[0]) return { ...existing.rows[0], created: false };
@@ -480,7 +538,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     ]);
     if (!agent.rows[0]) throw new ApiError('not_found', 'Agent not found.');
     const driveCheck = await getPool().query(
-      'SELECT count(*)::int AS count FROM drives WHERE account_id = $1 AND id = ANY($2::uuid[])',
+      'SELECT count(*)::int AS count FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])',
       [auth.accountId, drives],
     );
     if (Number(driveCheck.rows[0].count) !== drives.length)
@@ -508,6 +566,183 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
 }
 
 async function consoleEndpoint(request: Request, auth: Auth, parts: string[], url: URL) {
+  if (parts.length === 1 && parts[0] === 'deletions' && request.method === 'GET') {
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'timestamp');
+    const params: unknown[] = [auth.accountId];
+    let clause = 'account_id = $1';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      clause += ` AND (requested_at, id) < ($2::timestamptz, $3::uuid)`;
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT id, kind, target_id, status, requested_at, requested_at_text, not_before, completed_at, last_error
+         FROM (
+           SELECT id, kind, target_id, requested_at, not_before, completed_at, last_error,
+             requested_at::text AS requested_at_text,
+             CASE WHEN completed_at IS NOT NULL THEN 'complete'
+                  WHEN last_error IS NOT NULL THEN 'blocked' ELSE 'pending' END AS status,
+             account_id
+           FROM deletion_jobs WHERE ${clause}
+         ) jobs ORDER BY requested_at DESC, id DESC LIMIT $${params.length}`,
+      params,
+    );
+    const items = rows.rows.slice(0, limit).map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      targetId: row.target_id,
+      status: row.status,
+      requestedAt: row.requested_at,
+      notBefore: row.not_before,
+      completedAt: row.completed_at,
+      lastError: row.last_error,
+    }));
+    return response({
+      items,
+      nextCursor:
+        rows.rows.length > limit
+          ? encodeCursor({
+              value: rows.rows[limit - 1].requested_at_text,
+              id: rows.rows[limit - 1].id,
+            })
+          : null,
+    });
+  }
+  if (parts.length === 1 && parts[0] === 'audit' && request.method === 'GET') {
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'timestamp');
+    const params: unknown[] = [auth.accountId];
+    let clause = 'e.account_id = $1';
+    if (decoded) {
+      params.push(decoded.value, decoded.id);
+      clause += ` AND (e.created_at, e.id) < ($2::timestamptz, $3::uuid)`;
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT e.id, e.action, e.outcome, e.http_status, e.error_code, e.created_at,
+              e.created_at::text AS created_at_text,
+              a.name AS agent_name, k.label AS key_label, e.user_id
+         FROM audit_events e
+         LEFT JOIN agents a ON a.id = e.agent_id
+         LEFT JOIN api_keys k ON k.id = e.api_key_id
+        WHERE ${clause} ORDER BY e.created_at DESC, e.id DESC LIMIT $${params.length}`,
+      params,
+    );
+    return response({
+      items: rows.rows.slice(0, limit).map((row) => ({
+        id: row.id,
+        action: row.action,
+        outcome: row.outcome,
+        httpStatus: row.http_status,
+        errorCode: row.error_code,
+        createdAt: row.created_at,
+        agentName: row.agent_name,
+        keyLabel: row.key_label,
+        userId: row.user_id,
+      })),
+      nextCursor:
+        rows.rows.length > limit
+          ? encodeCursor({
+              value: rows.rows[limit - 1].created_at_text,
+              id: rows.rows[limit - 1].id,
+            })
+          : null,
+    });
+  }
+  if (parts.length === 2 && parts[0] === 'drives' && request.method === 'DELETE') {
+    const driveId = uuid(parts[1], 'drive id');
+    const body = await jsonBody(request);
+    const confirmation = stringField(body, 'confirmation', { required: true, max: 128 });
+    const existing = await getPool().query(
+      'SELECT * FROM deletion_jobs WHERE kind=$1 AND target_id=$2 AND account_id=$3',
+      ['drive', driveId, auth.accountId],
+    );
+    if (existing.rows[0]) return response(deletionJobOutput(existing.rows[0]), 202);
+    return response(
+      await withTransaction(async (client) => {
+        await lockBillingAccount(client, auth.accountId);
+        const retry = await client.query(
+          'SELECT * FROM deletion_jobs WHERE kind=$1 AND target_id=$2 AND account_id=$3',
+          ['drive', driveId, auth.accountId],
+        );
+        if (retry.rows[0]) return deletionJobOutput(retry.rows[0]);
+        const state = await billingState(client, auth.accountId);
+        await queueBillingDeliveries(client, state);
+        const drive = await client.query(
+          'SELECT id, name FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE',
+          [driveId, auth.accountId],
+        );
+        if (!drive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+        if (confirmation !== drive.rows[0].name)
+          throw new ApiError('validation_error', 'The drive name confirmation is incorrect.');
+        await client.query(
+          'UPDATE drives SET deleting_at = COALESCE(deleting_at, now()) WHERE id = $1',
+          [driveId],
+        );
+        await client.query(
+          'UPDATE shares SET revoked_at = COALESCE(revoked_at, now()) WHERE drive_id = $1',
+          [driveId],
+        );
+        await client.query(
+          'UPDATE api_keys SET drive_ids = array_remove(drive_ids, $1::uuid) WHERE account_id = $2',
+          [driveId, auth.accountId],
+        );
+        const job = await client.query(
+          `INSERT INTO deletion_jobs (kind,target_id,account_id,not_before)
+         SELECT 'drive',$1,$2,GREATEST(now()+interval '10 minutes',
+           COALESCE((SELECT max(expires_at) FROM upload_intents WHERE drive_id=$1 AND committed_version_id IS NULL), now()+interval '10 minutes'))
+         RETURNING *`,
+          [driveId, auth.accountId],
+        );
+        return deletionJobOutput(job.rows[0]);
+      }),
+      202,
+    );
+  }
+  if (parts.length === 1 && parts[0] === 'account' && request.method === 'DELETE') {
+    const body = await jsonBody(request);
+    const confirmation = stringField(body, 'confirmation', { required: true, max: 64 });
+    if (confirmation !== 'DELETE MY ACCOUNT')
+      throw new ApiError('validation_error', 'The account confirmation is incorrect.');
+    return response(
+      await withTransaction(async (client) => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [auth.userId]);
+        const existing = await client.query(
+          'SELECT * FROM deletion_jobs WHERE kind = $1 AND target_id = $2',
+          ['account', auth.accountId],
+        );
+        if (existing.rows[0]) return deletionJobOutput(existing.rows[0]);
+        await lockBillingAccount(client, auth.accountId);
+        const state = await billingState(client, auth.accountId);
+        await queueBillingDeliveries(client, state);
+        await client.query(
+          'UPDATE accounts SET deleting_at = COALESCE(deleting_at, now()) WHERE id = $1',
+          [auth.accountId],
+        );
+        await client.query(
+          'UPDATE api_keys SET revoked_at = COALESCE(revoked_at, now()) WHERE account_id = $1',
+          [auth.accountId],
+        );
+        await client.query(
+          'UPDATE shares SET revoked_at = COALESCE(revoked_at, now()) WHERE account_id = $1',
+          [auth.accountId],
+        );
+        await client.query('DELETE FROM billing_notifications WHERE account_id = $1', [
+          auth.accountId,
+        ]);
+        const job = await client.query(
+          `INSERT INTO deletion_jobs (kind,target_id,account_id,not_before)
+         SELECT 'account',$1,$1,GREATEST(now()+interval '10 minutes',
+           COALESCE((SELECT max(expires_at) FROM upload_intents WHERE account_id=$1 AND committed_version_id IS NULL), now()+interval '10 minutes'))
+         RETURNING *`,
+          [auth.accountId],
+        );
+        return deletionJobOutput(job.rows[0]);
+      }),
+      202,
+    );
+  }
   if (parts.length === 1 && parts[0] === 'billing' && request.method === 'GET') {
     return response({ ...(await billingSummary(auth.accountId)), ...billingFlags() });
   }
@@ -785,34 +1020,43 @@ async function shareEndpoint(
         'expiresAt must be between 60 seconds and 30 days from now.',
       );
     }
-    const source = await getPool().query(
-      `SELECT f.id AS file_id, f.path, v.id AS version_id, v.wrapped_key
-         FROM files f
-         JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
-        WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL AND v.file_id = f.id`,
-      [driveId, path, versionId ?? null],
-    );
-    const file = source.rows[0] as Row | undefined;
-    if (!file) throw new ApiError('not_found', 'File not found.');
     const id = randomBytes(16).toString('base64url');
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
-    const result = await getPool().query(
-      `INSERT INTO shares
-        (id, account_id, drive_id, file_id, version_id, agent_id, api_key_id, user_id, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING id, expires_at, created_at`,
-      [
-        id,
-        auth.accountId,
-        driveId,
-        file.file_id,
-        file.version_id,
-        auth.agentId,
-        auth.keyId,
-        userId,
-        requestedExpiry,
-      ],
-    );
+    const { file, result } = await withTransaction(async (client) => {
+      await lockBillingAccount(client, auth.accountId);
+      const lockedDrive = await client.query(
+        'SELECT id FROM drives WHERE id=$1 AND account_id=$2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      const source = await client.query(
+        `SELECT f.id AS file_id, f.path, v.id AS version_id, v.wrapped_key
+           FROM files f
+           JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
+          WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL AND v.file_id = f.id`,
+        [driveId, path, versionId ?? null],
+      );
+      const file = source.rows[0] as Row | undefined;
+      if (!file) throw new ApiError('not_found', 'File not found.');
+      const result = await client.query(
+        `INSERT INTO shares
+          (id, account_id, drive_id, file_id, version_id, agent_id, api_key_id, user_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         RETURNING id, expires_at, created_at`,
+        [
+          id,
+          auth.accountId,
+          driveId,
+          file.file_id,
+          file.version_id,
+          auth.agentId,
+          auth.keyId,
+          userId,
+          requestedExpiry,
+        ],
+      );
+      return { file, result };
+    });
     return response(
       {
         id: result.rows[0].id,
@@ -907,7 +1151,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
   const result = await withTransaction(async (client) => {
     await lockBillingAccount(client, auth.accountId);
     const lockedDrive = await client.query(
-      'SELECT id, quota_bytes FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE',
+      'SELECT id, quota_bytes FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
@@ -1009,7 +1253,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       const lockedIntent = lockedIntentResult.rows[0] as Row | undefined;
       if (!lockedIntent) throw new ApiError('not_found', 'Upload intent not found.');
       const lockedDrive = await client.query(
-        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE',
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
         [driveId, auth.accountId],
       );
       if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
@@ -1281,10 +1525,11 @@ async function fileEndpoint(
     const moved = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
       await enforceWriteBudget(client, auth.accountId);
-      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
-        driveId,
-        auth.accountId,
-      ]);
+      const lockedDrive = await client.query(
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       const machine = await machineId(client, auth, request);
       const result = await client.query(
         `UPDATE files SET path = $1 WHERE drive_id = $2 AND path = $3 AND deleted_at IS NULL
@@ -1310,10 +1555,12 @@ async function fileEndpoint(
     const path = canonicalPath(body.path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const deleted = await withTransaction(async (client) => {
-      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
-        driveId,
-        auth.accountId,
-      ]);
+      await lockBillingAccount(client, auth.accountId);
+      const lockedDrive = await client.query(
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       const machine = await machineId(client, auth, request);
       const result = await client.query(
         `UPDATE files SET deleted_at = now()
@@ -1358,11 +1605,12 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   try {
     result = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
+      const lockedDrive = await client.query(
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       const machine = await machineId(client, auth, request);
-      await client.query('SELECT id FROM drives WHERE id = $1 AND account_id = $2 FOR UPDATE', [
-        driveId,
-        auth.accountId,
-      ]);
       const source = await client.query(
         `SELECT f.*, v.* FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
        WHERE f.drive_id = $1 AND f.path = $2 AND v.file_id = f.id ${restore ? '' : 'AND f.deleted_at IS NULL'} FOR UPDATE`,
@@ -1450,6 +1698,10 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
 
 function consoleRouteAllowed(method: string, parts: string[]) {
+  if (method === 'GET' && parts.length === 1 && ['deletions', 'audit'].includes(parts[0]!))
+    return true;
+  if (method === 'DELETE' && parts.length === 1 && parts[0] === 'account') return true;
+  if (method === 'DELETE' && parts.length === 2 && parts[0] === 'drives') return true;
   if (method === 'GET' && parts.length === 1 && parts[0] === 'billing') return true;
   if (method === 'GET' && parts.length === 2 && parts[0] === 'billing' && parts[1] === 'statements')
     return true;
@@ -1521,6 +1773,18 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     const auth = context.auth;
     if (!auth) throw new ApiError('internal_error', 'The request actor is unavailable.');
+    if (mode.kind === 'console') {
+      const deleting = await getPool().query('SELECT deleting_at FROM accounts WHERE id = $1', [
+        auth.accountId,
+      ]);
+      if (
+        deleting.rows[0]?.deleting_at &&
+        !(request.method === 'GET' && ['deletions', 'audit'].includes(relative[0]!)) &&
+        !(request.method === 'DELETE' && relative[0] === 'account')
+      ) {
+        throw new ApiError('conflict', 'The account is being deleted.');
+      }
+    }
     await enforceKeyRateLimit(auth.keyId);
     if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
@@ -1585,6 +1849,8 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
          FROM shares s
          JOIN files f ON f.id = s.file_id
          JOIN versions v ON v.id = s.version_id AND v.file_id = f.id
+         JOIN drives d ON d.id = s.drive_id AND d.deleting_at IS NULL
+         JOIN accounts a ON a.id = s.account_id AND a.deleting_at IS NULL
         WHERE s.id = $1`,
       [shareId],
     );

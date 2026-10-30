@@ -1,0 +1,56 @@
+.pricing-page .billing-heading {
+  margin-top: 64px;
+}
+.pricing-page .billing-plan h2 {
+  text-transform: capitalize;
+  font-size: 1.15rem;
+  margin-bottom: 18px;
+}
+.pricing-availability {
+  padding: 18px 22px;
+  margin-bottom: 24px;
+  background: #eef3e5;
+  border: 1px solid #dce5d0;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+.pricing-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+}
+.pricing-details h2 {
+  margin: 12px 0 20px;
+}
+.pricing-details h3 {
+  margin-bottom: 18px;
+}
+.pricing-details p + p {
+  margin-top: 18px;
+}
+.pricing-rate-list {
+  margin: 0;
+  font-size: 0.85rem;
+}
+.pricing-rate-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.pricing-rate-list dd {
+  margin: 0;
+  white-space: nowrap;
+  font-weight: 600;
+}
+@media (max-width: 700px) {
+  .pricing-details {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .pricing-page .billing-header {
+    flex-wrap: wrap;
+    padding: 22px 0;
+  }
+}

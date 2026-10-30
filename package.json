@@ -16,6 +16,8 @@
     "test:mcp": "vitest run --config vitest.mcp.config.ts",
     "test:e2e": "playwright test",
     "agent-drive": "node packages/agent-drive/dist/cli.js",
+    "smoke:release": "pnpm --filter ./packages/agent-drive build && node scripts/release-smoke.mjs",
+    "release": "node scripts/release.mjs",
     "build": "pnpm --recursive --workspace-concurrency=1 build"
   },
   "devDependencies": {

@@ -19,6 +19,7 @@ export const accounts = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     name: text('name').notNull(),
     externalClerkUserId: text('external_clerk_user_id'),
+    deletingAt: timestamp('deleting_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
@@ -78,6 +79,7 @@ export const drives = pgTable(
     quotaBytes: bigint('quota_bytes', { mode: 'number' })
       .notNull()
       .default(Number.MAX_SAFE_INTEGER),
+    deletingAt: timestamp('deleting_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
@@ -480,4 +482,55 @@ export const billingLogObjects = pgTable(
   (table) => [
     primaryKey({ columns: [table.objectKey, table.etag], name: 'billing_log_objects_pk' }),
   ],
+);
+
+export const deletionJobs = pgTable(
+  'deletion_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    kind: text('kind').notNull(),
+    targetId: uuid('target_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
+    requestedAt: timestamp('requested_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+    notBefore: timestamp('not_before', { withTimezone: true, mode: 'date' }).notNull(),
+    completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
+    billingClosedAt: timestamp('billing_closed_at', { withTimezone: true, mode: 'date' }),
+    identityDeletedAt: timestamp('identity_deleted_at', { withTimezone: true, mode: 'date' }),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true, mode: 'date' }),
+    lastSweptAt: timestamp('last_swept_at', { withTimezone: true, mode: 'date' }),
+    lastError: text('last_error'),
+  },
+  (table) => [
+    uniqueIndex('deletion_jobs_kind_target_unique').on(table.kind, table.targetId),
+    index('deletion_jobs_claim_idx').on(table.completedAt, table.notBefore, table.leaseUntil),
+    check('deletion_jobs_kind_check', sql`${table.kind} IN ('drive', 'account')`),
+  ],
+);
+
+export const deletionBillingReceipts = pgTable(
+  'deletion_billing_receipts',
+  {
+    accountId: uuid('account_id').notNull(),
+    periodStart: timestamp('period_start', { withTimezone: true, mode: 'date' }).notNull(),
+    statement: jsonb('statement').$type<Record<string, unknown>>().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.accountId, table.periodStart],
+      name: 'deletion_billing_receipts_pk',
+    }),
+  ],
+);
+
+export const consoleUserTombstones = pgTable(
+  'console_user_tombstones',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    externalUserHash: text('external_user_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('console_user_tombstones_hash_unique').on(table.externalUserHash)],
 );

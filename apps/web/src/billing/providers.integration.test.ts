@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import Stripe from 'stripe';
 import { handleApiRequest } from '../api/handler';
 
 const stripeMocks = vi.hoisted(() => ({
@@ -17,6 +18,10 @@ const stripeMocks = vi.hoisted(() => ({
   checkoutCreate: vi.fn(),
   checkoutRetrieve: vi.fn(),
   checkoutExpire: vi.fn(),
+  customerRetrieve: vi.fn(),
+  checkoutList: vi.fn(),
+  subscriptionList: vi.fn(),
+  subscriptionCancel: vi.fn(),
 }));
 
 vi.mock('stripe', () => ({
@@ -24,21 +29,25 @@ vi.mock('stripe', () => ({
     webhooks = { constructEvent: stripeMocks.constructEvent };
     prices = { retrieve: stripeMocks.priceRetrieve };
     billing = { meters: { retrieve: stripeMocks.meterRetrieve } };
+    customers = { retrieve: stripeMocks.customerRetrieve };
     subscriptions = {
       retrieve: stripeMocks.subscriptionRetrieve,
       update: stripeMocks.subscriptionUpdate,
+      list: stripeMocks.subscriptionList,
+      cancel: stripeMocks.subscriptionCancel,
     };
     checkout = {
       sessions: {
         create: stripeMocks.checkoutCreate,
         retrieve: stripeMocks.checkoutRetrieve,
         expire: stripeMocks.checkoutExpire,
+        list: stripeMocks.checkoutList,
       },
     };
   },
 }));
 
-import { createCheckout, processStripeWebhook } from './providers';
+import { closeStripeBillingForDeletion, createCheckout, processStripeWebhook } from './providers';
 
 const pool = new Pool({
   connectionString:
@@ -109,9 +118,15 @@ const planPrices = {
     },
   },
 };
+const stripeCollection = <T>(items: T[]) => ({
+  async *[Symbol.asyncIterator]() {
+    yield* items;
+  },
+});
 
 beforeAll(async () => {
   realStripe = (await vi.importActual<typeof import('stripe')>('stripe')).default;
+  (Stripe as unknown as { errors: typeof realStripe.errors }).errors = realStripe.errors;
   for (const [name, value] of Object.entries({
     STRIPE_SECRET_KEY: 'sk_test_webhook_fixture',
     STRIPE_WEBHOOK_SECRET: 'whsec_webhook_fixture',
@@ -756,4 +771,137 @@ it('updates the existing base item for a paid-tier change and makes repeated tar
       ])
     ).rows[0]!.plan,
   ).toBe('team');
+});
+
+it('verifies deletion customer mode and ownership before touching billing resources', async () => {
+  stripeMocks.customerRetrieve.mockResolvedValue({
+    id: stripeCustomerId,
+    deleted: false,
+    livemode: false,
+    metadata: { accountId: 'another-account' },
+  });
+  await expect(closeStripeBillingForDeletion(accountId, stripeCustomerId)).rejects.toMatchObject({
+    code: 'internal_error',
+  });
+  expect(stripeMocks.checkoutList).not.toHaveBeenCalled();
+
+  stripeMocks.customerRetrieve.mockResolvedValue({
+    id: stripeCustomerId,
+    deleted: false,
+    livemode: true,
+    metadata: { accountId },
+  });
+  await expect(closeStripeBillingForDeletion(accountId, stripeCustomerId)).rejects.toMatchObject({
+    code: 'internal_error',
+  });
+  expect(stripeMocks.subscriptionList).not.toHaveBeenCalled();
+  stripeMocks.customerRetrieve.mockReset();
+});
+
+it('expires a racing open session, cancels active subscriptions, and skips canceled ones', async () => {
+  stripeMocks.customerRetrieve.mockResolvedValue({
+    id: stripeCustomerId,
+    deleted: false,
+    livemode: false,
+    metadata: { accountId },
+  });
+  stripeMocks.checkoutList.mockReturnValue(
+    stripeCollection([
+      {
+        id: 'cs_racing_delete',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'open',
+      },
+    ]),
+  );
+  const expireRace = new realStripe.errors.StripeInvalidRequestError({
+    type: 'invalid_request_error',
+    message: 'The session completed before it could be expired.',
+  });
+  stripeMocks.checkoutExpire.mockRejectedValue(expireRace);
+  stripeMocks.checkoutRetrieve.mockResolvedValue({
+    id: 'cs_racing_delete',
+    customer: stripeCustomerId,
+    livemode: false,
+    status: 'complete',
+  });
+  stripeMocks.subscriptionList.mockReturnValue(
+    stripeCollection([
+      {
+        id: 'sub_delete_active',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'active',
+      },
+      {
+        id: 'sub_delete_canceled',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'canceled',
+      },
+    ]),
+  );
+  stripeMocks.subscriptionCancel.mockResolvedValue({ id: 'sub_delete_active', status: 'canceled' });
+
+  await expect(closeStripeBillingForDeletion(accountId, stripeCustomerId)).resolves.toBe(true);
+  expect(stripeMocks.checkoutRetrieve).toHaveBeenCalledWith('cs_racing_delete');
+  expect(stripeMocks.subscriptionCancel).toHaveBeenCalledTimes(1);
+  expect(stripeMocks.subscriptionCancel).toHaveBeenCalledWith(
+    'sub_delete_active',
+    { invoice_now: true, prorate: true },
+    { idempotencyKey: `delete-subscription/${accountId}/sub_delete_active` },
+  );
+});
+
+it('leaves remaining cancellation work pending at the mutation budget and retries failures', async () => {
+  stripeMocks.customerRetrieve.mockResolvedValue({
+    id: stripeCustomerId,
+    deleted: false,
+    livemode: false,
+    metadata: { accountId },
+  });
+  stripeMocks.checkoutList.mockReturnValue(stripeCollection([]));
+  stripeMocks.subscriptionList.mockReturnValue(
+    stripeCollection([
+      {
+        id: 'sub_delete_one',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'active',
+      },
+      {
+        id: 'sub_delete_two',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'active',
+      },
+    ]),
+  );
+  stripeMocks.subscriptionCancel.mockResolvedValue({ status: 'canceled' });
+  await expect(closeStripeBillingForDeletion(accountId, stripeCustomerId, 1)).resolves.toBe(false);
+  expect(stripeMocks.subscriptionCancel).toHaveBeenCalledTimes(1);
+
+  stripeMocks.subscriptionList.mockReturnValue(
+    stripeCollection([
+      {
+        id: 'sub_delete_failure',
+        customer: stripeCustomerId,
+        livemode: false,
+        status: 'active',
+      },
+    ]),
+  );
+  stripeMocks.subscriptionCancel.mockRejectedValue(
+    new Error('provider details must not be hidden'),
+  );
+  await expect(closeStripeBillingForDeletion(accountId, stripeCustomerId)).rejects.toThrow(
+    'provider details must not be hidden',
+  );
+  stripeMocks.customerRetrieve.mockReset();
+  stripeMocks.checkoutList.mockReset();
+  stripeMocks.checkoutExpire.mockReset();
+  stripeMocks.checkoutRetrieve.mockReset();
+  stripeMocks.subscriptionList.mockReset();
+  stripeMocks.subscriptionCancel.mockReset();
 });
