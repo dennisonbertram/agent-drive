@@ -38,6 +38,32 @@ export type Version = {
   createdAt: string;
 };
 
+export type FileEntry = {
+  fileId: string;
+  versionId: string;
+  path: string;
+  ciphertextSize: number;
+  agentId: string;
+  machineId: string | null;
+  userId: string | null;
+  tags: string[];
+  description: string | null;
+  createdAt: string;
+};
+
+type FileEntryWire = {
+  id: string;
+  path: string;
+  version_id: string;
+  ciphertext_size: number | string;
+  agent_id: string;
+  machine_id: string | null;
+  user_id: string | null;
+  tags: string[] | null;
+  description: string | null;
+  created_at: string;
+};
+
 export type Drive = {
   id: string;
   name: string;
@@ -234,29 +260,32 @@ export class AgentDriveClient {
     return this.request<Page<ApiKey>>(this.pagePath('keys', limit, cursor));
   }
 
-  async list(driveId: string, prefix?: string, limit?: number, cursor?: string) {
-    const page = await this.request<
-      Page<Version & { version_id?: string; ciphertext_size?: number }>
-    >(
-      this.pagePath(
-        `drives/${encode(driveId)}/list`,
-        limit,
-        cursor,
-        prefix ? { prefix } : undefined,
-      ),
+  async list(
+    driveId: string,
+    prefix?: string,
+    limit?: number,
+    cursor?: string,
+    filters?: { tag?: string; agentId?: string; machine?: string; user?: string },
+  ): Promise<Page<FileEntry>> {
+    const page = await this.request<Page<FileEntryWire>>(
+      this.pagePath(`drives/${encode(driveId)}/list`, limit, cursor, {
+        ...(prefix ? { prefix } : {}),
+        ...filters,
+      }),
     );
     return {
       ...page,
       items: page.items.map((item) => ({
-        ...item,
-        id: item.version_id ?? item.id,
-        ciphertextSize: item.ciphertextSize ?? item.ciphertext_size ?? 0,
-        agentId: item.agentId,
-        machineId: item.machineId ?? null,
-        userId: item.userId ?? null,
+        fileId: item.id,
+        versionId: item.version_id,
+        path: item.path,
+        ciphertextSize: Number(item.ciphertext_size),
+        agentId: item.agent_id,
+        machineId: item.machine_id,
+        userId: item.user_id,
         tags: item.tags ?? [],
-        description: item.description ?? null,
-        createdAt: item.createdAt,
+        description: item.description,
+        createdAt: item.created_at,
       })),
     };
   }
@@ -290,6 +319,9 @@ export class AgentDriveClient {
   }
 
   async put(driveId: string, path: string, plaintext: Uint8Array, options: PutOptions = {}) {
+    if (options.mode === 'create' && options.ifVersionId !== undefined) {
+      throw new TypeError('Create-only writes cannot include ifVersionId.');
+    }
     const encrypted = await encryptFile(plaintext, this.keyFor(driveId));
     const body: Record<string, unknown> = {
       path,
@@ -299,13 +331,8 @@ export class AgentDriveClient {
     if (options.tags !== undefined) body.tags = options.tags;
     if (options.description !== undefined) body.description = options.description;
     if (options.userId !== undefined) body.userId = options.userId;
-    if (options.mode === 'create') body.ifVersionId = null;
-    if (options.mode === 'overwrite' && options.ifVersionId !== undefined) {
-      body.ifVersionId = options.ifVersionId;
-    }
-    if (options.mode === undefined && options.ifVersionId !== undefined) {
-      body.ifVersionId = options.ifVersionId;
-    }
+    if (options.ifVersionId !== undefined) body.ifVersionId = options.ifVersionId;
+    else if (options.mode !== 'overwrite') body.ifVersionId = null;
     const intent = await this.request<{
       intentId: string;
       uploadUrl: string;

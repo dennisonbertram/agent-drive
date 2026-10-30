@@ -5,6 +5,7 @@ export type {
   ApiKey,
   ClientOptions,
   Drive,
+  FileEntry,
   FetchLike,
   GetOptions,
   Page,

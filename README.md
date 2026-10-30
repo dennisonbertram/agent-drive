@@ -10,29 +10,51 @@ Google Drive for agents: encrypted file storage on S3, used through an MCP serve
 
 ## Phase 2 client quickstart
 
-Install the workspace package, provision a management API key, then log in without putting the
-token in shell history:
+After applying the database migration and provisioning a local management key as described below,
+build the workspace CLI:
+
+```sh
+pnpm --filter agent-drive build
+```
+
+Set the local API endpoint and paste the one-time management credential at the hidden prompt:
 
 ```sh
 export AGENT_DRIVE_API_URL=http://127.0.0.1:3000
-export AGENT_DRIVE_API_KEY=... # local development only
-printf '%s' "$AGENT_DRIVE_API_KEY" | pnpm exec agent-drive login --api "$AGENT_DRIVE_API_URL" --token-stdin
+read -rs -p "Management API key: " AGENT_DRIVE_API_KEY
+printf '\n'
+export AGENT_DRIVE_API_KEY
+pnpm agent-drive login --api "$AGENT_DRIVE_API_URL"
 ```
 
-Create a drive and **back up the printed drive key immediately**. The server cannot recover it:
+Create an agent and a drive. **Back up the printed drive key immediately.** The server cannot
+recover it:
 
 ```sh
-pnpm exec agent-drive drive create --name my-drive
+pnpm agent-drive agent create --name local-agent
+pnpm agent-drive drive create --name my-drive
 ```
 
-The client encrypts bytes before uploading. Drive keys never go to the API or object storage.
+Use the returned agent and drive IDs to create a scoped file-operation key. Save the one-time API
+token securely, then use it with the locally retained drive key:
 
-## Phase 0 foundation
+```sh
+pnpm agent-drive key create --agent AGENT_ID --drive DRIVE_ID --label local-cli --scope read --scope write --scope delete
+read -rs -p "Scoped API key: " AGENT_DRIVE_API_KEY
+printf '\n'
+export AGENT_DRIVE_API_KEY
+printf 'hello from an agent\n' > ./sample.txt
+pnpm agent-drive put ./sample.txt /sample.txt --drive DRIVE_ID
+pnpm agent-drive get /sample.txt --drive DRIVE_ID --output ./sample.downloaded.txt
+```
 
-This branch contains repository and CI scaffolding only. The web app is a placeholder, and the
-package does not yet implement product operations, a database schema, or MCP tools. Integration,
-MCP, and browser tests in this phase are explicitly scaffold smoke checks, not product acceptance.
-The MCP SDK handshake test covers infrastructure only; product MCP tools are pending Phase 3.
+The CLI encrypts bytes before uploading. Drive keys never go to the API or object storage.
+
+## Local development environment
+
+The repository includes the Phase 1 authenticated API and Phase 2 encrypted client/CLI. Product
+MCP tools remain planned for Phase 3; the current MCP handshake and browser smoke checks are
+scaffold-level tests, not product acceptance.
 
 ### Requirements
 
@@ -132,7 +154,7 @@ behavior.
 Copy `.env.example` to `.env` for local configuration. It lists the database connection and
 PostgreSQL credentials; MinIO root credentials and S3 endpoint, region, bucket, and access keys;
 Clerk publishable and secret keys; the API base URL; the per-drive
-`AGENT_DRIVE_KEY_<DRIVE_NAME>` convention; and placeholder Stripe, sender, and email API settings.
+`AGENT_DRIVE_KEY_<DRIVE_ID>` convention; and placeholder Stripe, sender, and email API settings.
 Clerk is the planned human-auth provider; GitHub OAuth can be configured as a Clerk provider.
-Authentication, billing, email, and drive-key placeholders are not used by the Phase 0 scaffold. A
-real drive key should be stored in a secure secret manager, not committed to `.env.example`.
+Authentication, billing, and email integrations remain staged work. A real drive key should be
+stored in a secure secret manager, not committed to `.env.example`.

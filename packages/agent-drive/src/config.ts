@@ -14,31 +14,47 @@ export function configPath() {
 }
 
 export async function readConfig(): Promise<AgentDriveConfig> {
+  let serialized: string;
   try {
-    const value: unknown = JSON.parse(await readFile(configPath(), 'utf8'));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-    const record = value as Record<string, unknown>;
-    return {
-      ...(typeof record.apiUrl === 'string' ? { apiUrl: record.apiUrl } : {}),
-      ...(typeof record.apiKey === 'string' ? { apiKey: record.apiKey } : {}),
-      ...(record.driveKeys &&
-      typeof record.driveKeys === 'object' &&
-      !Array.isArray(record.driveKeys)
-        ? {
-            driveKeys: Object.fromEntries(
-              Object.entries(record.driveKeys).filter(
-                (entry): entry is [string, string] => typeof entry[1] === 'string',
-              ),
-            ),
-          }
-        : {}),
-    };
-  } catch {
-    return {};
+    serialized = await readFile(configPath(), 'utf8');
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+      return {};
+    }
+    throw new Error('Unable to read Agent Drive configuration.');
   }
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized);
+  } catch {
+    throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    (record.apiUrl !== undefined && typeof record.apiUrl !== 'string') ||
+    (record.apiKey !== undefined && typeof record.apiKey !== 'string') ||
+    (record.driveKeys !== undefined &&
+      (!record.driveKeys ||
+        typeof record.driveKeys !== 'object' ||
+        Array.isArray(record.driveKeys) ||
+        Object.values(record.driveKeys).some((key) => typeof key !== 'string')))
+  ) {
+    throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
+  }
+  return {
+    ...(typeof record.apiUrl === 'string' ? { apiUrl: record.apiUrl } : {}),
+    ...(typeof record.apiKey === 'string' ? { apiKey: record.apiKey } : {}),
+    ...(record.driveKeys !== undefined
+      ? { driveKeys: { ...(record.driveKeys as Record<string, string>) } }
+      : {}),
+  };
 }
 
 export async function writeConfig(config: AgentDriveConfig) {
+  await readConfig();
   const path = configPath();
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });

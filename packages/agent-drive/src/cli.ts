@@ -32,8 +32,10 @@ function parse(raw: string[]) {
       prefix: { type: 'string' },
       description: { type: 'string' },
       user: { type: 'string' },
+      machine: { type: 'string' },
       tag: { type: 'string', multiple: true },
       query: { type: 'string' },
+      since: { type: 'string' },
       limit: { type: 'string' },
       cursor: { type: 'string' },
       version: { type: 'string' },
@@ -63,15 +65,12 @@ async function connect(args: ReturnType<typeof parse>) {
   const driveKey = drive
     ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
     : undefined;
-  return {
-    connection,
-    client: new AgentDriveClient({
-      apiUrl: connection.apiUrl,
-      apiKey: connection.apiKey,
-      machine: machineName(),
-      ...(driveKey ? { driveKey } : {}),
-    }),
-  };
+  return new AgentDriveClient({
+    apiUrl: connection.apiUrl,
+    apiKey: connection.apiKey,
+    machine: machineName(),
+    ...(driveKey ? { driveKey } : {}),
+  });
 }
 
 function requiredDrive(args: ReturnType<typeof parse>) {
@@ -99,7 +98,7 @@ async function run(command: string, raw: string[]) {
     output(who);
     return;
   }
-  const { client, connection } = await connect(args);
+  const client = await connect(args);
   if (command === 'whoami') return output(await client.whoami());
   if (command === 'agent' && args.positionals[0] === 'create')
     return output(await client.createAgent(args.values.name ?? args.positionals[1] ?? ''));
@@ -151,6 +150,12 @@ async function run(command: string, raw: string[]) {
         args.values.prefix,
         limit(args.values.limit),
         args.values.cursor,
+        {
+          ...(args.values.tag?.[0] ? { tag: args.values.tag[0] } : {}),
+          ...(args.values.agent ? { agentId: args.values.agent } : {}),
+          ...(args.values.machine ? { machine: args.values.machine } : {}),
+          ...(args.values.user ? { user: args.values.user } : {}),
+        },
       ),
     );
   if (command === 'versions')
@@ -166,7 +171,7 @@ async function run(command: string, raw: string[]) {
     return output(
       await client.recent(
         requiredDrive(args),
-        args.values.query,
+        args.values.since,
         limit(args.values.limit),
         args.values.cursor,
       ),
@@ -176,6 +181,7 @@ async function run(command: string, raw: string[]) {
       ...(args.values.query ? { q: args.values.query } : {}),
       ...(args.values.tag?.[0] ? { tag: args.values.tag[0] } : {}),
       ...(args.values.agent ? { agentId: args.values.agent } : {}),
+      ...(args.values.machine ? { machine: args.values.machine } : {}),
       ...(args.values.user ? { user: args.values.user } : {}),
     };
     return output(
@@ -206,7 +212,7 @@ async function run(command: string, raw: string[]) {
       args.values.version ? { versionId: args.values.version } : {},
     );
     if (args.values.output) {
-      await writeFile(args.values.output, result.bytes);
+      await writeFile(args.values.output, result.bytes, { mode: 0o600 });
       return output(result.version);
     }
     if (result.bytes.byteLength > 1024 * 1024)
@@ -215,6 +221,9 @@ async function run(command: string, raw: string[]) {
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes);
     } catch {
+      throw new Error('Binary output requires --output.');
+    }
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
       throw new Error('Binary output requires --output.');
     }
     process.stdout.write(`${text}${text.endsWith('\n') ? '' : '\n'}`);
@@ -255,21 +264,37 @@ async function run(command: string, raw: string[]) {
       await syncDirectory(client, requiredDrive(args), args.positionals[0], args.values.prefix),
     );
   }
-  if (command === 'drive-key') {
-    const key = await resolveDriveKey(
-      requiredDrive(args),
-      args.values['key-file'],
-      connection.config,
-    );
-    if (!key) throw new Error('No local drive key was found.');
-    process.stdout.write(`${key}\n`);
-    return;
-  }
   throw new Error('Unknown command.');
 }
 
 const [name, ...raw] = process.argv.slice(2);
-if (name) {
+const help = `Agent Drive CLI
+
+Commands:
+  login --api URL --token-stdin
+  whoami
+  agent create --name NAME
+  drive create --name NAME
+  key create --agent ID --drive ID --label LABEL --scope read --scope write
+  key revoke ID
+  put LOCAL REMOTE --drive ID [--if-version ID | --overwrite]
+  get REMOTE --drive ID [--output FILE]
+  ls --drive ID [--prefix PATH] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
+  mv SOURCE DESTINATION --drive ID
+  cp SOURCE DESTINATION --drive ID
+  rm PATH --drive ID
+  versions PATH --drive ID
+  restore PATH --drive ID [--version ID]
+  search --drive ID [--query TEXT] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
+  recent --drive ID [--since ISO_TIMESTAMP]
+  sync LOCAL_DIRECTORY --drive ID [--prefix PATH]
+
+Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
+AGENT_DRIVE_API_KEY, and AGENT_DRIVE_MACHINE.
+`;
+if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
+  process.stdout.write(help);
+} else {
   run(name, raw).catch((error: unknown) => {
     const message =
       error instanceof AgentDriveApiError
