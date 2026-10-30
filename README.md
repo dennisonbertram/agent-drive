@@ -4,6 +4,7 @@ Google Drive for agents: encrypted file storage on S3, used through an MCP serve
 
 - [User stories](docs/user-stories.md)
 - [Build plan](docs/plan.md)
+- [Phase 1 API contract](docs/api.md)
 
 ## Phase 0 foundation
 
@@ -45,6 +46,43 @@ root credentials. MinIO's API is at `http://localhost:9000`, its console is at
 `agent-drive-local` bucket. Keep these services running for local development; use
 `docker compose down` when intentionally stopping them. To use alternate host ports, set
 `POSTGRES_HOST_PORT`, `MINIO_API_HOST_PORT`, and `MINIO_CONSOLE_HOST_PORT`.
+
+Apply the checked-in Phase 1 schema after the services are healthy:
+
+```sh
+DATABASE_URL=postgresql://agent_drive:agent_drive_local_only@127.0.0.1:5432/agent_drive \
+  pnpm --dir apps/web db:migrate
+```
+
+Expired upload intents and their `staging/` objects are cleaned opportunistically when a new
+upload is requested. Run the bounded maintenance command periodically for installations that may
+be idle:
+
+```sh
+pnpm --dir apps/web maintenance:cleanup-expired-uploads
+```
+
+Configure the object store to expire only staging objects after one day as a backstop. For the
+local MinIO service, apply this lifecycle rule once:
+
+```sh
+docker compose run --rm minio-init ilm rule add \
+  --prefix staging/ --expire-days 1 local/agent-drive-local
+```
+
+Production S3 deployments should configure the equivalent one-day lifecycle rule for the exact
+`staging/` prefix. Never apply this expiration to immutable `objects/`; Phase 7 will add production
+lifecycle enforcement.
+
+The first agent credential is created only by an explicit local operator command. It is never
+available through an unauthenticated HTTP endpoint:
+
+```sh
+pnpm --dir apps/web provision:local
+```
+
+The command requires a loopback `DATABASE_URL` and interactive account and agent names. It prints
+the high-entropy API token once; only its SHA-256 hash is stored.
 
 Install the local Playwright browser once:
 

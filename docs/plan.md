@@ -106,6 +106,12 @@ Audit event on every call.
 an API contract snapshot (OpenAPI or typed route list) so accidental breaking
 changes show up in review.
 
+The checked-in migration is applied with `pnpm --dir apps/web db:migrate`.
+Local bootstrap uses the explicit loopback-only
+`pnpm --dir apps/web provision:local` operator command; there is no HTTP
+bootstrap endpoint. The portable Request/Response handler is adapted by the
+Next App Router catch-all route.
+
 ### Phase 2 — Client library, encryption, CLI (S1.3, S2.1–S2.3, S2.5, S3.*, S4.4)
 
 **Build:** encryption module (design above), API client, and CLI commands:

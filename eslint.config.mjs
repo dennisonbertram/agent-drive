@@ -18,6 +18,13 @@ export default defineConfig([
   ...scopeToWeb(nextVitals, ['apps/web/**/*.{js,jsx,mjs,ts,tsx,mts,cts}']),
   ...nextTypescript,
   {
+    settings: {
+      next: {
+        rootDir: 'apps/web/',
+      },
+    },
+  },
+  {
     files: ['apps/web/**/*.{js,jsx,ts,tsx}'],
     settings: {
       next: {
