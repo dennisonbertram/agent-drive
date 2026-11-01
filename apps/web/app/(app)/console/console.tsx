@@ -133,8 +133,12 @@ function Dialog({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
+    const opener = document.activeElement;
     dialog?.showModal();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
   return (
     <dialog
@@ -160,6 +164,8 @@ function Dialog({
 
 export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [tab, setTab] = useState<Tab>('Files');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavRef = useRef<HTMLButtonElement>(null);
   const [drives, setDrives] = useState<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -184,8 +190,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     items: FileEntry[];
     nextCursor: string | null;
   } | null>(null);
+  const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const fileScope = `${selected}:${tab}:${fileRefresh}`;
   const fileItems = filePage?.scope === fileScope ? filePage.items : [];
+  const filteredFiles = fileItems.filter((file) =>
+    file.path.toLowerCase().includes(filter.toLowerCase()),
+  );
+  const fileError = fileFailure?.scope === fileScope ? fileFailure.message : '';
+  const filesLoading = filePage?.scope !== fileScope && !fileError;
   const drive = drives.find((item) => item.id === selected);
   const hasKey = Boolean(driveKeys[selected]);
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
@@ -218,10 +230,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     let active = true;
     void api<Page<FileEntry>>(`drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}?limit=100`)
       .then((result) => {
-        if (active) setFilePage({ ...result, scope: fileScope });
+        if (active) {
+          setFilePage({ ...result, scope: fileScope });
+          setFileFailure(null);
+        }
       })
       .catch((reason: Error) => {
-        if (active) setError(reason.message);
+        if (active) setFileFailure({ scope: fileScope, message: reason.message });
       });
     return () => {
       active = false;
@@ -368,7 +383,23 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           </div>
         </div>
         <p className="nav-label">WORKSPACE</p>
-        <nav aria-label="Workspace">
+        <button
+          ref={mobileNavRef}
+          type="button"
+          className="mobile-nav-toggle"
+          aria-label="Workspace menu"
+          aria-expanded={mobileNavOpen}
+          aria-controls="workspace-navigation"
+          onClick={() => setMobileNavOpen((current) => !current)}
+        >
+          <span>{tab}</span>
+          <span>{mobileNavOpen ? 'Close menu −' : 'Menu +'}</span>
+        </button>
+        <nav
+          id="workspace-navigation"
+          aria-label="Workspace"
+          className={mobileNavOpen ? 'is-open' : ''}
+        >
           {(['Files', 'Agents', 'API keys', 'Usage', 'Trash'] as Tab[]).map((item, index) => (
             <button
               key={item}
@@ -378,6 +409,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 setTab(item);
                 setError('');
                 setFilter('');
+                if (mobileNavOpen) {
+                  setMobileNavOpen(false);
+                  mobileNavRef.current?.focus();
+                }
               }}
             >
               <span className="nav-icon" aria-hidden>
@@ -585,92 +620,111 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {fileItems
-                            .filter((file) =>
-                              file.path.toLowerCase().includes(filter.toLowerCase()),
-                            )
-                            .map((file) => (
-                              <tr key={file.id}>
-                                <td>
-                                  <span className="file-icon" aria-hidden>
-                                    ▤
-                                  </span>
-                                  <span className="file-path">{file.path}</span>
-                                  {file.created_at && (
-                                    <small className="cell-subtext">{date(file.created_at)}</small>
-                                  )}
-                                </td>
-                                <td>
-                                  {tab === 'Trash'
-                                    ? date(file.deletedAt)
-                                    : size(Number(file.ciphertext_size ?? 0))}
-                                </td>
-                                <td>
-                                  {tab === 'Trash'
-                                    ? 'Versions preserved'
-                                    : (agents.find((agent) => agent.id === file.agent_id)?.name ??
-                                      file.agent_id)}
-                                </td>
-                                <td>
-                                  <div className="row-actions">
-                                    {tab === 'Trash' ? (
-                                      <button
-                                        disabled={busy}
-                                        onClick={() => void act(() => restore(file.path))}
-                                      >
-                                        Restore
-                                      </button>
-                                    ) : (
-                                      <>
-                                        <button
-                                          disabled={busy || !hasKey}
-                                          title={
-                                            !hasKey
-                                              ? 'Load your drive key first'
-                                              : 'Decrypt and download'
-                                          }
-                                          onClick={() => void act(() => download(file))}
-                                        >
-                                          Download
-                                        </button>
-                                        <button
-                                          disabled={busy}
-                                          onClick={() =>
-                                            void act(async () => {
-                                              if (!window.confirm(`Move ${file.path} to trash?`))
-                                                return;
-                                              await api(`drives/${selected}/delete`, 'POST', {
-                                                path: file.path,
-                                              });
-                                              await refresh();
-                                            })
-                                          }
-                                        >
-                                          Trash
-                                        </button>
-                                      </>
-                                    )}
+                          {filteredFiles.map((file) => (
+                            <tr key={file.id}>
+                              <td>
+                                <span className="file-icon" aria-hidden>
+                                  ▤
+                                </span>
+                                <span className="file-path">{file.path}</span>
+                                {file.created_at && (
+                                  <small className="cell-subtext">{date(file.created_at)}</small>
+                                )}
+                              </td>
+                              <td>
+                                {tab === 'Trash'
+                                  ? date(file.deletedAt)
+                                  : size(Number(file.ciphertext_size ?? 0))}
+                              </td>
+                              <td>
+                                {tab === 'Trash'
+                                  ? 'Versions preserved'
+                                  : (agents.find((agent) => agent.id === file.agent_id)?.name ??
+                                    file.agent_id)}
+                              </td>
+                              <td>
+                                <div className="row-actions">
+                                  {tab === 'Trash' ? (
                                     <button
                                       disabled={busy}
-                                      onClick={() => void act(() => showVersions(file.path))}
+                                      onClick={() => void act(() => restore(file.path))}
                                     >
-                                      Versions
+                                      Restore
                                     </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                  ) : (
+                                    <>
+                                      <button
+                                        disabled={busy || !hasKey}
+                                        title={
+                                          !hasKey
+                                            ? 'Load your drive key first'
+                                            : 'Decrypt and download'
+                                        }
+                                        onClick={() => void act(() => download(file))}
+                                      >
+                                        Download
+                                      </button>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() =>
+                                          void act(async () => {
+                                            if (!window.confirm(`Move ${file.path} to trash?`))
+                                              return;
+                                            await api(`drives/${selected}/delete`, 'POST', {
+                                              path: file.path,
+                                            });
+                                            await refresh();
+                                          })
+                                        }
+                                      >
+                                        Trash
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    disabled={busy}
+                                    onClick={() => void act(() => showVersions(file.path))}
+                                  >
+                                    Versions
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
-                    {!fileItems.length && (
+                    {filesLoading ? (
+                      <div className="empty" role="status">
+                        <h3>Loading files…</h3>
+                      </div>
+                    ) : fileError ? (
+                      <div className="empty" role="alert">
+                        <h3>Files could not be loaded.</h3>
+                        <p>{fileError}</p>
+                        <button
+                          className="button secondary"
+                          onClick={() => setFileRefresh((value) => value + 1)}
+                        >
+                          Retry loading files
+                        </button>
+                      </div>
+                    ) : filter && !filteredFiles.length ? (
+                      <div className="empty" role="status">
+                        <h3>No matching loaded files.</h3>
+                        <p>
+                          {filePage?.nextCursor
+                            ? 'More files are available. Load the next page to include them in your filter.'
+                            : 'Try a different file name or clear the filter.'}
+                        </p>
+                        <button className="button secondary" onClick={() => setFilter('')}>
+                          Clear filter
+                        </button>
+                      </div>
+                    ) : !fileItems.length ? (
                       <div className="empty">
                         <h3>
-                          {filePage?.scope !== fileScope
-                            ? 'Loading files…'
-                            : tab === 'Trash'
-                              ? 'Nothing in the trash.'
-                              : 'Ready for your first file.'}
+                          {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}
                         </h3>
                         <p>
                           {tab === 'Trash'
@@ -688,7 +742,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           </button>
                         )}
                       </div>
-                    )}
+                    ) : null}
                     {filePage?.scope === fileScope && filePage.nextCursor && (
                       <button
                         className="button secondary load-more"

@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "run_id": "baseline-75fad601-local-synthetic",
+  "source_revision": "75fad60116971cb9ea4be17cd8de18d3ce9a706a",
+  "scope": "Local synthetic UI only; no product fixes, issue filing or provider acceptance.",
+  "findings": [
+    {
+      "id": "W-001",
+      "severity": "medium",
+      "category": "error-handling",
+      "title": "Failed selected-drive listing continues to say Loading files",
+      "stories": ["STORY-010"],
+      "source": "reused_same_revision_flow_baseline",
+      "expected": "Once the listing request has failed, stop the loading state and distinguish failure from a genuinely empty drive.",
+      "actual": "A simulated503 displayed an error banner but the table continued saying Loading files; Refresh recovered100 real rows after removing interception.",
+      "reproduction": [
+        "Open Files in the populated synthetic Harbor Research owner.",
+        "Use a browser-only route interception to return503 for the selected drive listing; click Refresh.",
+        "Observe the error banner together with Loading files in the table.",
+        "Remove the interception and Refresh to recover the populated listing."
+      ],
+      "evidence_ids": ["B-A109", "B-A110", "B-A111", "B-S26"],
+      "screenshots": [
+        "session-artifacts/flow-baseline/26-simulated-list-failed-1440.png",
+        "session-artifacts/flow-baseline/26-simulated-list-failed-375.png"
+      ],
+      "simulation": "Browser-only listing503; not an actual database or storage outage.",
+      "status": "open"
+    },
+    {
+      "id": "W-002",
+      "severity": "medium",
+      "category": "flow",
+      "title": "Loaded-page filter gives a blank table without no-match guidance",
+      "stories": ["STORY-010"],
+      "source": "reused_same_revision_flow_baseline",
+      "expected": "Explain that no currently loaded rows match and preserve a clear path to loading more; do not imply a global server search.",
+      "actual": "Filtering zoning-summary before loading page2 left a blank table without no-match guidance. Loading the next page exposed the real target. The Filter loaded files label is truthful but easy to miss.",
+      "reproduction": [
+        "Select Harbor Research with only its first100 metadata rows loaded.",
+        "Enter zoning-summary in Filter loaded files.",
+        "Observe a blank table; click Load more files and the matching later row appears."
+      ],
+      "evidence_ids": ["B-A034", "B-A035", "B-S14", "B-S15", "C043", "C044"],
+      "screenshots": [
+        "session-artifacts/flow-baseline/14-filter-before-next-page-1440.png",
+        "session-artifacts/flow-baseline/14-filter-before-next-page-375.png",
+        "session-artifacts/flow-baseline/15-filter-match-after-next-page-1440.png",
+        "session-artifacts/flow-baseline/15-filter-match-after-next-page-375.png"
+      ],
+      "simulation": null,
+      "status": "open"
+    },
+    {
+      "id": "W-003",
+      "severity": "medium",
+      "category": "error-handling",
+      "title": "Billing save/error feedback is outside the form viewport",
+      "stories": ["STORY-028"],
+      "source": "reused_same_revision_flow_baseline",
+      "expected": "After submitting spending controls, feedback should be discoverable at or near the controls, or focus/scroll should reliably reveal it.",
+      "actual": "Save/error banners rendered near the page top while the controls remained lower down. The user had to scroll upward to see the required-email error or save result.",
+      "reproduction": [
+        "Open Billing and limits and scroll to spending controls.",
+        "Provide a threshold but leave Alert email empty; click Save spending controls.",
+        "Observe no nearby error, then scroll to the top to find the banner."
+      ],
+      "evidence_ids": ["B-A078\u2013B-A091", "B-S37", "B-S38"],
+      "screenshots": [
+        "session-artifacts/flow-baseline/37-billing-missing-email-1440.png",
+        "session-artifacts/flow-baseline/37-billing-missing-email-375.png",
+        "session-artifacts/flow-baseline/38-billing-saved-controls-1440.png",
+        "session-artifacts/flow-baseline/38-billing-saved-controls-375.png"
+      ],
+      "simulation": null,
+      "status": "open"
+    },
+    {
+      "id": "W-004",
+      "severity": "low",
+      "category": "error-handling",
+      "title": "Required billing email error exposes API field names",
+      "stories": ["STORY-028"],
+      "source": "reused_same_revision_flow_baseline",
+      "expected": "Name the visible Alert email and Email me at controls in actionable user-facing language.",
+      "actual": "The required-email validation banner uses internal API field names rather than the displayed form labels.",
+      "reproduction": [
+        "Set Email me at to a valid amount and leave Alert email empty.",
+        "Submit and scroll upward to read the required-email banner."
+      ],
+      "evidence_ids": ["B-S37"],
+      "screenshots": [
+        "session-artifacts/flow-baseline/37-billing-missing-email-1440.png",
+        "session-artifacts/flow-baseline/37-billing-missing-email-375.png"
+      ],
+      "simulation": null,
+      "status": "open"
+    },
+    {
+      "id": "W-005",
+      "severity": "low",
+      "category": "a11y",
+      "title": "Escape closes the create-drive dialog without returning focus to its trigger",
+      "stories": ["STORY-007"],
+      "source": "new_isolated_browser_execution",
+      "expected": "After Escape closes a closable dialog opened from New drive, return keyboard focus to that invoking button.",
+      "actual": "The dialog closed but document.activeElement was BODY rather than the New drive button. Occasional BODY during Tab cycling was separately adjudicated as browser-chrome cycling, not an app control escaping the modal.",
+      "reproduction": [
+        "In the isolated empty synthetic owner's Files view, focus New drive.",
+        "Press Enter to open Create a drive and use Tab to inspect focus.",
+        "Press Escape; observe closed dialog and BODY as active element."
+      ],
+      "evidence_ids": ["C004", "C005", "E025", "E026", "focus.json"],
+      "screenshots": [
+        "session-artifacts/walker/12-escape-focus-return-1440.png",
+        "session-artifacts/walker/12-escape-focus-return-375.png"
+      ],
+      "simulation": null,
+      "status": "open",
+      "limitation": "Chromium observation only; not a screen-reader or cross-browser accessibility certification."
+    }
+  ],
+  "severity_counts": {
+    "medium": 3,
+    "low": 2
+  },
+  "geometry_adjudication": {
+    "observations": 114,
+    "indexed_screenshots": 118,
+    "viewport_sizes": [
+      [1440, 900],
+      [1920, 1080],
+      [768, 1024],
+      [375, 812]
+    ],
+    "document_horizontal_overflow_observed": false,
+    "overflow_spills_flagged": 0,
+    "intentional_scrolling": "Narrow tables and console navigation scroll independently; not document overflow.",
+    "false_positives": [
+      "Uneven row flags grouped unrelated nav/header/table elements.",
+      "Wrapped control on settings error was the focusable audit-table region.",
+      "Native select text truncation is distinct from inaccessible document overflow."
+    ],
+    "visual_inspection": [
+      "contact-1.png",
+      "contact-2.png",
+      "contact-3.png",
+      "contact-4.png",
+      "contact-5.png",
+      "contact-6.png",
+      "contact-7.png"
+    ],
+    "limitations": "Representative layouts only. Error/form/loading states not all repeated at every width; no exhaustive visual or accessibility certification."
+  }
+}

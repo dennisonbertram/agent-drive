@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 
 type Plan = {
   id: string;
@@ -159,6 +159,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [formFeedback, setFormFeedback] = useState<{
+    kind: 'error' | 'success';
+    message: string;
+  } | null>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState('');
   const load = useCallback(async () => {
@@ -179,21 +184,34 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    if (formFeedback?.kind === 'error') feedbackRef.current?.focus();
+  }, [formFeedback]);
+
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError('');
     setNotice('');
+    setFormFeedback(null);
     try {
+      const spendCapCents = centsInput(cap);
+      const alertThresholdCents = centsInput(threshold);
+      if (alertThresholdCents !== null && !email.trim()) {
+        throw new Error('Enter an alert email to receive your spending alert.');
+      }
       await api('/settings', 'PATCH', {
-        spendCapCents: centsInput(cap),
-        alertThresholdCents: centsInput(threshold),
+        spendCapCents,
+        alertThresholdCents,
         alertEmail: email.trim() || null,
       });
       await load();
-      setNotice('Spending controls saved.');
+      setFormFeedback({ kind: 'success', message: 'Spending controls saved.' });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Settings could not be saved.');
+      setFormFeedback({
+        kind: 'error',
+        message: reason instanceof Error ? reason.message : 'Settings could not be saved.',
+      });
     } finally {
       setBusy(false);
     }
@@ -419,6 +437,16 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                 </p>
               </div>
               <form className="billing-card billing-form" onSubmit={(event) => void save(event)}>
+                {formFeedback && (
+                  <div
+                    ref={feedbackRef}
+                    className={`billing-banner${formFeedback.kind === 'error' ? ' error' : ''}`}
+                    role={formFeedback.kind === 'error' ? 'alert' : 'status'}
+                    tabIndex={-1}
+                  >
+                    {formFeedback.message}
+                  </div>
+                )}
                 <label htmlFor="spend-cap">
                   Monthly write cap (USD)
                   <input

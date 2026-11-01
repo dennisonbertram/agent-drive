@@ -1026,6 +1026,9 @@ legend {
     padding: 18px;
   }
 }
+.mobile-nav-toggle {
+  display: none;
+}
 @media (max-width: 760px) {
   .console-shell {
     grid-template-columns: minmax(0, 1fr);
@@ -1058,14 +1061,34 @@ legend {
     display: none;
   }
   .sidebar nav {
-    display: flex;
+    display: none;
+  }
+  .sidebar nav.is-open {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 5px;
-    overflow-x: auto;
+    margin-top: 8px;
+  }
+  .mobile-nav-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid #46533d;
+    border-radius: 6px;
+    background: transparent;
+    color: #dce3d7;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
   }
   .nav-item {
     padding: 10px;
-    flex-shrink: 0;
-    font-size: 0.72rem;
+    min-width: 0;
+    min-height: 44px;
+    font-size: 0.8rem;
     gap: 6px;
   }
   .nav-icon {
