@@ -54,11 +54,18 @@ const decodeRates = (rates: BillingPeriod['rates']): Rates | null =>
       }
     : null;
 
-export async function lockBillingAccount(client: PoolClient, accountId: string) {
-  const exists = await client.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [
-    accountId,
-  ]);
+export async function lockBillingAccount(
+  client: PoolClient,
+  accountId: string,
+  options: { allowDeleting?: boolean } = {},
+) {
+  const exists = await client.query<{ id: string; deleting_at: Date | null }>(
+    'SELECT id, deleting_at FROM accounts WHERE id = $1 FOR UPDATE',
+    [accountId],
+  );
   if (!exists.rowCount) throw new ApiError('not_found', 'Account not found.');
+  if (exists.rows[0]!.deleting_at && !options.allowDeleting)
+    throw new ApiError('conflict', 'The account is being deleted.');
   await client.query(
     'INSERT INTO billing_accounts (account_id) VALUES ($1) ON CONFLICT DO NOTHING',
     [accountId],
@@ -70,8 +77,13 @@ export async function lockBillingAccount(client: PoolClient, accountId: string) 
   return result.rows[0]!;
 }
 
-export async function billingState(client: PoolClient, accountId: string, periodStart?: Date) {
-  const account = await lockBillingAccount(client, accountId);
+export async function billingState(
+  client: PoolClient,
+  accountId: string,
+  periodStart?: Date,
+  options: { allowDeleting?: boolean } = {},
+) {
+  const account = await lockBillingAccount(client, accountId, options);
   const clock = await client.query<{ now: Date }>('SELECT now() AS now');
   const { start, end } = monthBounds(periodStart ?? clock.rows[0]!.now);
   const currentMonth = monthBounds(clock.rows[0]!.now).start.getTime() === start.getTime();
@@ -329,7 +341,7 @@ export async function recordTransfer(transfer: Transfer) {
     );
     const owner = object.rows[0];
     if (!owner) return;
-    await lockBillingAccount(client, owner.account_id);
+    await lockBillingAccount(client, owner.account_id, { allowDeleting: true });
     await client.query(
       `INSERT INTO billing_egress_events (id,account_id,agent_id,drive_id,object_key,bytes_sent,occurred_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
@@ -346,7 +358,11 @@ export async function recordTransfer(transfer: Transfer) {
   });
 }
 
-export async function queueBillingDeliveries(client: PoolClient, state: BillingState) {
+export async function queueBillingDeliveries(
+  client: PoolClient,
+  state: BillingState,
+  options: { notify?: boolean } = {},
+) {
   const quote = quoteState(state);
   if (state.account.stripe_customer_id) {
     const queued = await client.query<{ cents: string }>(
@@ -369,6 +385,7 @@ export async function queueBillingDeliveries(client: PoolClient, state: BillingS
     }
   }
   if (
+    options.notify !== false &&
     state.account.alert_email &&
     state.account.alert_threshold_cents !== null &&
     quote.totalCents >= BigInt(state.account.alert_threshold_cents)

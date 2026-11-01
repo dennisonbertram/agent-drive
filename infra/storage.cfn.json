@@ -1,0 +1,209 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private Agent Drive ciphertext and access-log storage. No credentials are generated.",
+  "Parameters": {
+    "DataBucketName": { "Type": "String", "AllowedPattern": "[a-z0-9][a-z0-9-]{1,61}[a-z0-9]" },
+    "LogsBucketName": { "Type": "String", "AllowedPattern": "[a-z0-9][a-z0-9-]{1,61}[a-z0-9]" },
+    "PublicOrigin": {
+      "Type": "String",
+      "AllowedPattern": "https://[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]{1,5})?",
+      "Description": "Exact HTTPS application origin, without a trailing slash or wildcard."
+    },
+    "LogRetentionDays": { "Type": "Number", "Default": 90, "MinValue": 1, "MaxValue": 3650 }
+  },
+  "Resources": {
+    "LogsBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketName": { "Ref": "LogsBucketName" },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": { "Rules": [{ "ObjectOwnership": "BucketOwnerEnforced" }] },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            { "ServerSideEncryptionByDefault": { "SSEAlgorithm": "AES256" } }
+          ]
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireAccessLogs",
+              "Status": "Enabled",
+              "Prefix": "access/",
+              "ExpirationInDays": { "Ref": "LogRetentionDays" }
+            }
+          ]
+        }
+      }
+    },
+    "LogsBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "LogsBucket" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                { "Fn::GetAtt": ["LogsBucket", "Arn"] },
+                { "Fn::Sub": "${LogsBucket.Arn}/*" }
+              ],
+              "Condition": {
+                "Bool": { "aws:SecureTransport": "false", "aws:PrincipalIsAWSService": "false" }
+              }
+            },
+            {
+              "Sid": "AllowOnlyThisBucketsLogDelivery",
+              "Effect": "Allow",
+              "Principal": { "Service": "logging.s3.amazonaws.com" },
+              "Action": "s3:PutObject",
+              "Resource": { "Fn::Sub": "${LogsBucket.Arn}/access/*" },
+              "Condition": {
+                "StringEquals": { "aws:SourceAccount": { "Ref": "AWS::AccountId" } },
+                "ArnEquals": {
+                  "aws:SourceArn": { "Fn::Sub": "arn:${AWS::Partition}:s3:::${DataBucketName}" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "DataBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "DependsOn": "LogsBucketPolicy",
+      "Properties": {
+        "BucketName": { "Ref": "DataBucketName" },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": { "Rules": [{ "ObjectOwnership": "BucketOwnerEnforced" }] },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            { "ServerSideEncryptionByDefault": { "SSEAlgorithm": "AES256" } }
+          ]
+        },
+        "LoggingConfiguration": {
+          "DestinationBucketName": { "Ref": "LogsBucket" },
+          "LogFilePrefix": "access/"
+        },
+        "CorsConfiguration": {
+          "CorsRules": [
+            {
+              "AllowedOrigins": [{ "Ref": "PublicOrigin" }],
+              "AllowedMethods": ["GET", "HEAD", "PUT"],
+              "AllowedHeaders": ["content-type", "x-amz-*"],
+              "ExposedHeaders": ["ETag", "Content-Length"],
+              "MaxAge": 3600
+            }
+          ]
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireStagingOnly",
+              "Status": "Enabled",
+              "Prefix": "staging/",
+              "ExpirationInDays": 1,
+              "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+              "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+            },
+            {
+              "Id": "RemoveExpiredStagingMarkers",
+              "Status": "Enabled",
+              "Prefix": "staging/",
+              "ExpiredObjectDeleteMarker": true
+            }
+          ]
+        }
+      }
+    },
+    "DataBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": { "Ref": "DataBucket" },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                { "Fn::GetAtt": ["DataBucket", "Arn"] },
+                { "Fn::Sub": "${DataBucket.Arn}/*" }
+              ],
+              "Condition": {
+                "Bool": { "aws:SecureTransport": "false", "aws:PrincipalIsAWSService": "false" }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "RuntimeStoragePolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "Description": "Attach only to the dedicated Agent Drive API/maintenance role.",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": ["s3:ListBucket", "s3:ListBucketVersions"],
+              "Resource": { "Fn::GetAtt": ["DataBucket", "Arn"] },
+              "Condition": { "StringLike": { "s3:prefix": ["objects/*", "staging/*"] } }
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion"
+              ],
+              "Resource": [
+                { "Fn::Sub": "${DataBucket.Arn}/objects/*" },
+                { "Fn::Sub": "${DataBucket.Arn}/staging/*" }
+              ]
+            },
+            {
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": { "Fn::GetAtt": ["LogsBucket", "Arn"] },
+              "Condition": { "StringLike": { "s3:prefix": "access/*" } }
+            },
+            {
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": { "Fn::Sub": "${LogsBucket.Arn}/access/*" }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "S3Bucket": { "Value": { "Ref": "DataBucket" } },
+    "S3Region": { "Value": { "Ref": "AWS::Region" } },
+    "S3LogsBucket": { "Value": { "Ref": "LogsBucket" } },
+    "S3LogsPrefix": { "Value": "access/" },
+    "RuntimePolicyArn": { "Value": { "Ref": "RuntimeStoragePolicy" } }
+  }
+}

@@ -390,6 +390,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           <Link className="nav-item" href="/console/billing">
             <span aria-hidden="true">$</span>Billing &amp; limits
           </Link>
+          <Link className="nav-item" href="/console/settings">
+            Activity &amp; deletion
+          </Link>
         </nav>
         <div className="sidebar-bottom">
           <div className="privacy-note">

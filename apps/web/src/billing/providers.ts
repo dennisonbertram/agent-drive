@@ -44,6 +44,69 @@ export function emailConfigured() {
   return configured(process.env.RESEND_API_KEY) && configured(process.env.EMAIL_FROM);
 }
 
+export async function closeStripeBillingForDeletion(
+  accountId: string,
+  customerId: string,
+  maxChanges = 10,
+) {
+  const client = stripe();
+  const customer = await client.customers.retrieve(customerId);
+  if (customer.deleted) return true;
+  if (customer.livemode !== stripeLiveMode() || customer.metadata.accountId !== accountId) {
+    throw new ApiError('internal_error', 'The billing customer could not be verified.');
+  }
+  let changes = 0;
+  for await (const session of client.checkout.sessions.list({
+    customer: customerId,
+    status: 'open',
+    limit: 100,
+  })) {
+    if (changes >= maxChanges) return false;
+    if (session.customer !== customerId || session.livemode !== stripeLiveMode()) {
+      throw new ApiError('internal_error', 'The billing session could not be verified.');
+    }
+    changes++;
+    try {
+      await client.checkout.sessions.expire(
+        session.id,
+        {},
+        { idempotencyKey: `delete-checkout/${accountId}/${session.id}` },
+      );
+    } catch (error) {
+      if (!(error instanceof Stripe.errors.StripeInvalidRequestError)) throw error;
+      const current = await client.checkout.sessions.retrieve(session.id);
+      if (
+        current.status === 'open' ||
+        current.customer !== customerId ||
+        current.livemode !== stripeLiveMode()
+      ) {
+        throw error;
+      }
+    }
+  }
+  for await (const subscription of client.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 100,
+  })) {
+    if (subscription.customer !== customerId || subscription.livemode !== stripeLiveMode()) {
+      throw new ApiError('internal_error', 'The billing subscription could not be verified.');
+    }
+    if (['canceled', 'incomplete_expired'].includes(subscription.status)) continue;
+    if (changes >= maxChanges) return false;
+    changes++;
+    const canceled = await client.subscriptions.cancel(
+      subscription.id,
+      { invoice_now: true, prorate: true },
+      { idempotencyKey: `delete-subscription/${accountId}/${subscription.id}` },
+    );
+    if (canceled.status !== 'canceled') {
+      throw new ApiError('internal_error', 'The billing subscription could not be canceled.');
+    }
+  }
+  return true;
+}
+
 function stripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!configured(key)) throw new ApiError('internal_error', 'Stripe billing is not configured.');
@@ -499,10 +562,14 @@ export async function processStripeWebhook(rawBody: string, signature: string | 
       'The Stripe event is missing its customer or subscription.',
     );
   const mapped = await getPool().query(
-    'SELECT account_id FROM billing_accounts WHERE stripe_customer_id = $1',
+    `SELECT ba.account_id, a.deleting_at
+       FROM billing_accounts ba
+       LEFT JOIN accounts a ON a.id=ba.account_id
+      WHERE ba.stripe_customer_id = $1`,
     [customerId],
   );
   const accountId = mapped.rows[0]?.account_id as string | undefined;
+  if (!accountId && event.type === 'customer.subscription.deleted') return { received: true };
   if (!accountId)
     throw new ApiError('unauthorized', 'The Stripe customer is not mapped to an account.');
   if (
@@ -511,6 +578,17 @@ export async function processStripeWebhook(rawBody: string, signature: string | 
   )
     throw new ApiError('unauthorized', 'The checkout session account or mode does not match.');
   await withTransaction(async (db) => {
+    const account = await db.query<{ deleting_at: Date | null }>(
+      'SELECT deleting_at FROM accounts WHERE id=$1 FOR UPDATE',
+      [accountId],
+    );
+    if (!account.rowCount || account.rows[0]!.deleting_at) {
+      await db.query(
+        'INSERT INTO stripe_events (id, created, type) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+        [event.id, event.created, event.type],
+      );
+      return;
+    }
     const billing = await lockBillingAccount(db, accountId);
     const duplicate = await db.query('SELECT 1 FROM stripe_events WHERE id = $1', [event.id]);
     if (duplicate.rowCount) return;

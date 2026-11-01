@@ -1,7 +1,7 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { billingSummary, recordTransfer } from './ledger';
 import { parseS3Transfer } from './s3-log';
-import { getPool } from '../db/client';
+import { getPool, withTransaction } from '../db/client';
 import {
   emailConfigured,
   meterDeliveryConfigured,
@@ -84,7 +84,7 @@ export async function refreshPeriods() {
   let cursor: string | null = null;
   do {
     const result: { rows: Array<{ id: string }> } = await getPool().query<{ id: string }>(
-      'SELECT id FROM accounts WHERE ($1::uuid IS NULL OR id > $1::uuid) ORDER BY id LIMIT 100',
+      'SELECT id FROM accounts WHERE deleting_at IS NULL AND ($1::uuid IS NULL OR id > $1::uuid) ORDER BY id LIMIT 100',
       [cursor],
     );
     for (const row of result.rows) {
@@ -187,33 +187,45 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
       `UPDATE billing_notifications SET first_attempt_at=COALESCE(first_attempt_at,now()), lease_until=now()+interval '1 hour'
        WHERE id IN (SELECT id FROM billing_notifications WHERE sent_at IS NULL
          AND (first_attempt_at IS NULL OR first_attempt_at > now()-interval '24 hours')
+         AND EXISTS (SELECT 1 FROM accounts a
+                      WHERE a.id=billing_notifications.account_id AND a.deleting_at IS NULL)
          AND (lease_until IS NULL OR lease_until < now())
          ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 100)
-     RETURNING id, email, threshold_cents`,
+     RETURNING id, account_id, email, threshold_cents`,
     );
     for (const row of notifications.rows) {
-      try {
-        await providers.sendBillingEmail({
-          idempotencyKey: `billing-notification/${row.id}`,
-          to: row.email,
-          subject: 'Agent Drive billing threshold reached',
-          text: `Your Agent Drive billing threshold of ${row.threshold_cents} cents was reached. Review billing at ${billingOrigin()}/console/billing.`,
-        });
-        await getPool().query(
-          'UPDATE billing_notifications SET sent_at = now(), lease_until = NULL, last_error = NULL WHERE id = $1',
-          [row.id],
+      await withTransaction(async (client) => {
+        const account = await client.query(
+          'SELECT id FROM accounts WHERE id=$1 AND deleting_at IS NULL FOR UPDATE',
+          [row.account_id],
         );
-      } catch (error) {
-        await getPool().query(
-          'UPDATE billing_notifications SET lease_until = NULL, last_error = $2 WHERE id = $1',
-          [
-            row.id,
-            error instanceof Error
-              ? `${error.name}: Resend delivery failed.`
-              : 'Resend delivery failed.',
-          ],
-        );
-      }
+        if (!account.rowCount) {
+          await client.query('DELETE FROM billing_notifications WHERE id=$1', [row.id]);
+          return;
+        }
+        try {
+          await providers.sendBillingEmail({
+            idempotencyKey: `billing-notification/${row.id}`,
+            to: row.email,
+            subject: 'Agent Drive billing threshold reached',
+            text: `Your Agent Drive billing threshold of ${row.threshold_cents} cents was reached. Review billing at ${billingOrigin()}/console/billing.`,
+          });
+          await client.query(
+            'UPDATE billing_notifications SET sent_at = now(), lease_until = NULL, last_error = NULL WHERE id = $1',
+            [row.id],
+          );
+        } catch (error) {
+          await client.query(
+            'UPDATE billing_notifications SET lease_until = NULL, last_error = $2 WHERE id = $1',
+            [
+              row.id,
+              error instanceof Error
+                ? `${error.name}: Resend delivery failed.`
+                : 'Resend delivery failed.',
+            ],
+          );
+        }
+      });
     }
   }
 }

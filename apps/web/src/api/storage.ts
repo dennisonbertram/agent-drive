@@ -47,6 +47,10 @@ export function storageClient() {
   return client;
 }
 
+export function storageBucket() {
+  return config().bucket;
+}
+
 export async function presignedUpload(key: string, size: number) {
   const settings = config();
   return getSignedUrl(

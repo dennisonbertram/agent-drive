@@ -7,9 +7,14 @@ export default function Home() {
         <Link href="/" className="brand">
           <span className="brand-mark">a/</span> agent drive
         </Link>
-        <Link className="button secondary" href="/sign-in">
-          Sign in
-        </Link>
+        <nav className="actions" aria-label="Main">
+          <Link className="button secondary" href="/pricing">
+            Pricing
+          </Link>
+          <Link className="button secondary" href="/sign-in">
+            Sign in
+          </Link>
+        </nav>
       </header>
       <section className="hero">
         <p className="eyebrow">A WORKSPACE THAT OUTLIVES THE SESSION</p>
