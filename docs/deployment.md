@@ -55,8 +55,10 @@ mocked providers do not establish live payments, email delivery, or final-invoic
 
 ## Maintenance is required
 
-Use a trusted external worker with the same database/storage/provider configuration. Schedule
-these commands without exposing their environment in logs:
+On Vercel Pro, the checked-in cron schedules run these maintenance jobs through
+`/api/cron/maintenance`. Configure `CRON_SECRET` in the Vercel Production environment with at least
+32 random characters. The CLI commands remain available for a trusted external worker with the same
+database/storage/provider configuration:
 
 ```sh
 pnpm --filter @agent-drive/web deletion:maintenance
@@ -66,8 +68,8 @@ pnpm --filter @agent-drive/web billing:run
 
 Run deletion/upload cleanup frequently (for example, every five minutes), and billing at least
 hourly. Each pass is bounded; monitor pending/blocked jobs and increase execution frequency when
-there is a backlog. This repository does not silently provision a paid scheduler or assume a
-Vercel Cron plan. A web deployment alone does not run the worker.
+there is a backlog. A web deployment without the Vercel Pro cron schedules or an external worker
+does not run the maintenance jobs.
 
 Deletion first denies new application access, waits at least the presigned-upload grace period,
 then purges objects and metadata. Direct S3 links/in-flight requests cannot be recalled instantly.

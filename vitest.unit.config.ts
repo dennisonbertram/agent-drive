@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       'packages/agent-drive/src/**/*.unit.test.ts',
       'apps/web/src/**/*.unit.test.ts',
+      'apps/web/app/**/*.unit.test.ts',
       'tests/**/*.unit.test.ts',
     ],
     environment: 'node',

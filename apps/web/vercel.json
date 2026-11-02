@@ -3,5 +3,9 @@
   "framework": "nextjs",
   "installCommand": "pnpm --dir ../.. install --frozen-lockfile",
   "buildCommand": "pnpm --dir ../.. --filter ./packages/agent-drive build && pnpm build",
-  "git": { "deploymentEnabled": false }
+  "git": { "deploymentEnabled": false },
+  "crons": [
+    { "path": "/api/cron/maintenance?job=cleanup", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/maintenance?job=billing", "schedule": "0 * * * *" }
+  ]
 }
