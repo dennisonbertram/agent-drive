@@ -22,6 +22,7 @@ function publishedRates() {
 export default function PricingPage() {
   const rates = publishedRates();
   const paidAvailable = rates !== null && checkoutConfigured();
+  const egressNotMetered = process.env.S3_EGRESS_METERING === 'none';
   return (
     <div className="billing-page pricing-page">
       <header className="billing-header">
@@ -110,7 +111,7 @@ export default function PricingPage() {
                 </div>
                 <div>
                   <dt>Extra GiB downloaded</dt>
-                  <dd>{money(rates.egress)}</dd>
+                  <dd>{egressNotMetered ? 'Not charged' : money(rates.egress)}</dd>
                 </div>
                 <div>
                   <dt>Extra 1,000 API operations</dt>

@@ -305,7 +305,12 @@ default unless rates, known Stripe prices, and the S3 log source are configured.
 developer/team base amounts in policy are proposal defaults, not live pricing. Statements
 contain a monthly CSV-compatible breakdown; Stripe invoices remain the payment record. Missing
 S3, Stripe, or email configuration leaves durable delivery work pending and visible for operator
-reconciliation. Synthetic fixtures and test-mode signatures verify application wiring only;
+reconciliation. For Cloudflare R2, set `S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`,
+`S3_REGION=auto`, and `S3_BUCKET`; map an R2 API token access key ID and secret to
+`S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`. Set `S3_EGRESS_METERING=none` and leave
+`S3_LOGS_*` unset because R2 does not charge egress or provide server access logs. Configure bucket
+CORS for the public origin with GET/HEAD/PUT. Deletion uses `ListObjectsV2` on R2. Synthetic
+fixtures and test-mode signatures verify application wiring only;
 they do not prove production billing, email collection, or egress metering.
 
 The Playwright runner creates a random test-auth secret and enables a development-only provider

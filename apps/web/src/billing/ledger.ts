@@ -435,8 +435,9 @@ export async function billingSummary(accountId: string, periodStart?: Date) {
       authorizedEgressBytes: state.period.authorized_egress_bytes,
       operations: state.current.operations.toString(),
       egressMeteringConfigured: Boolean(
-        process.env.S3_LOGS_BUCKET && process.env.S3_LOGS_PREFIX && state.rates,
+        state.rates && process.env.S3_LOGS_BUCKET && process.env.S3_LOGS_PREFIX,
       ),
+      egressNotMetered: process.env.S3_EGRESS_METERING === 'none',
       totalCents: quote.totalCents.toString(),
       overageCents: quote.overageCents.toString(),
       spendCapCents: state.account.spend_cap_cents,

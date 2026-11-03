@@ -21,8 +21,8 @@ export function checkoutConfigured() {
     configured(process.env.STRIPE_METER_EVENT_NAME) &&
     configured(process.env.AGENT_DRIVE_PUBLIC_URL) &&
     billingRates() !== null &&
-    configured(process.env.S3_LOGS_BUCKET) &&
-    configured(process.env.S3_LOGS_PREFIX)
+    (process.env.S3_EGRESS_METERING === 'none' ||
+      (configured(process.env.S3_LOGS_BUCKET) && configured(process.env.S3_LOGS_PREFIX)))
   );
 }
 

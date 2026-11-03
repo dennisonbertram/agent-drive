@@ -33,6 +33,8 @@ export function storageClient() {
     const settings = config();
     client = new S3Client({
       region: settings.region,
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       ...(settings.endpoint ? { endpoint: settings.endpoint, forcePathStyle: true } : {}),
       ...(settings.accessKeyId && settings.secretAccessKey
         ? {

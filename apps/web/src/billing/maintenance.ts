@@ -16,6 +16,8 @@ const maxLogLineBytes = 1024 * 1024;
 function logsClient() {
   const config: ConstructorParameters<typeof S3Client>[0] = {
     region: process.env.S3_REGION ?? 'us-east-1',
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     forcePathStyle: !!process.env.S3_ENDPOINT,
   };
   if (process.env.S3_ENDPOINT) config.endpoint = process.env.S3_ENDPOINT;
@@ -28,6 +30,10 @@ function logsClient() {
 }
 
 export async function ingestLogs() {
+  if (process.env.S3_EGRESS_METERING === 'none') {
+    console.log('Egress metering skipped: storage provider does not charge for egress.');
+    return;
+  }
   const bucket = process.env.S3_LOGS_BUCKET;
   const prefix = process.env.S3_LOGS_PREFIX;
   if (!bucket || !prefix) {

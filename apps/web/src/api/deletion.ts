@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { DeleteObjectsCommand, ListObjectVersionsCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  ListObjectVersionsCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getPool, withTransaction } from '../db/client';
 import { queueBillingDeliveries, billingState } from '../billing/ledger';
 import { closeStripeBillingForDeletion } from '../billing/providers';
@@ -8,6 +13,13 @@ import { storageBucket, storageClient } from './storage';
 import { consoleIdentityDeletionConfigured, deleteConsoleIdentity } from '../console/identity';
 
 const batchSize = 100;
+let versionListingSupported = true;
+
+function isUnimplemented(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return candidate.name === 'NotImplemented' || candidate.$metadata?.httpStatusCode === 501;
+}
 
 type Adapters = {
   objectStore?: S3Client;
@@ -17,23 +29,59 @@ type Adapters = {
   jobIds?: string[];
 };
 
-async function purgePrefix(store: S3Client, prefix: string) {
+export async function purgePrefix(store: S3Client, prefix: string) {
   let removed = 0;
   while (removed < batchSize) {
-    const listed = await store.send(
-      new ListObjectVersionsCommand({
-        Bucket: storageBucket(),
-        Prefix: prefix,
-        MaxKeys: batchSize,
-      }),
-    );
-    const objects = [
-      ...(listed.Versions ?? []).map((entry) => ({ Key: entry.Key!, VersionId: entry.VersionId })),
-      ...(listed.DeleteMarkers ?? []).map((entry) => ({
-        Key: entry.Key!,
-        VersionId: entry.VersionId,
-      })),
-    ].filter((entry) => entry.Key);
+    let useVersions = versionListingSupported;
+    let objects: Array<{ Key: string; VersionId?: string | undefined }>;
+    let isTruncated: boolean;
+    if (useVersions) {
+      try {
+        const listed = await store.send(
+          new ListObjectVersionsCommand({
+            Bucket: storageBucket(),
+            Prefix: prefix,
+            MaxKeys: batchSize,
+          }),
+        );
+        objects = [
+          ...(listed.Versions ?? []).map((entry) => ({
+            Key: entry.Key!,
+            VersionId: entry.VersionId,
+          })),
+          ...(listed.DeleteMarkers ?? []).map((entry) => ({
+            Key: entry.Key!,
+            VersionId: entry.VersionId,
+          })),
+        ].filter((entry) => entry.Key);
+        isTruncated = !!listed.IsTruncated;
+      } catch (error) {
+        if (!isUnimplemented(error)) throw error;
+        versionListingSupported = false;
+        useVersions = false;
+        const listed = await store.send(
+          new ListObjectsV2Command({
+            Bucket: storageBucket(),
+            Prefix: prefix,
+            MaxKeys: batchSize,
+          }),
+        );
+        objects = (listed.Contents ?? []).flatMap((entry) =>
+          entry.Key ? [{ Key: entry.Key }] : [],
+        );
+        isTruncated = !!listed.IsTruncated;
+      }
+    } else {
+      const listed = await store.send(
+        new ListObjectsV2Command({
+          Bucket: storageBucket(),
+          Prefix: prefix,
+          MaxKeys: batchSize,
+        }),
+      );
+      objects = (listed.Contents ?? []).flatMap((entry) => (entry.Key ? [{ Key: entry.Key }] : []));
+      isTruncated = !!listed.IsTruncated;
+    }
     if (!objects.length) return true;
     const batch = objects.slice(0, batchSize - removed);
     const deleted = await store.send(
@@ -44,11 +92,18 @@ async function purgePrefix(store: S3Client, prefix: string) {
     );
     if (deleted.Errors?.length) throw new Error('Object deletion was incomplete.');
     removed += batch.length;
-    if (listed.IsTruncated || removed >= batchSize) {
-      const check = await store.send(
-        new ListObjectVersionsCommand({ Bucket: storageBucket(), Prefix: prefix, MaxKeys: 1 }),
-      );
-      if (!check.Versions?.length && !check.DeleteMarkers?.length) return true;
+    if (isTruncated || removed >= batchSize) {
+      if (useVersions) {
+        const check = await store.send(
+          new ListObjectVersionsCommand({ Bucket: storageBucket(), Prefix: prefix, MaxKeys: 1 }),
+        );
+        if (!check.Versions?.length && !check.DeleteMarkers?.length) return true;
+      } else {
+        const check = await store.send(
+          new ListObjectsV2Command({ Bucket: storageBucket(), Prefix: prefix, MaxKeys: 1 }),
+        );
+        if (!check.Contents?.length) return true;
+      }
       return false;
     }
   }
