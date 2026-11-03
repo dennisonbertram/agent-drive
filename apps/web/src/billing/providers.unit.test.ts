@@ -20,6 +20,7 @@ vi.mock('stripe', () => ({
 import {
   checkoutConfigured,
   configured,
+  egressMeteringConfigured,
   processStripeWebhook,
   sendBillingEmail,
   sendMeterReport,
@@ -62,6 +63,33 @@ describe('billing provider adapters', () => {
     }
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_configuration_fixture');
     expect(checkoutConfigured()).toBe(true);
+  });
+
+  it('allows paid checkout and egress status when the provider does not bill egress', () => {
+    for (const [key, value] of Object.entries({
+      STRIPE_SECRET_KEY: 'sk_test_configuration_fixture',
+      STRIPE_WEBHOOK_SECRET: 'whsec_configuration_fixture',
+      STRIPE_DEVELOPER_PRICE_ID: 'price_developer_fixture',
+      STRIPE_TEAM_PRICE_ID: 'price_team_fixture',
+      STRIPE_USAGE_PRICE_ID: 'price_usage_fixture',
+      STRIPE_METER_EVENT_NAME: 'agent_drive_usage',
+      AGENT_DRIVE_PUBLIC_URL: 'http://localhost:3100',
+      BILLING_DRIVE_MONTH_CENTS: '200',
+      BILLING_STORAGE_GIB_MONTH_CENTS: '5',
+      BILLING_EGRESS_GIB_CENTS: '15',
+      BILLING_OPERATIONS_1000_CENTS: '1',
+      S3_LOGS_BUCKET: '',
+      S3_LOGS_PREFIX: '',
+      S3_EGRESS_METERING: 'none',
+    }))
+      vi.stubEnv(key, value);
+
+    expect(checkoutConfigured()).toBe(true);
+    expect(egressMeteringConfigured()).toBe(true);
+
+    vi.stubEnv('S3_EGRESS_METERING', '');
+    expect(checkoutConfigured()).toBe(false);
+    expect(egressMeteringConfigured()).toBe(false);
   });
 
   it('uses the durable report id as the Stripe meter-event identifier on retries', async () => {

@@ -28,6 +28,10 @@ function logsClient() {
 }
 
 export async function ingestLogs() {
+  if (process.env.S3_EGRESS_METERING === 'none') {
+    console.log('Egress metering skipped: storage provider does not charge for egress.');
+    return;
+  }
   const bucket = process.env.S3_LOGS_BUCKET;
   const prefix = process.env.S3_LOGS_PREFIX;
   if (!bucket || !prefix) {

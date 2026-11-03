@@ -22,6 +22,12 @@ administration. Prefer short-lived workload credentials. No access keys are gene
 Configure `S3_BUCKET`, `S3_REGION`, `S3_LOGS_BUCKET`, and `S3_LOGS_PREFIX=access/` from its outputs.
 Leave `S3_ENDPOINT` unset for AWS; never carry a local MinIO endpoint or credentials into production.
 
+For Cloudflare R2, set `S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`,
+`S3_REGION=auto`, and `S3_BUCKET`. Map an R2 API token access key ID and secret to
+`S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, set `S3_EGRESS_METERING=none`, and leave
+`S3_LOGS_*` unset. Configure the bucket CORS policy for the public origin with GET/HEAD/PUT. R2
+does not charge egress or provide server access logs, so deletion uses `ListObjectsV2`.
+
 S3 versioning is intentionally not enabled: application versions already use immutable distinct
 object keys. Enabling bucket versioning silently retains additional physical bytes outside the
 logical billing ledger. Cleanup handles versions/delete markers defensively if versioning was
@@ -29,9 +35,10 @@ previously enabled. Lifecycle expires only `staging/` bytes and abandoned multip
 it never expires committed `objects/` data. Bucket retention protects against accidental stack
 deletion; deleting a CloudFormation stack is not an account-erasure procedure.
 
-Server access logs are delayed/best-effort and contain operational metadata. Keep them private;
-their retention is independent of account deletion. Verify actual log arrival and egress ingestion
-before enabling paid checkout. Static policy tests do not prove the deployed bucket's configuration.
+For AWS S3, server access logs are delayed/best-effort and contain operational metadata. Keep them
+private; their retention is independent of account deletion. Verify actual log arrival and egress
+ingestion before enabling paid checkout. Static policy tests do not prove the deployed bucket's
+configuration.
 
 ## Vercel and authentication
 

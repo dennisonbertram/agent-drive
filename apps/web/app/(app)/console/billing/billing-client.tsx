@@ -39,6 +39,7 @@ type Billing = {
   hasCustomer: boolean;
   checkoutConfigured: boolean;
   egressMeteringConfigured: boolean;
+  egressNotMetered: boolean;
   emailConfigured: boolean;
   agents: AgentUsage[];
   rates: Rates | null;
@@ -134,9 +135,11 @@ function downloadBreakdown(statement: Billing) {
       agent.storage_bytes,
       agent.egress_bytes,
       agent.operations,
-      statement.egressMeteringConfigured
-        ? 'configured; delivery may be incomplete'
-        : 'not configured',
+      statement.egressNotMetered
+        ? 'provider does not charge egress'
+        : statement.egressMeteringConfigured
+          ? 'configured; delivery may be incomplete'
+          : 'not configured',
     ]),
   ];
   const url = URL.createObjectURL(
@@ -323,7 +326,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
               <article className="billing-card">
                 <p className="eyebrow">OBSERVED DOWNLOADS</p>
                 <strong className="billing-number">
-                  {billing.egressMeteringConfigured ? bytes(billing.egressBytes) : 'Not connected'}
+                  {billing.egressNotMetered
+                    ? 'Not metered — provider does not charge egress'
+                    : billing.egressMeteringConfigured
+                      ? bytes(billing.egressBytes)
+                      : 'Not connected'}
                 </strong>
                 <p>{bytes(billing.authorizedEgressBytes)} authorized this month</p>
                 <small>
@@ -513,9 +520,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                         <td>{agent.name === '__console__' ? 'Console' : agent.name}</td>
                         <td>{bytes(agent.storage_bytes)}</td>
                         <td>
-                          {billing.egressMeteringConfigured
-                            ? bytes(agent.egress_bytes)
-                            : 'Not connected'}
+                          {billing.egressNotMetered
+                            ? 'Not metered — provider does not charge egress'
+                            : billing.egressMeteringConfigured
+                              ? bytes(agent.egress_bytes)
+                              : 'Not connected'}
                         </td>
                         <td>{BigInt(agent.operations).toLocaleString()}</td>
                       </tr>
