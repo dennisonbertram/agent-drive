@@ -95,6 +95,9 @@ mkdir -p .agents/skills
 cp -R skills/agent-drive .agents/skills/
 ```
 
+The `skills/agent-drive-trace-archive` skill archives an agent's old trace files weekly, deleting
+local copies only after the downloaded copy's SHA-256 matches. Install it the same way as above.
+
 The `share` tool creates expiring encrypted links through the implemented sharing backend.
 The stdio regression tests use a real local API and storage, not a live Claude Code session;
 no Claude binary or external service is installed or invoked by those tests.
