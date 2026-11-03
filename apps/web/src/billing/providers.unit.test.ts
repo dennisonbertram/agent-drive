@@ -65,7 +65,7 @@ describe('billing provider adapters', () => {
     expect(checkoutConfigured()).toBe(true);
   });
 
-  it('allows paid checkout and egress status when the provider does not bill egress', () => {
+  it('allows paid checkout without access logs when the provider does not bill egress', () => {
     for (const [key, value] of Object.entries({
       STRIPE_SECRET_KEY: 'sk_test_configuration_fixture',
       STRIPE_WEBHOOK_SECRET: 'whsec_configuration_fixture',
@@ -85,7 +85,7 @@ describe('billing provider adapters', () => {
       vi.stubEnv(key, value);
 
     expect(checkoutConfigured()).toBe(true);
-    expect(egressMeteringConfigured()).toBe(true);
+    expect(egressMeteringConfigured()).toBe(false);
 
     vi.stubEnv('S3_EGRESS_METERING', '');
     expect(checkoutConfigured()).toBe(false);

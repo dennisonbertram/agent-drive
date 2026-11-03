@@ -25,7 +25,10 @@ All collection endpoints return `{ "items": [...], "nextCursor": string | null }
 within a collection; cursors are validated and should be treated as opaque. `GET /drives` lists all
 account drives for management keys and only key-authorized drives for keys with `read`. `whoami`
 returns identity, scopes, and authorized drive IDs (`null` for management keys); use the paginated
-drives endpoint for names and quota details.
+drives endpoint for names and quota details. It also reports `egressMeteringConfigured` (whether
+access-log based egress measurement is configured) and `egressNotMetered` (whether the provider
+does not charge for egress). The usage endpoint reports these fields alongside `egressBytes`, which
+is `null` when access-log measurement is not configured.
 
 File `list` and `search` accept `agentId`, `machine`, and `user` filters; `list` also accepts a
 literal path `prefix` and optional path query `q`. `%` and `_` in a prefix are treated literally.

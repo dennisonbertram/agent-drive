@@ -29,8 +29,8 @@ export function checkoutConfigured() {
 export function egressMeteringConfigured() {
   return (
     billingRates() !== null &&
-    (process.env.S3_EGRESS_METERING === 'none' ||
-      (configured(process.env.S3_LOGS_BUCKET) && configured(process.env.S3_LOGS_PREFIX)))
+    configured(process.env.S3_LOGS_BUCKET) &&
+    configured(process.env.S3_LOGS_PREFIX)
   );
 }
 

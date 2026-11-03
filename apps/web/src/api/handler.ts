@@ -206,6 +206,7 @@ function billingFlags() {
   return {
     checkoutConfigured: checkoutConfigured(),
     egressMeteringConfigured: egressMeteringConfigured(),
+    egressNotMetered: process.env.S3_EGRESS_METERING === 'none',
     emailConfigured: emailConfigured(),
   };
 }
@@ -418,6 +419,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
       keyId: auth.keyId,
       scopes: auth.scopes,
       driveIds: auth.scopes.includes('manage') ? null : auth.driveIds,
+      ...billingFlags(),
     });
   }
   if (parts.length === 1 && parts[0] === 'agents' && method === 'GET') {
@@ -912,6 +914,7 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
       operations: Number(billing.operations),
       egressBytes: observedEgressConfigured ? billing.egressBytes : null,
       egressMeteringConfigured: observedEgressConfigured,
+      egressNotMetered: process.env.S3_EGRESS_METERING === 'none',
       cost: billing.overageConfigured ? billing.totalCents : null,
     });
   }
