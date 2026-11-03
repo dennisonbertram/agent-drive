@@ -401,8 +401,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   <h3>Configured overage rates</h3>
                   <p>
                     {money(rateCard.drive)} per extra drive/month · {money(rateCard.storage)} per
-                    extra GiB stored/month · {money(rateCard.egress)} per extra GiB downloaded ·{' '}
-                    {money(rateCard.operations)} per 1,000 extra operations.
+                    extra GiB stored/month ·{' '}
+                    {billing.egressNotMetered
+                      ? 'downloads not charged'
+                      : `${money(rateCard.egress)} per extra GiB downloaded`}{' '}
+                    · {money(rateCard.operations)} per 1,000 extra operations.
                   </p>
                   <small>
                     Paid plans only. Storage and drives use the month’s peak allocation, not
