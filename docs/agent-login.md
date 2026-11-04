@@ -340,3 +340,60 @@ revoked unrelated keys.
   stay untrusted.
 - **`check`** finds the newest existing file with the `recent` feed (newest first, skipping the
   check file) instead of the first page of `list`; with no other file it does the round trip only.
+
+## 9. Credential backup, proactive skill, and setup step 4
+
+The agent holds its drive key only in its config file. If that file is lost, which happens
+whenever a sandbox is deleted, the drive's files can never be decrypted. A new sandbox also
+cannot reconnect, because it has no previous API key. Backup is done on the agent's side: the
+human never handles the key.
+
+### Credentials bundle
+
+- `agent-drive credentials export (--to <path> | --stdout)` writes a bundle.
+  - Contents: base64url of JSON `{"v":1,"apiUrl","apiKey","driveKeys":{id:key},"driveKeyOrigins":{id:origin}}`, prefixed `adcred1.`.
+  - `--to` writes the file with mode 600 and refuses an existing path unless `--force`.
+  - `--stdout` prints only when stdout is not a TTY (meant for a pipe into a secret store) and
+    otherwise refuses with a hint.
+  - Both record `keyBackup: { "<driveId>": { "at": ISO time, "method": "file"|"stdout" } }` in
+    the config for every drive key in the bundle.
+- `agent-drive credentials import (--from <path> | stdin)` merges a bundle into the config.
+- Environment variable `AGENT_DRIVE_CREDENTIALS=<bundle>`:
+  - When present, it is merged in memory at startup and never written to disk unless
+    `credentials import` runs.
+  - Drives it supplies count as backed up, since the bundle already lives outside the machine.
+  - It is never printed.
+- `agent-drive credentials status` prints, for each drive key: whether it is backed up, when, and
+  how.
+
+### Enforcement
+
+- `login` and `drive create`, when they create a new drive key, end with:
+  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store>`. Until then `agent-drive check` will not pass.
+- `check` prints `check ok` only when every usable drive key is backed up. Otherwise it exits 1
+  with "drive key not backed up" plus the commands above.
+- `whoami` includes `keyBackup`.
+
+### Skill and install
+
+- `agent-drive skill install [--target claude|codex|<dir>]` writes the packaged `SKILL.md`.
+  - Default targets: `~/.claude/skills/agent-drive/SKILL.md` when `~/.claude` exists, and
+    `~/.codex/skills/agent-drive/SKILL.md` when `~/.codex` exists.
+  - It prints the paths written, and with no target found it prints the file location.
+  - The skill ships inside the CLI package.
+- The skill tells the agent to save proactively:
+  - It checks `/memory` and recent files at the start of a task.
+  - It saves deliverables to `/outputs` when done, durable decisions to `/memory`, task
+    material to `/work/<task>`, a handoff at the end of a session, and `backup` of the working
+    directory before a sandbox ends.
+  - It may save secrets and traces in file contents, since they are encrypted. It never puts
+    secrets in paths, names, tags, or descriptions. It never stores a drive key in the drive it
+    unlocks. It never shares files containing secrets.
+- **llms.txt setup:** step 4 is "Back up your credentials" (`credentials export`). Step 5 is
+  `agent-drive skill install`. `check` is the final step and enforces step 4. A sandboxes
+  section explains `AGENT_DRIVE_CREDENTIALS`.
+
+### Trace archive
+
+`archive-traces.sh` no longer holds back secret-looking files by default. `--hold-back-secrets`
+restores the old behaviour, which still exits 3 when files are held back.
