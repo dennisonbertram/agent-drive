@@ -126,52 +126,52 @@ export default function ShareClient({ id }: { id: string }) {
   const displayError = error ?? (fileKey ? null : 'This link is missing a valid decryption key.');
   const displayErrorCode = errorCode || (fileKey ? '' : 'missing-key');
 
+  const state = displayError ? 'error' : share ? 'ready' : 'loading';
+
   return (
     <main className="share-shell" data-testid="share-page">
-      <Link className="brand" href="/" aria-label="Agent Drive home">
-        <span className="brand-mark" aria-hidden="true">
-          a/
-        </span>
-        agent drive
+      <Link className="share-brand" href="/" aria-label="Agent Drive home">
+        <span className="share-logo" aria-hidden="true" />
+        Agent Drive
       </Link>
-      <section className="share-card" aria-live="polite">
-        <div className="share-symbol" aria-hidden="true">
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          >
-            <rect x="5" y="10" width="14" height="11" rx="2" />
-            <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
-          </svg>
+      <section className="share-card" data-state={state} aria-live="polite">
+        <div className="share-head">
+          <span className="share-led" aria-hidden="true" />
+          <p className="share-tag">ENCRYPTED FILE TRANSFER</p>
+          <span className="share-vent" aria-hidden="true" />
         </div>
-        <p className="eyebrow">ENCRYPTED FILE TRANSFER</p>
-        <h1 data-testid={displayError ? `share-error-${displayErrorCode}` : undefined}>
-          {displayError
-            ? (errorHeadings[displayErrorCode] ?? errorHeadings.unavailable)
-            : (share?.name ?? 'Opening secure link')}
-        </h1>
-        {displayError ? (
-          <p data-testid="share-error">
-            {displayErrorCode === 'missing-key' || displayErrorCode === 'decryption-failed'
-              ? 'Ask the sender for the complete link, including everything after the # symbol.'
-              : 'Ask the sender for a new share link. Your files have not been changed.'}
-          </p>
-        ) : share ? (
-          <>
-            <div className="share-details">
-              <div>
-                <span>TRANSFER SIZE</span>
-                <strong>{share.ciphertextSize.toLocaleString()} encrypted bytes</strong>
+        <div className="share-sled">
+          <h1
+            className="share-label"
+            data-testid={displayError ? `share-error-${displayErrorCode}` : undefined}
+          >
+            {displayError
+              ? (errorHeadings[displayErrorCode] ?? errorHeadings.unavailable)
+              : (share?.name ?? 'Opening secure link')}
+          </h1>
+          <div className="share-window">
+            {displayError ? (
+              <p className="share-msg" data-testid="share-error">
+                {displayErrorCode === 'missing-key' || displayErrorCode === 'decryption-failed'
+                  ? 'Ask the sender for the complete link, including everything after the # symbol.'
+                  : 'Ask the sender for a new share link. Your files have not been changed.'}
+              </p>
+            ) : share ? (
+              <div className="share-details">
+                <div>
+                  <span>TRANSFER SIZE</span>
+                  <strong>{share.ciphertextSize.toLocaleString()} encrypted bytes</strong>
+                </div>
+                <div>
+                  <span>LINK EXPIRES</span>
+                  <strong>{new Date(share.expiresAt).toLocaleString()}</strong>
+                </div>
               </div>
-              <div>
-                <span>LINK EXPIRES</span>
-                <strong>{new Date(share.expiresAt).toLocaleString()}</strong>
-              </div>
-            </div>
+            ) : (
+              <p className="share-msg">Checking this share link…</p>
+            )}
+          </div>
+          {share && !displayError ? (
             <button
               className="button primary share-download"
               disabled={busy}
@@ -179,11 +179,13 @@ export default function ShareClient({ id }: { id: string }) {
             >
               {busy ? 'Decrypting…' : 'Download'}
             </button>
-            <p>Your browser decrypts this file. No sign-in required.</p>
-          </>
-        ) : (
-          <p>Checking this share link…</p>
-        )}
+          ) : (
+            <span className="share-pull" aria-hidden="true" />
+          )}
+        </div>
+        {share && !displayError ? (
+          <p className="share-note">Your browser decrypts this file. No sign-in required.</p>
+        ) : null}
       </section>
       <p className="share-footer">Client-side encryption. The key stays in your browser.</p>
     </main>
