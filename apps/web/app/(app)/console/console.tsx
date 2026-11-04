@@ -2,13 +2,22 @@
 
 import { UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import {
   decodeDriveKey,
   decryptFile,
   generateDriveKey,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
+import { CopyButton } from '../copy-button';
 
 type Drive = { id: string; name: string; quota_bytes: string | number };
 type Agent = { id: string; name: string };
@@ -85,6 +94,48 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   const data = await result.json();
   if (!result.ok) throw new Error(data.error?.message ?? 'The request could not be completed.');
   return data as T;
+}
+
+function ConnectAgentPanel() {
+  const origin = useSyncExternalStore(
+    () => () => {},
+    () => window.location.origin,
+    () => 'https://agent-drive.vercel.app',
+  );
+  const instruction = `Set up Agent Drive: ${origin}/llms.txt`;
+  const snippets = [
+    ['Claude Code', 'claude mcp add agent-drive -- agent-drive mcp'],
+    [
+      'Codex (~/.codex/config.toml)',
+      '[mcp_servers.agent-drive]\ncommand = "agent-drive"\nargs = ["mcp"]',
+    ],
+    [
+      'Cursor or any MCP client',
+      '{"mcpServers":{"agent-drive":{"command":"agent-drive","args":["mcp"]}}}',
+    ],
+  ];
+  return (
+    <section className="panel agent-panel" aria-labelledby="connect-agent-title">
+      <h2 id="connect-agent-title">Connect an agent</h2>
+      <p>Paste this into your agent. It installs the CLI, then you approve it in your browser.</p>
+      <div className="agent-give">
+        <div className="terminal-command">
+          <code>{instruction}</code>
+          <CopyButton text={instruction} label="Copy agent instruction" />
+        </div>
+      </div>
+      <p>
+        <a href="/llms.txt">Read what your agent will see (llms.txt)</a>
+      </p>
+      {snippets.map(([name, text]) => (
+        <details key={name}>
+          <summary>MCP setup: {name}</summary>
+          <pre>{text}</pre>
+          <CopyButton text={text!} label={`Copy ${name} setup`} />
+        </details>
+      ))}
+    </section>
+  );
 }
 
 async function all<T>(path: string): Promise<T[]> {
@@ -746,6 +797,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   <p>Create a drive to start storing files.</p>
                 </section>
               )}
+              {tab === 'Agents' && <ConnectAgentPanel />}
               {tab === 'Agents' && (
                 <section className="panel">
                   <div className="panel-toolbar">
@@ -798,6 +850,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
               {tab === 'API keys' && (
                 <>
+                  <ConnectAgentPanel />
                   <section className="panel">
                     <div className="panel-toolbar">
                       <h2>Agent access</h2>
