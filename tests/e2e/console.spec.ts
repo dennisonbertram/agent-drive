@@ -142,13 +142,15 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeDisabled();
     expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
     await page.getByRole('button', { name: 'Load drive key' }).click();
-    await page.getByLabel('Drive key', { exact: true }).fill(randomBytes(32).toString('base64url'));
+    await page
+      .getByLabel(/^Drive key or credentials bundle/)
+      .fill(randomBytes(32).toString('base64url'));
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: /decrypt/i })).toBeVisible();
     await page.getByRole('button', { name: 'Forget key' }).click();
     await page.getByRole('button', { name: 'Load drive key' }).click();
-    await page.getByLabel('Drive key', { exact: true }).fill(driveKey);
+    await page.getByLabel(/^Drive key or credentials bundle/).fill(driveKey);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     const changed = Buffer.from('A later version, restored through the console.');
     await writeFile(localFile, changed);
