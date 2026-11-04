@@ -6,6 +6,9 @@ import './pricing.css';
 
 export const dynamic = 'force-dynamic';
 
+const allowance = (bytes: bigint) =>
+  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
+
 const money = (cents: number | bigint) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
     Number(cents) / 100,
@@ -67,16 +70,19 @@ export default function PricingPage() {
               </p>
               <ul>
                 <li>{String(plan.drives)} drives</li>
-                <li>{String(plan.storageBytes / GIB)} GiB stored ciphertext</li>
-                <li>{String(plan.egressBytes / GIB)} GiB monthly downloads included</li>
+                <li>{allowance(plan.storageBytes)} stored ciphertext</li>
+                <li>{allowance(plan.egressBytes)} monthly downloads included</li>
                 <li>{Number(plan.operations).toLocaleString('en-US')} API operations / month</li>
                 <li>CLI, MCP, web console, and encrypted sharing</li>
               </ul>
               <Link
                 className={`button ${name === 'free' ? 'primary' : 'secondary'}`}
                 href={name === 'free' ? '/sign-up' : '/console/billing'}
+                prefetch={name === 'free' ? null : false}
               >
-                {name === 'free' ? 'Start with Free' : 'Manage your plan'}
+                {name === 'free'
+                  ? 'Start with Free'
+                  : `Choose ${name === 'developer' ? 'Developer' : 'Team'}`}
               </Link>
             </article>
           ))}
