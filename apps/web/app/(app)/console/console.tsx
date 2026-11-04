@@ -400,7 +400,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 {['▤', '⌘', '⚿', '▥', '⌫'][index]}
               </span>
               {item}
-              {item === 'Files' && selected && (
+              {item === 'Files' && tab === 'Files' && selected && (
                 <span className="nav-count">{fileItems.length}</span>
               )}
             </button>
