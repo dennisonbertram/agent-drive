@@ -80,6 +80,8 @@ export const drives = pgTable(
       .notNull()
       .default(Number.MAX_SAFE_INTEGER),
     deletingAt: timestamp('deleting_at', { withTimezone: true, mode: 'date' }),
+    keyBackupAt: timestamp('key_backup_at', { withTimezone: true, mode: 'date' }),
+    keyBackupMethod: text('key_backup_method'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [

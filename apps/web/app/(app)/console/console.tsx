@@ -18,8 +18,15 @@ import {
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
 import { CopyButton } from '../copy-button';
+import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
 
-type Drive = { id: string; name: string; quota_bytes: string | number };
+type Drive = {
+  id: string;
+  name: string;
+  quota_bytes: string | number;
+  key_backup_at?: string | null;
+  key_backup_method?: string | null;
+};
 type Agent = { id: string; name: string };
 type ApiKey = {
   id: string;
@@ -400,9 +407,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   async function loadKeyFile(file?: File) {
     if (!file) return;
     if (file.size > 16_384) throw new Error('This is not a valid drive key file.');
+    const text = await file.text();
+    if (text.trim().startsWith(BUNDLE_PREFIX)) {
+      const key = driveKeyFromBundle(text, selected);
+      decodeDriveKey(key);
+      setKeyInput(key);
+      return;
+    }
     let candidate: unknown;
     try {
-      candidate = JSON.parse(await file.text());
+      candidate = JSON.parse(text);
     } catch {
       throw new Error('Choose a JSON recovery key file downloaded from this console.');
     }
@@ -417,6 +431,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       throw new Error('This recovery file does not belong to the selected drive.');
     decodeDriveKey(candidate.key);
     setKeyInput(candidate.key);
+  }
+
+  async function downloadRecoveryFile() {
+    const key = driveKeys[selected];
+    if (!key) return;
+    save(
+      new Blob(
+        [JSON.stringify({ format: 'agent-drive-key-v1', driveId: selected, key }, null, 2)],
+        { type: 'application/json' },
+      ),
+      `agent-drive-${selected}.key.json`,
+    );
+    // Only the method is reported; the key never leaves this page.
+    await api(`drives/${selected}/key-backup`, 'POST', { method: 'file' });
+    await refresh();
+    setNotice('Recovery file saved. Store it in a password manager or another secure location.');
   }
 
   const errorBanner = error && (
@@ -624,6 +654,40 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </button>
                     )}
                   </div>
+                  {tab === 'Files' && drive && (
+                    <div
+                      className={`banner ${drive.key_backup_at ? 'info' : 'error'}`}
+                      data-testid="key-backup-status"
+                    >
+                      {drive.key_backup_at ? (
+                        <>
+                          Key backed up {new Date(drive.key_backup_at).toLocaleDateString()} (
+                          {drive.key_backup_method})
+                        </>
+                      ) : (
+                        <>
+                          This drive&rsquo;s key hasn&rsquo;t been backed up. If the agent&rsquo;s
+                          machine is lost, these files can&rsquo;t be opened. Ask the agent to run{' '}
+                          <code>agent-drive credentials export</code>{' '}
+                          <CopyButton
+                            text="agent-drive credentials export"
+                            label="Copy credentials export command"
+                          />
+                        </>
+                      )}
+                      {hasKey && (
+                        <>
+                          {' '}
+                          <button
+                            className="button secondary"
+                            onClick={() => void act(downloadRecoveryFile)}
+                          >
+                            Download recovery file
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {!hasKey && tab === 'Files' && (
                     <div className="banner info">
                       You can browse file names without a key. Load your drive key to decrypt and
@@ -1132,7 +1196,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <form
               onSubmit={(event) =>
                 form(event, async () => {
-                  const key = keyInput.trim();
+                  const pasted = keyInput.trim();
+                  const key = pasted.startsWith(BUNDLE_PREFIX)
+                    ? driveKeyFromBundle(pasted, selected)
+                    : pasted;
                   decodeDriveKey(key);
                   setDriveKeys((current) => ({ ...current, [selected]: key }));
                   setModal(null);
@@ -1147,7 +1214,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 reload.
               </p>
               <label>
-                Drive key
+                Drive key or credentials bundle (adcred1.…)
                 <input
                   type="password"
                   autoComplete="off"
@@ -1157,10 +1224,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 />
               </label>
               <label>
-                Or choose a recovery file
+                Or choose a recovery file or credentials bundle
                 <input
                   type="file"
-                  accept="application/json,.json"
                   onChange={(event) => void act(() => loadKeyFile(event.target.files?.[0]))}
                 />
               </label>
