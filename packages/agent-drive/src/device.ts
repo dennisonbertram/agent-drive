@@ -137,6 +137,8 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   const unsealed: string[] = [];
   const noKey: string[] = [];
   for (const driveId of token.drive_ids ?? []) {
+    // The new drive's key is generated below, so it is never "missing".
+    if (driveId === token.new_drive_id) continue;
     const sealed = token.sealed_drive_keys?.[driveId];
     if (!sealed) {
       noKey.push(driveId);
