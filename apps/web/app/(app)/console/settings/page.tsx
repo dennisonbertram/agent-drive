@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation';
 import { consoleUserId } from '@/src/console/auth';
 import SettingsClient from './settings-client';
-import '../billing/billing.css';
-import './settings.css';
+import '../../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
 

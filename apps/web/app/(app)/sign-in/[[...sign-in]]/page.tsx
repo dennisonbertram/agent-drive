@@ -1,6 +1,8 @@
 import { SignIn } from '@clerk/nextjs';
 import Link from 'next/link';
 import { clerkConfigured } from '@/src/console/auth';
+import { t1Appearance } from '../../sign-in/appearance';
+import '../../../styles/account.css';
 
 export default function SignInPage() {
   return (
@@ -10,6 +12,7 @@ export default function SignInPage() {
       </Link>
       {clerkConfigured() ? (
         <SignIn
+          appearance={t1Appearance}
           routing="path"
           path="/sign-in"
           signUpUrl="/sign-up"

@@ -1,0 +1,722 @@
+/* T1 "Rack" — account surfaces: pricing, console billing, console settings, sign-in/up.
+   Tokens always carry fallbacks so these pages render before the shared :root lands. */
+
+/* Same ground as the shared body (dot grid); scoped so it is harmless once :root owns it. */
+html:has(.billing-page, .auth-page),
+body:has(.billing-page, .auth-page) {
+  background: var(--bg, #e9e8e4) radial-gradient(rgba(18, 18, 17, 0.13) 1px, transparent 1.2px) 0
+    0 / 24px 24px;
+  color: var(--ink, #121211);
+}
+
+/* ---------- page frame ---------- */
+.billing-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+  font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
+}
+.billing-header {
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.billing-page .brand,
+.auth-page .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  color: var(--ink, #121211);
+}
+.billing-page .brand-mark,
+.auth-page .brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--ink, #121211);
+  color: #fff;
+  font: 500 12px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+.billing-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 44px 0 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--ink, #121211);
+}
+.billing-heading h1 {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  line-height: 1;
+  letter-spacing: -0.045em;
+  font-weight: 600;
+  margin: 12px 0;
+}
+.billing-heading p:not(.eyebrow) {
+  font-size: 1rem;
+  color: var(--muted, #5d5b56);
+}
+.billing-page .eyebrow,
+.billing-page .feature-number {
+  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #5d5b56);
+}
+.billing-page main > section {
+  margin-bottom: 28px;
+}
+
+/* ---------- panels ---------- */
+.billing-card {
+  padding: 24px;
+  background: var(--panel, #f3f2ee);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-radius: 10px;
+  min-width: 0;
+}
+.billing-card p,
+.billing-card small {
+  font-size: 0.8125rem;
+  line-height: 1.65;
+}
+.billing-card small {
+  display: block;
+  color: var(--muted, #5d5b56);
+  margin-top: 8px;
+}
+.billing-metrics,
+.billing-plans {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.billing-number {
+  display: block;
+  font: 500 clamp(1.4rem, 3vw, 2rem) / 1.1
+    var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: -0.03em;
+  margin: 14px 0 8px;
+  overflow-wrap: anywhere;
+}
+.billing-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.billing-section-heading h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+.billing-tag,
+.billing-page .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: var(--al1, #f4f3f0);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  color: var(--ink, #121211);
+}
+.billing-tag::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sig, #ff5a1f);
+  box-shadow:
+    0 0 0 2px rgba(255, 90, 31, 0.2),
+    0 0 8px rgba(255, 90, 31, 0.8);
+}
+
+/* ---------- plans as numbered rack units ---------- */
+.billing-plans {
+  counter-reset: unit;
+}
+.billing-plan {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  counter-increment: unit;
+}
+.billing-plan::before {
+  content: 'UNIT 0' counter(unit);
+  display: block;
+  padding: 10px 20px;
+  background: var(--al1, #f4f3f0);
+  border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.08em;
+  color: var(--muted, #5d5b56);
+}
+.billing-plan > * {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+.billing-plan h2,
+.billing-plan h3 {
+  text-transform: uppercase;
+  margin-top: 18px;
+  margin-bottom: 6px;
+  font: 600 1.125rem var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  letter-spacing: 0.04em;
+}
+.billing-plan > p:first-of-type,
+.billing-plan > p {
+  margin-bottom: 0;
+}
+.billing-price {
+  font: 500 2rem var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: -0.04em;
+  color: var(--ink, #121211);
+}
+.billing-plan ul {
+  list-style: none;
+  padding: 0;
+  margin: 18px 20px 20px;
+  flex: 1;
+  font: 400 12.5px/1.4 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  border-top: 1px solid var(--ink, #121211);
+}
+.billing-plan li {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+}
+.billing-plan > .button,
+.billing-plan > button {
+  align-self: stretch;
+  margin-bottom: 20px;
+  justify-content: center;
+  text-align: center;
+}
+.billing-plan.selected {
+  border-color: var(--ink, #121211);
+  box-shadow: 0 0 0 1px var(--ink, #121211);
+}
+.billing-plan.selected::before {
+  content: 'UNIT 0' counter(unit) '  \25CF  SELECTED';
+  background: var(--ink, #121211);
+  color: var(--sig-text, #ff7a45);
+}
+.billing-caption {
+  font-size: 0.8125rem !important;
+  color: var(--muted, #5d5b56);
+  margin-top: 16px;
+}
+.billing-rates {
+  margin-top: 18px;
+}
+.billing-rates h3 {
+  font-size: 0.9375rem;
+  margin-bottom: 10px;
+}
+
+/* ---------- billing controls + forms ---------- */
+.billing-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  padding: 24px 0;
+  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.billing-controls h2 {
+  margin: 14px 0 16px;
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+}
+.billing-controls > div > p {
+  max-width: 420px;
+  font-size: 0.9375rem;
+  color: var(--muted, #5d5b56);
+}
+.billing-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.billing-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.billing-form input,
+.billing-period-label select,
+.settings-delete-grid input,
+.settings-delete-grid select {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink, #121211);
+  font: 400 14px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.billing-form > small {
+  margin-top: -8px;
+}
+.billing-form .billing-caption {
+  margin: 0;
+}
+.billing-period-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font: 500 11px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.billing-section-heading .actions {
+  align-items: flex-end;
+}
+
+/* ---------- tables ---------- */
+.billing-page table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.billing-page thead {
+  background: var(--al1, #f4f3f0);
+}
+.billing-page th {
+  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  text-transform: uppercase;
+  color: var(--muted, #5d5b56);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ink, #121211);
+}
+.billing-page th,
+.billing-page td {
+  padding: 13px 12px;
+  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+}
+.billing-page td {
+  font-size: 0.8125rem;
+  max-width: 260px;
+  overflow-wrap: anywhere;
+}
+.billing-page td:not(:first-child) {
+  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+}
+
+/* ---------- banners, notices ---------- */
+.billing-banner,
+.settings-page .banner,
+.pricing-availability {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--panel, #f3f2ee);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-left: 3px solid var(--ink, #121211);
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+.billing-banner.error,
+.settings-page .banner.error {
+  border-left-color: #8b3027;
+  color: #8b3027;
+  background: #fbf1ee;
+}
+.settings-notice {
+  border-left-color: var(--sig, #ff5a1f) !important;
+  overflow-wrap: anywhere;
+}
+.billing-loading {
+  padding: 50px 0;
+  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #5d5b56);
+}
+.billing-footer,
+.billing-page .landing-footer {
+  padding: 22px 0 32px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font: 400 11.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #5d5b56);
+  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.billing-page .landing-footer a {
+  text-decoration: none;
+  letter-spacing: 0.08em;
+  color: var(--ink, #121211);
+}
+
+/* ---------- buttons on these pages: one orange primary, hairline secondary ---------- */
+.billing-page .button.primary {
+  background: var(--sig, #ff5a1f);
+  color: var(--ink, #121211);
+  border: 0;
+  font-weight: 600;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -2px 0 rgba(0, 0, 0, 0.18) inset;
+}
+.billing-page .button.secondary {
+  background: transparent;
+  color: var(--ink, #121211);
+  border: 1px solid var(--ink, #121211);
+}
+.billing-page .button:focus-visible {
+  outline: 2px solid var(--ink, #121211);
+  outline-offset: 2px;
+}
+
+/* ---------- pricing ---------- */
+.pricing-page .billing-heading {
+  margin-top: 40px;
+}
+.pricing-page .billing-plan h2 {
+  font-size: 1.125rem;
+}
+.pricing-availability {
+  display: block;
+}
+.pricing-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+}
+.pricing-details h2 {
+  margin: 12px 0 18px;
+  letter-spacing: -0.02em;
+}
+.pricing-details h3 {
+  margin-bottom: 14px;
+  font: 500 11px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #5d5b56);
+}
+.pricing-details p + p {
+  margin-top: 16px;
+}
+.pricing-rate-list {
+  margin: 0;
+  font-size: 0.8125rem;
+  border-top: 1px solid var(--ink, #121211);
+}
+.pricing-rate-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+}
+.pricing-rate-list dd {
+  margin: 0;
+  white-space: nowrap;
+  font: 500 13px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+}
+.pricing-page .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--ink, #121211);
+}
+.pricing-page .feature-grid article {
+  padding: 20px 24px 8px 0;
+}
+.pricing-page .feature-grid article + article {
+  padding-left: 24px;
+  border-left: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.pricing-page .feature-grid h2 {
+  margin: 12px 0 10px;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+.pricing-page .feature-grid p {
+  font-size: 0.875rem;
+  color: var(--muted, #5d5b56);
+}
+
+/* ---------- settings ---------- */
+.settings-section-heading,
+.settings-job-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.settings-section-heading p {
+  margin: 10px 0 0;
+  color: var(--muted, #5d5b56);
+}
+.settings-audit {
+  min-width: 0;
+}
+.settings-audit small {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted, #5d5b56);
+  overflow-wrap: anywhere;
+}
+.settings-audit th,
+.settings-audit td {
+  vertical-align: top;
+}
+.settings-audit time,
+.settings-audit code {
+  white-space: nowrap;
+}
+.settings-outcome {
+  display: inline-block;
+  white-space: nowrap;
+  text-transform: uppercase;
+  font: 500 10.5px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.06em;
+  border-radius: 3px;
+  padding: 4px 7px;
+  background: var(--al1, #f4f3f0);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.settings-outcome.success,
+.settings-outcome.complete {
+  border-color: var(--ink, #121211);
+}
+.settings-outcome.failure,
+.settings-outcome.blocked {
+  border-color: #8b3027;
+  color: #8b3027;
+}
+.settings-outcome.pending {
+  border-style: dashed;
+}
+.settings-empty {
+  padding: 24px 0;
+  color: var(--muted, #5d5b56);
+}
+.settings-audit + button,
+.settings-page .table-scroll + button {
+  margin-top: 20px;
+}
+/* destructive zone: set apart with a red rule and hatched header strip */
+.settings-page .settings-danger {
+  margin-top: 40px;
+  border-color: #8b3027;
+  border-width: 1px 1px 1px 4px;
+  background: #fbf6f4;
+}
+.settings-danger h2 {
+  margin: 12px 0 18px;
+}
+.settings-page .settings-danger .eyebrow {
+  color: #8b3027;
+}
+.settings-explainer {
+  margin: 22px 0;
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+.settings-explainer summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.settings-explainer p {
+  margin-top: 14px;
+}
+.settings-delete-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin-top: 28px;
+}
+.settings-delete-grid h3 {
+  margin-bottom: 14px;
+}
+.settings-delete-grid form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.settings-delete-grid label {
+  display: block;
+  font-size: 0.8125rem;
+  margin: 18px 0 8px;
+}
+.settings-delete-grid .button {
+  align-self: flex-start;
+  margin-top: 20px;
+}
+.billing-page .button.settings-delete-button {
+  background: #8b3027;
+  border: 1px solid #8b3027;
+  color: #fff;
+  box-shadow: none;
+}
+.billing-page .button.settings-delete-button:hover:not(:disabled) {
+  background: #6d241d;
+}
+.settings-jobs {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.settings-jobs li {
+  padding: 20px 0;
+  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+.settings-job-title {
+  margin-bottom: 10px;
+}
+.settings-jobs p + p {
+  margin-top: 10px;
+}
+.settings-id {
+  font: 400 11.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+.settings-job-error {
+  color: #8b3027 !important;
+}
+
+/* ---------- sign-in / sign-up ---------- */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  gap: 28px;
+  font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
+}
+.auth-page .brand {
+  font-size: 1.0625rem;
+}
+.auth-page .panel {
+  width: 100%;
+  max-width: 440px;
+  padding: 28px;
+  background: var(--panel, #f3f2ee);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-radius: 12px;
+  box-shadow:
+    0 1px 0 #fff inset,
+    0 24px 40px -28px rgba(40, 30, 20, 0.45);
+}
+.auth-page h1 {
+  margin-bottom: 14px;
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+}
+.auth-page .panel p {
+  color: var(--muted, #5d5b56);
+  font-size: 0.875rem;
+}
+.auth-page .cl-card {
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  box-shadow:
+    0 1px 0 #fff inset,
+    0 24px 40px -28px rgba(40, 30, 20, 0.45);
+}
+
+/* ---------- responsive ---------- */
+@media (max-width: 850px) {
+  .billing-page {
+    padding: 0 24px;
+  }
+  .billing-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .billing-metrics > :last-child {
+    grid-column: 1 / -1;
+  }
+  .billing-plans {
+    grid-template-columns: 1fr;
+  }
+  .billing-controls {
+    gap: 28px;
+  }
+  .pricing-page .feature-grid {
+    grid-template-columns: 1fr;
+  }
+  .pricing-page .feature-grid article + article {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  }
+}
+@media (max-width: 700px) {
+  .pricing-details,
+  .settings-delete-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .settings-audit {
+    min-width: 630px;
+  }
+  .settings-section-heading {
+    flex-wrap: wrap;
+  }
+  .settings-page .billing-card {
+    padding: 20px;
+  }
+  .pricing-page .billing-header {
+    flex-wrap: wrap;
+    padding: 18px 0;
+  }
+}
+@media (max-width: 620px) {
+  .billing-page {
+    padding: 0 16px;
+  }
+  .billing-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    margin: 28px 0 22px;
+  }
+  .billing-metrics,
+  .billing-controls {
+    grid-template-columns: 1fr;
+  }
+  .billing-controls {
+    padding: 10px 0;
+    gap: 24px;
+  }
+  .billing-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .billing-header .button {
+    font-size: 0.75rem;
+    padding: 8px 10px;
+  }
+}

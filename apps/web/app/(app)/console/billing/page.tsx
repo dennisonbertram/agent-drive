@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { consoleUserId } from '@/src/console/auth';
 import { PLANS } from '@/src/billing/policy';
 import BillingClient from './billing-client';
-import './billing.css';
+import '../../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
 
