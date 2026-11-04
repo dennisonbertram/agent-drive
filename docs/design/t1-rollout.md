@@ -17,7 +17,7 @@ Message: every agent gets its own portable drive. Encryption is small print only
 - [x] 0 Foundation (0bc98f1): tokens, fonts, body/dot grid, typography scale, buttons (primary/secondary/copy), badges, inputs/forms, focus ring, status LED primitive, eyebrow/labels, links
 - [x] 1 Landing (8fdd038) (`app/(app)/page.tsx`): nav, brand, hero copy "Every agent gets a drive.", rack illustration (inline SVG/CSS), setup rows + copy, works-with, numbered callouts, footer
 - [ ] 2 Console shell (`console.tsx`): sidebar → drive bay strip + section nav, topbar/breadcrumb, workspace, panels, files table (path/size/author/modified/actions), backup status line (LED + one line), empty/loading states
-- [ ] 3 Console secondary: agents, API keys, usage stats, trash, versions, dialogs (Load drive key, New drive), onboarding, privacy note, forms
+- [x] 3 (be0f3fd) Console secondary: agents, API keys, usage stats, trash, versions, dialogs (Load drive key, New drive), onboarding, privacy note, forms
 - [x] 4 (acfbeef; Deny kept: existing product behaviour) Connect / approval (`connect.tsx`): device-pairing card, code on smoked display, one Approve button, revoke note; all its states (waiting, approved, expired, error)
 - [x] 5 (746596b) Share page (`app/s/[id]`)
 - [x] 6 (551a30a; Clerk widgets unseen locally) Pricing, billing, settings, sign-in/up (Clerk appearance variables)
