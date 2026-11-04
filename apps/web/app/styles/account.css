@@ -2,13 +2,6 @@
    Tokens always carry fallbacks so these pages render before the shared :root lands. */
 
 /* Same ground as the shared body (dot grid); scoped so it is harmless once :root owns it. */
-html:has(.billing-page, .auth-page),
-body:has(.billing-page, .auth-page) {
-  background: var(--bg, #e9e8e4) radial-gradient(rgba(18, 18, 17, 0.13) 1px, transparent 1.2px) 0
-    0 / 24px 24px;
-  color: var(--ink, #121211);
-}
-
 /* ---------- page frame ---------- */
 .billing-page {
   max-width: 1200px;
