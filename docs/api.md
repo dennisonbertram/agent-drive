@@ -53,10 +53,11 @@ audit write fails, the API returns 500; a mutation may already have committed be
 
 ## Device authorization (agent login)
 
-Full contract: `docs/agent-login.md` section 2. These endpoints use no API key.
+Full contract: `docs/agent-login.md` sections 2 and 7. These endpoints use no API key.
 
-- `POST /api/oauth/device_authorization` with `client_name`, `machine` (optional), and `public_key`
-  (form or JSON). Returns `device_code`, `user_code`, `verification_uri`,
+- `POST /api/oauth/device_authorization` with `client_name`, `machine` (optional), `public_key`,
+  and optional `known_drive_ids` (up to 20 UUIDs; JSON array, or repeated or comma-separated form
+  field; invalid input returns 400 `invalid_request`). Returns `device_code`, `user_code`, `verification_uri`,
   `verification_uri_complete`, `expires_in` (600), and `interval` (5). At most 20 starts per IP
   per hour; the 21st returns 429 `{"error":"slow_down"}`.
 - `POST /api/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` and
@@ -66,9 +67,14 @@ Full contract: `docs/agent-login.md` section 2. These endpoints use no API key.
   `drive_ids`, `new_drive_id`, and `sealed_drive_keys`.
 - Console (Clerk session): `GET /api/console/device/{user_code}`,
   `POST /api/console/device/{user_code}/approve`, and `POST /api/console/device/{user_code}/deny`.
-  Approval takes `driveIds`, `newDriveName`, `scopes` (never `manage`), optional `agentId`, and
+  The lookup also returns `drives` (`[{id, name}]`, the requested drives that still belong to the
+  account) and `creates_drive`. Approving with `{}` grants read, write, delete, and share on those
+  drives, or on a new drive named after the agent (`name`, `name (machine)`, `name 2`, ...), and
+  revokes the same agent's earlier keys with the same label when the token is issued. Explicit
+  approval takes `driveIds`, `newDriveName`, `scopes` (never `manage`), optional `agentId`, and
   optional `sealedDriveKeys`. A `newDriveName` that matches an existing drive returns 409. Each
   account gets 30 device calls and 10 `not_found` results per 10 minutes; beyond that, 429
   `rate_limited`. Revoking an agent denies its approved but unredeemed requests.
+- A key missing a scope gets 403 `permission_denied`: `The API key lacks the "<scope>" scope.`
 - Audit actions: `device.authorize`, `device.token`, `console.device.read`,
   `console.device.approve`, `console.device.deny`. Maintenance deletes requests older than 24 hours.

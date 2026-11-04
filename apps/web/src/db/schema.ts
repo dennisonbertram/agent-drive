@@ -575,6 +575,10 @@ export const deviceAuthorizations = pgTable(
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
+    requestedDriveIds: uuid('requested_drive_ids')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
     newDriveId: uuid('new_drive_id'),
     sealedDriveKeys: jsonb('sealed_drive_keys').$type<Record<string, unknown>>(),
     apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),

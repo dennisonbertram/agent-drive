@@ -16,6 +16,9 @@ const BASE64URL = /^[A-Za-z0-9_-]{1,4096}$/u;
 const EXPIRES_IN_SECONDS = 600;
 const STARTS_PER_HOUR = 20;
 const USER_SCOPES = new Set(['read', 'write', 'delete', 'share']);
+const DEFAULT_SCOPES = ['read', 'write', 'delete', 'share'];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const MAX_KNOWN_DRIVES = 20;
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const noStore = { 'Cache-Control': 'no-store' };
@@ -36,7 +39,12 @@ export function generateUserCode() {
   return `${Array.from({ length: 4 }, pick).join('')}-${Array.from({ length: 4 }, pick).join('')}`;
 }
 
-type StartInput = { clientName: string; machine: string | null; publicKey: string };
+type StartInput = {
+  clientName: string;
+  machine: string | null;
+  publicKey: string;
+  knownDriveIds?: string[];
+};
 
 export async function startDeviceAuthorization(
   input: StartInput,
@@ -68,8 +76,9 @@ export async function startDeviceAuthorization(
       if (taken.rowCount) continue;
       await client.query(
         `INSERT INTO device_authorizations
-           (device_code_hash, user_code, client_name, machine, public_key, ip_hash, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7))`,
+           (device_code_hash, user_code, client_name, machine, public_key, ip_hash, expires_at,
+            requested_drive_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8::uuid[])`,
         [
           sha256(deviceCode),
           candidate,
@@ -78,6 +87,7 @@ export async function startDeviceAuthorization(
           input.publicKey,
           ipHash,
           EXPIRES_IN_SECONDS,
+          input.knownDriveIds ?? [],
         ],
       );
       return candidate;
@@ -154,6 +164,13 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     );
     const driveIds = drives.rows.map((drive) => drive.id as string);
     const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
+    // A repeat login replaces that machine's key: revoke only this agent's active keys with the
+    // same label.
+    await client.query(
+      `UPDATE api_keys SET revoked_at = now()
+        WHERE account_id = $1 AND agent_id = $2 AND label = $3 AND revoked_at IS NULL`,
+      [row.account_id, row.agent_id, label],
+    );
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const key = await client.query(
       `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
@@ -204,7 +221,30 @@ async function publicBody(request: Request): Promise<Record<string, unknown>> {
   const text = await request.text();
   if (text.length > MAX_BODY_BYTES)
     throw new OAuthError('invalid_request', 'The body is too large.');
-  return Object.fromEntries(new URLSearchParams(text));
+  const params = new URLSearchParams(text);
+  const body: Record<string, unknown> = Object.fromEntries(params);
+  if (params.has('known_drive_ids')) body.known_drive_ids = params.getAll('known_drive_ids');
+  return body;
+}
+
+// Array, or comma-separated string (form fields). At most 20 distinct UUIDs.
+function knownDriveIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  const items = Array.isArray(value) ? value : [value];
+  const ids = items.flatMap((item) => {
+    if (typeof item !== 'string')
+      throw new OAuthError('invalid_request', 'known_drive_ids is invalid.');
+    return item
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  });
+  if (ids.some((id) => !UUID_PATTERN.test(id)))
+    throw new OAuthError('invalid_request', 'known_drive_ids must be UUIDs.');
+  const unique = [...new Set(ids.map((id) => id.toLowerCase()))];
+  if (unique.length > MAX_KNOWN_DRIVES)
+    throw new OAuthError('invalid_request', 'known_drive_ids may hold at most 20 ids.');
+  return unique;
 }
 
 function field(body: Record<string, unknown>, name: string, max: number, required: boolean) {
@@ -257,6 +297,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
             clientName: field(body, 'client_name', 64, true)!,
             machine: field(body, 'machine', 128, false) ?? null,
             publicKey,
+            knownDriveIds: knownDriveIds(body.known_drive_ids),
           },
           { ip: clientIp(request), origin },
         ),
@@ -308,18 +349,17 @@ function approvalInput(body: Record<string, unknown>) {
   ];
   const newDriveName =
     body.newDriveName === undefined ? undefined : stringField(body, 'newDriveName', { max: 128 });
-  if (!drives.length && !newDriveName)
-    throw new ApiError('validation_error', 'Choose a drive or a new drive name.');
   if (
-    !Array.isArray(body.scopes) ||
-    body.scopes.length === 0 ||
-    body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value))
+    body.scopes !== undefined &&
+    (!Array.isArray(body.scopes) ||
+      body.scopes.length === 0 ||
+      body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value)))
   )
     throw new ApiError(
       'validation_error',
       'scopes must be a non-empty list of read, write, delete, or share.',
     );
-  const scopes = [...new Set(body.scopes as string[])];
+  const scopes = body.scopes === undefined ? DEFAULT_SCOPES : [...new Set(body.scopes as string[])];
   const agentId =
     body.agentId === undefined
       ? undefined
@@ -341,6 +381,32 @@ function approvalInput(body: Record<string, unknown>) {
   return { drives, newDriveName, scopes, agentId, sealed };
 }
 
+async function liveRequestedDrives(client: PoolClient, accountId: string, ids: string[]) {
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])
+      ORDER BY name, id`,
+    [accountId, ids],
+  );
+  return rows.map((drive) => drive.id);
+}
+
+// client_name, then "client_name (machine)", then "client_name 2", "client_name 3", ...
+async function freeDriveName(
+  client: PoolClient,
+  accountId: string,
+  row: { client_name: string; machine: string | null },
+) {
+  const base = row.client_name;
+  const candidates = [base, ...(row.machine ? [`${base} (${row.machine})`.slice(0, 128)] : [])];
+  const { rows } = await client.query<{ name: string }>(
+    'SELECT name FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name LIKE $2',
+    [accountId, `${base.replace(/[\\%_]/gu, '\\$&')}%`],
+  );
+  const taken = new Set(rows.map((drive) => drive.name));
+  for (const name of candidates) if (!taken.has(name)) return name;
+  for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
+}
+
 async function approve(
   client: PoolClient,
   accountId: string,
@@ -349,7 +415,8 @@ async function approve(
 ) {
   await lockBillingAccount(client, accountId);
   const found = await client.query(
-    `SELECT id, client_name FROM device_authorizations WHERE ${pendingRequest}
+    `SELECT id, client_name, machine, requested_drive_ids FROM device_authorizations
+      WHERE ${pendingRequest}
       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
     [code],
   );
@@ -381,18 +448,25 @@ async function approve(
       )
     ).rows[0].id as string;
   }
+  let drives = input.drives;
+  let newDriveName = input.newDriveName;
+  if (!drives.length && !newDriveName) {
+    // Defaults (contract v2): reconnect to known drives, else create one named for the agent.
+    drives = await liveRequestedDrives(client, accountId, row.requested_drive_ids);
+    if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
+  }
   let newDriveId: string | null = null;
-  if (input.newDriveName) {
+  if (newDriveName) {
     const exists = await client.query(
       'SELECT 1 FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name = $2',
-      [accountId, input.newDriveName],
+      [accountId, newDriveName],
     );
     if (exists.rowCount) throw new ApiError('conflict', 'A drive with this name already exists.');
     await enforceWriteBudget(client, accountId, { drives: 1n });
     newDriveId = (
       await client.query('INSERT INTO drives (account_id, name) VALUES ($1, $2) RETURNING id', [
         accountId,
-        input.newDriveName,
+        newDriveName,
       ])
     ).rows[0].id as string;
   }
@@ -405,7 +479,7 @@ async function approve(
       row.id,
       accountId,
       agentId,
-      newDriveId ? [...input.drives, newDriveId] : input.drives,
+      newDriveId ? [...drives, newDriveId] : drives,
       input.scopes,
       newDriveId,
       Object.keys(input.sealed).length ? JSON.stringify(input.sealed) : null,
@@ -468,13 +542,21 @@ async function consoleDeviceAction(
   const code = userCodeFrom(parts[1]);
   if (parts.length === 2 && request.method === 'GET') {
     const found = await getPool().query(
-      `SELECT user_code, client_name, machine, created_at, expires_at, public_key
+      `SELECT user_code, client_name, machine, created_at, expires_at, public_key,
+              requested_drive_ids
          FROM device_authorizations WHERE ${pendingRequest} ORDER BY created_at DESC LIMIT 1`,
       [code],
     );
     const row = found.rows[0];
     if (!row) throw new ApiError('not_found', 'Device request not found.');
+    const known = await getPool().query<{ id: string; name: string }>(
+      `SELECT id, name FROM drives WHERE account_id = $1 AND deleting_at IS NULL
+          AND id = ANY($2::uuid[]) ORDER BY name, id`,
+      [accountId, row.requested_drive_ids],
+    );
     return reply({
+      drives: known.rows,
+      creates_drive: known.rows.length === 0,
       user_code: row.user_code,
       client_name: row.client_name,
       machine: row.machine,
