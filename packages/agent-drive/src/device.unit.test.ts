@@ -1,9 +1,11 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deviceLogin } from './device.js';
+import { deviceLogin, defaultAgentName } from './device.js';
+import { AgentDriveApiError } from './client.js';
+import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
 
 const { subtle } = webcrypto;
 const text = new TextEncoder();
@@ -36,7 +38,7 @@ const start = {
 
 type Handler = (n: number, publicKey: string) => Response | Promise<Response>;
 
-function run(tokens: Handler) {
+function run(tokens: Handler, extra: { apiUrl?: string } = {}) {
   const calls: { url: string; body: Record<string, string> }[] = [];
   const out: string[] = [];
   const sleeps: number[] = [];
@@ -48,7 +50,7 @@ function run(tokens: Handler) {
     return tokens(polls++, calls[0]?.body.public_key ?? '');
   };
   const promise = deviceLogin({
-    apiUrl: 'https://x.test/api',
+    apiUrl: extra.apiUrl ?? 'https://x.test/api',
     name: 'bot',
     machine: 'box',
     fetch: fetcher as typeof fetch,
@@ -195,11 +197,127 @@ describe('deviceLogin', () => {
       json(200, {
         access_token: 'adk_T',
         api_url: 'http://evil.example/api',
-        drive_ids: [],
+        drive_ids: ['dn'],
+        new_drive_id: 'dn',
       }),
     );
     await r.promise;
     const saved = JSON.parse(await readFile(path, 'utf8')) as { apiUrl: string };
     expect(saved.apiUrl).toBe('https://x.test/api');
+  });
+
+  it('sends known_drive_ids from saved keys for the same origin only', async () => {
+    const path = await setup();
+    await writeFile(
+      path,
+      JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k', driveKeys: { a: 'A', b: 'B' } }),
+    );
+    const same = run(() => json(200, { access_token: 't', drive_ids: ['a'] }));
+    await same.promise;
+    expect(same.calls[0]?.body.known_drive_ids).toEqual(['a', 'b']);
+    const other = run(() => json(200, { access_token: 't', drive_ids: ['n'], new_drive_id: 'n' }), {
+      apiUrl: 'https://other.test/api',
+    });
+    await other.promise;
+    expect(other.calls[0]?.body.known_drive_ids).toBeUndefined();
+  });
+
+  it('fails with the contract message when no granted drive has a key, but keeps the config', async () => {
+    const path = await setup();
+    const r = run(() => json(200, { access_token: 'adk_T', drive_ids: ['d9'] }));
+    await expect(r.promise).rejects.toThrow(
+      "Login finished but this agent has no usable drive key. Run `agent-drive login` again; the owner's approval will create a drive for this agent.",
+    );
+    expect(JSON.parse(await readFile(path, 'utf8')).apiKey).toBe('adk_T');
+  });
+
+  it('counts a granted drive whose key is already saved as usable', async () => {
+    const path = await setup();
+    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', driveKeys: { d9: 'K' } }));
+    const r = run(() => json(200, { access_token: 't', drive_ids: ['d9'] }));
+    await r.promise;
+    expect(r.out.join('\n')).toContain('Usable drives: d9');
+  });
+
+  it('defaults the agent name to "<machine> agent"', () => {
+    vi.stubEnv('AGENT_DRIVE_MACHINE', 'laptop');
+    expect(defaultAgentName()).toBe('laptop agent');
+  });
+});
+
+describe('check and key helpers', () => {
+  it('whoami localDriveKeys reports which authorized drives have a key', async () => {
+    expect(await localKeyMap(['a', 'b'], async (id) => (id === 'a' ? 'K' : undefined))).toEqual({
+      a: true,
+      b: false,
+    });
+    expect(await localKeyMap(null, async () => 'K')).toEqual({});
+  });
+
+  it('picks the only keyed drive, or requires --drive', () => {
+    expect(pickCheckDrive(undefined, ['a', 'b'], { a: true, b: false })).toBe('a');
+    expect(() => pickCheckDrive(undefined, ['a', 'b'], { a: true, b: true })).toThrow(/--drive/u);
+    expect(() => pickCheckDrive(undefined, ['a'], { a: false })).toThrow(/no usable drive key/iu);
+    expect(() => pickCheckDrive('z', ['a'], { a: true })).toThrow(/no key/iu);
+    expect(pickCheckDrive('a', ['a', 'b'], { a: true, b: true })).toBe('a');
+  });
+
+  function fake(readBack: (b: Uint8Array) => Uint8Array) {
+    let sent: Uint8Array = new Uint8Array();
+    return {
+      put: vi.fn(async (_d: string, _p: string, bytes: Uint8Array, o: unknown) => {
+        sent = bytes;
+        expect(o).toEqual({ mode: 'overwrite' });
+        return {} as never;
+      }),
+      get: vi.fn(async () => ({ bytes: readBack(sent) }) as never),
+    };
+  }
+
+  it('check succeeds when the bytes round-trip', async () => {
+    const c = fake((b) => b);
+    expect(await runCheck(c, 'd1')).toBe('check ok drive=d1');
+    expect(c.put.mock.calls[0]?.[1]).toBe('/.agent-drive/check.txt');
+  });
+
+  it('check fails on a mismatch', async () => {
+    await expect(
+      runCheck(
+        fake(() => new Uint8Array([1])),
+        'd1',
+      ),
+    ).rejects.toThrow(/mismatch/iu);
+  });
+
+  it('check surfaces a permission error', async () => {
+    const c = {
+      put: async () => {
+        throw new AgentDriveApiError(
+          'permission_denied',
+          403,
+          'The API key lacks the "write" scope.',
+        );
+      },
+      get: async () => ({}) as never,
+    };
+    await expect(runCheck(c, 'd1')).rejects.toThrow('lacks the "write" scope');
+  });
+
+  it('drive create note has no key and names the config path', () => {
+    const note = createdDriveNote('/c/config.json');
+    expect(note).toBe('Drive key saved to /c/config.json; back it up.');
+  });
+
+  it('appends the reconnect hint only for permission_denied', () => {
+    const denied = new AgentDriveApiError(
+      'permission_denied',
+      403,
+      'The API key lacks the "write" scope.',
+    );
+    expect(apiErrorLines(denied)).toEqual([
+      'The API key lacks the "write" scope.',
+      'Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.',
+    ]);
+    expect(apiErrorLines(new AgentDriveApiError('not_found', 404, 'nope'))).toEqual(['nope']);
   });
 });
