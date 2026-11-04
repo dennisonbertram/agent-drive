@@ -9,6 +9,8 @@ export type AgentDriveConfig = {
   driveKeys?: Record<string, string>;
 };
 
+export const DEFAULT_API_URL = 'https://agent-drive.vercel.app/api';
+
 export function configPath() {
   return process.env.AGENT_DRIVE_CONFIG ?? join(homedir(), '.config', 'agent-drive', 'config.json');
 }
@@ -126,7 +128,7 @@ export function driveKeyEnvironmentName(driveId: string) {
 
 export async function resolveConnection() {
   const saved = await readConfig();
-  const apiUrl = process.env.AGENT_DRIVE_API_URL ?? saved.apiUrl;
+  const apiUrl = process.env.AGENT_DRIVE_API_URL ?? saved.apiUrl ?? DEFAULT_API_URL;
   const apiKey = process.env.AGENT_DRIVE_API_KEY ?? saved.apiKey;
   if (!apiUrl || !apiKey) {
     throw new Error(

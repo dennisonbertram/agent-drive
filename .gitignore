@@ -12,3 +12,4 @@ test-results/
 .devin-local-preview
 .vercel/
 .DS_Store
+apps/web/public/cli/
