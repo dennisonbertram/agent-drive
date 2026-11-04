@@ -100,6 +100,10 @@ export function billingOrigin() {
   return url.origin;
 }
 
+export function downloadsLabel(allowance: string, notMetered: boolean) {
+  return notMetered ? 'Downloads not charged' : `${allowance} monthly downloads included`;
+}
+
 export function paymentRequired(message: string): never {
   throw new ApiError('payment_required', message, 402, {
     upgradeUrl: `${billingOrigin()}/console/billing`,

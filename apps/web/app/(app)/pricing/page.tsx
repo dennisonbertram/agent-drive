@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { billingRates, GIB, PLANS } from '@/src/billing/policy';
+import { billingRates, downloadsLabel, GIB, PLANS } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
 import '../console/billing/billing.css';
 import './pricing.css';
@@ -71,7 +71,7 @@ export default function PricingPage() {
               <ul>
                 <li>{String(plan.drives)} drives</li>
                 <li>{allowance(plan.storageBytes)} stored ciphertext</li>
-                <li>{allowance(plan.egressBytes)} monthly downloads included</li>
+                <li>{downloadsLabel(allowance(plan.egressBytes), egressNotMetered)}</li>
                 <li>{Number(plan.operations).toLocaleString('en-US')} API operations / month</li>
                 <li>CLI, MCP, web console, and encrypted sharing</li>
               </ul>
