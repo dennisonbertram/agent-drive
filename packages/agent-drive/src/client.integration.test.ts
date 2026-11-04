@@ -534,9 +534,14 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     const concurrentSaved = JSON.parse(await readFile(concurrentConfig, 'utf8')) as {
       driveKeys: Record<string, string>;
     };
+    // `drive create` no longer prints the key; it must be saved, and distinct per drive.
     for (const drive of concurrentDrives) {
-      expect(concurrentSaved.driveKeys[String(drive.id)]).toBe(String(drive.driveKey));
+      expect(drive).not.toHaveProperty('driveKey');
+      expect(concurrentSaved.driveKeys[String(drive.id)]).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     }
+    expect(
+      new Set(concurrentDrives.map((drive) => concurrentSaved.driveKeys[String(drive.id)])).size,
+    ).toBe(concurrentDrives.length);
 
     const agent = parsedOutput(
       await runCli(['agent', 'create', '--name', `cli-agent-${randomUUID()}`], baseEnvironment),
@@ -545,12 +550,13 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       await runCli(['drive', 'create', '--name', `cli-drive-${randomUUID()}`], baseEnvironment),
     );
     cliDriveId = String(drive.id);
-    cliDriveKey = String(drive.driveKey);
     expect(drive.created).toBe(true);
+    expect(drive).not.toHaveProperty('driveKey');
     const savedConfig = JSON.parse(await readFile(config, 'utf8')) as {
       driveKeys: Record<string, string>;
     };
-    expect(savedConfig.driveKeys[cliDriveId]).toBe(cliDriveKey);
+    cliDriveKey = String(savedConfig.driveKeys[cliDriveId]);
+    expect(cliDriveKey).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     const repeated = parsedOutput(
       await runCli(['drive', 'create', '--name', String(drive.name)], baseEnvironment),
     );
