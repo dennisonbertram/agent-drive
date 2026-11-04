@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Drive — T1: Rack</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Type: Space Grotesk (a grotesque with slightly quirky, engineered letterforms that suits an industrial-design page without being a costume) + IBM Plex Mono (plain, legible part-number labels). -->
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#e9e8e4; --panel:#f3f2ee; --al1:#f4f3f0; --al2:#d6d4cf; --al3:#bdbab4;
+  --ink:#121211; --muted:#5d5b56; --line:rgba(18,18,17,.16); --line-soft:rgba(18,18,17,.09);
+  --sig:#ff5a1f;            /* signal orange: LEDs and primary actions only; black text on it is 7.3:1 */
+  --sig-text:#ff7a45;       /* orange on smoked black, 7:1 */
+  --smoke:#17160f;
+  --sans:'Space Grotesk',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0}
+body{font-family:var(--sans);color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden;font-variant-numeric:tabular-nums;
+  background:var(--bg) radial-gradient(rgba(18,18,17,.13) 1px,transparent 1.2px) 0 0/24px 24px}
+code,.mono{font-family:var(--mono)}
+button{font:inherit;cursor:pointer}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:24px;max-width:1272px;margin:0 auto;padding:0 32px}
+.tag{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.cap{max-width:1272px;margin:0 auto;padding:22px 32px 0;display:flex;align-items:center;gap:14px}.cap:after{content:"";flex:1;height:1px;background:var(--line)}
+.cap .tag b{color:var(--ink)}
+.btn{border:0;border-radius:8px;padding:10px 16px;font:500 14px var(--sans);background:var(--ink);color:#fff;text-decoration:none;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn.sig{background:var(--sig);color:var(--ink);font-weight:600;box-shadow:0 1px 0 rgba(255,255,255,.4) inset,0 -2px 0 rgba(0,0,0,.18) inset}
+.btn.sig:hover{background:#ff6d38}
+.btn.sm{padding:6px 11px;font-size:12.5px;border-radius:7px}
+.btn.out{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+.led{display:inline-block;width:9px;height:9px;border-radius:50%;background:#8d8a83;box-shadow:inset 0 1px 1px rgba(0,0,0,.35);flex:none}
+.led.on{background:var(--sig);box-shadow:0 0 0 2px rgba(255,90,31,.2),0 0 9px rgba(255,90,31,.8)}
+.led.dim{background:#c9663b;box-shadow:inset 0 1px 1px rgba(0,0,0,.25)}
+
+/* nav */
+nav{max-width:1272px;margin:0 auto;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:10px;font:600 17px var(--sans);letter-spacing:-.01em;text-decoration:none}
+.logo{width:26px;height:26px;border-radius:7px;background:var(--ink);position:relative;box-shadow:0 1px 0 rgba(255,255,255,.2) inset}
+.logo:after{content:"";position:absolute;right:5px;bottom:5px;width:5px;height:5px;border-radius:50%;background:var(--sig);box-shadow:0 0 6px var(--sig)}
+.logo:before{content:"";position:absolute;left:5px;right:5px;top:7px;height:2px;background:#fff;opacity:.85;border-radius:1px;box-shadow:0 5px 0 rgba(255,255,255,.5)}
+.links{display:flex;gap:28px;font-size:14px;color:var(--muted)}.links a{text-decoration:none}.links a:hover{color:var(--ink)}
+
+/* hero */
+.hero{padding-bottom:84px;position:relative}
+.heroGrid{padding-top:62px;align-items:center}
+.copy{grid-column:1/6}
+.rackWrap{grid-column:6/13}
+.eyebrow{display:flex;gap:10px;align-items:center;margin-bottom:22px}.eyebrow i{width:9px;height:9px;background:var(--sig);border-radius:50%;box-shadow:0 0 8px var(--sig)}
+h1{font:600 clamp(42px,5.2vw,70px)/1 var(--sans);letter-spacing:-.045em}
+.sub{margin-top:20px;font-size:18px;color:var(--muted);max-width:420px}
+.spec{margin-top:36px;border-top:1px solid var(--ink)}
+.spec .row{padding:14px 0;border-bottom:1px solid var(--line)}
+.spec .head{flex-wrap:wrap;gap:8px;display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;min-height:30px}
+.spec code{display:block;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:10px 12px;overflow-wrap:anywhere;box-shadow:inset 0 1px 2px rgba(0,0,0,.08)}
+.spec code .p{color:var(--muted)}
+.works{margin-top:18px;display:flex;flex-wrap:wrap;gap:4px 0;align-items:center;font-size:13.5px}
+.works .tag{margin-right:14px}.works b{font-weight:500}.works b+b:before{content:"·";margin:0 10px;color:var(--muted)}
+.fine{margin-top:22px;font:400 11.5px var(--mono);color:var(--muted)}
+
+/* the rack */
+.rack{position:relative;max-width:660px;margin-left:auto;display:grid;grid-template-columns:30px 1fr 30px;border-radius:12px;background:linear-gradient(180deg,#f7f6f3,#d9d7d2 92%,#c5c2bc);
+  box-shadow:0 1px 0 #fff inset,0 -2px 0 rgba(0,0,0,.12) inset,0 40px 50px -30px rgba(40,30,20,.45),0 3px 8px rgba(40,30,20,.12)}
+.ear{display:flex;flex-direction:column;justify-content:space-around;align-items:center;padding:14px 0;background:linear-gradient(90deg,rgba(0,0,0,.08),rgba(0,0,0,0) 40%,rgba(0,0,0,.06));}
+.ear:first-child{border-radius:12px 0 0 12px;border-right:1px solid var(--line)}.ear:last-child{border-radius:0 12px 12px 0;border-left:1px solid var(--line)}
+.slot{width:11px;height:30px;border-radius:6px;background:#8e8b85;box-shadow:inset 0 2px 3px rgba(0,0,0,.55),0 1px 0 rgba(255,255,255,.7)}
+.face{padding:14px 18px 20px}
+.fh{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.fh .tag{color:var(--ink)}
+.vent{flex:1;height:10px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.5) 0 2px,transparent 2px 7px);opacity:.35;border-radius:2px}
+.bays{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.bay{position:relative;height:272px;border-radius:9px;background:linear-gradient(180deg,#2a2924,#3b3a35);box-shadow:inset 0 3px 8px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.8);padding:5px}
+.sled{height:100%;border-radius:6px;display:flex;flex-direction:column;gap:7px;padding:7px;background:linear-gradient(180deg,#f2f1ee,#cfcdc8);box-shadow:0 1px 0 #fff inset,0 2px 4px rgba(0,0,0,.4)}
+.lab{background:#fff;border-radius:3px;padding:5px 6px;font:500 10.5px/1.2 var(--mono);letter-spacing:-.01em;border:1px solid var(--line);text-align:left;white-space:nowrap;overflow:hidden}
+.win{flex:1;border-radius:4px;background:linear-gradient(160deg,#2c2a22,#0f0e09);box-shadow:inset 0 1px 6px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.7);padding:9px 8px;display:flex;flex-direction:column;justify-content:space-between;position:relative;overflow:hidden}
+.win:after{content:"";position:absolute;left:-20%;top:-30%;width:140%;height:60%;background:linear-gradient(180deg,rgba(255,255,255,.14),transparent);transform:rotate(-8deg);pointer-events:none}
+.win .tag{color:#9a978e;font-size:9px}
+.rd{font:500 22px/1 var(--mono);color:var(--sig-text);letter-spacing:-.04em}
+.rd small{font-size:11px;letter-spacing:0;margin-left:2px;opacity:.85}
+.parts{display:flex;flex-direction:column;gap:2px;font:400 9px/1.3 var(--mono);color:#9a978e}
+.sf{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.pull{flex:1;height:8px;border-radius:5px;background:#8e8b85;box-shadow:inset 0 2px 3px rgba(0,0,0,.5),0 1px 0 rgba(255,255,255,.8)}
+.sled.write .led{background:var(--sig);box-shadow:0 0 0 2px rgba(255,90,31,.25),0 0 10px var(--sig)}
+.sled.write .rd{color:#ffb08f}
+.empty{border:1.5px dashed rgba(18,18,17,.5);background:rgba(255,255,255,.28);box-shadow:inset 0 2px 6px rgba(0,0,0,.14);display:flex;align-items:center;justify-content:center;padding:0}
+.ghost{width:calc(100% - 22px);height:calc(100% - 28px);border:1.5px dashed rgba(255,90,31,.8);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;animation:invite 3.4s ease-in-out infinite;background:rgba(255,90,31,.06)}
+.ghost .plus{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--ink);display:grid;place-items:center;font:500 20px/1 var(--mono)}
+.ghost span.tag{color:var(--ink);text-align:center;line-height:1.4;font-size:10.5px}
+@keyframes invite{0%,100%{transform:translateY(7px);opacity:.55}50%{transform:translateY(-3px);opacity:1}}
+.mk{position:absolute;z-index:3;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font:500 11px/20px var(--mono);text-align:center;box-shadow:0 0 0 3px #e2e0db}
+.mk.below{top:auto;bottom:-27px}.mk.below:before{content:"";position:absolute;left:9px;bottom:20px;width:1px;height:13px;background:var(--ink)}
+.seg{display:flex;gap:3px}.seg i{flex:1;height:14px;border-radius:2px;background:#3a382f;box-shadow:inset 0 1px 2px rgba(0,0,0,.6)}.seg i.on{background:var(--sig);box-shadow:0 0 6px rgba(255,90,31,.6)}
+.segl{display:flex;gap:3px;margin-top:4px;font:400 7.5px var(--mono);color:#9a978e}.segl span{flex:1;text-align:center}
+.spark{flex:1;display:flex;align-items:flex-end;gap:2px;padding:10px 0 8px;min-height:30px}.spark i{flex:1;background:#4a4739;border-radius:1px}.spark i:nth-last-child(-n+3){background:#8a5a3f}
+.notes{display:grid;grid-template-columns:repeat(4,1fr);gap:0 18px;margin-top:30px;max-width:660px;margin-left:auto}
+.notes div{border-top:1px solid var(--ink);padding-top:9px;font-size:13px;color:var(--muted);line-height:1.4}
+.notes b{display:block;font:500 11px var(--mono);color:var(--ink);margin-bottom:4px}
+
+/* console */
+.sec{padding:26px 0 80px}
+.cons{grid-column:1/13;margin-top:20px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 0 #fff inset,0 30px 50px -34px rgba(40,30,20,.4);overflow:hidden}
+.strip{display:flex;gap:10px;align-items:stretch;padding:12px;background:linear-gradient(180deg,#d9d7d2,#c9c6c0);border-bottom:1px solid var(--line);overflow-x:auto}
+.mb{flex:1 1 0;min-width:168px;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;background:linear-gradient(180deg,#2a2924,#3b3a35);box-shadow:inset 0 2px 5px rgba(0,0,0,.7),0 1px 0 rgba(255,255,255,.7);color:#e8e6df;text-align:left;border:0}
+.mb .n{font:500 12.5px var(--mono);color:#fff;display:block}.mb .c{font:400 11px var(--mono);color:#a7a49b}
+.mb.sel{background:linear-gradient(180deg,#f7f6f3,#d6d4cf);color:var(--ink);box-shadow:0 0 0 2px var(--sig),0 2px 6px rgba(0,0,0,.3)}.mb.sel .n{color:var(--ink)}.mb.sel .c{color:var(--muted)}
+.mb.add{background:transparent;border:1.5px dashed rgba(18,18,17,.5);box-shadow:none;color:var(--ink)}.mb.add .n{color:var(--ink)}
+.body{display:grid;grid-template-columns:176px 1fr}
+.side{padding:16px 12px;display:flex;flex-direction:column;gap:2px;border-right:1px solid var(--line)}
+.side a{display:flex;justify-content:space-between;padding:8px 10px;border-radius:7px;font-size:14px;color:var(--muted);text-decoration:none}
+.side a.on{background:var(--ink);color:#fff}
+.side .nn{font:500 11px var(--mono);opacity:.7}
+.main{padding:22px 22px 26px;min-width:0;background:#fbfaf8}
+.mh{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.mh h2{font:600 26px var(--sans);letter-spacing:-.03em}.mh p{font:400 12px var(--mono);color:var(--muted)}
+.keyline{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13.5px;margin-bottom:14px}
+.keyline code{font-size:12px;background:#fff;border:1px solid var(--line);padding:1px 6px;border-radius:4px}
+.keyline .btn{margin-left:auto}
+.parts-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.parts-tabs span{font:500 12px var(--mono);padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#fff}
+.parts-tabs span.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+th{text-align:left;font:500 10.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:11px 10px;background:#eceae6;white-space:nowrap}
+td{padding:13px 10px;border-top:1px solid var(--line-soft);vertical-align:middle}
+td.p{font:500 13px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}td.p span{color:var(--muted);font-weight:400}
+td.s,td.m{font:400 13px var(--mono);white-space:nowrap}
+.agent{display:inline-flex;flex-direction:column;gap:1px;white-space:nowrap}.agent b{font-weight:500;display:flex;align-items:center;gap:7px}.agent small{padding-left:16px;color:var(--muted);font-size:12px}
+.acts{display:flex;gap:6px;justify-content:flex-end}.acts button{white-space:nowrap;border:1px solid var(--line);background:#fff;border-radius:6px;padding:5px 8px;font-size:12.5px}
+.acts button:hover{border-color:var(--ink)}
+.foot{margin-top:12px;font:400 12px var(--mono);color:var(--muted)}
+
+/* approval */
+.appr{grid-column:1/13;display:grid;place-items:center;margin-top:20px}
+.dev{width:100%;max-width:440px;border-radius:22px;padding:14px;background:linear-gradient(180deg,#f7f6f3,#d9d7d2);box-shadow:0 1px 0 #fff inset,0 -2px 0 rgba(0,0,0,.12) inset,0 40px 50px -34px rgba(40,30,20,.5),0 3px 8px rgba(40,30,20,.12)}
+.scr{border-radius:14px;background:linear-gradient(160deg,#2c2a22,#0f0e09);padding:20px 20px 22px;text-align:center;box-shadow:inset 0 2px 10px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.8);position:relative;overflow:hidden}
+.scr:after{content:"";position:absolute;left:-10%;top:-40%;width:120%;height:70%;background:linear-gradient(180deg,rgba(255,255,255,.1),transparent);transform:rotate(-6deg);pointer-events:none}
+.scr .tag{color:#a7a49b;display:flex;justify-content:center;align-items:center;gap:8px}
+.code{font:500 44px/1 var(--mono);letter-spacing:.06em;color:var(--sig-text);margin:16px 0 10px}
+.scr .hint{text-wrap:balance;font-size:13px;color:#b9b6ad}
+.info{padding:18px 8px 6px}
+.who{border-top:1px solid var(--ink)}
+.who div{display:flex;justify-content:space-between;gap:14px;padding:10px 0;font-size:14px;border-bottom:1px solid var(--line)}
+.who span{color:var(--muted)}.who b{font-weight:500;text-align:right}
+.can{margin:16px 0 18px}.can .tag{display:block;margin-bottom:8px}
+.can ul{padding:0}.can li{list-style:none;display:flex;gap:10px;padding:3px 0;font-size:14px}.can li:before{content:"";flex:none;width:8px;height:8px;margin-top:7px;background:var(--ink);border-radius:2px}
+.big{width:100%;justify-content:center;padding:14px;font-size:16px}
+.note{margin-top:12px;text-align:center;font-size:13px;color:var(--muted)}
+footer{padding:26px 24px;text-align:center;font:400 12px var(--mono);color:var(--muted);border-top:1px solid var(--line)}
+
+@media (max-width:860px){
+  .grid{padding:0 20px;column-gap:0}nav{padding:14px 20px}.links{display:none}
+  .copy,.rackWrap{grid-column:1/13}
+  .heroGrid{padding-top:30px}
+  .rackWrap{margin-top:46px}
+  .rack{grid-template-columns:20px 1fr 20px}.ear .slot{width:9px;height:22px}
+  .face{padding:12px 10px 14px}
+  .bays{grid-template-columns:1fr 1fr;row-gap:32px}.bay{height:206px}
+  .rd{font-size:20px}
+  .notes{grid-template-columns:1fr 1fr;gap:16px 14px}
+  .strip{display:grid;grid-template-columns:1fr 1fr;overflow:visible}.mb{min-width:0}
+  .body{grid-template-columns:1fr}
+  .side{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:10px}.side a{white-space:nowrap;gap:8px}
+  .main{padding:18px 14px}
+  .keyline .btn{margin-left:0}
+  table,thead,tbody,tr,td{display:block}thead,colgroup{display:none}table{border:0;background:none}
+  tr{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+  td{border:0;padding:3px 0}td.p{white-space:normal;overflow-wrap:anywhere}
+  td.a .agent{flex-direction:row;gap:8px;align-items:center}td.a .agent small{padding-left:0}
+  td.m:before{content:"modified ";color:var(--muted)}td.s:before{content:"size ";color:var(--muted)}
+  .acts{justify-content:flex-start;margin-top:8px}
+  .code{font-size:32px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ================= 1. HERO ================= -->
+<div class="cap"><span class="tag"><b>01</b> &nbsp;Landing hero</span></div>
+<header class="hero">
+  <nav aria-label="Main">
+    <a class="brand" href="#"><span class="logo"></span>Agent Drive</a>
+    <div class="links"><a href="#">How it works</a><a href="#">CLI</a><a href="#">Docs</a><a href="#">llms.txt</a></div>
+    <a class="btn" href="#">Open console</a>
+  </nav>
+
+  <div class="grid heroGrid">
+    <div class="copy">
+      <div class="eyebrow tag"><i></i>Portable storage for AI agents</div>
+      <h1>Every agent gets a drive.</h1>
+      <p class="sub">The same files follow it to any machine, sandbox or new session.</p>
+
+      <div class="spec">
+        <div class="row">
+          <div class="head"><span class="tag"><b style="color:var(--ink)">01</b> &nbsp;Paste into your agent</span><button class="btn sig sm copy-btn" data-t="c1" aria-label="Copy setup line for your agent"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5.5" y="5.5" width="8" height="8" rx="2"/><path d="M10.5 5.5V4a1.5 1.5 0 00-1.5-1.5H4A1.5 1.5 0 002.5 4v5A1.5 1.5 0 004 10.5h1.5"/></svg><span>Copy for your agent</span></button></div>
+          <code id="c1">Set up Agent Drive: https://agentdrive.xyz/llms.txt</code>
+        </div>
+        <div class="row">
+          <div class="head"><span class="tag"><b style="color:var(--ink)">02</b> &nbsp;Or install the CLI</span><button class="btn out sm copy-btn" data-t="c2" aria-label="Copy install command"><span>Copy</span></button></div>
+          <code><span class="p">$ </span><span id="c2">npm install -g https://agentdrive.xyz/cli/agent-drive.tgz</span></code>
+        </div>
+      </div>
+      <div class="works"><span class="tag">Works with</span><b>Claude Code</b><b>Codex</b><b>Cursor</b><b>Amp</b><b>Gemini CLI</b></div>
+      <p class="fine">Encrypted on the agent's machine.</p>
+    </div>
+
+    <div class="rackWrap">
+      <div class="rack" id="rack" role="img" aria-label="A rack unit with four drive bays: trace-bot, nightly-evals and research-agent drives, and one empty bay for your next agent">
+        <div class="ear"><i class="slot"></i><i class="slot"></i></div>
+        <div class="face">
+          <div class="fh"><span class="tag">Agent Drive · AD-4</span><i class="vent"></i><span class="tag">4 bays</span><span class="led dim"></span></div>
+          <div class="bays">
+            <div class="bay"><span class="mk" style="left:-9px;top:46%">1</span><span class="mk below" style="left:6px">2</span>
+              <div class="sled" data-s="0"><div class="lab">trace-bot</div>
+                <div class="win"><div><div class="seg"><i class="on"></i><i class="on"></i><i></i><i></i></div><div class="segl"><span>MEM</span><span>OUT</span><span>WRK</span><span>HND</span></div></div><div class="spark"></div><div><div class="rd">54.3<small>KB</small></div><div class="parts"><span>/memory /outputs</span><span>2 files</span></div></div></div>
+                <div class="sf"><span class="led dim"></span><i class="pull"></i></div></div></div>
+            <div class="bay">
+              <div class="sled" data-s="1"><div class="lab">nightly-evals</div>
+                <div class="win"><div><div class="seg"><i></i><i></i><i class="on"></i><i class="on"></i></div><div class="segl"><span>MEM</span><span>OUT</span><span>WRK</span><span>HND</span></div></div><div class="spark"></div><div><div class="rd">2.4<small>MB</small></div><div class="parts"><span>/work /handoff</span><span>2 files</span></div></div></div>
+                <div class="sf"><span class="led dim"></span><i class="pull"></i></div></div></div>
+            <div class="bay"><span class="mk below" style="right:22px">4</span>
+              <div class="sled" data-s="2"><div class="lab">research-agent</div>
+                <div class="win"><div><div class="seg"><i class="on"></i><i></i><i class="on"></i><i></i></div><div class="segl"><span>MEM</span><span>OUT</span><span>WRK</span><span>HND</span></div></div><div class="spark"></div><div><div class="rd">118<small>KB</small></div><div class="parts"><span>/memory /work</span><span>5 files</span></div></div></div>
+                <div class="sf"><span class="led dim"></span><i class="pull"></i></div></div></div>
+            <div class="bay"><span class="mk" style="right:-9px;top:-9px">3</span>
+              <div class="sled empty"><div class="ghost"><span class="plus">+</span><span class="tag">your next<br>agent</span></div></div></div>
+          </div>
+        </div>
+        <div class="ear"><i class="slot"></i><i class="slot"></i></div>
+      </div>
+      <div class="notes">
+        <div><b>1 / DRIVE</b>One per agent.</div>
+        <div><b>2 / LED</b>Blinks on every write.</div>
+        <div><b>3 / BAY</b>New agent, new drive.</div>
+        <div><b>4 / PORTABLE</b>Slot it into a laptop, CI or sandbox.</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ================= 2. CONSOLE ================= -->
+<div class="cap"><span class="tag"><b>02</b> &nbsp;Console · Files</span></div>
+<section class="sec"><div class="grid">
+  <div class="cons">
+    <div class="strip" role="tablist" aria-label="Drives">
+      <button class="mb"><span class="led dim"></span><span><span class="n">trace-bot</span><span class="c">54.3 KB · 2 files</span></span></button>
+      <button class="mb"><span class="led dim"></span><span><span class="n">nightly-evals</span><span class="c">2.4 MB · 2 files</span></span></button>
+      <button class="mb sel" aria-selected="true"><span class="led on"></span><span><span class="n">research-agent</span><span class="c">118 KB · 5 files</span></span></button>
+      <button class="mb add"><span class="n">+</span><span class="tag" style="color:var(--ink)">your next agent</span></button>
+    </div>
+    <div class="body">
+      <aside class="side" aria-label="Console sections">
+        <a class="on" href="#">Files <span class="nn">4</span></a><a href="#">Agents <span class="nn">2</span></a><a href="#">API keys</a><a href="#">Usage</a><a href="#">Trash</a><a href="#">Billing &amp; limits</a><a href="#">Activity &amp; deletion</a>
+      </aside>
+      <div class="main">
+        <div class="mh"><h2>Files</h2><p>Research agent · drv_8f3a21</p></div>
+        <div class="keyline" role="status"><span class="led on"></span><span>Drive key not backed up. Run <code>agent-drive credentials export</code></span><a class="btn sm" href="#">Back up key</a></div>
+        <div class="parts-tabs"><span class="on">All</span><span>/memory</span><span>/outputs</span><span>/work</span><span>/handoff</span></div>
+        <table>
+          <colgroup><col><col style="width:86px"><col style="width:160px"><col style="width:146px"><col style="width:196px"></colgroup>
+          <thead><tr><th>Path</th><th>Size</th><th>Author</th><th>Modified</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="p"><span>/outputs/</span>q3-pricing-analysis.md</td><td class="s">48.2 KB</td><td class="a"><span class="agent"><b><span class="led dim"></span>trace-bot</b><small>Claude Code · MacBook</small></span></td><td class="m">Nov 4, 09:12</td><td><div class="acts"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr>
+            <tr><td class="p"><span>/memory/</span>project-notes.md</td><td class="s">6.1 KB</td><td class="a"><span class="agent"><b><span class="led dim"></span>trace-bot</b><small>Claude Code · MacBook</small></span></td><td class="m">Nov 4, 08:47</td><td><div class="acts"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr>
+            <tr><td class="p"><span>/work/scrape-competitors/</span>results.jsonl</td><td class="s">2.4 MB</td><td class="a"><span class="agent"><b><span class="led dim"></span>nightly-evals</b><small>Codex · sandbox</small></span></td><td class="m">Nov 4, 03:30</td><td><div class="acts"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr>
+            <tr><td class="p"><span>/handoff/</span>2026-11-04.md</td><td class="s">3.0 KB</td><td class="a"><span class="agent"><b><span class="led dim"></span>nightly-evals</b><small>Codex · sandbox</small></span></td><td class="m">Nov 4, 03:31</td><td><div class="acts"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr>
+          </tbody>
+        </table>
+        <p class="foot">4 files · sizes are encrypted size</p>
+      </div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ================= 3. APPROVAL ================= -->
+<div class="cap"><span class="tag"><b>03</b> &nbsp;One-click approval · /connect</span></div>
+<section class="sec" style="padding-bottom:70px"><div class="grid"><div class="appr">
+  <div class="dev">
+    <div class="scr">
+      <span class="tag"><span class="led on" id="wait"></span>Pairing code</span>
+      <div class="code" aria-label="Device code CXRH-TZJT">CXRH-TZJT</div>
+      <div class="hint">Check it matches your agent's terminal. If not, close this page.</div>
+    </div>
+    <div class="info">
+      <div class="who"><div><span>Agent</span><b>trace-bot</b></div><div><span>Runs on</span><b>Claude Code · MacBook</b></div><div><span>Drive</span><b>Research agent</b></div></div>
+      <div class="can"><span class="tag">This agent will be able to</span><ul><li>Read, write, delete and share files in this drive</li><li>See file paths, sizes and versions</li></ul></div>
+      <a class="btn sig big" href="#">Approve</a>
+      <p class="note">You can revoke access any time in Console, Agents.</p>
+    </div>
+  </div>
+</div></div></section>
+<footer>agentdrive.xyz</footer>
+
+<script>
+document.querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',async()=>{
+  const el=document.getElementById(b.dataset.t),s=b.querySelector('span');
+  try{await navigator.clipboard.writeText(el.textContent)}catch(e){}
+  const o=s.textContent;s.textContent='Copied';setTimeout(()=>s.textContent=o,1400);
+}));
+document.querySelectorAll('.spark').forEach((el,k)=>{let h='';for(let i=0;i<16;i++){h+='<i style="height:'+(18+((i*37+k*53)%64))+'%"></i>'}el.innerHTML=h});
+// one LED blinks when a file is written
+(function(){
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+  const sleds=document.querySelectorAll('.sled[data-s]');let i=0;
+  setInterval(()=>{const s=sleds[i++%sleds.length];s.classList.add('write');setTimeout(()=>s.classList.remove('write'),650)},1900);
+  const w=document.getElementById('wait');setInterval(()=>w.classList.toggle('on'),900);
+})();
+</script>
+</body>
+</html>
