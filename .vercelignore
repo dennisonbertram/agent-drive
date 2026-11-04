@@ -1,0 +1,4 @@
+# Build outputs come from the Vercel build; never upload stale local copies.
+packages/agent-drive/dist
+apps/web/public/cli
+apps/web/.next
