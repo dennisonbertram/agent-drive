@@ -222,3 +222,73 @@ failed unseal is reported per drive and does not abort login.
   agent names as text (no logos), and a three-step "how connecting works".
 - Console: a "Connect an agent" panel on Agents and API keys with the same instruction, plus
   per-client snippets using the real origin. Manual API keys remain as the alternative.
+
+## 7. Version 2: one-click connect (supersedes conflicting parts of §2, §3, §5, §6)
+
+Field report (2026-11-04): a human approved an agent onto an existing drive without supplying its
+key, so the agent could list names but never decrypt. Login still exited 0, and every repeat
+login repeated the same state. First-time humans have no context for drive, permission, or
+recovery-key choices. The agent owns those decisions.
+
+### Approval has no choices
+
+- `/connect` shows the code, agent name, machine, and request time, then **Approve agent** and
+  **Deny** only. There are no drive, permission, or key fields.
+- The copy says: "This agent gets its own encrypted drive. Its key is created and kept on that
+  machine; Agent Drive never sees it." When reconnecting, it says "Reconnects to: <drive names>".
+- `POST /api/console/device/{code}/approve` with an empty body (`{}`) applies the defaults
+  below. The optional explicit fields from §2 stay accepted for API compatibility, but the page
+  no longer sends them.
+
+### Defaults on approve
+
+- **Scopes:** `read`, `write`, `delete`, `share`, scoped to the granted drives. Never `manage`.
+- **Agent:** reuse the account's agent named `client_name`, otherwise create it (as before).
+- **Drives:** `known_drive_ids` from the request (below), filtered to drives that belong to the
+  approving account and are not being deleted. If none remain, create a new drive named
+  `client_name`; if that name is taken, use `client_name (machine)`, then append ` 2`, ` 3`, …
+  The new drive is returned as `new_drive_id`.
+- **Previous keys:** when issuing the token, revoke the account's active API keys for the same
+  agent with the same label (`client_name on machine`), so a repeat login replaces that
+  machine's key instead of accumulating keys.
+
+### Request: `known_drive_ids`
+
+- `POST /api/oauth/device_authorization` accepts an optional `known_drive_ids`: up to 20 UUIDs,
+  the drives whose keys the CLI already holds for this API origin. They are stored in a new
+  column, `requested_drive_ids uuid[] not null default '{}'` (migration 0012).
+- `GET /api/console/device/{code}` additionally returns
+  `drives: [{ id, name }]` (the requested drives that pass the account filter) and
+  `creates_drive: boolean`.
+
+### Errors
+
+- Missing-scope errors name the scope: `The API key lacks the "<scope>" scope.` The CLI adds:
+  "Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope."
+
+### CLI changes
+
+- `login` sends `known_drive_ids`, the saved drive-key IDs for the target origin (none on a
+  fresh machine).
+- `login` counts usable drives: granted drives with a saved, unsealed, or newly generated key.
+  - If there are none, it exits 1 with: "Login finished but this agent has no usable drive key.
+    Run `agent-drive login` again; the owner's approval will create a drive for this agent."
+  - Otherwise it prints the usable drives by name/ID and the config path, never secrets.
+- Default `--name` is `<machine> agent`, where machine is `AGENT_DRIVE_MACHINE` or the
+  hostname.
+- `whoami` adds `localDriveKeys: { "<driveId>": true|false }` for the authorized drives.
+- New `agent-drive check [--drive ID]` is the final setup check. It needs one usable drive
+  (the only one, or `--drive`). It writes a small random file to `/.agent-drive/check.txt` with
+  overwrite, reads it back, and compares bytes. It prints `check ok drive=<id>`, or a clear
+  failure with exit 1.
+- `drive create` no longer prints `driveKey`. It prints the drive and "Drive key saved to <config
+  path>; back it up." (It still needs `manage`; agents should not use it.)
+
+### llms.txt changes
+
+- **Steps:** install → `agent-drive login --name "<your name>"` → tell the human to open the
+  link and click Approve → `agent-drive check`. Setup is complete only when `check ok` prints.
+- **Troubleshooting:**
+  - No usable drive key: run `login` again.
+  - Missing-scope error: run `login` again; do not use `drive create`.
+  - The `/connect` page requires the human to be signed in.
