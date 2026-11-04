@@ -33,13 +33,20 @@ let ipCounter = 0;
 const json = async (response: Response) => (await response.json()) as Record<string, any>;
 const nextIp = () => `203.0.113.${(ipCounter += 1)}`;
 
-function oauth(path: string, body: Record<string, unknown>, ip = nextIp(), form = false) {
+function oauth(
+  path: string,
+  body: Record<string, unknown>,
+  ip = nextIp(),
+  form = false,
+  bearer?: string,
+) {
   return handleOAuthRequest(
     new Request(`${origin}/api/oauth/${path}`, {
       method: 'POST',
       headers: {
         'content-type': form ? 'application/x-www-form-urlencoded' : 'application/json',
         'x-forwarded-for': `${ip}, 10.0.0.1`,
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       },
       body: form
         ? new URLSearchParams(body as Record<string, string>).toString()
@@ -57,11 +64,13 @@ function consoleCall(userId: string, path: string, method = 'GET', body?: unknow
   return handleConsoleApiRequest(new Request(`${origin}/api/console${path}`, init), userId);
 }
 
-async function start(extra: Record<string, unknown> = {}, ip = nextIp()) {
+async function start(extra: Record<string, unknown> = {}, ip = nextIp(), bearer?: string) {
   const response = await oauth(
     'device_authorization',
     { client_name: 'claude-code', machine: 'laptop', public_key: publicKey, ...extra },
     ip,
+    false,
+    bearer,
   );
   expect(response.status).toBe(200);
   return json(response);
@@ -535,8 +544,8 @@ describe('one-click connect (contract v2)', () => {
     ).rows[0].id;
   });
   const approveEmpty = (code: string) => consoleCall(user, `/device/${code}/approve`, 'POST', {});
-  async function login(extra: Record<string, unknown>) {
-    const started = await start(extra);
+  async function login(extra: Record<string, unknown>, bearer?: string) {
+    const started = await start(extra, nextIp(), bearer);
     expect((await approveEmpty(started.user_code)).status).toBe(200);
     await allowPoll(started.device_code);
     const issued = await poll(started.device_code);
@@ -544,17 +553,107 @@ describe('one-click connect (contract v2)', () => {
     return { started, token: await json(issued) };
   }
 
-  it('reconnects to a known drive without creating one, and GET lists it', async () => {
+  const whoami = (key: string) =>
+    handleApiRequest(
+      new Request(`${origin}/api/v1/whoami`, { headers: { authorization: `Bearer ${key}` } }),
+    );
+
+  it('reconnects only drives the previous key holds, and GET lists them', async () => {
     const name = `known-${suffix}`;
-    const started = await start({ client_name: name, known_drive_ids: [drive, drive] });
+    const first = (await login({ client_name: name })).token;
+    const held = first.drive_ids[0];
+    const started = await start(
+      { client_name: name, known_drive_ids: [held, held, drive] },
+      nextIp(),
+      first.access_token,
+    );
     const info = await json(await consoleCall(user, `/device/${started.user_code}`));
-    expect(info.drives).toEqual([{ id: drive, name: 'owner-drive' }]);
+    expect(info.drives).toEqual([{ id: held, name }]);
     expect(info.creates_drive).toBe(false);
     expect((await approveEmpty(started.user_code)).status).toBe(200);
     await allowPoll(started.device_code);
     const token = await json(await poll(started.device_code));
-    expect(token).toMatchObject({ drive_ids: [drive], new_drive_id: null });
+    expect(token).toMatchObject({ drive_ids: [held], new_drive_id: null });
     expect(token.scope).toBe('read write delete share');
+    expect((await whoami(first.access_token)).status).toBe(401);
+    expect((await whoami(token.access_token)).status).toBe(200);
+  });
+
+  it('ignores known_drive_ids without proof, so a known id grants nothing', async () => {
+    const started = await start({ client_name: `attack-${suffix}`, known_drive_ids: [drive] });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info).toMatchObject({ drives: [], creates_drive: true });
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token.drive_ids).not.toContain(drive);
+    expect(token.new_drive_id).toBeTruthy();
+    const stored = await pool.query(
+      'SELECT previous_api_key_id FROM device_authorizations WHERE user_code = $1',
+      [started.user_code],
+    );
+    expect(stored.rows[0].previous_api_key_id).toBeNull();
+  });
+
+  it('ignores invalid and revoked bearers, and keys of another agent or account', async () => {
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const victim = (await login({ client_name: `victim-${suffix}` })).token;
+    const held = victim.drive_ids[0];
+    // Another agent in the same account.
+    const sameAccountOtherAgent = victim.access_token;
+    // Another account's key.
+    const otherUserId = `device_v2_${randomUUID()}`;
+    const otherAcct = (await json(await consoleCall(otherUserId, '/session'))).account.id;
+    accountIds.push(otherAcct);
+    const outsiderKey = `adk_${randomUUID().replaceAll('-', '')}`;
+    const outsiderDrive = (
+      await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id', [
+        otherAcct,
+        'outsider',
+      ])
+    ).rows[0].id;
+    const outsiderAgent = (
+      await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id', [
+        otherAcct,
+        `attacker-${suffix}`,
+      ])
+    ).rows[0].id;
+    await pool.query(
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+       VALUES ($1,$2,'x',$3,$4::uuid[],ARRAY['read'])`,
+      [
+        otherAcct,
+        outsiderAgent,
+        createHash('sha256').update(outsiderKey).digest('hex'),
+        [outsiderDrive],
+      ],
+    );
+    const revokedKey = (await login({ client_name: `gone-${suffix}` })).token;
+    await pool.query('DELETE FROM drives WHERE id = $1', [revokedKey.drive_ids[0]]);
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE token_hash = $1', [
+      createHash('sha256').update(revokedKey.access_token).digest('hex'),
+    ]);
+    for (const [bearer, ids] of [
+      [sameAccountOtherAgent, [held]], // key belongs to agent "victim", request is "attacker"
+      [outsiderKey, [held, outsiderDrive]],
+      [revokedKey.access_token, revokedKey.drive_ids],
+      ['adk_not_a_real_key', [held]],
+    ] as const) {
+      const started = await start(
+        { client_name: `attacker-${suffix}`, known_drive_ids: [...ids] },
+        nextIp(),
+        bearer,
+      );
+      const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+      expect(info).toMatchObject({ drives: [], creates_drive: true });
+      expect((await approveEmpty(started.user_code)).status).toBe(200);
+      await allowPoll(started.device_code);
+      const token = await json(await poll(started.device_code));
+      expect(token.drive_ids).toEqual([token.new_drive_id]);
+      await pool.query('DELETE FROM drives WHERE id = $1', [token.new_drive_id]);
+    }
+    expect((await whoami(victim.access_token)).status).toBe(200);
+    expect((await whoami(revokedKey.access_token)).status).toBe(401);
   });
 
   it('filters unknown, foreign, and deleting known ids, then creates a named drive', async () => {
@@ -599,21 +698,51 @@ describe('one-click connect (contract v2)', () => {
     expect(token.scope).toBe('read write delete share');
   });
 
-  it('replaces only the same-agent same-label key on a repeat login', async () => {
+  it('revokes exactly the proven previous key, not same-label or same-name keys', async () => {
     const name = `repeat-${suffix}`;
-    const call = (key: string) =>
-      handleApiRequest(
-        new Request(`${origin}/api/v1/whoami`, { headers: { authorization: `Bearer ${key}` } }),
-      );
-    const first = (await login({ client_name: name, machine: 'a', known_drive_ids: [drive] }))
-      .token;
-    const otherLabel = (await login({ client_name: name, machine: 'b', known_drive_ids: [drive] }))
-      .token;
-    const second = (await login({ client_name: name, machine: 'a', known_drive_ids: [drive] }))
-      .token;
-    expect((await call(first.access_token)).status).toBe(401);
-    expect((await call(otherLabel.access_token)).status).toBe(200);
-    expect((await call(second.access_token)).status).toBe(200);
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const first = (await login({ client_name: name, machine: 'a' })).token;
+    // Same name and hostname on a second machine, and a manual key with the same label.
+    const twin = (await login({ client_name: name, machine: 'a' })).token;
+    expect((await whoami(first.access_token)).status).toBe(200);
+    const manual = `adk_${randomUUID().replaceAll('-', '')}`;
+    await pool.query(
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+       VALUES ($1,$2,$3,$4,$5::uuid[],ARRAY['read'])`,
+      [
+        account,
+        first.agent_id,
+        `${name} on a`,
+        createHash('sha256').update(manual).digest('hex'),
+        [],
+      ],
+    );
+    const second = (await login({ client_name: name, machine: 'a' }, first.access_token)).token;
+    expect((await whoami(first.access_token)).status).toBe(401);
+    expect((await whoami(twin.access_token)).status).toBe(200);
+    expect((await whoami(manual)).status).toBe(200);
+    expect((await whoami(second.access_token)).status).toBe(200);
+  });
+
+  it('allocates names around drives that are pending deletion', async () => {
+    const name = `pending-${suffix}`;
+    await pool.query('INSERT INTO drives (account_id,name,deleting_at) VALUES ($1,$2,now())', [
+      account,
+      name,
+    ]);
+    const { token } = await login({ client_name: name, machine: 'box' });
+    expect(
+      (await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id])).rows[0]
+        .name,
+    ).toBe(`${name} (box)`);
+  });
+
+  it('requires scopes in any non-empty approve body', async () => {
+    const started = await start({ client_name: `legacy-${suffix}` });
+    const response = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [drive],
+    });
+    expect(response.status).toBe(400);
   });
 
   it('validates known_drive_ids', async () => {
