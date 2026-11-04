@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { validateUrl } from './client.js';
+import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
 import {
   readConfig,
@@ -25,6 +27,8 @@ export const BACKUP_HINT =
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 const isStringMap = (v: unknown): v is Record<string, string> =>
   Boolean(v) &&
@@ -53,6 +57,22 @@ export function decodeBundle(text: string): Bundle {
     !isStringMap(value.driveKeyOrigins)
   )
     throw bad();
+  // Reject the whole bundle on any invalid field.
+  try {
+    validateUrl(value.apiUrl, true);
+  } catch {
+    throw bad();
+  }
+  if (!value.apiKey || value.apiKey.length > 512) throw bad();
+  for (const [id, key] of Object.entries(value.driveKeys)) {
+    if (!UUID.test(id)) throw bad();
+    try {
+      decodeDriveKey(key);
+    } catch {
+      throw bad();
+    }
+  }
+  for (const id of Object.keys(value.driveKeyOrigins)) if (!UUID.test(id)) throw bad();
   return value as Bundle;
 }
 
@@ -77,13 +97,20 @@ export async function loadConfig(): Promise<AgentDriveConfig> {
   const bundle = envBundle();
   if (!bundle) return saved;
   const at = new Date().toISOString();
-  const effectiveOrigin = originOf(
-    process.env.AGENT_DRIVE_API_URL || saved.apiUrl || bundle.apiUrl,
-  );
+  const effectiveUrl = process.env.AGENT_DRIVE_API_URL || saved.apiUrl || bundle.apiUrl;
+  const effectiveOrigin = originOf(effectiveUrl);
+  // A bundle is a backup only of the connection it holds: same API key and origin.
+  const sameConnection =
+    (process.env.AGENT_DRIVE_API_KEY || saved.apiKey || bundle.apiKey) === bundle.apiKey &&
+    originOf(bundle.apiUrl) === effectiveOrigin;
   const driveKeys = { ...bundle.driveKeys, ...saved.driveKeys };
   const keyBackup: Record<string, KeyBackup> = { ...saved.keyBackup };
   for (const id of Object.keys(bundle.driveKeys))
-    if (driveKeys[id] === bundle.driveKeys[id] && bundle.driveKeyOrigins[id] === effectiveOrigin)
+    if (
+      sameConnection &&
+      driveKeys[id] === bundle.driveKeys[id] &&
+      bundle.driveKeyOrigins[id] === effectiveOrigin
+    )
       keyBackup[id] = { at, method: 'env' };
   return {
     apiUrl: saved.apiUrl ?? bundle.apiUrl,
@@ -107,6 +134,11 @@ export function unbackedUp(config: AgentDriveConfig, driveIds: string[]) {
 }
 
 type Io = { isTTY: boolean; write: (text: string) => Promise<void> };
+
+const pendingFor = (apiKey: string, driveIds: string[]) => ({
+  apiKeyHash: createHash('sha256').update(apiKey).digest('hex'),
+  driveIds,
+});
 
 /**
  * Writes a bundle to a 0600 file (recorded as a backup) or to a non-TTY stdout. A stdout export
@@ -155,18 +187,28 @@ export async function exportCredentials(
     return { method: 'file' as const, driveIds: ids, apiUrl, apiKey };
   }
   await io.write(`${bundle}\n`);
+  await writeConfig({ pendingExport: pendingFor(apiKey, ids) });
   return { method: 'stdout' as const, driveIds: ids, apiUrl, apiKey };
 }
 
-/** Records that the last export was stored (`credentials confirm`). Returns what to report. */
+/**
+ * Records that the last export was stored (`credentials confirm`). Only drives named by a
+ * pending export made with the current API key are recorded, and the marker is then cleared.
+ */
 export async function confirmCredentials(method: 'stdout' | 'file' = 'stdout') {
   const config = await loadConfig();
   const apiKey = process.env.AGENT_DRIVE_API_KEY || config.apiKey;
-  const ids = Object.keys(config.driveKeys ?? {});
-  if (!apiKey || !ids.length)
-    throw new Error('There are no credentials on this machine to confirm.');
+  const pending = config.pendingExport;
+  if (!apiKey || !pending || pending.apiKeyHash !== pendingFor(apiKey, []).apiKeyHash)
+    throw new Error(
+      'There is no matching credentials export to confirm. Run `agent-drive credentials export` first.',
+    );
+  const ids = pending.driveIds.filter((id) => config.driveKeys?.[id]);
   const at = new Date().toISOString();
-  await writeConfig({ keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method }])) });
+  await writeConfig({
+    keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method }])),
+    pendingExport: null,
+  });
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   return { method, driveIds: ids, apiUrl, apiKey };
 }
@@ -223,6 +265,7 @@ export async function reportEnvBackups(
   const bundle = envBundle();
   if (!bundle || reportedEnv) return;
   reportedEnv = true;
+  if (bundle.apiKey !== apiKey || originOf(bundle.apiUrl) !== originOf(apiUrl)) return;
   const config = await loadConfig();
   const origin = originOf(apiUrl);
   const ids: string[] = [];

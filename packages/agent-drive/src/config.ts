@@ -13,7 +13,11 @@ export type AgentDriveConfig = {
   driveKeyOrigins?: Record<string, string>;
   /** Where each drive key was last backed up (§9). */
   keyBackup?: Record<string, KeyBackup>;
+  /** Set by `credentials export`, consumed by `credentials confirm`. Holds a hash, never the key. */
+  pendingExport?: PendingExport | null;
 };
+
+export type PendingExport = { apiKeyHash: string; driveIds: string[] };
 
 export type KeyBackup = { at: string; method: 'file' | 'stdout' | 'env' };
 
@@ -59,7 +63,11 @@ export async function readConfig(): Promise<AgentDriveConfig> {
     (record.keyBackup !== undefined &&
       (!record.keyBackup ||
         typeof record.keyBackup !== 'object' ||
-        Array.isArray(record.keyBackup)))
+        Array.isArray(record.keyBackup))) ||
+    (record.pendingExport != null &&
+      (typeof record.pendingExport !== 'object' ||
+        typeof (record.pendingExport as PendingExport).apiKeyHash !== 'string' ||
+        !Array.isArray((record.pendingExport as PendingExport).driveIds)))
   ) {
     throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
   }
@@ -81,6 +89,9 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       : {}),
     ...(record.keyBackup !== undefined
       ? { keyBackup: { ...(record.keyBackup as Record<string, KeyBackup>) } }
+      : {}),
+    ...(record.pendingExport != null
+      ? { pendingExport: record.pendingExport as PendingExport }
       : {}),
   };
 }
@@ -138,6 +149,7 @@ export async function writeConfig(config: AgentDriveConfig) {
         : {}),
     };
     if (keyChanged && !config.keyBackup) delete merged.keyBackup;
+    if (merged.pendingExport === null) delete merged.pendingExport;
     const handle = await open(temporary, 'wx', 0o600);
     temporaryCreated = true;
     try {

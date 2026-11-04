@@ -15,8 +15,15 @@ import {
   reportKeyBackup,
   unbackedUp,
 } from './credentials.js';
-import { runCheck } from './check.js';
+import { backupCandidates, runCheck } from './check.js';
 
+const D1 = '11111111-1111-4111-8111-111111111111';
+const D2 = '22222222-2222-4222-8222-222222222222';
+const E1 = '33333333-3333-4333-8333-333333333333';
+const IA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const IB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const IC = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const dirs: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -34,8 +41,8 @@ async function setup() {
   await writeConfig({
     apiUrl: 'https://x.test/api',
     apiKey: 'tok',
-    driveKeys: { d1: key },
-    driveKeyOrigins: { d1: 'https://x.test' },
+    driveKeys: { [D1]: key },
+    driveKeyOrigins: { [D1]: 'https://x.test' },
   });
   return { dir, key };
 }
@@ -51,8 +58,8 @@ describe('bundle', () => {
       v: 1 as const,
       apiUrl: 'https://x.test/api',
       apiKey: 'tok',
-      driveKeys: { d1: 'k' },
-      driveKeyOrigins: { d1: 'https://x.test' },
+      driveKeys: { [D1]: generateDriveKey() },
+      driveKeyOrigins: { [D1]: 'https://x.test' },
     };
     const text = encodeBundle(b);
     expect(text.startsWith('adcred1.')).toBe(true);
@@ -70,9 +77,9 @@ describe('export', () => {
     expect(result.method).toBe('stdout');
     expect(decodeBundle(pipe.out.join('')).apiKey).toBe('tok');
     // --stdout alone does not record a backup: only `credentials confirm` does.
-    expect((await readConfig()).keyBackup?.d1).toBeUndefined();
+    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
     await confirmCredentials('stdout');
-    expect((await readConfig()).keyBackup?.d1?.method).toBe('stdout');
+    expect((await readConfig()).keyBackup?.[D1]?.method).toBe('stdout');
   });
 
   it('fails when stdout cannot be written (EPIPE)', async () => {
@@ -84,7 +91,7 @@ describe('export', () => {
       },
     };
     await expect(exportCredentials({ stdout: true }, broken)).rejects.toThrow(/EPIPE/);
-    expect((await readConfig()).keyBackup?.d1).toBeUndefined();
+    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
   });
 
   it('refuses to write through a symlink and never follows it', async () => {
@@ -108,7 +115,7 @@ describe('export', () => {
     await expect(exportCredentials({ to: path }, quiet)).rejects.toThrow(/exists/);
     await exportCredentials({ to: path, force: true }, quiet);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
-    expect((await readConfig()).keyBackup?.d1?.method).toBe('file');
+    expect((await readConfig()).keyBackup?.[D1]?.method).toBe('file');
   });
 });
 
@@ -121,15 +128,15 @@ describe('import', () => {
         v: 1,
         apiUrl: 'https://x.test/api',
         apiKey: 'new',
-        driveKeys: { d2: other },
-        driveKeyOrigins: { d2: 'https://x.test' },
+        driveKeys: { [D2]: other },
+        driveKeyOrigins: { [D2]: 'https://x.test' },
       }),
       'file',
     );
     const config = await readConfig();
     expect(config.apiKey).toBe('new');
-    expect(config.driveKeys).toEqual({ d1: key, d2: other });
-    expect(config.keyBackup?.d2?.method).toBe('file');
+    expect(config.driveKeys).toEqual({ [D1]: key, [D2]: other });
+    expect(config.keyBackup?.[D2]?.method).toBe('file');
     await rm(dir, { recursive: true, force: true });
   });
 });
@@ -149,14 +156,14 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
         v: 1,
         apiUrl: 'https://env.test/api',
         apiKey: 'envtok',
-        driveKeys: { e1: key },
-        driveKeyOrigins: { e1: 'https://env.test' },
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: { [E1]: 'https://env.test' },
       }),
     );
     const connection = await resolveConnection();
     expect(connection.apiKey).toBe('envtok');
-    expect(connection.config.driveKeys?.e1).toBe(key);
-    expect(unbackedUp(await loadConfig(), ['e1'])).toEqual([]);
+    expect(connection.config.driveKeys?.[E1]).toBe(key);
+    expect(unbackedUp(await loadConfig(), [E1])).toEqual([]);
     await writeConfig({ driveKeys: { other: generateDriveKey() } });
     expect(await readFile(configFile, 'utf8')).not.toContain('envtok');
     expect(await readFile(configFile, 'utf8')).not.toContain(key);
@@ -183,9 +190,9 @@ describe('login replacing the API key', () => {
   it('clears backup records, which describe a stale bundle', async () => {
     await setup();
     await exportCredentials({ to: join(dirs[0]!, 'b') }, io(true));
-    expect((await readConfig()).keyBackup?.d1).toBeTruthy();
+    expect((await readConfig()).keyBackup?.[D1]).toBeTruthy();
     expect(await writeConfig({ apiKey: 'tok' })).toEqual({ backupsCleared: false });
-    expect((await readConfig()).keyBackup?.d1).toBeTruthy();
+    expect((await readConfig()).keyBackup?.[D1]).toBeTruthy();
     expect(await writeConfig({ apiKey: 'new' })).toEqual({ backupsCleared: true });
     expect((await readConfig()).keyBackup).toBeUndefined();
   });
@@ -199,29 +206,117 @@ describe('env bundle reporting', () => {
     vi.stubEnv('AGENT_DRIVE_API_URL', '');
     vi.stubEnv('AGENT_DRIVE_API_KEY', '');
     const [a, b, c, d] = [1, 2, 3, 4].map(() => generateDriveKey());
-    await writeConfig({ driveKeys: { b: generateDriveKey() } });
+    await writeConfig({ driveKeys: { [IB]: generateDriveKey() } });
     vi.stubEnv(
       'AGENT_DRIVE_CREDENTIALS',
       encodeBundle({
         v: 1,
         apiUrl: 'https://x.test/api',
         apiKey: 'k',
-        driveKeys: { a: a!, b: b!, c: c!, d: d! },
+        driveKeys: { [IA]: a!, [IB]: b!, [IC]: c!, [ID]: d! },
         driveKeyOrigins: {
-          a: 'https://x.test',
-          b: 'https://x.test',
-          c: 'https://other.test',
-          d: 'https://x.test',
+          [IA]: 'https://x.test',
+          [IB]: 'https://x.test',
+          [IC]: 'https://other.test',
+          [ID]: 'https://x.test',
         },
       }),
     );
-    vi.stubEnv('AGENT_DRIVE_KEY_D', generateDriveKey());
+    vi.stubEnv('AGENT_DRIVE_KEY_DDDDDDDD_DDDD_4DDD_8DDD_DDDDDDDDDDDD', generateDriveKey());
     const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
     await reportEnvBackups('https://x.test/api', 'k', {
       fetch: fetcher as unknown as typeof fetch,
     });
     const urls = fetcher.mock.calls.map((call) => (call as unknown as [string])[0]);
-    expect(urls).toEqual(['https://x.test/api/v1/drives/a/key-backup']);
+    expect(urls).toEqual([`https://x.test/api/v1/drives/${IA}/key-backup`]);
+  });
+});
+
+describe('review fixes', () => {
+  const envBundleFor = (over: Partial<Parameters<typeof encodeBundle>[0]>, key: string) =>
+    encodeBundle({
+      v: 1,
+      apiUrl: 'https://x.test/api',
+      apiKey: 'tok',
+      driveKeys: { [D1]: key },
+      driveKeyOrigins: { [D1]: 'https://x.test' },
+      ...over,
+    });
+
+  it('a stale env bundle (different API key or origin) is not a backup', async () => {
+    const { key } = await setup();
+    await writeConfig({ driveKeys: { [D2]: generateDriveKey() } });
+    for (const over of [{ apiKey: 'old' }, { apiUrl: 'https://other.test/api' }]) {
+      vi.stubEnv('AGENT_DRIVE_CREDENTIALS', envBundleFor(over, key));
+      expect(unbackedUp(await loadConfig(), [D1])).toEqual([D1]);
+    }
+    vi.stubEnv('AGENT_DRIVE_CREDENTIALS', envBundleFor({}, key));
+    expect(unbackedUp(await loadConfig(), [D1])).toEqual([]);
+  });
+
+  it('does not report a stale env bundle', async () => {
+    const { key } = await setup();
+    vi.stubEnv('AGENT_DRIVE_CREDENTIALS', envBundleFor({ apiKey: 'old' }, key));
+    const fetcher = vi.fn(async () => new Response('{}'));
+    vi.resetModules(); // reportEnvBackups reports once per process
+    const fresh = await import('./credentials.js');
+    await fresh.reportEnvBackups('https://x.test/api', 'tok', {
+      fetch: fetcher as unknown as typeof fetch,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('confirm needs a matching pending export and records only its drives', async () => {
+    await setup();
+    await expect(confirmCredentials('stdout')).rejects.toThrow(/credentials export/);
+    await exportCredentials({ stdout: true }, io(false));
+    const pending = (await readConfig()).pendingExport;
+    expect(pending?.apiKeyHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(JSON.stringify(pending)).not.toContain('tok');
+    await writeConfig({ driveKeys: { [D2]: generateDriveKey() } });
+    const result = await confirmCredentials('stdout');
+    expect(result.driveIds).toEqual([D1]);
+    const config = await readConfig();
+    expect(config.keyBackup?.[D1]).toBeTruthy();
+    expect(config.keyBackup?.[D2]).toBeUndefined();
+    expect(config.pendingExport).toBeUndefined();
+    await expect(confirmCredentials('stdout')).rejects.toThrow(/credentials export/);
+  });
+
+  it('confirm fails when the API key changed after the export', async () => {
+    await setup();
+    await exportCredentials({ stdout: true }, io(false));
+    await writeConfig({ apiKey: 'rotated' });
+    await expect(confirmCredentials('stdout')).rejects.toThrow(/credentials export/);
+  });
+
+  it('--key-file exempts only the checked drive from the backup requirement', () => {
+    const keys = { [D1]: true, [D2]: true };
+    expect(backupCandidates(keys, D1, '/k', {})).toEqual([D2]);
+    expect(backupCandidates(keys, D1, undefined, {})).toEqual([D1, D2]);
+  });
+
+  it('rejects bundles with invalid fields', () => {
+    const good = {
+      v: 1 as const,
+      apiUrl: 'https://x.test/api',
+      apiKey: 'tok',
+      driveKeys: { [D1]: generateDriveKey() },
+      driveKeyOrigins: { [D1]: 'https://x.test' },
+    };
+    expect(() => decodeBundle(encodeBundle(good))).not.toThrow();
+    for (const bad of [
+      { apiUrl: 'http://evil.test/api' },
+      { apiUrl: 'not a url' },
+      { apiKey: '' },
+      { apiKey: 'x'.repeat(5000) },
+      { driveKeys: { [D1]: 'short' } },
+      { driveKeys: { 'not-a-uuid': generateDriveKey() } },
+    ])
+      expect(() => decodeBundle(encodeBundle({ ...good, ...bad }))).toThrow(/bundle/);
+    expect(() =>
+      decodeBundle(encodeBundle({ ...good, apiUrl: 'http://localhost:3000/api' })),
+    ).not.toThrow();
   });
 });
 
@@ -229,38 +324,38 @@ describe('enforcement and reporting', () => {
   it('does not send the token to an insecure URL', async () => {
     const warn: string[] = [];
     const fetcher = vi.fn(async () => new Response('', { status: 200 }));
-    await reportKeyBackup('http://evil.test/api', 'tok', ['d1'], 'file', {
+    await reportKeyBackup('http://evil.test/api', 'tok', [D1], 'file', {
       fetch: fetcher as unknown as typeof fetch,
       warn: (m) => warn.push(m),
     });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(warn.join('')).toMatch(/d1/);
+    expect(warn.join('')).toMatch(new RegExp(D1));
   });
 
   it('lists drives with no backup record', async () => {
     const { key } = await setup();
-    expect(unbackedUp(await loadConfig(), ['d1'])).toEqual(['d1']);
+    expect(unbackedUp(await loadConfig(), [D1])).toEqual([D1]);
     await exportCredentials({ to: join(dirs[0]!, 'b') }, io(true));
-    expect(unbackedUp(await loadConfig(), ['d1'])).toEqual([]);
+    expect(unbackedUp(await loadConfig(), [D1])).toEqual([]);
     expect(key).toBeTruthy();
   });
 
   it('only warns when the report endpoint fails', async () => {
     const warn: string[] = [];
     const fail = vi.fn(async () => new Response('', { status: 404 }));
-    await reportKeyBackup('https://x.test/api', 'tok', ['d1'], 'file', {
+    await reportKeyBackup('https://x.test/api', 'tok', [D1], 'file', {
       fetch: fail as unknown as typeof fetch,
       warn: (m) => warn.push(m),
     });
-    expect(warn.join('')).toMatch(/d1/);
+    expect(warn.join('')).toMatch(new RegExp(D1));
     expect(fail).toHaveBeenCalledWith(
-      'https://x.test/api/v1/drives/d1/key-backup',
+      `https://x.test/api/v1/drives/${D1}/key-backup`,
       expect.objectContaining({ method: 'POST' }),
     );
     const boom = vi.fn(async () => {
       throw new Error('net');
     });
-    await reportKeyBackup('https://x.test/api', 'tok', ['d1'], 'env', {
+    await reportKeyBackup('https://x.test/api', 'tok', [D1], 'env', {
       fetch: boom as unknown as typeof fetch,
       warn: (m) => warn.push(m),
     });

@@ -10,6 +10,7 @@ import {
   notBackedUpMessage,
   pickCheckDrive,
   runCheck,
+  backupCandidates,
 } from './check.js';
 import {
   BACKUP_HINT,
@@ -307,14 +308,7 @@ async function run(command: string, raw: string[]) {
     const driveId = pickCheckDrive(explicit, candidates, keys);
     const unbacked = unbackedUp(
       connection.config,
-      // A key supplied by the environment or --key-file already lives outside the config.
-      Object.keys(keys).filter(
-        (id) =>
-          keys[id] &&
-          !process.env[driveKeyEnvironmentName(id)] &&
-          !process.env.AGENT_DRIVE_KEY &&
-          !args.values['key-file'],
-      ),
+      backupCandidates(keys, driveId, args.values['key-file']),
     );
     if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
     const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
