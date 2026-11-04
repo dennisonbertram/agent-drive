@@ -3,7 +3,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
-import { readConfig, resolveConnection, driveKeyEnvironmentName, machineName } from './config.js';
+import { resolveConnection, driveKeyEnvironmentName, machineName } from './config.js';
+import { reportEnvBackups } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 
 const trustNotice =
@@ -358,7 +359,8 @@ export function createMcpServer(client: AgentDriveClient) {
 
 export async function runMcp() {
   const connection = await resolveConnection();
-  const saved = await readConfig();
+  const saved = connection.config;
+  await reportEnvBackups(connection.apiUrl, connection.apiKey);
   const client = new AgentDriveClient({
     apiUrl: connection.apiUrl,
     apiKey: connection.apiKey,

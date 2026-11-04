@@ -60,6 +60,40 @@ open it. Then it writes a random file to `/.agent-drive/check.txt` with overwrit
 prints only the drive and a note on stderr that the key is saved to the config; it never prints the
 key. A `permission_denied` error adds a hint to run `agent-drive login` again.
 
+## Credential backup and skill install (contract section 9)
+
+The drive key lives only in the config file, so lose the machine and the files cannot be opened.
+
+- `agent-drive credentials export (--to PATH [--force] | --stdout)` writes a bundle:
+  `adcred1.` plus base64url of `{"v":1,"apiUrl","apiKey","driveKeys","driveKeyOrigins"}`. `--to`
+  writes a mode `0600` file and refuses an existing path without `--force`. `--stdout` prints only
+  when stdout is not a terminal (pipe it to a secret store), waits for stdout to drain, and fails on
+  EPIPE. `--to` and `skill install` write through a temp file and rename, and refuse a symlink
+  destination. The bundle is the only secret the CLI
+  ever prints. A `--to` export records `keyBackup: { "<driveId>": { at, method } }` in the config and
+  then calls `POST /v1/drives/:id/key-backup` with `{ method }` for each drive; a failed call is
+  only a warning. A `--stdout` export records nothing; run
+  `agent-drive credentials export --stdout | <secret store> && agent-drive credentials confirm`
+  (`confirm [--method stdout]` records the backup and reports it). Use `set -o pipefail` so a failed
+  store stops `confirm`. A login that replaces the API key clears all backup records (the exported
+  bundle holds the revoked key) and says so; `check` then asks for a new export.
+- `agent-drive credentials import [--from PATH]` merges a bundle (file or stdin) into the config
+  and marks its drives as backed up.
+- `agent-drive credentials status` prints, per drive key, whether and when it was backed up.
+- `AGENT_DRIVE_CREDENTIALS=<bundle>` is merged in memory at startup and never written to disk. The
+  saved config and the explicit variables (`AGENT_DRIVE_API_URL`, `AGENT_DRIVE_API_KEY`,
+  `AGENT_DRIVE_KEY_<ID>`) take precedence over it. Its drives count as backed up (method `env`)
+  and are reported once per process, but only for drives whose effective key (after the precedence
+  above) equals the bundle's key and whose recorded origin matches the API origin.
+- `login` and `drive create` print the backup instructions when they create a drive key.
+  `check` fails with "drive key not backed up" until every usable key is backed up (a key supplied
+  by `AGENT_DRIVE_KEY*` or `--key-file` is already outside the config and is exempt). `whoami`
+  includes `keyBackup`.
+- `agent-drive skill install [--target claude|codex|DIR]` copies the packaged `SKILL.md` to
+  `~/.claude/skills/agent-drive/` and `~/.codex/skills/agent-drive/` when those directories exist
+  (or to the target), and prints the paths written. With none found it prints the packaged file's
+  location.
+
 On reconnect, `login` sends the saved API key as a bearer header only when the saved API URL has the
 same origin as the login URL. The config records each drive key's origin in `driveKeyOrigins`. Keys
 with a different or unknown origin, or that do not decode to 32 bytes, are not sent or counted as

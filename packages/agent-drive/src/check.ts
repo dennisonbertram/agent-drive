@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { driveKeyEnvironmentName } from './config.js';
+import { BACKUP_HINT } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 import { AgentDriveApiError, type AgentDriveClient } from './client.js';
 
@@ -13,6 +15,10 @@ export function apiErrorLines(error: AgentDriveApiError) {
     error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
     error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
   ].filter(Boolean);
+}
+
+export function notBackedUpMessage(driveIds: string[]) {
+  return `drive key not backed up: ${driveIds.join(', ')}\n${BACKUP_HINT}`;
 }
 
 export function createdDriveNote(configPath: string) {
@@ -75,4 +81,20 @@ export async function runCheck(
       `Check failed: the bytes read back from drive ${driveId} do not match (mismatch).`,
     );
   return `check ok drive=${driveId}`;
+}
+
+/** Drives that must be backed up before check passes. Env keys and --key-file (for the checked drive only) live outside the config. */
+export function backupCandidates(
+  keys: Record<string, boolean>,
+  driveId: string,
+  keyFile: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  return Object.keys(keys).filter(
+    (id) =>
+      keys[id] &&
+      !env[driveKeyEnvironmentName(id)] &&
+      !env.AGENT_DRIVE_KEY &&
+      !(keyFile && id === driveId),
+  );
 }

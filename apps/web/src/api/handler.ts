@@ -307,6 +307,8 @@ function actionFor(method: string, parts: string[]) {
   if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'shares')
     return `share.${method === 'POST' ? 'create' : method === 'GET' ? 'list' : 'unknown'}`;
   if (parts.length === 4 && parts[0] === 'drives' && parts[2] === 'shares') return 'share.revoke';
+  if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'key-backup' && method === 'POST')
+    return 'drive.key_backup';
   if (parts.length === 3 && parts[0] === 'drives')
     return actions[`${method}:${parts[2]}`] ?? 'unknown';
   return 'unknown';
@@ -472,10 +474,37 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, name, quota_bytes, created_at FROM drives WHERE deleting_at IS NULL AND ${where} ORDER BY name, id LIMIT $${params.length}`,
+      `SELECT id, name, quota_bytes, created_at, key_backup_at, key_backup_method FROM drives WHERE deleting_at IS NULL AND ${where} ORDER BY name, id LIMIT $${params.length}`,
       params,
     );
     return response(collection(rows.rows as Row[], limit, (row) => row.name));
+  }
+  if (
+    parts.length === 3 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'key-backup' &&
+    method === 'POST'
+  ) {
+    const driveId = uuid(parts[1], 'drive id');
+    need(auth, 'write');
+    const body = await jsonBody(request);
+    const unknown = Object.keys(body).find((name) => name !== 'method');
+    if (unknown !== undefined)
+      throw new ApiError('validation_error', `Unknown field: ${unknown.slice(0, 64)}.`);
+    const backupMethod = body.method;
+    if (backupMethod !== 'file' && backupMethod !== 'stdout' && backupMethod !== 'env')
+      throw new ApiError('validation_error', 'method must be "file", "stdout", or "env".');
+    const result = await getPool().query(
+      `UPDATE drives SET key_backup_at = now(), key_backup_method = $3
+        WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL AND id = ANY($4::uuid[])
+        RETURNING key_backup_at, key_backup_method`,
+      [driveId, auth.accountId, backupMethod, auth.driveIds],
+    );
+    if (!result.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    return response({
+      keyBackupAt: result.rows[0].key_backup_at,
+      keyBackupMethod: result.rows[0].key_backup_method,
+    });
   }
   if (parts[0] === 'drives' && parts.length === 1 && method === 'POST') {
     manage(auth);
@@ -1747,6 +1776,7 @@ function consoleRouteAllowed(method: string, parts: string[]) {
   if (method === 'POST' && parts.length === 3 && parts[0] === 'agents' && parts[2] === 'revoke')
     return true;
   if (parts.length !== 3 || parts[0] !== 'drives') return false;
+  if (method === 'POST' && parts[2] === 'key-backup') return true;
   if (
     method === 'GET' &&
     ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)

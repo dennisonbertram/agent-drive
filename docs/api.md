@@ -16,6 +16,7 @@ bearer API key; successful JSON responses and errors are `Cache-Control: no-stor
 | POST     | `/api/v1/drives/:id/put`                                             | `write`                             |
 | POST     | `/api/v1/drives/:id/commit`                                          | `write`                             |
 | GET      | `/api/v1/drives/:id/get`, `/list`, `/versions`, `/recent`, `/search` | `read`                              |
+| POST     | `/api/v1/drives/:id/key-backup`                                      | `write`                             |
 | POST     | `/api/v1/drives/:id/move`                                            | `write`                             |
 | POST     | `/api/v1/drives/:id/delete`                                          | `delete`                            |
 | POST     | `/api/v1/drives/:id/copy`, `/restore`                                | `read` and `write`                  |
@@ -50,6 +51,16 @@ must not be covered by that rule.
 Audit entries contain the authenticated key/account/agent IDs, fixed route action, outcome, safe
 error code, and HTTP status. They omit bodies, tokens, wrapped keys, object URLs, and paths. If the
 audit write fails, the API returns 500; a mutation may already have committed before that response.
+
+## Drive key backup status
+
+`POST /api/v1/drives/:id/key-backup` with `{ "method": "file" | "stdout" | "env" }` records that the
+drive's key has been backed up outside the machine. It requires the `write` scope on that drive; the
+console session may also call it as `/api/console/drives/:id/key-backup`. It returns
+`200 { keyBackupAt, keyBackupMethod }` and writes the audit action `drive.key_backup`. Unknown fields
+and other methods return 400, so key material is never accepted. A drive of another account, or one
+outside the key's drives, returns 404. `GET /drives` includes `key_backup_at` and `key_backup_method`
+(both null until reported).
 
 ## Device authorization (agent login)
 

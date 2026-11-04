@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { hostname, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { decodeDriveKey } from './crypto.js';
+import { loadConfig } from './credentials.js';
 
 export type AgentDriveConfig = {
   apiUrl?: string;
@@ -10,7 +11,15 @@ export type AgentDriveConfig = {
   driveKeys?: Record<string, string>;
   /** Origin each drive key was saved for; keys with none are assigned the saved apiUrl's origin when read. */
   driveKeyOrigins?: Record<string, string>;
+  /** Where each drive key was last backed up (§9). */
+  keyBackup?: Record<string, KeyBackup>;
+  /** Set by `credentials export`, consumed by `credentials confirm`. Holds a hash, never the key. */
+  pendingExport?: PendingExport | null;
 };
+
+export type PendingExport = { apiKeyHash: string; driveIds: string[] };
+
+export type KeyBackup = { at: string; method: 'file' | 'stdout' | 'env' };
 
 export const DEFAULT_API_URL = 'https://agent-drive.vercel.app/api';
 
@@ -50,7 +59,15 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       (!record.driveKeyOrigins ||
         typeof record.driveKeyOrigins !== 'object' ||
         Array.isArray(record.driveKeyOrigins) ||
-        Object.values(record.driveKeyOrigins).some((origin) => typeof origin !== 'string')))
+        Object.values(record.driveKeyOrigins).some((origin) => typeof origin !== 'string'))) ||
+    (record.keyBackup !== undefined &&
+      (!record.keyBackup ||
+        typeof record.keyBackup !== 'object' ||
+        Array.isArray(record.keyBackup))) ||
+    (record.pendingExport != null &&
+      (typeof record.pendingExport !== 'object' ||
+        typeof (record.pendingExport as PendingExport).apiKeyHash !== 'string' ||
+        !Array.isArray((record.pendingExport as PendingExport).driveIds)))
   ) {
     throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
   }
@@ -69,6 +86,12 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       : {}),
     ...(Object.keys(origins).length || record.driveKeyOrigins !== undefined
       ? { driveKeyOrigins: origins }
+      : {}),
+    ...(record.keyBackup !== undefined
+      ? { keyBackup: { ...(record.keyBackup as Record<string, KeyBackup>) } }
+      : {}),
+    ...(record.pendingExport != null
+      ? { pendingExport: record.pendingExport as PendingExport }
       : {}),
   };
 }
@@ -106,8 +129,13 @@ export async function writeConfig(config: AgentDriveConfig) {
 
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let temporaryCreated = false;
+  let backupsCleared = false;
   try {
     const current = await readConfig();
+    // A new API key invalidates every exported bundle, so earlier backup records are stale.
+    const keyChanged = config.apiKey !== undefined && config.apiKey !== current.apiKey;
+    backupsCleared = keyChanged && Object.keys(current.keyBackup ?? {}).length > 0;
+    const previousBackup = keyChanged ? undefined : current.keyBackup;
     const mergedDriveKeys = { ...current.driveKeys, ...config.driveKeys };
     const merged: AgentDriveConfig = {
       ...current,
@@ -116,7 +144,12 @@ export async function writeConfig(config: AgentDriveConfig) {
       ...(current.driveKeyOrigins || config.driveKeyOrigins
         ? { driveKeyOrigins: { ...current.driveKeyOrigins, ...config.driveKeyOrigins } }
         : {}),
+      ...(previousBackup || config.keyBackup
+        ? { keyBackup: { ...previousBackup, ...config.keyBackup } }
+        : {}),
     };
+    if (keyChanged && !config.keyBackup) delete merged.keyBackup;
+    if (merged.pendingExport === null) delete merged.pendingExport;
     const handle = await open(temporary, 'wx', 0o600);
     temporaryCreated = true;
     try {
@@ -141,6 +174,7 @@ export async function writeConfig(config: AgentDriveConfig) {
       }
     }
   }
+  return { backupsCleared };
 }
 
 function isCode(error: unknown, code: string): boolean {
@@ -174,9 +208,9 @@ export function driveKeyEnvironmentName(driveId: string) {
 }
 
 export async function resolveConnection() {
-  const saved = await readConfig();
-  const apiUrl = process.env.AGENT_DRIVE_API_URL ?? saved.apiUrl ?? DEFAULT_API_URL;
-  const apiKey = process.env.AGENT_DRIVE_API_KEY ?? saved.apiKey;
+  const saved = await loadConfig();
+  const apiUrl = process.env.AGENT_DRIVE_API_URL || saved.apiUrl || DEFAULT_API_URL;
+  const apiKey = process.env.AGENT_DRIVE_API_KEY || saved.apiKey;
   if (!apiUrl || !apiKey) {
     throw new Error(
       'API configuration is missing. Run `agent-drive login` or set AGENT_DRIVE_API_URL and AGENT_DRIVE_API_KEY.',

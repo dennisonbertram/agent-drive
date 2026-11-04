@@ -994,6 +994,35 @@ describe('Phase 1 core API', () => {
     expect((await request('/whoami', key.token)).status).toBe(401);
   });
 
+  it('records drive key backup status without accepting key material', async () => {
+    const path = `/drives/${driveId}/key-backup`;
+    expect((await request(path, readToken, 'POST', { method: 'file' })).status).toBe(403);
+    expect((await request(path, writeToken, 'POST', {})).status).toBe(400);
+    expect((await request(path, writeToken, 'POST', { method: 'cloud' })).status).toBe(400);
+    const withKey = await request(path, writeToken, 'POST', { method: 'file', driveKey: 'x' });
+    expect(withKey.status).toBe(400);
+    const emptyName = await request(path, writeToken, 'POST', { method: 'file', '': 'x' });
+    expect(emptyName.status).toBe(400);
+    const foreign = await request(`/drives/${otherDriveId}/key-backup`, writeToken, 'POST', {
+      method: 'file',
+    });
+    expect(foreign.status).toBe(404);
+    const ok = await request(path, writeToken, 'POST', { method: 'env' });
+    expect(ok.status).toBe(200);
+    const body = await json(ok);
+    expect(body.keyBackupMethod).toBe('env');
+    expect(Date.parse(body.keyBackupAt)).not.toBeNaN();
+    const listed = await json(await request('/drives', writeToken));
+    const row = listed.items.find((item: { id: string }) => item.id === driveId);
+    expect(row.key_backup_method).toBe('env');
+    expect(row.key_backup_at).toBe(body.keyBackupAt);
+    const events = await pool.query(
+      "SELECT outcome FROM audit_events WHERE api_key_id = $1 AND action = 'drive.key_backup'",
+      [writeKeyId],
+    );
+    expect(events.rows.some((event) => event.outcome === 'success')).toBe(true);
+  });
+
   it('records safe success and failure audit events', async () => {
     await request('/whoami', writeToken);
     await request('/whoami/extra', writeToken);

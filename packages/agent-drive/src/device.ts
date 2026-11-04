@@ -8,6 +8,7 @@ import {
   readConfig,
   writeConfig,
 } from './config.js';
+import { BACKUP_HINT } from './credentials.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
 
@@ -192,13 +193,17 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
     options.log('Ignored a different API URL returned by the server.');
   if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
-  await writeConfig({
+  const { backupsCleared } = await writeConfig({
     apiUrl: base,
     apiKey: token.access_token,
     driveKeys,
     driveKeyOrigins: Object.fromEntries(Object.keys(driveKeys).map((id) => [id, origin])),
   });
 
+  if (backupsCleared)
+    options.log(
+      'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.',
+    );
   const usable = [
     ...new Set(
       [...(token.drive_ids ?? []), ...(token.new_drive_id ? [token.new_drive_id] : [])].filter(
@@ -215,9 +220,8 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   options.log(`Scopes: ${token.scope ?? ''}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
-    options.log(
-      `New drive ${token.new_drive_id} created. Back up this drive key; it cannot be recovered. It is saved in the config file.`,
-    );
+    options.log(`New drive ${token.new_drive_id} created; its key is saved in the config file.`);
+    options.log(BACKUP_HINT);
   }
   if (noKey.length)
     options.log(
