@@ -54,7 +54,7 @@ transcripts. The owner has opted in to this use case, on the condition that secr
 
 5. Read the summary line (`uploaded`, `already_present_verified`, `deleted`, `failed`,
    `skipped`, `held_back_secrets`, `remote_files_in_week`). Report it, listing any held-back or
-   failed paths. Exit code 0 means every candidate was verified and deleted or held back.
+   failed paths. Exit code 0 means every candidate was verified and deleted; 1 means a failure (files kept); 3 means some files were held back as possible secrets.
 
 The script uploads with create-only `put`, downloads with `get --output` to a private temporary
 file, compares SHA-256, and runs `rm` on the local file only when they are equal. It finishes by

@@ -120,4 +120,6 @@ if [ "$DRY" = 0 ]; then
 fi
 
 echo "summary week=$WEEK uploaded=$uploaded already_present_verified=$((present)) deleted=$deleted failed=$failed skipped=$skipped held_back_secrets=$held remote_files_in_week=$remote_count dry_run=$DRY"
-[ "$failed" -eq 0 ]
+[ "$failed" -eq 0 ] || exit 1
+# Exit 3 so a scheduler can alert when files were kept local because they may hold secrets.
+[ "$held" -eq 0 ] || exit 3
