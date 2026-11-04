@@ -1,0 +1,2 @@
+ALTER TABLE "device_authorizations" ADD COLUMN "previous_api_key_id" uuid;--> statement-breakpoint
+ALTER TABLE "device_authorizations" ADD CONSTRAINT "device_authorizations_previous_api_key_id_api_keys_id_fk" FOREIGN KEY ("previous_api_key_id") REFERENCES "public"."api_keys"("id") ON DELETE set null ON UPDATE no action;
