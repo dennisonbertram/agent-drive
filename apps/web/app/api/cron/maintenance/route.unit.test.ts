@@ -1,15 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { runDeletionMaintenance, cleanupAllExpiredUploads, runBillingMaintenance } = vi.hoisted(
-  () => ({
-    runDeletionMaintenance: vi.fn(),
-    cleanupAllExpiredUploads: vi.fn(),
-    runBillingMaintenance: vi.fn(),
-  }),
-);
+const {
+  runDeletionMaintenance,
+  cleanupAllExpiredUploads,
+  cleanupDeviceAuthorizations,
+  runBillingMaintenance,
+} = vi.hoisted(() => ({
+  runDeletionMaintenance: vi.fn(),
+  cleanupAllExpiredUploads: vi.fn(),
+  cleanupDeviceAuthorizations: vi.fn(),
+  runBillingMaintenance: vi.fn(),
+}));
 
 vi.mock('@/src/api/deletion', () => ({ runDeletionMaintenance }));
-vi.mock('@/src/api/upload-cleanup', () => ({ cleanupAllExpiredUploads }));
+vi.mock('@/src/api/upload-cleanup', () => ({
+  cleanupAllExpiredUploads,
+  cleanupDeviceAuthorizations,
+}));
 vi.mock('@/src/billing/maintenance', () => ({ runBillingMaintenance }));
 
 import { GET } from './route';
@@ -61,10 +68,11 @@ describe('maintenance cron route', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       job: 'cleanup',
-      results: { deletion: 'ok', uploads: 'ok' },
+      results: { deletion: 'ok', uploads: 'ok', deviceAuthorizations: 'ok' },
     });
     expect(runDeletionMaintenance).toHaveBeenCalledOnce();
     expect(cleanupAllExpiredUploads).toHaveBeenCalledOnce();
+    expect(cleanupDeviceAuthorizations).toHaveBeenCalledOnce();
     expect(runBillingMaintenance).not.toHaveBeenCalled();
   });
 
@@ -86,7 +94,7 @@ describe('maintenance cron route', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
       job: 'cleanup',
-      results: { deletion: 'failed', uploads: 'ok' },
+      results: { deletion: 'failed', uploads: 'ok', deviceAuthorizations: 'ok' },
     });
     expect(cleanupAllExpiredUploads).toHaveBeenCalledOnce();
   });

@@ -71,6 +71,13 @@
       "when": 1793385120167,
       "tag": "0009_omniscient_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793760401404,
+      "tag": "0010_young_dexter_bennett",
+      "breakpoints": true
     }
   ]
 }
