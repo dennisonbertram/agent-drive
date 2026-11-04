@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-export function CopyButton({ text }: { text: string }) {
+export function CopyButton({ text, label = 'Copy command' }: { text: string; label?: string }) {
   const [status, setStatus] = useState('');
   const copy = () => {
     // navigator.clipboard is undefined on insecure (plain HTTP) origins.
@@ -20,7 +20,7 @@ export function CopyButton({ text }: { text: string }) {
   };
   return (
     <>
-      <button type="button" className="copy-button" onClick={copy} aria-label="Copy command">
+      <button type="button" className="copy-button" onClick={copy} aria-label={label}>
         {status === 'Copied' ? 'Copied' : 'Copy'}
       </button>
       <span className="sr-only" role="status" aria-live="polite">

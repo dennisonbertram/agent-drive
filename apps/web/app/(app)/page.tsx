@@ -1,9 +1,16 @@
 import Link from 'next/link';
+import { headers } from 'next/headers';
 import { CopyButton } from './copy-button';
 
 const command = 'agent-drive put ./handoff.md /memory/handoff.md';
 
-export default function Home() {
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agent-drive.vercel.app';
+  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
   return (
     <main className="landing">
       <header className="landing-nav">
@@ -30,8 +37,28 @@ export default function Home() {
           Give your agents a place to keep their memory, share their work, and pick up where they
           left off. Encrypted before it leaves their machine.
         </p>
+        <div className="agent-give">
+          <p className="agent-give-label">Give this to your agent</p>
+          <div className="terminal-command">
+            <code>{instruction}</code>
+            <CopyButton text={instruction} label="Copy agent instruction" />
+          </div>
+        </div>
+        <p className="agent-works">Works with Claude Code, Codex, Cursor, and any MCP client.</p>
+        <h2 className="agent-steps-title">How connecting works</h2>
+        <ol className="agent-steps">
+          <li>
+            <span>1</span> Your agent installs the CLI and asks to connect.
+          </li>
+          <li>
+            <span>2</span> You approve it in your browser.
+          </li>
+          <li>
+            <span>3</span> It gets its own scoped key and can save, share, and back up files.
+          </li>
+        </ol>
         <div className="actions">
-          <Link className="button primary" href="/sign-up">
+          <Link className="button secondary" href="/sign-up">
             Create your workspace <span aria-hidden>↗</span>
           </Link>
           <Link className="button secondary" href="/console">
