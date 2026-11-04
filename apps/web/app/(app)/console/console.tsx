@@ -23,6 +23,7 @@ type ApiKey = {
 type FileEntry = {
   id: string;
   path: string;
+  version_id?: string;
   ciphertext_size?: number;
   agent_id?: string;
   created_at?: string;
@@ -199,10 +200,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const drive = drives.find((item) => item.id === selected);
   const origin =
     typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
-  const newestVersionId = versions.reduce<Version | undefined>(
-    (best, v) => (!best || v.createdAt > best.createdAt ? v : best),
-    undefined,
-  )?.id;
+  // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
+  const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
 
