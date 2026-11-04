@@ -18,5 +18,15 @@ describe('GET /llms.txt', () => {
     expect(body).not.toContain('agent-drive whoami');
     expect(body).toContain('claude mcp add agent-drive -- agent-drive mcp');
     expect(body).toContain('[mcp_servers.agent-drive]');
+    expect(body).toContain('Back up your credentials');
+    expect(body).toContain('agent-drive credentials export --to');
+    expect(body).toContain('agent-drive credentials export --stdout |');
+    expect(body).toContain('gh secret set AGENT_DRIVE_CREDENTIALS');
+    expect(body).toContain('vercel env add AGENT_DRIVE_CREDENTIALS production');
+    expect(body).toContain('agent-drive skill install');
+    expect(body).toContain('## Sandboxes');
+    expect(body).toContain('Never put secrets in');
+    expect(body).toContain('Never store a drive key in the drive it unlocks');
+    expect(body.indexOf('credentials export')).toBeLessThan(body.indexOf('agent-drive check'));
   });
 });
