@@ -482,33 +482,6 @@ button {
   justify-content: space-between;
   gap: 15px;
 }
-.onboarding {
-  text-align: center;
-  padding: 54px 35px 0;
-}
-.onboarding-symbol {
-  width: 64px;
-  height: 64px;
-  display: grid;
-  place-items: center;
-  font-weight: 650;
-  font-size: var(--fs-xl);
-  letter-spacing: -0.1em;
-  border: 1px solid #d4e5b3;
-  background: #edf7dc;
-  border-radius: 16px;
-  margin: 0 auto 23px;
-  padding-right: 5px;
-}
-.onboarding h2 {
-  font-size: var(--fs-xl);
-  margin: 13px 0;
-}
-.onboarding > p:not(.eyebrow) {
-  max-width: 410px;
-  margin: 0 auto 24px;
-  font-size: var(--fs-sm);
-}
 .setup-steps {
   margin-top: 48px;
   border-top: 1px solid var(--border);
@@ -723,16 +696,6 @@ td:first-child {
   font-size: var(--fs-xs);
   overflow-wrap: anywhere;
 }
-.connection-guide {
-  padding: 28px;
-}
-.connection-guide h2 {
-  font-size: var(--fs-lg);
-  margin: 10px 0;
-}
-.connection-guide p:not(.eyebrow) {
-  font-size: var(--fs-sm);
-}
 pre {
   padding: 20px;
   margin: 20px 0;
@@ -742,52 +705,6 @@ pre {
   line-height: 1.9;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-.stat {
-  padding: 24px;
-}
-.stat p {
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-}
-.stat strong {
-  display: block;
-  font-size: var(--fs-xl);
-  font-weight: 500;
-  letter-spacing: -0.05em;
-  margin: 16px 0 10px;
-}
-.stat strong.pending-stat {
-  font-size: var(--fs-md);
-  padding: 8px 0;
-  letter-spacing: -0.02em;
-}
-.stat small {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-.usage-row {
-  padding: 22px;
-  border-bottom: 1px solid #edf0e8;
-}
-.split {
-  display: flex;
-  justify-content: space-between;
-  gap: 15px;
-  font-size: var(--fs-sm);
-}
-.split strong {
-  font-weight: 550;
-}
-.split span,
-.usage-row small {
-  color: var(--muted);
-  font-size: var(--fs-xs);
 }
 progress {
   display: block;
@@ -827,16 +744,6 @@ dialog {
 dialog::backdrop {
   background: #17220f66;
   backdrop-filter: blur(3px);
-}
-.dialog-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 22px;
-}
-.dialog-heading h2 {
-  font-size: var(--fs-lg);
-  font-weight: 550;
 }
 .icon-button {
   background: transparent;
@@ -909,33 +816,6 @@ legend {
   accent-color: var(--sig);
   flex-shrink: 0;
 }
-.warning-copy {
-  padding: 12px;
-  border-radius: 6px;
-  background: #fbf5e8;
-  color: #6f5a2a;
-  font-size: var(--fs-xs) !important;
-}
-.version-row {
-  padding: 15px 0;
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-.version-row strong {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-}
-.version-row small,
-.version-row code {
-  display: block;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  margin-top: 6px;
-  overflow-wrap: anywhere;
-}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -981,9 +861,6 @@ legend {
   th {
     padding-left: 15px;
     padding-right: 15px;
-  }
-  .stat {
-    padding: 18px;
   }
 }
 @media (max-width: 760px) {
@@ -1071,10 +948,6 @@ legend {
   table {
     min-width: 620px;
   }
-  .stat-grid {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
   .entity-row {
     flex-wrap: wrap;
     gap: 12px;
@@ -1086,12 +959,6 @@ legend {
   .setup-steps {
     gap: 14px;
     flex-wrap: wrap;
-  }
-  .onboarding {
-    padding: 34px 22px 0;
-  }
-  .onboarding h2 {
-    font-size: var(--fs-lg);
   }
   .panel-footer {
     flex-direction: column;
@@ -1105,10 +972,6 @@ legend {
     margin-top: 10px;
   }
   .landing-footer {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .version-row {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1140,31 +1003,6 @@ legend {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: var(--fs-md);
-}
-.agent-panel {
-  padding: 20px 22px;
-}
-.agent-panel .agent-give {
-  margin: 12px 0;
-  padding: 14px 16px;
-}
-.agent-panel details {
-  border-top: 1px solid var(--border);
-  padding: 10px 0;
-  font-size: var(--fs-sm);
-}
-.agent-panel summary {
-  cursor: pointer;
-  font-weight: 550;
-}
-.agent-panel pre {
-  margin: 10px 0 0;
-  padding: 12px;
-  background: #f1f4eb;
-  border-radius: 7px;
-  font-size: var(--fs-xs);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 @media (max-width: 640px) {
   .agent-give {
