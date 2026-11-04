@@ -99,6 +99,10 @@ async function all<T>(path: string): Promise<T[]> {
   return items;
 }
 
+function authorLabel(name: string) {
+  return name === '__console__' ? 'Console' : name;
+}
+
 function size(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -186,7 +190,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   } | null>(null);
   const fileScope = `${selected}:${tab}:${fileRefresh}`;
   const fileItems = filePage?.scope === fileScope ? filePage.items : [];
+  const countKeys = (agentId: string) =>
+    apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
+  const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
+  const shownFiles = fileItems.filter((file) =>
+    file.path.toLowerCase().includes(filter.toLowerCase()),
+  );
   const drive = drives.find((item) => item.id === selected);
+  const origin =
+    typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
+  const newestVersionId = versions.reduce<Version | undefined>(
+    (best, v) => (!best || v.createdAt > best.createdAt ? v : best),
+    undefined,
+  )?.id;
   const hasKey = Boolean(driveKeys[selected]);
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
 
@@ -384,7 +400,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 {['▤', '⌘', '⚿', '▥', '⌫'][index]}
               </span>
               {item}
-              {item === 'Files' && <span className="nav-count">{drives.length}</span>}
+              {item === 'Files' && selected && (
+                <span className="nav-count">{fileItems.length}</span>
+              )}
             </button>
           ))}
           <Link className="nav-item" href="/console/billing">
@@ -585,81 +603,86 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {fileItems
-                            .filter((file) =>
-                              file.path.toLowerCase().includes(filter.toLowerCase()),
-                            )
-                            .map((file) => (
-                              <tr key={file.id}>
-                                <td>
-                                  <span className="file-icon" aria-hidden>
-                                    ▤
-                                  </span>
-                                  <span className="file-path">{file.path}</span>
-                                  {file.created_at && (
-                                    <small className="cell-subtext">{date(file.created_at)}</small>
-                                  )}
-                                </td>
-                                <td>
-                                  {tab === 'Trash'
-                                    ? date(file.deletedAt)
-                                    : size(Number(file.ciphertext_size ?? 0))}
-                                </td>
-                                <td>
-                                  {tab === 'Trash'
-                                    ? 'Versions preserved'
-                                    : (agents.find((agent) => agent.id === file.agent_id)?.name ??
-                                      file.agent_id)}
-                                </td>
-                                <td>
-                                  <div className="row-actions">
-                                    {tab === 'Trash' ? (
-                                      <button
-                                        disabled={busy}
-                                        onClick={() => void act(() => restore(file.path))}
-                                      >
-                                        Restore
-                                      </button>
-                                    ) : (
-                                      <>
-                                        <button
-                                          disabled={busy || !hasKey}
-                                          title={
-                                            !hasKey
-                                              ? 'Load your drive key first'
-                                              : 'Decrypt and download'
-                                          }
-                                          onClick={() => void act(() => download(file))}
-                                        >
-                                          Download
-                                        </button>
-                                        <button
-                                          disabled={busy}
-                                          onClick={() =>
-                                            void act(async () => {
-                                              if (!window.confirm(`Move ${file.path} to trash?`))
-                                                return;
-                                              await api(`drives/${selected}/delete`, 'POST', {
-                                                path: file.path,
-                                              });
-                                              await refresh();
-                                            })
-                                          }
-                                        >
-                                          Trash
-                                        </button>
-                                      </>
+                          {filter && fileItems.length > 0 && !shownFiles.length && (
+                            <tr>
+                              <td colSpan={4}>No loaded files match “{filter}”.</td>
+                            </tr>
+                          )}
+                          {shownFiles.map((file) => (
+                            <tr key={file.id}>
+                              <td>
+                                <span className="file-icon" aria-hidden>
+                                  ▤
+                                </span>
+                                <span className="file-path">{file.path}</span>
+                                {file.created_at && (
+                                  <small className="cell-subtext">{date(file.created_at)}</small>
+                                )}
+                              </td>
+                              <td>
+                                {tab === 'Trash'
+                                  ? date(file.deletedAt)
+                                  : size(Number(file.ciphertext_size ?? 0))}
+                              </td>
+                              <td>
+                                {tab === 'Trash'
+                                  ? 'Versions preserved'
+                                  : authorLabel(
+                                      agents.find((agent) => agent.id === file.agent_id)?.name ??
+                                        file.agent_id ??
+                                        '',
                                     )}
+                              </td>
+                              <td>
+                                <div className="row-actions">
+                                  {tab === 'Trash' ? (
                                     <button
                                       disabled={busy}
-                                      onClick={() => void act(() => showVersions(file.path))}
+                                      onClick={() => void act(() => restore(file.path))}
                                     >
-                                      Versions
+                                      Restore
                                     </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
+                                  ) : (
+                                    <>
+                                      <button
+                                        disabled={busy || !hasKey}
+                                        title={
+                                          !hasKey
+                                            ? 'Load your drive key first'
+                                            : 'Decrypt and download'
+                                        }
+                                        onClick={() => void act(() => download(file))}
+                                      >
+                                        Download
+                                      </button>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() =>
+                                          void act(async () => {
+                                            await api(`drives/${selected}/delete`, 'POST', {
+                                              path: file.path,
+                                            });
+                                            await refresh();
+                                            setNotice(
+                                              `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
+                                            );
+                                          })
+                                        }
+                                      >
+                                        Trash
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    disabled={busy}
+                                    onClick={() => void act(() => showVersions(file.path))}
+                                  >
+                                    Versions
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -728,7 +751,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 <section className="panel">
                   <div className="panel-toolbar">
                     <h2>Agent identities</h2>
-                    <span className="badge">{activeAgents.length} agents</span>
+                    <span className="badge">
+                      {activeAgents.length} {activeAgents.length === 1 ? 'agent' : 'agents'}
+                    </span>
                   </div>
                   {!activeAgents.length && (
                     <div className="empty">
@@ -747,11 +772,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <code>{agent.id}</code>
                       </div>
                       <span className="badge">
-                        {
-                          apiKeys.filter((key) => key.agent_id === agent.id && !key.revoked_at)
-                            .length
-                        }{' '}
-                        active keys
+                        {countKeys(agent.id)} active {countKeys(agent.id) === 1 ? 'key' : 'keys'}
                       </span>
                       <button
                         className="button secondary"
@@ -782,7 +803,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <div className="panel-toolbar">
                       <h2>Agent access</h2>
                       <span className="badge">
-                        {apiKeys.filter((key) => !key.revoked_at).length} active keys
+                        {activeKeyCount} active {activeKeyCount === 1 ? 'key' : 'keys'}
                       </span>
                     </div>
                     {(!drives.length || !activeAgents.length) && (
@@ -856,9 +877,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       putting them in shell history:
                     </p>
                     <pre>
-                      {
-                        'read -rs -p "API key: " AGENT_DRIVE_API_KEY; export AGENT_DRIVE_API_KEY\nagent-drive login --api https://your-agent-drive-host\nread -rs -p "Drive key: " AGENT_DRIVE_KEY; export AGENT_DRIVE_KEY\nagent-drive put ./handoff.md /memory/handoff.md --drive <drive-id>\nagent-drive mcp'
-                      }
+                      {`read -rs -p "API key: " AGENT_DRIVE_API_KEY; export AGENT_DRIVE_API_KEY\nagent-drive login --api ${origin}\nread -rs -p "Drive key: " AGENT_DRIVE_KEY; export AGENT_DRIVE_KEY\nagent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}\nagent-drive mcp`}
                     </pre>
                     <p>
                       To rotate access, create a replacement API key, update the agent, then revoke
@@ -937,7 +956,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <tbody>
                           {usage.agents.map((item) => (
                             <tr key={item.id}>
-                              <td>{item.name === '__console__' ? 'Human console' : item.name}</td>
+                              <td>{authorLabel(item.name)}</td>
                               <td>{size(item.storageBytes)}</td>
                               <td>{item.versions}</td>
                               <td>{item.operations}</td>
@@ -1232,21 +1251,28 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               {versions.map((version) => (
                 <div className="version-row" key={version.id}>
                   <div>
-                    <strong>{date(version.createdAt)}</strong>
+                    <strong>
+                      {date(version.createdAt)}
+                      {version.id === newestVersionId ? ' · Current' : ''}
+                    </strong>
                     <small>
                       {size(version.ciphertextSize)} ·{' '}
-                      {agents.find((agent) => agent.id === version.agentId)?.name ??
-                        version.agentId}
+                      {authorLabel(
+                        agents.find((agent) => agent.id === version.agentId)?.name ??
+                          version.agentId,
+                      )}
                     </small>
                     <code>{version.id}</code>
                   </div>
-                  <button
-                    className="button secondary"
-                    disabled={busy}
-                    onClick={() => void act(() => restore(selectedPath, version.id))}
-                  >
-                    Restore this version
-                  </button>
+                  {version.id !== newestVersionId && (
+                    <button
+                      className="button secondary"
+                      disabled={busy}
+                      onClick={() => void act(() => restore(selectedPath, version.id))}
+                    >
+                      Restore this version
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

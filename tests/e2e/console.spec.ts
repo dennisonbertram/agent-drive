@@ -170,7 +170,6 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     const restoredDownload = page.waitForEvent('download');
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     expect((await readFile((await (await restoredDownload).path())!)).equals(original)).toBe(true);
-    page.once('dialog', (dialog) => void dialog.accept());
     await fileRow.getByRole('button', { name: 'Trash', exact: true }).click();
     await expect(fileRow).toHaveCount(0);
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
