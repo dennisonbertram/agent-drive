@@ -63,7 +63,9 @@ key. A `permission_denied` error adds a hint to run `agent-drive login` again.
 On reconnect, `login` sends the saved API key as a bearer header only when the saved API URL has the
 same origin as the login URL. The config records each drive key's origin in `driveKeyOrigins`. Keys
 with a different or unknown origin, or that do not decode to 32 bytes, are not sent or counted as
-usable. The default agent name is `<machine> agent`, truncated to 64 characters.
+usable. Configs written before origins were recorded are migrated when read: a drive key with no
+origin is assigned the origin of the saved `apiUrl` (and kept only if one is saved); the migration is
+written back on the next config write. The default agent name is `<machine> agent`, truncated to 64 characters.
 
 `agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]` uploads every regular
 file to `PATH/<relative path>` (default `/backups/<machine>`) with overwrite, so history is kept.

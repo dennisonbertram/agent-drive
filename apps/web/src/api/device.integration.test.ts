@@ -724,6 +724,56 @@ describe('one-click connect (contract v2)', () => {
     expect((await whoami(second.access_token)).status).toBe(200);
   });
 
+  it('denies a reconnect whose previous key was revoked after approval', async () => {
+    const name = `revoked-${suffix}`;
+    const first = (await login({ client_name: name })).token;
+    const started = await start(
+      { client_name: name, known_drive_ids: first.drive_ids },
+      nextIp(),
+      first.access_token,
+    );
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    const previousId = (
+      await pool.query(
+        'SELECT previous_api_key_id AS id FROM device_authorizations WHERE user_code=$1',
+        [started.user_code],
+      )
+    ).rows[0].id;
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE id = $1', [previousId]);
+    const before = (
+      await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE account_id=$1', [account])
+    ).rows[0].n;
+    await allowPoll(started.device_code);
+    const result = await poll(started.device_code);
+    expect(result.status).toBe(400);
+    expect(await json(result)).toMatchObject({
+      error: 'access_denied',
+      error_description: 'The previous key was revoked; run agent-drive login again.',
+    });
+    const after = (
+      await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE account_id=$1', [account])
+    ).rows[0].n;
+    expect(after).toBe(before);
+  });
+
+  it('issues only one key when two approved requests cite the same previous key', async () => {
+    const name = `twice-${suffix}`;
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const first = (await login({ client_name: name })).token;
+    const extra = { client_name: name, known_drive_ids: first.drive_ids };
+    const a = await start(extra, nextIp(), first.access_token);
+    const b = await start(extra, nextIp(), first.access_token);
+    expect((await approveEmpty(a.user_code)).status).toBe(200);
+    expect((await approveEmpty(b.user_code)).status).toBe(200);
+    await allowPoll(a.device_code);
+    await allowPoll(b.device_code);
+    const one = await poll(a.device_code);
+    const two = await poll(b.device_code);
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(400);
+    expect((await json(two)).error).toBe('access_denied');
+  });
+
   it('allocates names around drives that are pending deletion', async () => {
     const name = `pending-${suffix}`;
     await pool.query('INSERT INTO drives (account_id,name,deleting_at) VALUES ($1,$2,now())', [

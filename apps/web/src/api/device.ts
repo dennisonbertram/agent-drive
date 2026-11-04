@@ -180,13 +180,32 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     );
     const driveIds = drives.rows.map((drive) => drive.id as string);
     const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
-    // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's.
-    if (row.previous_api_key_id)
-      await client.query(
-        `UPDATE api_keys SET revoked_at = now()
-          WHERE id = $1 AND account_id = $2 AND agent_id = $3 AND revoked_at IS NULL`,
+    // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's. Lock
+    // order: account, agent, request, then this key (handler.ts key revoke locks only the key row).
+    // Re-check it here: it may have been revoked, or used by another approved request, since approval.
+    if (row.previous_api_key_id) {
+      const previous = await client.query(
+        `SELECT 1 FROM api_keys
+          WHERE id = $1 AND account_id = $2 AND agent_id = $3 AND revoked_at IS NULL FOR UPDATE`,
         [row.previous_api_key_id, row.account_id, row.agent_id],
       );
+      if (!previous.rowCount && !row.new_drive_id) {
+        await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
+          row.id,
+        ]);
+        return new OAuthError(
+          'access_denied',
+          'The previous key was revoked; run agent-drive login again.',
+        );
+      }
+      if (previous.rowCount) {
+        const revoked = await client.query(
+          'UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL',
+          [row.previous_api_key_id],
+        );
+        if (revoked.rowCount !== 1) throw new Error('Previous key revocation did not apply.');
+      }
+    }
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const key = await client.query(
       `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
