@@ -54,10 +54,16 @@ usable key, login exits 1 (the config is still saved); run `login` again. Otherw
 usable drives and the config path. See `docs/agent-login.md`.
 
 `agent-drive whoami` adds `localDriveKeys`, a map of authorized drive IDs to whether this machine
-holds a key. `agent-drive check [--drive ID]` writes a random file to `/.agent-drive/check.txt` with
-overwrite, reads it back, and prints `check ok drive=<id>`, or fails with exit 1. `drive create`
+holds a key. `agent-drive check [--drive ID]` first downloads the newest existing file (other than
+the check file) and fails with "This drive key cannot decrypt existing files." if the key cannot
+open it. Then it writes a random file to `/.agent-drive/check.txt` with overwrite, reads it back, and prints `check ok drive=<id>`, or fails with exit 1. `drive create`
 prints only the drive and a note on stderr that the key is saved to the config; it never prints the
 key. A `permission_denied` error adds a hint to run `agent-drive login` again.
+
+On reconnect, `login` sends the saved API key as a bearer header only when the saved API URL has the
+same origin as the login URL. The config records each drive key's origin in `driveKeyOrigins`. Keys
+with a different or unknown origin, or that do not decode to 32 bytes, are not sent or counted as
+usable. The default agent name is `<machine> agent`, truncated to 64 characters.
 
 `agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]` uploads every regular
 file to `PATH/<relative path>` (default `/backups/<machine>`) with overwrite, so history is kept.

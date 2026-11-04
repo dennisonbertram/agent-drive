@@ -211,7 +211,10 @@ async function run(command: string, raw: string[]) {
     const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
     if (drive.created) {
       const key = generateDriveKey();
-      await writeConfig({ driveKeys: { [drive.id]: key } });
+      await writeConfig({
+        driveKeys: { [drive.id]: key },
+        driveKeyOrigins: { [drive.id]: new URL((await resolveConnection()).apiUrl).origin },
+      });
       output(drive);
       process.stderr.write(`${createdDriveNote(configPath())}\n`);
     } else {

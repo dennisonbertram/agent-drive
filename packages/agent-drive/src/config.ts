@@ -2,11 +2,14 @@ import { chmod, mkdir, open, readFile, rename, rm, rmdir } from 'node:fs/promise
 import { dirname, join } from 'node:path';
 import { hostname, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { decodeDriveKey } from './crypto.js';
 
 export type AgentDriveConfig = {
   apiUrl?: string;
   apiKey?: string;
   driveKeys?: Record<string, string>;
+  /** Origin each drive key was saved for; keys without one are not trusted for login. */
+  driveKeyOrigins?: Record<string, string>;
 };
 
 export const DEFAULT_API_URL = 'https://agent-drive.vercel.app/api';
@@ -42,7 +45,12 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       (!record.driveKeys ||
         typeof record.driveKeys !== 'object' ||
         Array.isArray(record.driveKeys) ||
-        Object.values(record.driveKeys).some((key) => typeof key !== 'string')))
+        Object.values(record.driveKeys).some((key) => typeof key !== 'string'))) ||
+    (record.driveKeyOrigins !== undefined &&
+      (!record.driveKeyOrigins ||
+        typeof record.driveKeyOrigins !== 'object' ||
+        Array.isArray(record.driveKeyOrigins) ||
+        Object.values(record.driveKeyOrigins).some((origin) => typeof origin !== 'string')))
   ) {
     throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
   }
@@ -51,6 +59,9 @@ export async function readConfig(): Promise<AgentDriveConfig> {
     ...(typeof record.apiKey === 'string' ? { apiKey: record.apiKey } : {}),
     ...(record.driveKeys !== undefined
       ? { driveKeys: { ...(record.driveKeys as Record<string, string>) } }
+      : {}),
+    ...(record.driveKeyOrigins !== undefined
+      ? { driveKeyOrigins: { ...(record.driveKeyOrigins as Record<string, string>) } }
       : {}),
   };
 }
@@ -87,6 +98,9 @@ export async function writeConfig(config: AgentDriveConfig) {
       ...current,
       ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined)),
       ...(current.driveKeys || config.driveKeys ? { driveKeys: mergedDriveKeys } : {}),
+      ...(current.driveKeyOrigins || config.driveKeyOrigins
+        ? { driveKeyOrigins: { ...current.driveKeyOrigins, ...config.driveKeyOrigins } }
+        : {}),
     };
     const handle = await open(temporary, 'wx', 0o600);
     temporaryCreated = true;
@@ -120,6 +134,24 @@ function isCode(error: unknown, code: string): boolean {
 
 export function machineName() {
   return process.env.AGENT_DRIVE_MACHINE ?? hostname();
+}
+
+/** A saved key is trusted for an origin only if it was saved for it and decodes to 32 bytes. */
+export function keysForOrigin(config: AgentDriveConfig, origin: string) {
+  return Object.fromEntries(
+    Object.entries(config.driveKeys ?? {}).filter(
+      ([id, key]) => config.driveKeyOrigins?.[id] === origin && isValidDriveKey(key),
+    ),
+  );
+}
+
+export function isValidDriveKey(key: string) {
+  try {
+    decodeDriveKey(key);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function driveKeyEnvironmentName(driveId: string) {

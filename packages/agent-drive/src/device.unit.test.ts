@@ -5,6 +5,7 @@ import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deviceLogin, defaultAgentName } from './device.js';
 import { AgentDriveApiError } from './client.js';
+import { DriveCryptoError } from './crypto.js';
 import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
 
 const { subtle } = webcrypto;
@@ -12,6 +13,9 @@ const text = new TextEncoder();
 const b64 = (bytes: ArrayBuffer | Uint8Array) =>
   Buffer.from(bytes as ArrayBuffer).toString('base64url');
 const dirs: string[] = [];
+const K1 = Buffer.alloc(32, 1).toString('base64url');
+const K2 = Buffer.alloc(32, 2).toString('base64url');
+const K9 = Buffer.alloc(32, 9).toString('base64url');
 afterEach(async () => {
   vi.unstubAllEnvs();
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
@@ -109,7 +113,7 @@ describe('deviceLogin', () => {
         drive_ids: ['d1', 'd2', 'd3'],
         new_drive_id: 'd3',
         sealed_drive_keys: {
-          d1: await seal(publicKey, 'd1', 'KEY-ONE'),
+          d1: await seal(publicKey, 'd1', K1),
           d2: { epk: 'bad', iv: 'bad', ct: 'bad' },
         },
       });
@@ -125,18 +129,20 @@ describe('deviceLogin', () => {
       apiUrl: string;
       apiKey: string;
       driveKeys: Record<string, string>;
+      driveKeyOrigins: Record<string, string>;
     };
     expect(saved.apiUrl).toBe('https://x.test/api');
     expect(saved.apiKey).toBe('adk_SECRETTOKEN');
-    expect(saved.driveKeys.d1).toBe('KEY-ONE');
+    expect(saved.driveKeys.d1).toBe(K1);
     expect(saved.driveKeys.d2).toBeUndefined();
     expect(saved.driveKeys.d3).toBeTruthy();
+    expect(saved.driveKeyOrigins).toEqual({ d1: 'https://x.test', d3: 'https://x.test' });
     const printed = r.out.join('\n');
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');
     expect(printed).toMatch(/d2/u);
     expect(printed).toMatch(/No usable key for: d2\./u);
-    for (const secret of ['adk_SECRETTOKEN', 'KEY-ONE', saved.driveKeys.d3 ?? 'x'])
+    for (const secret of ['adk_SECRETTOKEN', K1, saved.driveKeys.d3 ?? 'x'])
       expect(printed).not.toContain(secret);
   });
 
@@ -210,7 +216,12 @@ describe('deviceLogin', () => {
     const path = await setup();
     await writeFile(
       path,
-      JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k', driveKeys: { a: 'A', b: 'B' } }),
+      JSON.stringify({
+        apiUrl: 'https://x.test/api',
+        apiKey: 'k',
+        driveKeys: { a: K1, b: K2 },
+        driveKeyOrigins: { a: 'https://x.test', b: 'https://x.test' },
+      }),
     );
     const same = run(() => json(200, { access_token: 't', drive_ids: ['a'] }));
     await same.promise;
@@ -233,10 +244,74 @@ describe('deviceLogin', () => {
 
   it('counts a granted drive whose key is already saved as usable', async () => {
     const path = await setup();
-    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', driveKeys: { d9: 'K' } }));
+    await writeFile(
+      path,
+      JSON.stringify({
+        apiUrl: 'https://x.test/api',
+        driveKeys: { d9: K9 },
+        driveKeyOrigins: { d9: 'https://x.test' },
+      }),
+    );
     const r = run(() => json(200, { access_token: 't', drive_ids: ['d9'] }));
     await r.promise;
     expect(r.out.join('\n')).toContain('Usable drives: d9');
+  });
+
+  it('sends the saved key as a bearer header only to the saved origin', async () => {
+    const path = await setup();
+    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'adk_OLD' }));
+    const headers: Record<string, string>[] = [];
+    const go = (apiUrl: string) =>
+      deviceLogin({
+        apiUrl,
+        name: 'bot',
+        machine: 'box',
+        fetch: (async (url: RequestInfo | URL, init?: RequestInit) => {
+          headers.push(init?.headers as Record<string, string>);
+          return String(url).endsWith('/oauth/device_authorization')
+            ? json(200, start)
+            : json(200, { access_token: 't', drive_ids: ['n'], new_drive_id: 'n' });
+        }) as typeof fetch,
+        sleep: async () => undefined,
+        log: () => undefined,
+        openBrowser: false,
+      });
+    await go('https://x.test/api');
+    expect(headers[0]?.authorization).toBe('Bearer adk_OLD');
+    expect(headers[1]?.authorization).toBeUndefined();
+    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'adk_OLD' }));
+    headers.length = 0;
+    await go('https://other.test/api');
+    expect(headers[0]?.authorization).toBeUndefined();
+  });
+
+  it('does not send or count keys from another origin, with no origin, or malformed', async () => {
+    const path = await setup();
+    await writeFile(
+      path,
+      JSON.stringify({
+        apiUrl: 'https://x.test/api',
+        apiKey: 'k',
+        driveKeys: { good: K1, other: K2, unknown: K9, bad: 'K' },
+        driveKeyOrigins: {
+          good: 'https://x.test',
+          other: 'https://other.test',
+          bad: 'https://x.test',
+        },
+      }),
+    );
+    const r = run(() =>
+      json(200, { access_token: 't', drive_ids: ['good', 'other', 'unknown', 'bad'] }),
+    );
+    await r.promise;
+    expect(r.calls[0]?.body.known_drive_ids).toEqual(['good']);
+    expect(r.out.join('\n')).toContain('Usable drives: good\n');
+  });
+
+  it('caps the default name at 64 characters', () => {
+    vi.stubEnv('AGENT_DRIVE_MACHINE', 'h'.repeat(200));
+    expect(defaultAgentName()).toHaveLength(64);
+    expect(defaultAgentName().endsWith(' agent')).toBe(true);
   });
 
   it('defaults the agent name to "<machine> agent"', () => {
@@ -271,6 +346,7 @@ describe('check and key helpers', () => {
         return {} as never;
       }),
       get: vi.fn(async () => ({ bytes: readBack(sent) }) as never),
+      list: vi.fn(async () => ({ items: [], nextCursor: null }) as never),
     };
   }
 
@@ -289,6 +365,40 @@ describe('check and key helpers', () => {
     ).rejects.toThrow(/mismatch/iu);
   });
 
+  it('check downloads the newest existing file and fails if it cannot be decrypted', async () => {
+    const items = [
+      { path: '/.agent-drive/check.txt', createdAt: '2026-03-01T00:00:00Z' },
+      { path: '/old', createdAt: '2026-01-01T00:00:00Z' },
+      { path: '/new', createdAt: '2026-02-01T00:00:00Z' },
+    ];
+    const base = fake((b) => b);
+    const gets: string[] = [];
+    const c = {
+      ...base,
+      list: async () => ({ items }) as never,
+      get: vi.fn(async (_d: string, path: string) => {
+        gets.push(path);
+        if (path === '/new') throw new DriveCryptoError('decryption_failed', 'bad');
+        return { bytes: new Uint8Array() } as never;
+      }),
+    };
+    await expect(runCheck(c, 'd1')).rejects.toThrow(
+      'This drive key cannot decrypt existing files.',
+    );
+    expect(gets).toEqual(['/new']);
+    expect(base.put).not.toHaveBeenCalled();
+    const ok = {
+      ...base,
+      list: c.list,
+      get: vi.fn(async (d: string, path: string) =>
+        path === '/new'
+          ? ({ bytes: new Uint8Array() } as never)
+          : (base.get as (d: string, p: string) => Promise<never>)(d, path),
+      ),
+    };
+    expect(await runCheck(ok as never, 'd1')).toBe('check ok drive=d1');
+  });
+
   it('check surfaces a permission error', async () => {
     const c = {
       put: async () => {
@@ -299,6 +409,7 @@ describe('check and key helpers', () => {
         );
       },
       get: async () => ({}) as never,
+      list: async () => ({ items: [] }) as never,
     };
     await expect(runCheck(c, 'd1')).rejects.toThrow('lacks the "write" scope');
   });
