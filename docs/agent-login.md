@@ -325,3 +325,18 @@ revoked unrelated keys.
 - **`check`:** before writing, it lists the drive and, if any file other than the check file
   exists, downloads the most recent one and requires decryption to succeed. Then it does the
   round trip. A wrong key fails `check` with "This drive key cannot decrypt existing files."
+
+### Fixes to v2.1
+
+- **Redemption rechecks the previous key.** Inside the redemption transaction, after the account,
+  agent and request locks, the server locks the previous key's row (`FOR UPDATE`; key revoke only
+  touches that one row, so no lock cycle). It must still be unrevoked, with the same account and
+  agent. For a reconnect that creates no drive, a key that no longer qualifies marks the request
+  `denied` and returns `access_denied` ("The previous key was revoked; run agent-drive login
+  again.") without issuing. Of two approved requests citing the same key, only the first issues.
+  The revoking `UPDATE` must affect exactly one row.
+- **Legacy key origins.** `readConfig` assigns the saved `apiUrl` origin to any drive key with no
+  `driveKeyOrigins` entry (persisted on the next write). Without a valid saved `apiUrl` such keys
+  stay untrusted.
+- **`check`** finds the newest existing file with the `recent` feed (newest first, skipping the
+  check file) instead of the first page of `list`; with no other file it does the round trip only.

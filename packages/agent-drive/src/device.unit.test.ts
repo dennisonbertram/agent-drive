@@ -233,6 +233,29 @@ describe('deviceLogin', () => {
     expect(other.calls[0]?.body.known_drive_ids).toBeUndefined();
   });
 
+  it('migrates legacy keys without origins to the saved apiUrl origin', async () => {
+    const path = await setup();
+    await writeFile(
+      path,
+      JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k', driveKeys: { a: K1 } }),
+    );
+    const same = run(() => json(200, { access_token: 't', drive_ids: ['a'] }));
+    await same.promise;
+    expect(same.calls[0]?.body.known_drive_ids).toEqual(['a']);
+    expect(same.out.join('\n')).toContain('Usable drives: a');
+    const saved = JSON.parse(await readFile(path, 'utf8')) as { driveKeyOrigins: unknown };
+    expect(saved.driveKeyOrigins).toEqual({ a: 'https://x.test' });
+    await writeFile(
+      path,
+      JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k', driveKeys: { a: K1 } }),
+    );
+    const other = run(() => json(200, { access_token: 't', drive_ids: ['n'], new_drive_id: 'n' }), {
+      apiUrl: 'https://other.test/api',
+    });
+    await other.promise;
+    expect(other.calls[0]?.body.known_drive_ids).toBeUndefined();
+  });
+
   it('fails with the contract message when no granted drive has a key, but keeps the config', async () => {
     const path = await setup();
     const r = run(() => json(200, { access_token: 'adk_T', drive_ids: ['d9'] }));
@@ -285,7 +308,7 @@ describe('deviceLogin', () => {
     expect(headers[0]?.authorization).toBeUndefined();
   });
 
-  it('does not send or count keys from another origin, with no origin, or malformed', async () => {
+  it('does not send or count keys from another origin, or malformed (a missing origin is migrated)', async () => {
     const path = await setup();
     await writeFile(
       path,
@@ -304,8 +327,8 @@ describe('deviceLogin', () => {
       json(200, { access_token: 't', drive_ids: ['good', 'other', 'unknown', 'bad'] }),
     );
     await r.promise;
-    expect(r.calls[0]?.body.known_drive_ids).toEqual(['good']);
-    expect(r.out.join('\n')).toContain('Usable drives: good\n');
+    expect(r.calls[0]?.body.known_drive_ids).toEqual(['good', 'unknown']);
+    expect(r.out.join('\n')).toContain('Usable drives: good, unknown\n');
   });
 
   it('caps the default name at 64 characters', () => {
@@ -346,7 +369,7 @@ describe('check and key helpers', () => {
         return {} as never;
       }),
       get: vi.fn(async () => ({ bytes: readBack(sent) }) as never),
-      list: vi.fn(async () => ({ items: [], nextCursor: null }) as never),
+      recent: vi.fn(async () => ({ items: [], nextCursor: null }) as never),
     };
   }
 
@@ -365,17 +388,16 @@ describe('check and key helpers', () => {
     ).rejects.toThrow(/mismatch/iu);
   });
 
-  it('check downloads the newest existing file and fails if it cannot be decrypted', async () => {
-    const items = [
-      { path: '/.agent-drive/check.txt', createdAt: '2026-03-01T00:00:00Z' },
-      { path: '/old', createdAt: '2026-01-01T00:00:00Z' },
-      { path: '/new', createdAt: '2026-02-01T00:00:00Z' },
-    ];
+  it('check downloads the newest file from the recent feed and fails if it cannot be decrypted', async () => {
+    const ev = (path: string, operation = 'put') => ({ path, operation });
+    const items = [ev('/.agent-drive/check.txt'), ev('/gone', 'delete'), ev('/new'), ev('/old')];
     const base = fake((b) => b);
     const gets: string[] = [];
     const c = {
       ...base,
-      list: async () => ({ items }) as never,
+      recent: async () => ({ items }) as never,
+      // list's first page would hold only an older file the key still opens
+      list: async () => ({ items: [{ path: '/a-old', createdAt: '2026-01-01T00:00:00Z' }] }),
       get: vi.fn(async (_d: string, path: string) => {
         gets.push(path);
         if (path === '/new') throw new DriveCryptoError('decryption_failed', 'bad');
@@ -389,7 +411,7 @@ describe('check and key helpers', () => {
     expect(base.put).not.toHaveBeenCalled();
     const ok = {
       ...base,
-      list: c.list,
+      recent: c.recent,
       get: vi.fn(async (d: string, path: string) =>
         path === '/new'
           ? ({ bytes: new Uint8Array() } as never)
@@ -409,7 +431,7 @@ describe('check and key helpers', () => {
         );
       },
       get: async () => ({}) as never,
-      list: async () => ({ items: [] }) as never,
+      recent: async () => ({ items: [] }) as never,
     };
     await expect(runCheck(c, 'd1')).rejects.toThrow('lacks the "write" scope');
   });

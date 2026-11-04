@@ -47,21 +47,25 @@ export function pickCheckDrive(
 }
 
 export async function runCheck(
-  client: Pick<AgentDriveClient, 'put' | 'get' | 'list'>,
+  client: Pick<AgentDriveClient, 'put' | 'get' | 'recent'>,
   driveId: string,
 ) {
   const payload = randomBytes(16);
   const path = '/.agent-drive/check.txt';
-  // A wrong key would still pass the round trip below, so first prove it opens an existing file.
-  const existing = (await client.list(driveId)).items.filter((item) => item.path !== path);
-  const newest = existing.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  // A wrong key would still pass the round trip below, so first prove it opens an existing file:
+  // the newest one by the recent feed (newest first), not the first page of the path-ordered list.
+  const events = (await client.recent(driveId, undefined, 50)).items;
+  const newest = events.find(
+    (event) => event.path !== path && ['put', 'copy', 'restore'].includes(event.operation),
+  );
   if (newest) {
     try {
       await client.get(driveId, newest.path);
     } catch (error) {
       if (error instanceof DriveCryptoError)
         throw new Error('This drive key cannot decrypt existing files.');
-      throw error;
+      // ponytail: a file deleted or moved since is skipped, not retried with the next newest.
+      if (!(error instanceof AgentDriveApiError && error.status === 404)) throw error;
     }
   }
   await client.put(driveId, path, payload, { mode: 'overwrite' });

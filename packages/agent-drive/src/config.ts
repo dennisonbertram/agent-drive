@@ -8,7 +8,7 @@ export type AgentDriveConfig = {
   apiUrl?: string;
   apiKey?: string;
   driveKeys?: Record<string, string>;
-  /** Origin each drive key was saved for; keys without one are not trusted for login. */
+  /** Origin each drive key was saved for; keys with none are assigned the saved apiUrl's origin when read. */
   driveKeyOrigins?: Record<string, string>;
 };
 
@@ -54,16 +54,31 @@ export async function readConfig(): Promise<AgentDriveConfig> {
   ) {
     throw new Error('Agent Drive configuration is malformed; refusing to overwrite it.');
   }
+  // One-time migration: a key saved before origins were recorded belongs to the saved apiUrl's
+  // origin. It is persisted by the next writeConfig, which merges what readConfig returns.
+  const legacyOrigin = typeof record.apiUrl === 'string' ? originOf(record.apiUrl) : undefined;
+  const keys = (record.driveKeys ?? {}) as Record<string, string>;
+  const origins = { ...(record.driveKeyOrigins as Record<string, string> | undefined) };
+  if (legacyOrigin)
+    for (const id of Object.keys(keys)) if (origins[id] === undefined) origins[id] = legacyOrigin;
   return {
     ...(typeof record.apiUrl === 'string' ? { apiUrl: record.apiUrl } : {}),
     ...(typeof record.apiKey === 'string' ? { apiKey: record.apiKey } : {}),
     ...(record.driveKeys !== undefined
       ? { driveKeys: { ...(record.driveKeys as Record<string, string>) } }
       : {}),
-    ...(record.driveKeyOrigins !== undefined
-      ? { driveKeyOrigins: { ...(record.driveKeyOrigins as Record<string, string>) } }
+    ...(Object.keys(origins).length || record.driveKeyOrigins !== undefined
+      ? { driveKeyOrigins: origins }
       : {}),
   };
+}
+
+function originOf(url: string) {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function writeConfig(config: AgentDriveConfig) {
