@@ -1,0 +1,47 @@
+[
+  {
+    "id": "F-001-01",
+    "story_id": "STORY-001",
+    "severity": "high",
+    "category": "consistency",
+    "criterion": "Production trust / theme consistency",
+    "score": "fail",
+    "description": "Clerk sign-up form shows an orange 'Development mode' badge, and the console logs a Clerk development-keys warning, on live production.",
+    "expected": "Production auth shows no development-mode marker; uses production Clerk keys.",
+    "actual": "/sign-up card footer reads 'Development mode'; console warns 'Clerk has been loaded with development keys'.",
+    "screenshot": "STORY-001/screenshots/step-3.png",
+    "suggested_fix": "Switch the production deployment to a Clerk production instance and live keys.",
+    "files_likely_involved": [
+      "apps/web/app/sign-up/[[...sign-up]]/page.tsx",
+      "apps/web/app/layout.tsx"
+    ]
+  },
+  {
+    "id": "F-001-02",
+    "story_id": "STORY-001",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Overflow / responsive",
+    "score": "warn",
+    "description": "On 390px the hero terminal command is cut off ('/memory/ha') with no visible wrap or scroll cue.",
+    "expected": "Full command visible (wrapped) or clearly scrollable.",
+    "actual": "Command text clipped at card edge.",
+    "screenshot": "STORY-001/screenshots/mobile-check.png",
+    "suggested_fix": "Allow the command to wrap or add overflow-x scroll with fade, or shorten the sample path.",
+    "files_likely_involved": ["apps/web/app/page.tsx"]
+  },
+  {
+    "id": "F-001-03",
+    "story_id": "STORY-001",
+    "severity": "suggestion",
+    "category": "layout",
+    "criterion": "Viewport usage",
+    "score": "warn",
+    "description": "On desktop the hero content sits in the left ~55% and the right half is empty; terminal card is left-aligned, leaving a lopsided composition.",
+    "expected": "Balanced hero (e.g. terminal card beside the headline).",
+    "actual": "Right side of the hero is blank at 1280px.",
+    "screenshot": "STORY-001/screenshots/step-2b.png",
+    "suggested_fix": "Place the terminal card in the right column at wide widths.",
+    "files_likely_involved": ["apps/web/app/page.tsx"]
+  }
+]

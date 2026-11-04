@@ -1,0 +1,47 @@
+[
+  {
+    "id": "F-003-01",
+    "story_id": "STORY-003",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Anonymous visitors see 'Manage your plan' on the Developer and Team cards; both link to /console/billing without the chosen plan, so clicking sends a signed-out visitor to sign-in with no plan context.",
+    "expected": "Label like 'Choose Developer' / 'Sign in to upgrade' and plan carried through sign-in.",
+    "actual": "Both buttons go to /console/billing and, signed out, to Clerk sign-in.",
+    "screenshot": "STORY-003/screenshots/step-1.png",
+    "suggested_fix": "Use signed-out labels ('Start with Developer') and pass ?plan=developer through sign-up.",
+    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
+  },
+  {
+    "id": "F-003-02",
+    "story_id": "STORY-003",
+    "severity": "low",
+    "category": "hierarchy",
+    "criterion": "Primary CTA",
+    "score": "warn",
+    "description": "Developer card is highlighted (green border/tint) but its button is the secondary white style, while only Free has the green primary button, so the highlighted plan and the primary action disagree.",
+    "expected": "Highlighted plan carries the primary button, or no plan is highlighted.",
+    "actual": "Free: green button; Developer (highlighted) and Team: white buttons.",
+    "screenshot": "STORY-003/screenshots/step-1.png",
+    "suggested_fix": "Align emphasis between card highlight and button style.",
+    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
+  },
+  {
+    "id": "F-003-03",
+    "story_id": "STORY-003",
+    "severity": "high",
+    "category": "consistency",
+    "criterion": "Theme consistency / navigation",
+    "score": "fail",
+    "description": "Clicking 'Manage your plan' ends on a Clerk-hosted page (dominant-aardvark-1062.accounts.dev) that is dark with a purple button and no Agent Drive logo, unlike the in-app light, branded /sign-in and /sign-up pages. The user leaves the agent-drive domain unexpectedly.",
+    "expected": "Redirect to the app's own /sign-in (light, branded, same domain).",
+    "actual": "Redirect URL is https://dominant-aardvark-1062.accounts.dev/sign-in?redirect_url=...",
+    "screenshot": "STORY-003/screenshots/step-2.png",
+    "suggested_fix": "Set Clerk signInUrl (NEXT_PUBLIC_CLERK_SIGN_IN_URL) so auth.protect() redirects to /sign-in on the app domain.",
+    "files_likely_involved": [
+      "apps/web/middleware.ts",
+      "apps/web/app/sign-in/[[...sign-in]]/page.tsx"
+    ]
+  }
+]

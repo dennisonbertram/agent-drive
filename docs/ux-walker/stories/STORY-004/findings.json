@@ -1,0 +1,47 @@
+[
+  {
+    "id": "F-004-01",
+    "story_id": "STORY-004",
+    "severity": "high",
+    "category": "consistency",
+    "criterion": "Theme consistency / navigation",
+    "score": "fail",
+    "description": "'Open console' signed-out redirects to a Clerk-hosted accounts.dev page (dark, purple, no Agent Drive branding, different domain) while the nav 'Sign in' link shows a light, branded in-app page. Same intent, two completely different sign-in screens.",
+    "expected": "Both routes land on the same branded in-app sign-in.",
+    "actual": "Redirect URL is dominant-aardvark-1062.accounts.dev/sign-in?redirect_url=.../console; the in-app /sign-in is light and branded.",
+    "screenshot": "STORY-004/screenshots/step-1.png",
+    "suggested_fix": "Configure the Clerk sign-in URL so protected routes redirect to /sign-in on this domain.",
+    "files_likely_involved": [
+      "apps/web/middleware.ts",
+      "apps/web/app/sign-in/[[...sign-in]]/page.tsx"
+    ]
+  },
+  {
+    "id": "F-004-02",
+    "story_id": "STORY-004",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "'Open console' sits beside 'Create your workspace' as a near-peer but a signed-out visitor gets no hint (no label like 'Sign in to open console') and no demo; the sign-in page never says a console is behind it.",
+    "expected": "Button says what will happen for signed-out visitors, or is dropped in favor of nav 'Sign in'.",
+    "actual": "Click leads to a bare sign-in form with no context.",
+    "screenshot": "STORY-004/screenshots/step-1.png",
+    "suggested_fix": "Rename to 'Sign in to console' (or hide when signed out); add a one-line context on the sign-in page.",
+    "files_likely_involved": ["apps/web/app/page.tsx"]
+  },
+  {
+    "id": "F-004-03",
+    "story_id": "STORY-004",
+    "severity": "high",
+    "category": "consistency",
+    "criterion": "Production trust",
+    "score": "fail",
+    "description": "The in-app sign-in page shows 'Development mode' under the Clerk card on production.",
+    "expected": "No development marker in production.",
+    "actual": "Orange 'Development mode' text visible.",
+    "screenshot": "STORY-004/screenshots/step-2.png",
+    "suggested_fix": "Use Clerk production instance.",
+    "files_likely_involved": ["apps/web/app/sign-in/[[...sign-in]]/page.tsx"]
+  }
+]

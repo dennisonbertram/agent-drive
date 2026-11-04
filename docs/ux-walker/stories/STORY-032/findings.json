@@ -1,0 +1,30 @@
+[
+  {
+    "id": "F-032-001",
+    "story_id": "STORY-032",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Empty filter result",
+    "score": "fail",
+    "description": "Filtering the file list to a term with no matches shows only the column headers and a footer that still says '9 loaded'.",
+    "expected": "A 'No files match \"zzz-nothing\"' row with a Clear filter control.",
+    "actual": "Empty table body; footer '9 loaded'; column widths shift.",
+    "screenshot": "screenshots/finding-1-no-matches.jpg",
+    "suggested_fix": "Render an empty-state row when the filtered list is empty; keep column widths fixed.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-032-002",
+    "story_id": "STORY-032",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Confirmation and feedback consistency",
+    "score": "warn",
+    "description": "Trash uses a native window.confirm ('Move /tests/sample.bin to trash?') and shows no notice afterwards, while Restore asks nothing and shows a styled success banner.",
+    "expected": "Trash is reversible, so no confirm; show a notice like 'Moved to Trash · Undo'.",
+    "actual": "Native browser confirm, then the row silently disappears.",
+    "screenshot": "screenshots/step-3-after-trash.jpg",
+    "suggested_fix": "Drop the confirm for Trash (it is recoverable) and show the same success banner Restore uses.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
+]

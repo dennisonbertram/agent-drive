@@ -1,0 +1,19 @@
+[
+  {
+    "id": "F-088-001",
+    "story_id": "STORY-088",
+    "severity": "high",
+    "category": "happy-path",
+    "criterion": "Audit log answers 'what did my agent do?'",
+    "score": "fail",
+    "description": "Action names don't match user actions: moving a file to Trash is logged as 'drive.delete', opening the Trash tab is logged as 'drive.trash', and some rows show 'unknown'. Every console page load adds 5-6 list entries, burying meaningful events. There is no filter by actor or action.",
+    "expected": "Human-readable labels (e.g. 'Moved /tests/sample.bin to Trash'), read-only list calls hidden or collapsed, and a filter by agent/action.",
+    "actual": "Raw route names, misleading labels, list noise, no filter.",
+    "screenshot": "screenshots/step-1-audit-log.jpg",
+    "suggested_fix": "Fix the action-name mapping for trash/list-trash and unknown routes, hide list reads by default, add actor/action filters.",
+    "files_likely_involved": [
+      "apps/web/src/api/handler.ts",
+      "apps/web/app/(app)/console/settings/settings-client.tsx"
+    ]
+  }
+]
