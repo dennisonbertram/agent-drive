@@ -24,15 +24,27 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
    agent-drive login --name "<your agent name>"
 
-   It prints a link and a code. Tell the human: "Open this link, check that the code matches
-   the one I printed, and approve." Then wait; the command finishes by itself after approval.
+   It prints a link and a code. Tell the human: "Open this link (you must be signed in to
+   Agent Drive), check that the code matches the one I printed, and click Approve." There is
+   nothing else for the human to choose. Wait; the command finishes by itself after approval.
 
 3. Check that it worked:
 
-   agent-drive whoami
+   agent-drive check
+
+   Setup is complete only when it prints \`check ok\`. If it does not, do not tell the human
+   setup is done.
 
 If ${origin} is unreachable (for example, the sandbox blocks network access to it), stop and
 tell the human. Do not try to work around it.
+
+## Troubleshooting
+
+- "no usable drive key": run \`agent-drive login\` again. The human's approval sets up a drive
+  for this agent.
+- An error that the API key lacks a scope: run \`agent-drive login\` again. Do not use
+  \`agent-drive drive create\`.
+- The approval link asks the human to sign in: they must sign in first, then click Approve.
 
 ## Hosted assistants
 

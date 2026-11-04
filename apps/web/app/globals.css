@@ -1321,10 +1321,20 @@ legend {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.connect-code-box {
+  margin: 16px 0;
+}
+.connect-code-box p {
+  margin: 4px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
 .connect-code {
-  font-size: 1.5rem;
-  letter-spacing: 0.12em;
-  font-weight: 600;
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 2.25rem;
+  letter-spacing: 0.14em;
+  font-weight: 700;
 }
 .connect-actions {
   display: flex;

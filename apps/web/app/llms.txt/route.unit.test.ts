@@ -11,6 +11,11 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('npm install -g https://example.test/cli/agent-drive.tgz');
     expect(body).toContain('npx -y https://example.test/cli/agent-drive.tgz');
     expect(body).toContain('agent-drive login --name');
+    expect(body).toContain('agent-drive check');
+    expect(body).toContain('check ok');
+    expect(body).toContain('no usable drive key');
+    expect(body).toContain('Do not use');
+    expect(body).not.toContain('agent-drive whoami');
     expect(body).toContain('claude mcp add agent-drive -- agent-drive mcp');
     expect(body).toContain('[mcp_servers.agent-drive]');
   });
