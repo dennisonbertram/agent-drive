@@ -18,6 +18,7 @@ import {
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
 import { CopyButton } from '../copy-button';
+import '../../styles/console.css';
 import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
 
 type Drive = {
@@ -174,6 +175,17 @@ function size(bytes: number) {
 
 function date(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
+}
+
+function modifiedAt(value?: string) {
+  return value
+    ? new Date(value).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '—';
 }
 
 function save(blob: Blob, name: string) {
@@ -516,6 +528,48 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <span className="status-dot" /> CLIENT-SIDE ENCRYPTED
           </span>
         </header>
+        {ready && drives.length > 0 && (
+          <div className="bay-strip" role="group" aria-label="Drives">
+            {drives.map((item) => {
+              const stats = usage?.drives.find((entry) => entry.id === item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`bay ${item.id === selected ? 'selected' : ''}`}
+                  aria-pressed={item.id === selected}
+                  onClick={() => {
+                    setSelected(item.id);
+                    setFilter('');
+                  }}
+                >
+                  <span className={`led ${item.id === selected ? 'on' : ''}`} aria-hidden />
+                  <span className="bay-label">
+                    <span className="bay-name">{item.name}</span>
+                    {stats && (
+                      <span className="bay-meta">
+                        {size(stats.storageBytes)} · {stats.liveFiles}{' '}
+                        {stats.liveFiles === 1 ? 'file' : 'files'}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              className="bay add"
+              disabled={busy || !ready}
+              aria-label="Add a drive"
+              onClick={() => open('drive')}
+            >
+              <span className="bay-plus" aria-hidden>
+                +
+              </span>
+              <span className="bay-meta">your next agent</span>
+            </button>
+          </div>
+        )}
         <div className="console-content">
           <div className="page-heading">
             <div>
@@ -573,7 +627,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             </div>
           )}
           {!ready ? (
-            <section className="panel empty">
+            <section className={`panel empty ${error ? '' : 'loading'}`}>
               <h2>{error ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
               <p>
                 {error
@@ -611,23 +665,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               {(tab === 'Files' || tab === 'Trash') && drives.length > 0 && (
                 <>
                   <div className="drive-toolbar">
-                    <label>
-                      DRIVE
-                      <select
-                        aria-label="Selected drive"
-                        value={selected}
-                        onChange={(event) => {
-                          setSelected(event.target.value);
-                          setFilter('');
-                        }}
-                      >
-                        {drives.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                     <div className="drive-identity">
                       <code data-testid="drive-id">{selected}</code>
                       <span className={`badge ${hasKey ? 'positive' : ''}`}>
@@ -656,9 +693,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   </div>
                   {tab === 'Files' && drive && (
                     <div
-                      className={`banner ${drive.key_backup_at ? 'info' : 'error'}`}
+                      className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
                       data-testid="key-backup-status"
                     >
+                      <span className={`led ${drive.key_backup_at ? 'dim' : 'on'}`} aria-hidden />
                       {drive.key_backup_at ? (
                         <>
                           Key backed up {new Date(drive.key_backup_at).toLocaleDateString()} (
@@ -714,6 +752,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             <th>FILE PATH</th>
                             <th>{tab === 'Trash' ? 'DELETED' : 'ENCRYPTED SIZE'}</th>
                             <th>{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
+                            <th>MODIFIED</th>
                             <th>
                               <span className="sr-only">Actions</span>
                             </th>
@@ -722,19 +761,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <tbody>
                           {filter && fileItems.length > 0 && !shownFiles.length && (
                             <tr>
-                              <td colSpan={4}>No loaded files match “{filter}”.</td>
+                              <td colSpan={5}>No loaded files match “{filter}”.</td>
                             </tr>
                           )}
                           {shownFiles.map((file) => (
                             <tr key={file.id}>
-                              <td>
-                                <span className="file-icon" aria-hidden>
-                                  ▤
+                              <td className="file-cell">
+                                <span className="file-path">
+                                  <span className="file-dir">
+                                    {file.path.slice(0, file.path.lastIndexOf('/') + 1)}
+                                  </span>
+                                  {file.path.slice(file.path.lastIndexOf('/') + 1)}
                                 </span>
-                                <span className="file-path">{file.path}</span>
-                                {file.created_at && (
-                                  <small className="cell-subtext">{date(file.created_at)}</small>
-                                )}
                               </td>
                               <td>
                                 {tab === 'Trash'
@@ -742,23 +780,37 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   : size(Number(file.ciphertext_size ?? 0))}
                               </td>
                               <td>
-                                {tab === 'Trash'
-                                  ? 'Versions preserved'
-                                  : authorLabel(
+                                {tab === 'Trash' ? (
+                                  'Versions preserved'
+                                ) : (
+                                  <span className="author">
+                                    <span className="led dim" aria-hidden />
+                                    {authorLabel(
                                       agents.find((agent) => agent.id === file.agent_id)?.name ??
                                         file.agent_id ??
                                         '',
                                     )}
+                                  </span>
+                                )}
                               </td>
+                              <td className="modified">{modifiedAt(file.created_at)}</td>
                               <td>
                                 <div className="row-actions">
                                   {tab === 'Trash' ? (
-                                    <button
-                                      disabled={busy}
-                                      onClick={() => void act(() => restore(file.path))}
-                                    >
-                                      Restore
-                                    </button>
+                                    <>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => void act(() => restore(file.path))}
+                                      >
+                                        Restore
+                                      </button>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => void act(() => showVersions(file.path))}
+                                      >
+                                        Versions
+                                      </button>
+                                    </>
                                   ) : (
                                     <>
                                       <button
@@ -771,6 +823,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                         onClick={() => void act(() => download(file))}
                                       >
                                         Download
+                                      </button>
+                                      <button
+                                        disabled={busy}
+                                        onClick={() => void act(() => showVersions(file.path))}
+                                      >
+                                        Versions
                                       </button>
                                       <button
                                         disabled={busy}
@@ -790,12 +848,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       </button>
                                     </>
                                   )}
-                                  <button
-                                    disabled={busy}
-                                    onClick={() => void act(() => showVersions(file.path))}
-                                  >
-                                    Versions
-                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -804,7 +856,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </table>
                     </div>
                     {!fileItems.length && (
-                      <div className="empty">
+                      <div className={`empty ${filePage?.scope !== fileScope ? 'loading' : ''}`}>
                         <h3>
                           {filePage?.scope !== fileScope
                             ? 'Loading files…'
