@@ -944,6 +944,12 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
           RETURNING id`,
         [agentId, auth.accountId],
       );
+      // Approved but unredeemed device logins would otherwise still mint a key afterwards.
+      await client.query(
+        `UPDATE device_authorizations SET status = 'denied'
+          WHERE agent_id = $1 AND account_id = $2 AND status = 'approved'`,
+        [agentId, auth.accountId],
+      );
       return revoked.rowCount ?? 0;
     });
     return response({ id: agentId, revokedKeys: result });
