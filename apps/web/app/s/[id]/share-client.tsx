@@ -130,7 +130,7 @@ export default function ShareClient({ id }: { id: string }) {
     <main className="share-shell" data-testid="share-page">
       <Link className="brand" href="/" aria-label="Agent Drive home">
         <span className="brand-mark" aria-hidden="true">
-          ad
+          a/
         </span>
         agent drive
       </Link>

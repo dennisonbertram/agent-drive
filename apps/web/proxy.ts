@@ -8,12 +8,15 @@ const configured =
   process.env.AGENT_DRIVE_TEST_AUTH !== '1' &&
   clerkKeysConfigured(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, process.env.CLERK_SECRET_KEY);
 
-const clerkProxy = clerkMiddleware(async (auth, request) => {
-  if (isClerkConsolePage(request.nextUrl.pathname)) {
-    await auth.protect();
-  }
-  return NextResponse.next();
-});
+const clerkProxy = clerkMiddleware(
+  async (auth, request) => {
+    if (isClerkConsolePage(request.nextUrl.pathname)) {
+      await auth.protect();
+    }
+    return NextResponse.next();
+  },
+  { signInUrl: '/sign-in', signUpUrl: '/sign-up' },
+);
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
   const pathname = request.nextUrl.pathname;
