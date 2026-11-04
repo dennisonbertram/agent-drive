@@ -1,4 +1,4 @@
-import { withTransaction } from '../db/client';
+import { getPool, withTransaction } from '../db/client';
 import { deleteObject } from './storage';
 
 type ExpiredIntent = { id: string; staging_key: string };
@@ -43,4 +43,11 @@ export async function cleanupAllExpiredUploads(batchSize = 25) {
     total += cleaned;
     if (cleaned < batchSize) return total;
   }
+}
+
+export async function cleanupDeviceAuthorizations() {
+  const removed = await getPool().query(
+    "DELETE FROM device_authorizations WHERE created_at < now() - interval '24 hours'",
+  );
+  return removed.rowCount ?? 0;
 }

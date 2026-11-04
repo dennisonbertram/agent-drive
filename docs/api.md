@@ -50,3 +50,23 @@ must not be covered by that rule.
 Audit entries contain the authenticated key/account/agent IDs, fixed route action, outcome, safe
 error code, and HTTP status. They omit bodies, tokens, wrapped keys, object URLs, and paths. If the
 audit write fails, the API returns 500; a mutation may already have committed before that response.
+
+## Device authorization (agent login)
+
+Full contract: `docs/agent-login.md` section 2. These endpoints use no API key.
+
+- `POST /api/oauth/device_authorization` with `client_name`, `machine` (optional), and `public_key`
+  (form or JSON). Returns `device_code`, `user_code`, `verification_uri`,
+  `verification_uri_complete`, `expires_in` (600), and `interval` (5). At most 20 starts per IP
+  per hour; the 21st returns 429 `{"error":"slow_down"}`.
+- `POST /api/oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:device_code` and
+  `device_code`. Errors are 400 `{"error": …}`: `authorization_pending`, `slow_down`,
+  `access_denied`, `expired_token`, `invalid_grant`, `unsupported_grant_type`. On approval it
+  returns the API key once, with `scope`, `api_url`, `account_id`, `agent_id`, `agent_name`,
+  `drive_ids`, `new_drive_id`, and `sealed_drive_keys`.
+- Console (Clerk session): `GET /api/console/device/{user_code}`,
+  `POST /api/console/device/{user_code}/approve`, and `POST /api/console/device/{user_code}/deny`.
+  Approval takes `driveIds`, `newDriveName`, `scopes` (never `manage`), optional `agentId`, and
+  optional `sealedDriveKeys`. A `newDriveName` that matches an existing drive returns 409.
+- Audit actions: `device.authorize`, `device.token`, `console.device.read`,
+  `console.device.approve`, `console.device.deny`. Maintenance deletes requests older than 24 hours.
