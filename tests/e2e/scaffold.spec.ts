@@ -18,9 +18,16 @@ test.describe('public landing page', () => {
   test('shows the whole CLI command on a phone', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
-    const fits = await page
-      .locator('.terminal-preview code')
-      .evaluate((el) => el.scrollWidth <= el.clientWidth);
+    const fits = await page.locator('.terminal-preview code').evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const page = document.scrollingElement ?? document.documentElement;
+      return (
+        el.scrollWidth <= el.clientWidth &&
+        box.left >= 0 &&
+        box.right <= window.innerWidth &&
+        page.scrollWidth <= window.innerWidth
+      );
+    });
     expect(fits).toBe(true);
     await expect(page.getByRole('button', { name: 'Copy command' })).toBeVisible();
   });

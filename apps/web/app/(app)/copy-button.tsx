@@ -5,6 +5,11 @@ import { useState } from 'react';
 export function CopyButton({ text }: { text: string }) {
   const [status, setStatus] = useState('');
   const copy = () => {
+    // navigator.clipboard is undefined on insecure (plain HTTP) origins.
+    if (!navigator.clipboard?.writeText) {
+      setStatus('Copy failed');
+      return;
+    }
     navigator.clipboard.writeText(text).then(
       () => {
         setStatus('Copied');
