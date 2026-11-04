@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { CopyButton } from './copy-button';
+
+const command = 'agent-drive put ./handoff.md /memory/handoff.md';
 
 export default function Home() {
   return (
@@ -39,9 +42,12 @@ export default function Home() {
           <div className="terminal-label">
             <span className="status-dot" /> FROM A SESSION TO SOMETHING LASTING
           </div>
-          <code>
-            <span>$</span> agent-drive put ./handoff.md /memory/handoff.md
-          </code>
+          <div className="terminal-command">
+            <code>
+              <span>$</span> {command}
+            </code>
+            <CopyButton text={command} />
+          </div>
           <p>A fresh session. The same context.</p>
         </div>
       </section>

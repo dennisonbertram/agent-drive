@@ -13,15 +13,9 @@
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  font-size: 0.82rem;
-}
-.settings-page .table-scroll {
-  max-height: 440px;
-  overflow: auto;
+  font-size: var(--fs-sm);
 }
 .settings-audit thead {
-  position: sticky;
-  top: 0;
   background: var(--surface);
 }
 .settings-audit th,
@@ -31,7 +25,7 @@
   vertical-align: top;
 }
 .settings-audit th {
-  font-size: 0.72rem;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   color: var(--muted);
   letter-spacing: 0.05em;
@@ -50,7 +44,7 @@
 }
 .settings-outcome {
   text-transform: capitalize;
-  font-size: 0.75rem;
+  font-size: var(--fs-xs);
   border-radius: 4px;
   padding: 4px 8px;
   background: #f1f1ed;
@@ -89,7 +83,7 @@
   padding: 18px 20px;
   background: #faf6f1;
   border-radius: 6px;
-  font-size: 0.84rem;
+  font-size: var(--fs-sm);
 }
 .settings-explainer summary {
   cursor: pointer;
@@ -114,7 +108,7 @@
 }
 .settings-delete-grid label {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   margin: 18px 0 8px;
 }
 .settings-delete-grid input,
@@ -163,7 +157,7 @@
   margin-top: 10px;
 }
 .settings-id {
-  font-size: 0.75rem;
+  font-size: var(--fs-xs);
   overflow-wrap: anywhere;
 }
 .settings-job-error {

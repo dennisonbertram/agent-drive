@@ -3,7 +3,7 @@
 }
 .pricing-page .billing-plan h2 {
   text-transform: capitalize;
-  font-size: 1.15rem;
+  font-size: var(--fs-lg);
   margin-bottom: 18px;
 }
 .pricing-availability {
@@ -12,7 +12,7 @@
   background: #eef3e5;
   border: 1px solid #dce5d0;
   border-radius: 8px;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 .pricing-details {
   display: grid;
@@ -30,7 +30,7 @@
 }
 .pricing-rate-list {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
 }
 .pricing-rate-list > div {
   display: flex;
