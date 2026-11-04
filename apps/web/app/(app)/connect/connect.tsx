@@ -59,6 +59,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
   const [problem, setProblem] = useState<{ kind: 'missing' | 'error'; message: string } | null>(
     null,
   );
+  const loginCommand = <code className="connect-cmd">agent-drive login</code>;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<'approved' | 'denied' | null>(null);
@@ -80,8 +81,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
       if (error instanceof HttpError && error.status === 404)
         setProblem({
           kind: 'missing',
-          message:
-            'This code is wrong, expired, or already used. Run agent-drive login in your agent to get a new one.',
+          message: '',
         });
       else
         setProblem({
@@ -155,10 +155,17 @@ export default function Connect({ initialCode }: { initialCode: string }) {
           {loading ? 'Looking up' : problem ? 'No pairing' : 'Awaiting code'}
         </span>
         <h1>Connect an agent</h1>
-        <p>Enter the code your agent printed after running agent-drive login.</p>
+        <p>Enter the code your agent printed after running {loginCommand}.</p>
         {problem && (
           <div role="alert" className={`banner ${problem.kind === 'missing' ? 'info' : 'error'}`}>
-            {problem.message}
+            {problem.kind === 'missing' ? (
+              <>
+                This code is wrong, expired, or already used. Run {loginCommand} in your agent to
+                get a new one.
+              </>
+            ) : (
+              problem.message
+            )}
           </div>
         )}
         <form
