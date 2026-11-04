@@ -185,7 +185,7 @@ async function authenticateConsole(userId: string): Promise<Auth> {
 
 function need(auth: Auth, scope: string, driveId?: string) {
   if (!auth.scopes.includes(scope))
-    throw new ApiError('permission_denied', 'The API key lacks this scope.');
+    throw new ApiError('permission_denied', `The API key lacks the "${scope}" scope.`);
   if (driveId && !auth.driveIds.includes(driveId)) {
     throw new ApiError('permission_denied', 'The API key is not scoped to this drive.');
   }

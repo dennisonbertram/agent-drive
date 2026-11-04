@@ -85,6 +85,13 @@
       "when": 1793761384790,
       "tag": "0011_material_living_tribunal",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793811280290,
+      "tag": "0012_great_the_enforcers",
+      "breakpoints": true
     }
   ]
 }

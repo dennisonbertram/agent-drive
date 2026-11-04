@@ -1,0 +1,1 @@
+ALTER TABLE "device_authorizations" ADD COLUMN "requested_drive_ids" uuid[] DEFAULT ARRAY[]::uuid[] NOT NULL;

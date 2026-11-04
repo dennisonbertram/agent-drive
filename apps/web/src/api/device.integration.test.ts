@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleApiRequest, handleConsoleApiRequest } from './handler';
 import { cleanupDeviceAuthorizations } from './upload-cleanup';
 import { handleOAuthRequest, startDeviceAuthorization } from './device';
@@ -283,8 +283,6 @@ describe('device authorization', () => {
       scopes: ['read', 'manage'],
     });
     expect(manage.status).toBe(400);
-    const none = await consoleCall(ownerUser, path, 'POST', { scopes: ['read'] });
-    expect(none.status).toBe(400);
     const noScopes = await consoleCall(ownerUser, path, 'POST', {
       driveIds: [driveId],
       scopes: [],
@@ -517,5 +515,157 @@ describe('device authorization', () => {
       [[old.user_code, recent.user_code]],
     );
     expect(rows.rows.map((r) => r.user_code)).toEqual([recent.user_code]);
+  });
+});
+
+describe('one-click connect (contract v2)', () => {
+  // Each test gets its own account: the free plan allows only 3 drives.
+  let user = ownerUser;
+  let account = ownerAccountId;
+  let drive = driveId;
+  beforeEach(async () => {
+    user = `device_v2_${randomUUID()}`;
+    account = (await json(await consoleCall(user, '/session'))).account.id;
+    accountIds.push(account);
+    drive = (
+      await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id', [
+        account,
+        'owner-drive',
+      ])
+    ).rows[0].id;
+  });
+  const approveEmpty = (code: string) => consoleCall(user, `/device/${code}/approve`, 'POST', {});
+  async function login(extra: Record<string, unknown>) {
+    const started = await start(extra);
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const issued = await poll(started.device_code);
+    expect(issued.status).toBe(200);
+    return { started, token: await json(issued) };
+  }
+
+  it('reconnects to a known drive without creating one, and GET lists it', async () => {
+    const name = `known-${suffix}`;
+    const started = await start({ client_name: name, known_drive_ids: [drive, drive] });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info.drives).toEqual([{ id: drive, name: 'owner-drive' }]);
+    expect(info.creates_drive).toBe(false);
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token).toMatchObject({ drive_ids: [drive], new_drive_id: null });
+    expect(token.scope).toBe('read write delete share');
+  });
+
+  it('filters unknown, foreign, and deleting known ids, then creates a named drive', async () => {
+    const deleting = (
+      await pool.query(
+        'INSERT INTO drives (account_id,name,deleting_at) VALUES ($1,$2,now()) RETURNING id',
+        [account, `deleting-${suffix}`],
+      )
+    ).rows[0].id;
+    const name = `fresh-${suffix}`;
+    const started = await start({
+      client_name: name,
+      known_drive_ids: [randomUUID(), otherDriveId, deleting],
+    });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info).toMatchObject({ drives: [], creates_drive: true });
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token.new_drive_id).toBeTruthy();
+    expect(token.drive_ids).toEqual([token.new_drive_id]);
+    const drive = await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id]);
+    expect(drive.rows[0].name).toBe(name);
+  });
+
+  it('resolves drive name collisions with (machine), then a counter', async () => {
+    const name = `collide-${suffix}`;
+    const names: string[] = [];
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]);
+    for (let i = 0; i < 3; i += 1) {
+      const { token } = await login({ client_name: name, machine: 'box' });
+      names.push(
+        (await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id])).rows[0]
+          .name,
+      );
+    }
+    expect(names).toEqual([name, `${name} (box)`, `${name} 2`]);
+  });
+
+  it('applies the four default scopes and an empty body is accepted', async () => {
+    const { token } = await login({ client_name: `defaults-${suffix}` });
+    expect(token.scope).toBe('read write delete share');
+  });
+
+  it('replaces only the same-agent same-label key on a repeat login', async () => {
+    const name = `repeat-${suffix}`;
+    const call = (key: string) =>
+      handleApiRequest(
+        new Request(`${origin}/api/v1/whoami`, { headers: { authorization: `Bearer ${key}` } }),
+      );
+    const first = (await login({ client_name: name, machine: 'a', known_drive_ids: [drive] }))
+      .token;
+    const otherLabel = (await login({ client_name: name, machine: 'b', known_drive_ids: [drive] }))
+      .token;
+    const second = (await login({ client_name: name, machine: 'a', known_drive_ids: [drive] }))
+      .token;
+    expect((await call(first.access_token)).status).toBe(401);
+    expect((await call(otherLabel.access_token)).status).toBe(200);
+    expect((await call(second.access_token)).status).toBe(200);
+  });
+
+  it('validates known_drive_ids', async () => {
+    const tooMany = Array.from({ length: 21 }, () => randomUUID());
+    for (const bad of [tooMany, ['not-a-uuid'], 'x', [5]]) {
+      const response = await oauth('device_authorization', {
+        client_name: 'v',
+        public_key: publicKey,
+        known_drive_ids: bad,
+      });
+      expect(response.status).toBe(400);
+      expect((await json(response)).error).toBe('invalid_request');
+    }
+    const form = await oauth(
+      'device_authorization',
+      { client_name: 'v', public_key: publicKey, known_drive_ids: `${drive},${randomUUID()}` },
+      nextIp(),
+      true,
+    );
+    expect(form.status).toBe(200);
+    expect(
+      (
+        await pool.query(
+          'SELECT requested_drive_ids FROM device_authorizations WHERE user_code=$1',
+          [(await json(form)).user_code],
+        )
+      ).rows[0].requested_drive_ids,
+    ).toHaveLength(2);
+  });
+
+  it('names the missing scope', async () => {
+    const started = await start({ client_name: `ro-${suffix}` });
+    await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [drive],
+      scopes: ['read'],
+    });
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    const response = await handleApiRequest(
+      new Request(`${origin}/api/v1/drives/${drive}/put`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token.access_token}`,
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect((await json(response)).error).toMatchObject({
+      code: 'permission_denied',
+      message: 'The API key lacks the "write" scope.',
+    });
   });
 });
