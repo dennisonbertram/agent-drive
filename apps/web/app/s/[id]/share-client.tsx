@@ -26,6 +26,41 @@ const errorHeadings: Record<string, string> = {
   unavailable: 'Share unavailable',
 };
 
+const errorBodies: Record<string, string> = {
+  'missing-key': 'Ask the sender for the complete link, including everything after the # symbol.',
+  'decryption-failed':
+    'Ask the sender for the complete link, including everything after the # symbol.',
+  not_found:
+    'This link does not match any shared file. Check the address, or ask the sender for a new link.',
+  share_revoked:
+    'The sender turned this link off. Ask them for a new link if you still need the file.',
+  share_expired: 'This link passed its expiry date. Ask the sender for a new link.',
+};
+const defaultErrorBody = 'This file cannot be opened right now. Ask the sender for a new link.';
+
+function formatBytes(bytes: number) {
+  if (bytes < 1000) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1000;
+  let i = 0;
+  while (value >= 1000 && i < units.length - 1) {
+    value /= 1000;
+    i += 1;
+  }
+  return `${value.toFixed(1)} ${units[i]}`;
+}
+
+function formatExpiry(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
 class ShareError extends Error {
   constructor(readonly code: string) {
     super(errorHeadings[code] ?? errorHeadings.unavailable);
@@ -58,8 +93,9 @@ function currentHash() {
 }
 
 export default function ShareClient({ id }: { id: string }) {
-  const fragment = useSyncExternalStore(subscribeToHash, currentHash, () => '');
-  const fileKey = parseShareFragment(fragment);
+  const fragment = useSyncExternalStore<string | null>(subscribeToHash, currentHash, () => null);
+  // Before hydration the fragment is unknown (null), so show the loading state, not a missing-key error.
+  const fileKey = fragment === null ? null : parseShareFragment(fragment);
   const [share, setShare] = useState<ShareMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState('');
@@ -123,8 +159,9 @@ export default function ShareClient({ id }: { id: string }) {
     }
   }
 
-  const displayError = error ?? (fileKey ? null : 'This link is missing a valid decryption key.');
-  const displayErrorCode = errorCode || (fileKey ? '' : 'missing-key');
+  const displayError =
+    error ?? (fileKey || fragment === null ? null : 'This link is missing a valid decryption key.');
+  const displayErrorCode = errorCode || (fileKey || fragment === null ? '' : 'missing-key');
 
   const state = displayError ? 'error' : share ? 'ready' : 'loading';
 
@@ -141,30 +178,28 @@ export default function ShareClient({ id }: { id: string }) {
           <span className="share-vent" aria-hidden="true" />
         </div>
         <div className="share-sled">
-          <h1
-            className="share-label"
-            data-testid={displayError ? `share-error-${displayErrorCode}` : undefined}
-          >
-            {displayError
-              ? (errorHeadings[displayErrorCode] ?? errorHeadings.unavailable)
-              : (share?.name ?? 'Opening secure link')}
-          </h1>
+          {displayError ? null : (
+            <h1 className="share-label">{share?.name ?? 'Opening secure link'}</h1>
+          )}
           <div className="share-window">
             {displayError ? (
-              <p className="share-msg" data-testid="share-error">
-                {displayErrorCode === 'missing-key' || displayErrorCode === 'decryption-failed'
-                  ? 'Ask the sender for the complete link, including everything after the # symbol.'
-                  : 'Ask the sender for a new share link. Your files have not been changed.'}
-              </p>
+              <div className="share-fault">
+                <h1 data-testid={`share-error-${displayErrorCode}`}>
+                  {errorHeadings[displayErrorCode] ?? errorHeadings.unavailable}
+                </h1>
+                <p className="share-msg" data-testid="share-error">
+                  {errorBodies[displayErrorCode] ?? defaultErrorBody}
+                </p>
+              </div>
             ) : share ? (
               <div className="share-details">
                 <div>
                   <span>TRANSFER SIZE</span>
-                  <strong>{share.ciphertextSize.toLocaleString()} encrypted bytes</strong>
+                  <strong>{formatBytes(share.ciphertextSize)} encrypted</strong>
                 </div>
                 <div>
                   <span>LINK EXPIRES</span>
-                  <strong>{new Date(share.expiresAt).toLocaleString()}</strong>
+                  <strong>{formatExpiry(share.expiresAt)}</strong>
                 </div>
               </div>
             ) : (
@@ -179,15 +214,12 @@ export default function ShareClient({ id }: { id: string }) {
             >
               {busy ? 'Decrypting…' : 'Download'}
             </button>
-          ) : (
-            <span className="share-pull" aria-hidden="true" />
-          )}
+          ) : null}
         </div>
-        {share && !displayError ? (
-          <p className="share-note">Your browser decrypts this file. No sign-in required.</p>
-        ) : null}
       </section>
-      <p className="share-footer">Client-side encryption. The key stays in your browser.</p>
+      <p className="share-footer">
+        Your browser decrypts this file and the key never leaves it. No sign-in required.
+      </p>
     </main>
   );
 }
