@@ -594,7 +594,7 @@ Follow-ups once files exist: STORY-029, 030, 033, 034 (console files), STORY-069
 ##### Edge Cases
 
 - Page-level guards (`redirect('/sign-in')`) lose the original target if middleware is bypassed (unconfigured or test mode).
-- /api/console/* is not page-protected by middleware; unauthenticated calls return 401 from the handler instead of a redirect.
+- /api/console/\* is not page-protected by middleware; unauthenticated calls return 401 from the handler instead of a redirect.
 
 #### STORY-015: Session expires while the console is open
 
@@ -801,7 +801,7 @@ Follow-ups once files exist: STORY-029, 030, 033, 034 (console files), STORY-069
 **Goal**: Create a drive named "Research workspace"
 **Preconditions**: A drive named "Research workspace" already exists; Tomas has since reloaded the page so its key is not loaded
 **Ideal path**: 2 — the form should detect the existing name and point to Load drive key
-**Alternate paths**: CLI `agent-drive drive create --name "Research workspace"` is idempotent and returns the existing drive without a new key, but errors "Drive <id> already exists; load its backup through AGENT_DRIVE_KEY_<ID>." if no key is found locally
+**Alternate paths**: CLI `agent-drive drive create --name "Research workspace"` is idempotent and returns the existing drive without a new key, but errors "Drive <id> already exists; load its backup through AGENT*DRIVE_KEY*<ID>." if no key is found locally
 
 ##### Steps
 
@@ -2616,7 +2616,7 @@ Follow-ups once files exist: STORY-029, 030, 033, 034 (console files), STORY-069
 - The wrong or missing drive key must be fixed in the job's environment, not by re-creating the drive (`drive create` against an existing drive without the backup refuses: `Drive <id> already exists; load its backup through AGENT_DRIVE_KEY_<ID>.`).
 
 > Topic summary (from topics/trace-archive.md):
-> **Recommended safest weekly sequence (summary)
+> \*\*Recommended safest weekly sequence (summary)
 >
 > 1. `agent-drive whoami`
 > 2. per file: `agent-drive put "$F" "/traces/$WEEK/$N" --drive $D --tag trace --tag $WEEK` (create-only)

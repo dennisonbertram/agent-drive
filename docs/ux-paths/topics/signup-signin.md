@@ -84,7 +84,7 @@ Surfaces: `/sign-up`, `/sign-in` (Clerk `<SignUp>`/`<SignIn>`, path routing, `fa
 ### Edge Cases
 
 - Page-level guards (`redirect('/sign-in')`) lose the original target if middleware is bypassed (unconfigured or test mode).
-- /api/console/* is not page-protected by middleware; unauthenticated calls return 401 from the handler instead of a redirect.
+- /api/console/\* is not page-protected by middleware; unauthenticated calls return 401 from the handler instead of a redirect.
 
 ## STORY-004: Session expires while the console is open
 
