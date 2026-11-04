@@ -6,7 +6,7 @@ this document exactly; change the document first if a detail has to change.
 ## Goals
 
 - An agent connects with one instruction a human pastes into it:
-  `Set up Agent Drive: https://agent-drive.vercel.app/llms.txt`
+  `Set up Agent Drive: https://agentdrive.xyz/llms.txt`
 - The agent installs the CLI from this site, starts an OAuth 2.0 Device Authorization Grant
   (RFC 8628), and the human approves it in the browser. No API key is copied by hand.
 - It works where the agent has no browser (sandboxes, containers, remote hosts): the CLI prints a
@@ -23,9 +23,9 @@ hold drive keys, which breaks client-side encryption.
   (`npm pack`), served at `/cli/agent-drive.tgz`. The package's `files` lists only `dist` (and
   README if present); it has no workspace dependencies.
 - Install options shown to agents:
-  - `npm install -g https://agent-drive.vercel.app/cli/agent-drive.tgz`
-  - Sandboxes without global installs: `npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>`
-- The CLI's default API URL is `https://agent-drive.vercel.app/api`, overridable by `--api` or
+  - `npm install -g https://agentdrive.xyz/cli/agent-drive.tgz`
+  - Sandboxes without global installs: `npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>`
+- The CLI's default API URL is `https://agentdrive.xyz/api`, overridable by `--api` or
   `AGENT_DRIVE_API_URL`.
 
 ## 2. Device authorization (RFC 8628)

@@ -39,10 +39,10 @@ destructive mirror.
 
 ## Install, device login, and backup
 
-Install from the site: `npm install -g https://agent-drive.vercel.app/cli/agent-drive.tgz`, or run
-without installing: `npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>`. The
+Install from the site: `npm install -g https://agentdrive.xyz/cli/agent-drive.tgz`, or run
+without installing: `npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>`. The
 Vercel build packs `packages/agent-drive` into `apps/web/public/cli/agent-drive.tgz`. The default
-API URL is `https://agent-drive.vercel.app/api` (override with `--api` or `AGENT_DRIVE_API_URL`).
+API URL is `https://agentdrive.xyz/api` (override with `--api` or `AGENT_DRIVE_API_URL`).
 
 `agent-drive login [--name AGENT] [--no-browser]` runs the OAuth device flow when no
 `AGENT_DRIVE_API_KEY` or `--token-stdin` is given. It prints a link and a code, opens a browser only

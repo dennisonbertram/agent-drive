@@ -546,7 +546,7 @@ Commands:
   skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent
   mcp
 
-Without installing: npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>
+Without installing: npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in

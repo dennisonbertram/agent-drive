@@ -21,7 +21,7 @@ export type PendingExport = { apiKeyHash: string; driveIds: string[] };
 
 export type KeyBackup = { at: string; method: 'file' | 'stdout' | 'env' };
 
-export const DEFAULT_API_URL = 'https://agent-drive.vercel.app/api';
+export const DEFAULT_API_URL = 'https://agentdrive.xyz/api';
 
 export function configPath() {
   return process.env.AGENT_DRIVE_CONFIG ?? join(homedir(), '.config', 'agent-drive', 'config.json');
