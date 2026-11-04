@@ -101,13 +101,22 @@ JSON with `Cache-Control: no-store`.
   }
   ```
   The key is created with label `{client_name} on {machine}` (or `{client_name}` without a
-  machine), the approved scopes, and the approved drives.
+  machine), the approved scopes, and the approved drives. The successful `device.token` audit row
+  is written in the same transaction. If any part fails, nothing commits, the request stays
+  `approved`, and the client can poll again.
+- Revocation: `agents.revoke` also sets the agent's `approved` requests to `denied`, so an
+  approved but unredeemed login returns `access_denied` and creates no key. Redemption locks the
+  account, then the agent, then the request row; `agents.revoke` and approval lock the agent
+  before touching requests. A revoke that races a redemption therefore either denies the request
+  or waits and then revokes the new key. Deleting the account also makes redemption return
+  `invalid_grant`.
 
 ### Console endpoints (Clerk session, through `/api/console/…`)
 
 - `GET /api/console/device/{user_code}` → `{ user_code, client_name, machine, created_at, expires_at, public_key }`
   for a pending, unexpired row; otherwise 404 `not_found`.
 - `POST /api/console/device/{user_code}/approve` with JSON:
+
   ```json
   {
     "agentId": "existing agent id (optional)",
@@ -125,7 +134,13 @@ JSON with `Cache-Control: no-store`.
   - The drive from `newDriveName` is added to `drive_ids` and stored in `new_drive_id`.
   - Free-plan drive limits and other existing creation rules still apply.
   - 200 `{ status: "approved" }`; 404 if not pending or expired.
+
 - `POST /api/console/device/{user_code}/deny` → 200 `{ status: "denied" }`.
+- Attempt limit (table `device_console_limits`, migration 0011): each account may make at most 30
+  device calls (lookup, approve, deny) and have at most 10 `not_found` results per 10 minutes.
+  Malformed, unknown, expired, and already-decided codes all return the same 404 and count as
+  failures. Once either budget is spent, every device call returns 429 `rate_limited`, even for a
+  real code, until 10 minutes after the window started.
 - Audit actions: `device.authorize` (public start), `device.token` (successful issue),
   `console.device.read`, `console.device.approve`, `console.device.deny`.
 

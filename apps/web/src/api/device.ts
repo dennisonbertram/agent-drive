@@ -102,6 +102,22 @@ type Issued = {
 
 async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<Issued> {
   const outcome = await withTransaction(async (client): Promise<Issued | OAuthError> => {
+    // Lock order is account, agent, then request row. agents.revoke and approval take the agent
+    // lock before touching requests, so a revoke either lands first (the request is denied) or
+    // waits until this key exists and revokes it.
+    const owner = await client.query(
+      'SELECT account_id, agent_id FROM device_authorizations WHERE device_code_hash = $1',
+      [sha256(deviceCode)],
+    );
+    if (owner.rows[0]?.account_id) {
+      try {
+        await lockBillingAccount(client, owner.rows[0].account_id);
+      } catch (error) {
+        if (error instanceof ApiError) return new OAuthError('invalid_grant');
+        throw error;
+      }
+      await client.query('SELECT 1 FROM agents WHERE id = $1 FOR UPDATE', [owner.rows[0].agent_id]);
+    }
     const found = await client.query(
       `SELECT *, expires_at <= now() AS is_expired,
               (last_polled_at IS NOT NULL
@@ -148,6 +164,12 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
       `UPDATE device_authorizations
           SET status = 'consumed', consumed_at = now(), api_key_id = $2 WHERE id = $1`,
       [row.id, key.rows[0].id],
+    );
+    // Same transaction as the key: if this insert fails, nothing commits and the client retries.
+    await client.query(
+      `INSERT INTO audit_events (account_id, agent_id, action, outcome, http_status)
+       VALUES ($1, $2, 'device.token', 'success', 200)`,
+      [row.account_id, row.agent_id],
     );
     return {
       accountId: row.account_id,
@@ -197,23 +219,11 @@ function clientIp(request: Request) {
   return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
 }
 
-async function recordAudit(
-  action: string,
-  status: number,
-  errorCode: string | null,
-  ids?: { accountId: string; agentId: string },
-) {
+async function recordAudit(action: string, status: number, errorCode: string | null) {
   await getPool().query(
     `INSERT INTO audit_events (account_id, agent_id, action, outcome, error_code, http_status)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [
-      ids?.accountId ?? null,
-      ids?.agentId ?? null,
-      action,
-      status >= 400 ? 'failure' : 'success',
-      errorCode,
-      status,
-    ],
+    [null, null, action, status >= 400 ? 'failure' : 'success', errorCode, status],
   );
 }
 
@@ -231,7 +241,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
         : 'unknown';
   let output: Response;
   let errorCode: string | null = null;
-  let ids: { accountId: string; agentId: string } | undefined;
+  let audited = false;
   try {
     if (action === 'unknown' || request.method !== 'POST')
       throw new OAuthError('invalid_request', 'Endpoint not found.', 404);
@@ -255,7 +265,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
       if (body.grant_type !== DEVICE_GRANT) throw new OAuthError('unsupported_grant_type');
       const deviceCode = field(body, 'device_code', 256, true)!;
       const issued = await exchangeDeviceCode(deviceCode, origin);
-      ids = issued;
+      audited = true;
       output = reply(issued.body);
     }
   } catch (error) {
@@ -270,7 +280,7 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
     );
   }
   try {
-    await recordAudit(action, output.status, errorCode, ids);
+    if (!audited) await recordAudit(action, output.status, errorCode);
   } catch {
     return reply({ error: 'server_error' }, 500);
   }
@@ -357,10 +367,10 @@ async function approve(
   }
   let agentId = input.agentId;
   if (agentId) {
-    const agent = await client.query('SELECT id FROM agents WHERE id = $1 AND account_id = $2', [
-      agentId,
-      accountId,
-    ]);
+    const agent = await client.query(
+      'SELECT id FROM agents WHERE id = $1 AND account_id = $2 FOR UPDATE',
+      [agentId, accountId],
+    );
     if (!agent.rows[0]) throw new ApiError('not_found', 'Agent not found.');
   } else {
     agentId = (
@@ -403,12 +413,58 @@ async function approve(
   );
 }
 
+const CONSOLE_WINDOW = '10 minutes';
+const CONSOLE_MAX_ATTEMPTS = 30;
+const CONSOLE_MAX_FAILURES = 10;
+
+// Bounds user-code guessing: 30 calls and 10 not-found results per account per 10 minutes.
+// Once either is spent, every device call (even for a real code) returns 429 until the window ends.
+async function takeConsoleAttempt(accountId: string) {
+  const { rows } = await getPool().query<{ attempts: number; failures: number }>(
+    `INSERT INTO device_console_limits (account_id, window_start, attempts, failures)
+     VALUES ($1, now(), 1, 0)
+     ON CONFLICT (account_id) DO UPDATE SET
+       attempts = CASE WHEN device_console_limits.window_start <= now() - interval '${CONSOLE_WINDOW}'
+                       THEN 1 ELSE device_console_limits.attempts + 1 END,
+       failures = CASE WHEN device_console_limits.window_start <= now() - interval '${CONSOLE_WINDOW}'
+                       THEN 0 ELSE device_console_limits.failures END,
+       window_start = CASE WHEN device_console_limits.window_start <= now() - interval '${CONSOLE_WINDOW}'
+                           THEN now() ELSE device_console_limits.window_start END
+     RETURNING attempts, failures`,
+    [accountId],
+  );
+  const { attempts, failures } = rows[0]!;
+  if (attempts > CONSOLE_MAX_ATTEMPTS || failures >= CONSOLE_MAX_FAILURES)
+    throw new ApiError(
+      'rate_limited',
+      'Too many device code attempts. Wait 10 minutes and try again.',
+    );
+}
+
 export async function consoleDeviceEndpoint(
   request: Request,
   accountId: string,
   parts: string[],
 ): Promise<Response | undefined> {
   if (parts[0] !== 'device' || parts.length < 2 || parts.length > 3) return undefined;
+  await takeConsoleAttempt(accountId);
+  try {
+    return await consoleDeviceAction(request, accountId, parts);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === 'not_found')
+      await getPool().query(
+        'UPDATE device_console_limits SET failures = failures + 1 WHERE account_id = $1',
+        [accountId],
+      );
+    throw error;
+  }
+}
+
+async function consoleDeviceAction(
+  request: Request,
+  accountId: string,
+  parts: string[],
+): Promise<Response | undefined> {
   const code = userCodeFrom(parts[1]);
   if (parts.length === 2 && request.method === 'GET') {
     const found = await getPool().query(

@@ -67,6 +67,8 @@ Full contract: `docs/agent-login.md` section 2. These endpoints use no API key.
 - Console (Clerk session): `GET /api/console/device/{user_code}`,
   `POST /api/console/device/{user_code}/approve`, and `POST /api/console/device/{user_code}/deny`.
   Approval takes `driveIds`, `newDriveName`, `scopes` (never `manage`), optional `agentId`, and
-  optional `sealedDriveKeys`. A `newDriveName` that matches an existing drive returns 409.
+  optional `sealedDriveKeys`. A `newDriveName` that matches an existing drive returns 409. Each
+  account gets 30 device calls and 10 `not_found` results per 10 minutes; beyond that, 429
+  `rate_limited`. Revoking an agent denies its approved but unredeemed requests.
 - Audit actions: `device.authorize`, `device.token`, `console.device.read`,
   `console.device.approve`, `console.device.deny`. Maintenance deletes requests older than 24 hours.

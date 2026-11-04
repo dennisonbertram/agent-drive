@@ -411,6 +411,25 @@ export const apiKeyRateLimits = pgTable(
   (table) => [check('api_key_rate_limits_requests_positive', sql`${table.requests} > 0`)],
 );
 
+// Per-account attempt budget for the console device-code endpoints (docs/agent-login.md section 2).
+export const deviceConsoleLimits = pgTable(
+  'device_console_limits',
+  {
+    accountId: uuid('account_id')
+      .primaryKey()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    windowStart: timestamp('window_start', { withTimezone: true, mode: 'date' }).notNull(),
+    attempts: integer('attempts').notNull(),
+    failures: integer('failures').notNull(),
+  },
+  (table) => [
+    check(
+      'device_console_limits_counts_nonnegative',
+      sql`${table.attempts} >= 0 AND ${table.failures} >= 0`,
+    ),
+  ],
+);
+
 export const billingMeterReports = pgTable(
   'billing_meter_reports',
   {

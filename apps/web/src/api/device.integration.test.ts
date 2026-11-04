@@ -364,6 +364,117 @@ describe('device authorization', () => {
     );
   });
 
+  async function approveFor(user: string, drive: string) {
+    const started = await start({ client_name: `agent-${randomUUID()}` });
+    const approve = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [drive],
+      scopes: ['read'],
+    });
+    expect(approve.status).toBe(200);
+    const agentId = (
+      await pool.query('SELECT agent_id FROM device_authorizations WHERE user_code = $1', [
+        started.user_code,
+      ])
+    ).rows[0].agent_id as string;
+    return { started, agentId };
+  }
+  const liveKeys = async (agentId: string) =>
+    (
+      await pool.query(
+        'SELECT count(*)::int AS n FROM api_keys WHERE agent_id = $1 AND revoked_at IS NULL',
+        [agentId],
+      )
+    ).rows[0].n as number;
+
+  it('denies an approved request when the agent is revoked before redemption', async () => {
+    const { started, agentId } = await approveFor(ownerUser, driveId);
+    const revoked = await consoleCall(ownerUser, `/agents/${agentId}/revoke`, 'POST');
+    expect(revoked.status).toBe(200);
+    await allowPoll(started.device_code);
+    const result = await poll(started.device_code);
+    expect(result.status).toBe(400);
+    expect((await json(result)).error).toBe('access_denied');
+    expect(await liveKeys(agentId)).toBe(0);
+    const total = await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE agent_id = $1', [
+      agentId,
+    ]);
+    expect(total.rows[0].n).toBe(0);
+  });
+
+  it('never yields a working key when revoke and redeem race', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const { started, agentId } = await approveFor(ownerUser, driveId);
+      await allowPoll(started.device_code);
+      const [revoked, redeemed] = await Promise.all([
+        consoleCall(ownerUser, `/agents/${agentId}/revoke`, 'POST'),
+        poll(started.device_code),
+      ]);
+      expect(revoked.status).toBe(200);
+      expect([200, 400]).toContain(redeemed.status);
+      expect(await liveKeys(agentId)).toBe(0);
+    }
+  });
+
+  it('limits failed console lookups per account and bounds total attempts', async () => {
+    const user = `device_limit_${suffix}`;
+    const session = await json(await consoleCall(user, '/session'));
+    accountIds.push(session.account.id);
+    for (let i = 0; i < 10; i += 1) {
+      const miss = await consoleCall(user, '/device/BBBB-CCCC');
+      expect(miss.status).toBe(404);
+    }
+    const limited = await consoleCall(user, '/device/BBBB-CCCC');
+    expect(limited.status).toBe(429);
+    expect((await json(limited)).error.code).toBe('rate_limited');
+    // A real pending code is also refused while the window is exhausted.
+    const started = await start();
+    const real = await consoleCall(user, `/device/${started.user_code}`);
+    expect(real.status).toBe(429);
+    const approve = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [driveId],
+      scopes: ['read'],
+    });
+    expect(approve.status).toBe(429);
+    // Other accounts are unaffected, and the window passing restores access.
+    expect((await consoleCall(ownerUser, `/device/${started.user_code}`)).status).toBe(200);
+    await pool.query(
+      "UPDATE device_console_limits SET window_start = now() - interval '11 minutes' WHERE account_id = $1",
+      [session.account.id],
+    );
+    expect((await consoleCall(user, `/device/${started.user_code}`)).status).toBe(200);
+    // Successful lookups still count toward the 30 per window total.
+    for (let i = 0; i < 29; i += 1)
+      expect((await consoleCall(user, `/device/${started.user_code}`)).status).toBe(200);
+    expect((await consoleCall(user, `/device/${started.user_code}`)).status).toBe(429);
+  });
+
+  it('commits the key and its audit row together, so a failed audit can be retried', async () => {
+    const { started } = await approveFor(ownerUser, driveId);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION test_fail_token_audit() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'audit unavailable'; END $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE TRIGGER test_fail_token_audit BEFORE INSERT ON audit_events
+      FOR EACH ROW WHEN (NEW.action = 'device.token' AND NEW.outcome = 'success')
+      EXECUTE FUNCTION test_fail_token_audit()`);
+    try {
+      await allowPoll(started.device_code);
+      const failed = await poll(started.device_code);
+      expect(failed.status).toBe(500);
+    } finally {
+      await pool.query('DROP TRIGGER test_fail_token_audit ON audit_events');
+      await pool.query('DROP FUNCTION test_fail_token_audit()');
+    }
+    const row = await pool.query(
+      'SELECT status, api_key_id FROM device_authorizations WHERE user_code = $1',
+      [started.user_code],
+    );
+    expect(row.rows[0]).toMatchObject({ status: 'approved', api_key_id: null });
+    await allowPoll(started.device_code);
+    const retry = await poll(started.device_code);
+    expect(retry.status).toBe(200);
+    expect((await json(retry)).access_token).toMatch(/^adk_/);
+  });
+
   it('rate limits starts per IP', async () => {
     const ip = '198.51.100.77';
     await pool.query('DELETE FROM device_authorizations WHERE ip_hash = $1', [
