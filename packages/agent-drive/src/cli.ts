@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError } from './client.js';
 import { generateDriveKey } from './crypto.js';
 import {
+  DEFAULT_API_URL,
   driveKeyEnvironmentName,
   machineName,
   readConfig,
@@ -12,6 +13,8 @@ import {
   writeConfig,
 } from './config.js';
 import { syncDirectory } from './sync.js';
+import { backupDirectory } from './backup.js';
+import { deviceLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
 
 function parse(raw: string[]) {
@@ -42,6 +45,8 @@ function parse(raw: string[]) {
       cursor: { type: 'string' },
       version: { type: 'string' },
       'expires-in': { type: 'string' },
+      'no-browser': { type: 'boolean' },
+      'dry-run': { type: 'boolean' },
     },
     allowPositionals: true,
     strict: true,
@@ -109,15 +114,55 @@ export function parseShareExpiry(value: string | undefined, now = Date.now()) {
 async function run(command: string, raw: string[]) {
   const args = parse(raw);
   if (command === 'login') {
-    const apiUrl = args.values.api ?? process.env.AGENT_DRIVE_API_URL;
+    const apiUrl = args.values.api ?? process.env.AGENT_DRIVE_API_URL ?? DEFAULT_API_URL;
     const apiKey =
       process.env.AGENT_DRIVE_API_KEY ?? (args.values['token-stdin'] ? await stdinText() : '');
-    if (!apiUrl || !apiKey)
-      throw new Error('Set AGENT_DRIVE_API_URL and AGENT_DRIVE_API_KEY, or use --token-stdin.');
+    if (!apiKey) {
+      await deviceLogin({
+        apiUrl,
+        name: args.values.name ?? 'agent',
+        machine: machineName(),
+        log: (line) => process.stdout.write(`${line}\n`),
+        openBrowser: shouldOpenBrowser(args.values['no-browser']),
+      });
+      return;
+    }
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
     const who = await client.whoami();
     await writeConfig({ apiUrl, apiKey });
     output(who);
+    return;
+  }
+  if (command === 'backup') {
+    if (!args.positionals[0]) throw new Error('backup requires LOCAL_DIRECTORY.');
+    const connection = await resolveConnection();
+    let driveId = args.values.drive?.[0];
+    if (!driveId) {
+      const ids = Object.keys(connection.config.driveKeys ?? {});
+      if (ids.length !== 1 || !ids[0])
+        throw new Error('Pass --drive ID: the config does not hold exactly one drive key.');
+      driveId = ids[0];
+    }
+    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const backupClient = new AgentDriveClient({
+      apiUrl: connection.apiUrl,
+      apiKey: connection.apiKey,
+      machine: machineName(),
+      ...(key ? { driveKey: key } : {}),
+    });
+    const dryRun = args.values['dry-run'] ?? false;
+    const result = await backupDirectory(
+      backupClient,
+      driveId,
+      args.positionals[0],
+      args.values.prefix ?? `/backups/${machineName()}`,
+      { dryRun, log: (line) => process.stderr.write(`${line}\n`) },
+    );
+    for (const path of result.wouldUpload) process.stdout.write(`would upload ${path}\n`);
+    process.stdout.write(
+      `backup uploaded=${result.uploaded} unchanged=${result.unchanged} failed=${result.failed}\n`,
+    );
+    if (result.failed) process.exitCode = 1;
     return;
   }
   const client = await connect(args);
@@ -317,7 +362,8 @@ const [name, ...raw] = process.argv.slice(2);
 const help = `Agent Drive CLI
 
 Commands:
-  login --api URL --token-stdin
+  login [--name AGENT] [--no-browser]   Approve in a browser (device flow)
+  login --api URL --token-stdin         Save an existing API key
   whoami
   agent create --name NAME
   drive create --name NAME
@@ -337,7 +383,10 @@ Commands:
   share list --drive ID
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
+  backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
   mcp
+
+Without installing: npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, and AGENT_DRIVE_MACHINE.

@@ -36,3 +36,23 @@ existing state directory with unsafe permissions is rejected without changing it
 updates use an exclusive `<config-path>.lock` directory. A crashed CLI may leave that lock; remove
 it manually only after confirming no Agent Drive CLI process is active. It is not a download or
 destructive mirror.
+
+## Install, device login, and backup
+
+Install from the site: `npm install -g https://agent-drive.vercel.app/cli/agent-drive.tgz`, or run
+without installing: `npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>`. The
+Vercel build packs `packages/agent-drive` into `apps/web/public/cli/agent-drive.tgz`. The default
+API URL is `https://agent-drive.vercel.app/api` (override with `--api` or `AGENT_DRIVE_API_URL`).
+
+`agent-drive login [--name AGENT] [--no-browser]` runs the OAuth device flow when no
+`AGENT_DRIVE_API_KEY` or `--token-stdin` is given. It prints a link and a code, opens a browser only
+when stdout is a TTY, `CI` is unset, and `--no-browser` is absent, then polls until the human
+approves. It saves the API key and unsealed drive keys to the private config and never prints
+them. A drive key that fails to unseal is reported and skipped. See `docs/agent-login.md`.
+
+`agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]` uploads every regular
+file to `PATH/<relative path>` (default `/backups/<machine>`) with overwrite, so history is kept.
+The drive defaults to the only drive key in config. A private manifest in `<config-path>.state`,
+keyed by server, drive, prefix, and relative path, lets later runs skip unchanged files by SHA-256.
+Symlinks are skipped, and one failing file does not stop the rest. It prints
+`backup uploaded=N unchanged=N failed=N` and exits 1 if any file failed.
