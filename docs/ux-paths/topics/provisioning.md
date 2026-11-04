@@ -40,7 +40,7 @@ Production: https://agent-drive.vercel.app (Clerk development instance, Stripe t
 **Goal**: Create a drive named "Research workspace"
 **Preconditions**: A drive named "Research workspace" already exists; Tomas has since reloaded the page so its key is not loaded
 **Ideal path**: 2 — the form should detect the existing name and point to Load drive key
-**Alternate paths**: CLI `agent-drive drive create --name "Research workspace"` is idempotent and returns the existing drive without a new key, but errors "Drive <id> already exists; load its backup through AGENT_DRIVE_KEY_<ID>." if no key is found locally
+**Alternate paths**: CLI `agent-drive drive create --name "Research workspace"` is idempotent and returns the existing drive without a new key, but errors "Drive <id> already exists; load its backup through AGENT*DRIVE_KEY*<ID>." if no key is found locally
 
 ### Steps
 

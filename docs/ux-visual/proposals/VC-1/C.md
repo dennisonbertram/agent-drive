@@ -13,7 +13,7 @@ Adopt role tokens with those names and rules:
 - Keep `--muted` as an alias of `--fg-subtle` so existing references work.
 - Status pills: dot + dark text on a tint (`.badge::before` 6px dot). Success `#4d6634` on `#ecf5df` (5.72), neutral `#4a5448` on `#f0f2ed` (7.0).
 - Table headers: sentence case, 12px, `--fg-muted`, weight 600.
-- A written rule in a comment block above `:root`: "text never uses a value outside --fg-*; only `:disabled` may use --fg-disabled."
+- A written rule in a comment block above `:root`: "text never uses a value outside --fg-\*; only `:disabled` may use --fg-disabled."
 
 ## Before / after
 

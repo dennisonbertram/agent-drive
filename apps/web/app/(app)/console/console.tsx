@@ -117,7 +117,10 @@ function ConnectAgentPanel() {
   return (
     <section className="panel agent-panel" aria-labelledby="connect-agent-title">
       <h2 id="connect-agent-title">Connect an agent</h2>
-      <p>Paste this into your agent. It installs the CLI, then you approve it in your browser.</p>
+      <p>
+        Paste this into your agent. It installs the CLI and gives you a link; open it and click
+        Approve. The agent sets up its own encrypted drive.
+      </p>
       <div className="agent-give">
         <div className="terminal-command">
           <code>{instruction}</code>

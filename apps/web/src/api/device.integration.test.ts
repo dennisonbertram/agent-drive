@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleApiRequest, handleConsoleApiRequest } from './handler';
 import { cleanupDeviceAuthorizations } from './upload-cleanup';
 import { handleOAuthRequest, startDeviceAuthorization } from './device';
@@ -33,13 +33,20 @@ let ipCounter = 0;
 const json = async (response: Response) => (await response.json()) as Record<string, any>;
 const nextIp = () => `203.0.113.${(ipCounter += 1)}`;
 
-function oauth(path: string, body: Record<string, unknown>, ip = nextIp(), form = false) {
+function oauth(
+  path: string,
+  body: Record<string, unknown>,
+  ip = nextIp(),
+  form = false,
+  bearer?: string,
+) {
   return handleOAuthRequest(
     new Request(`${origin}/api/oauth/${path}`, {
       method: 'POST',
       headers: {
         'content-type': form ? 'application/x-www-form-urlencoded' : 'application/json',
         'x-forwarded-for': `${ip}, 10.0.0.1`,
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
       },
       body: form
         ? new URLSearchParams(body as Record<string, string>).toString()
@@ -57,11 +64,13 @@ function consoleCall(userId: string, path: string, method = 'GET', body?: unknow
   return handleConsoleApiRequest(new Request(`${origin}/api/console${path}`, init), userId);
 }
 
-async function start(extra: Record<string, unknown> = {}, ip = nextIp()) {
+async function start(extra: Record<string, unknown> = {}, ip = nextIp(), bearer?: string) {
   const response = await oauth(
     'device_authorization',
     { client_name: 'claude-code', machine: 'laptop', public_key: publicKey, ...extra },
     ip,
+    false,
+    bearer,
   );
   expect(response.status).toBe(200);
   return json(response);
@@ -283,8 +292,6 @@ describe('device authorization', () => {
       scopes: ['read', 'manage'],
     });
     expect(manage.status).toBe(400);
-    const none = await consoleCall(ownerUser, path, 'POST', { scopes: ['read'] });
-    expect(none.status).toBe(400);
     const noScopes = await consoleCall(ownerUser, path, 'POST', {
       driveIds: [driveId],
       scopes: [],
@@ -517,5 +524,327 @@ describe('device authorization', () => {
       [[old.user_code, recent.user_code]],
     );
     expect(rows.rows.map((r) => r.user_code)).toEqual([recent.user_code]);
+  });
+});
+
+describe('one-click connect (contract v2)', () => {
+  // Each test gets its own account: the free plan allows only 3 drives.
+  let user = ownerUser;
+  let account = ownerAccountId;
+  let drive = driveId;
+  beforeEach(async () => {
+    user = `device_v2_${randomUUID()}`;
+    account = (await json(await consoleCall(user, '/session'))).account.id;
+    accountIds.push(account);
+    drive = (
+      await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id', [
+        account,
+        'owner-drive',
+      ])
+    ).rows[0].id;
+  });
+  const approveEmpty = (code: string) => consoleCall(user, `/device/${code}/approve`, 'POST', {});
+  async function login(extra: Record<string, unknown>, bearer?: string) {
+    const started = await start(extra, nextIp(), bearer);
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const issued = await poll(started.device_code);
+    expect(issued.status).toBe(200);
+    return { started, token: await json(issued) };
+  }
+
+  const whoami = (key: string) =>
+    handleApiRequest(
+      new Request(`${origin}/api/v1/whoami`, { headers: { authorization: `Bearer ${key}` } }),
+    );
+
+  it('reconnects only drives the previous key holds, and GET lists them', async () => {
+    const name = `known-${suffix}`;
+    const first = (await login({ client_name: name })).token;
+    const held = first.drive_ids[0];
+    const started = await start(
+      { client_name: name, known_drive_ids: [held, held, drive] },
+      nextIp(),
+      first.access_token,
+    );
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info.drives).toEqual([{ id: held, name }]);
+    expect(info.creates_drive).toBe(false);
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token).toMatchObject({ drive_ids: [held], new_drive_id: null });
+    expect(token.scope).toBe('read write delete share');
+    expect((await whoami(first.access_token)).status).toBe(401);
+    expect((await whoami(token.access_token)).status).toBe(200);
+  });
+
+  it('ignores known_drive_ids without proof, so a known id grants nothing', async () => {
+    const started = await start({ client_name: `attack-${suffix}`, known_drive_ids: [drive] });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info).toMatchObject({ drives: [], creates_drive: true });
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token.drive_ids).not.toContain(drive);
+    expect(token.new_drive_id).toBeTruthy();
+    const stored = await pool.query(
+      'SELECT previous_api_key_id FROM device_authorizations WHERE user_code = $1',
+      [started.user_code],
+    );
+    expect(stored.rows[0].previous_api_key_id).toBeNull();
+  });
+
+  it('ignores invalid and revoked bearers, and keys of another agent or account', async () => {
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const victim = (await login({ client_name: `victim-${suffix}` })).token;
+    const held = victim.drive_ids[0];
+    // Another agent in the same account.
+    const sameAccountOtherAgent = victim.access_token;
+    // Another account's key.
+    const otherUserId = `device_v2_${randomUUID()}`;
+    const otherAcct = (await json(await consoleCall(otherUserId, '/session'))).account.id;
+    accountIds.push(otherAcct);
+    const outsiderKey = `adk_${randomUUID().replaceAll('-', '')}`;
+    const outsiderDrive = (
+      await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id', [
+        otherAcct,
+        'outsider',
+      ])
+    ).rows[0].id;
+    const outsiderAgent = (
+      await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id', [
+        otherAcct,
+        `attacker-${suffix}`,
+      ])
+    ).rows[0].id;
+    await pool.query(
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+       VALUES ($1,$2,'x',$3,$4::uuid[],ARRAY['read'])`,
+      [
+        otherAcct,
+        outsiderAgent,
+        createHash('sha256').update(outsiderKey).digest('hex'),
+        [outsiderDrive],
+      ],
+    );
+    const revokedKey = (await login({ client_name: `gone-${suffix}` })).token;
+    await pool.query('DELETE FROM drives WHERE id = $1', [revokedKey.drive_ids[0]]);
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE token_hash = $1', [
+      createHash('sha256').update(revokedKey.access_token).digest('hex'),
+    ]);
+    for (const [bearer, ids] of [
+      [sameAccountOtherAgent, [held]], // key belongs to agent "victim", request is "attacker"
+      [outsiderKey, [held, outsiderDrive]],
+      [revokedKey.access_token, revokedKey.drive_ids],
+      ['adk_not_a_real_key', [held]],
+    ] as const) {
+      const started = await start(
+        { client_name: `attacker-${suffix}`, known_drive_ids: [...ids] },
+        nextIp(),
+        bearer,
+      );
+      const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+      expect(info).toMatchObject({ drives: [], creates_drive: true });
+      expect((await approveEmpty(started.user_code)).status).toBe(200);
+      await allowPoll(started.device_code);
+      const token = await json(await poll(started.device_code));
+      expect(token.drive_ids).toEqual([token.new_drive_id]);
+      await pool.query('DELETE FROM drives WHERE id = $1', [token.new_drive_id]);
+    }
+    expect((await whoami(victim.access_token)).status).toBe(200);
+    expect((await whoami(revokedKey.access_token)).status).toBe(401);
+  });
+
+  it('filters unknown, foreign, and deleting known ids, then creates a named drive', async () => {
+    const deleting = (
+      await pool.query(
+        'INSERT INTO drives (account_id,name,deleting_at) VALUES ($1,$2,now()) RETURNING id',
+        [account, `deleting-${suffix}`],
+      )
+    ).rows[0].id;
+    const name = `fresh-${suffix}`;
+    const started = await start({
+      client_name: name,
+      known_drive_ids: [randomUUID(), otherDriveId, deleting],
+    });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info).toMatchObject({ drives: [], creates_drive: true });
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token.new_drive_id).toBeTruthy();
+    expect(token.drive_ids).toEqual([token.new_drive_id]);
+    const drive = await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id]);
+    expect(drive.rows[0].name).toBe(name);
+  });
+
+  it('resolves drive name collisions with (machine), then a counter', async () => {
+    const name = `collide-${suffix}`;
+    const names: string[] = [];
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]);
+    for (let i = 0; i < 3; i += 1) {
+      const { token } = await login({ client_name: name, machine: 'box' });
+      names.push(
+        (await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id])).rows[0]
+          .name,
+      );
+    }
+    expect(names).toEqual([name, `${name} (box)`, `${name} 2`]);
+  });
+
+  it('applies the four default scopes and an empty body is accepted', async () => {
+    const { token } = await login({ client_name: `defaults-${suffix}` });
+    expect(token.scope).toBe('read write delete share');
+  });
+
+  it('revokes exactly the proven previous key, not same-label or same-name keys', async () => {
+    const name = `repeat-${suffix}`;
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const first = (await login({ client_name: name, machine: 'a' })).token;
+    // Same name and hostname on a second machine, and a manual key with the same label.
+    const twin = (await login({ client_name: name, machine: 'a' })).token;
+    expect((await whoami(first.access_token)).status).toBe(200);
+    const manual = `adk_${randomUUID().replaceAll('-', '')}`;
+    await pool.query(
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+       VALUES ($1,$2,$3,$4,$5::uuid[],ARRAY['read'])`,
+      [
+        account,
+        first.agent_id,
+        `${name} on a`,
+        createHash('sha256').update(manual).digest('hex'),
+        [],
+      ],
+    );
+    const second = (await login({ client_name: name, machine: 'a' }, first.access_token)).token;
+    expect((await whoami(first.access_token)).status).toBe(401);
+    expect((await whoami(twin.access_token)).status).toBe(200);
+    expect((await whoami(manual)).status).toBe(200);
+    expect((await whoami(second.access_token)).status).toBe(200);
+  });
+
+  it('denies a reconnect whose previous key was revoked after approval', async () => {
+    const name = `revoked-${suffix}`;
+    const first = (await login({ client_name: name })).token;
+    const started = await start(
+      { client_name: name, known_drive_ids: first.drive_ids },
+      nextIp(),
+      first.access_token,
+    );
+    expect((await approveEmpty(started.user_code)).status).toBe(200);
+    const previousId = (
+      await pool.query(
+        'SELECT previous_api_key_id AS id FROM device_authorizations WHERE user_code=$1',
+        [started.user_code],
+      )
+    ).rows[0].id;
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE id = $1', [previousId]);
+    const before = (
+      await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE account_id=$1', [account])
+    ).rows[0].n;
+    await allowPoll(started.device_code);
+    const result = await poll(started.device_code);
+    expect(result.status).toBe(400);
+    expect(await json(result)).toMatchObject({
+      error: 'access_denied',
+      error_description: 'The previous key was revoked; run agent-drive login again.',
+    });
+    const after = (
+      await pool.query('SELECT count(*)::int AS n FROM api_keys WHERE account_id=$1', [account])
+    ).rows[0].n;
+    expect(after).toBe(before);
+  });
+
+  it('issues only one key when two approved requests cite the same previous key', async () => {
+    const name = `twice-${suffix}`;
+    await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota
+    const first = (await login({ client_name: name })).token;
+    const extra = { client_name: name, known_drive_ids: first.drive_ids };
+    const a = await start(extra, nextIp(), first.access_token);
+    const b = await start(extra, nextIp(), first.access_token);
+    expect((await approveEmpty(a.user_code)).status).toBe(200);
+    expect((await approveEmpty(b.user_code)).status).toBe(200);
+    await allowPoll(a.device_code);
+    await allowPoll(b.device_code);
+    const one = await poll(a.device_code);
+    const two = await poll(b.device_code);
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(400);
+    expect((await json(two)).error).toBe('access_denied');
+  });
+
+  it('allocates names around drives that are pending deletion', async () => {
+    const name = `pending-${suffix}`;
+    await pool.query('INSERT INTO drives (account_id,name,deleting_at) VALUES ($1,$2,now())', [
+      account,
+      name,
+    ]);
+    const { token } = await login({ client_name: name, machine: 'box' });
+    expect(
+      (await pool.query('SELECT name FROM drives WHERE id = $1', [token.new_drive_id])).rows[0]
+        .name,
+    ).toBe(`${name} (box)`);
+  });
+
+  it('requires scopes in any non-empty approve body', async () => {
+    const started = await start({ client_name: `legacy-${suffix}` });
+    const response = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [drive],
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('validates known_drive_ids', async () => {
+    const tooMany = Array.from({ length: 21 }, () => randomUUID());
+    for (const bad of [tooMany, ['not-a-uuid'], 'x', [5]]) {
+      const response = await oauth('device_authorization', {
+        client_name: 'v',
+        public_key: publicKey,
+        known_drive_ids: bad,
+      });
+      expect(response.status).toBe(400);
+      expect((await json(response)).error).toBe('invalid_request');
+    }
+    const form = await oauth(
+      'device_authorization',
+      { client_name: 'v', public_key: publicKey, known_drive_ids: `${drive},${randomUUID()}` },
+      nextIp(),
+      true,
+    );
+    expect(form.status).toBe(200);
+    expect(
+      (
+        await pool.query(
+          'SELECT requested_drive_ids FROM device_authorizations WHERE user_code=$1',
+          [(await json(form)).user_code],
+        )
+      ).rows[0].requested_drive_ids,
+    ).toHaveLength(2);
+  });
+
+  it('names the missing scope', async () => {
+    const started = await start({ client_name: `ro-${suffix}` });
+    await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [drive],
+      scopes: ['read'],
+    });
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    const response = await handleApiRequest(
+      new Request(`${origin}/api/v1/drives/${drive}/put`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token.access_token}`,
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect((await json(response)).error).toMatchObject({
+      code: 'permission_denied',
+      message: 'The API key lacks the "write" scope.',
+    });
   });
 });

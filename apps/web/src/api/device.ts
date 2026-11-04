@@ -16,6 +16,9 @@ const BASE64URL = /^[A-Za-z0-9_-]{1,4096}$/u;
 const EXPIRES_IN_SECONDS = 600;
 const STARTS_PER_HOUR = 20;
 const USER_SCOPES = new Set(['read', 'write', 'delete', 'share']);
+const DEFAULT_SCOPES = ['read', 'write', 'delete', 'share'];
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const MAX_KNOWN_DRIVES = 20;
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const noStore = { 'Cache-Control': 'no-store' };
@@ -31,12 +34,32 @@ class OAuthError extends Error {
   }
 }
 
+// The CLI's current key, if valid and unrevoked (same lookup as handler.ts authenticate). An
+// invalid key is ignored; the token is never logged or stored.
+async function previousKeyId(request: Request) {
+  const value = request.headers.get('authorization');
+  if (!value?.startsWith('Bearer ') || value.length <= 7) return null;
+  const { rows } = await getPool().query<{ id: string }>(
+    `SELECT k.id FROM api_keys k
+       JOIN accounts a ON a.id = k.account_id AND a.deleting_at IS NULL
+      WHERE k.token_hash = $1 AND k.revoked_at IS NULL`,
+    [sha256(value.slice(7))],
+  );
+  return rows[0]?.id ?? null;
+}
+
 export function generateUserCode() {
   const pick = () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]!;
   return `${Array.from({ length: 4 }, pick).join('')}-${Array.from({ length: 4 }, pick).join('')}`;
 }
 
-type StartInput = { clientName: string; machine: string | null; publicKey: string };
+type StartInput = {
+  clientName: string;
+  machine: string | null;
+  publicKey: string;
+  knownDriveIds?: string[];
+  previousApiKeyId?: string | null;
+};
 
 export async function startDeviceAuthorization(
   input: StartInput,
@@ -68,8 +91,9 @@ export async function startDeviceAuthorization(
       if (taken.rowCount) continue;
       await client.query(
         `INSERT INTO device_authorizations
-           (device_code_hash, user_code, client_name, machine, public_key, ip_hash, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7))`,
+           (device_code_hash, user_code, client_name, machine, public_key, ip_hash, expires_at,
+            requested_drive_ids, previous_api_key_id)
+         VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7), $8::uuid[], $9)`,
         [
           sha256(deviceCode),
           candidate,
@@ -78,6 +102,8 @@ export async function startDeviceAuthorization(
           input.publicKey,
           ipHash,
           EXPIRES_IN_SECONDS,
+          input.knownDriveIds ?? [],
+          input.previousApiKeyId ?? null,
         ],
       );
       return candidate;
@@ -154,6 +180,32 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     );
     const driveIds = drives.rows.map((drive) => drive.id as string);
     const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
+    // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's. Lock
+    // order: account, agent, request, then this key (handler.ts key revoke locks only the key row).
+    // Re-check it here: it may have been revoked, or used by another approved request, since approval.
+    if (row.previous_api_key_id) {
+      const previous = await client.query(
+        `SELECT 1 FROM api_keys
+          WHERE id = $1 AND account_id = $2 AND agent_id = $3 AND revoked_at IS NULL FOR UPDATE`,
+        [row.previous_api_key_id, row.account_id, row.agent_id],
+      );
+      if (!previous.rowCount && !row.new_drive_id) {
+        await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
+          row.id,
+        ]);
+        return new OAuthError(
+          'access_denied',
+          'The previous key was revoked; run agent-drive login again.',
+        );
+      }
+      if (previous.rowCount) {
+        const revoked = await client.query(
+          'UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL',
+          [row.previous_api_key_id],
+        );
+        if (revoked.rowCount !== 1) throw new Error('Previous key revocation did not apply.');
+      }
+    }
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const key = await client.query(
       `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
@@ -204,7 +256,30 @@ async function publicBody(request: Request): Promise<Record<string, unknown>> {
   const text = await request.text();
   if (text.length > MAX_BODY_BYTES)
     throw new OAuthError('invalid_request', 'The body is too large.');
-  return Object.fromEntries(new URLSearchParams(text));
+  const params = new URLSearchParams(text);
+  const body: Record<string, unknown> = Object.fromEntries(params);
+  if (params.has('known_drive_ids')) body.known_drive_ids = params.getAll('known_drive_ids');
+  return body;
+}
+
+// Array, or comma-separated string (form fields). At most 20 distinct UUIDs.
+function knownDriveIds(value: unknown): string[] {
+  if (value === undefined) return [];
+  const items = Array.isArray(value) ? value : [value];
+  const ids = items.flatMap((item) => {
+    if (typeof item !== 'string')
+      throw new OAuthError('invalid_request', 'known_drive_ids is invalid.');
+    return item
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  });
+  if (ids.some((id) => !UUID_PATTERN.test(id)))
+    throw new OAuthError('invalid_request', 'known_drive_ids must be UUIDs.');
+  const unique = [...new Set(ids.map((id) => id.toLowerCase()))];
+  if (unique.length > MAX_KNOWN_DRIVES)
+    throw new OAuthError('invalid_request', 'known_drive_ids may hold at most 20 ids.');
+  return unique;
 }
 
 function field(body: Record<string, unknown>, name: string, max: number, required: boolean) {
@@ -257,6 +332,8 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
             clientName: field(body, 'client_name', 64, true)!,
             machine: field(body, 'machine', 128, false) ?? null,
             publicKey,
+            knownDriveIds: knownDriveIds(body.known_drive_ids),
+            previousApiKeyId: await previousKeyId(request),
           },
           { ip: clientIp(request), origin },
         ),
@@ -298,6 +375,7 @@ function userCodeFrom(value: string | undefined) {
 const pendingRequest = `user_code = $1 AND status = 'pending' AND expires_at > now()`;
 
 function approvalInput(body: Record<string, unknown>) {
+  const isEmpty = Object.keys(body).length === 0;
   const driveIds = body.driveIds === undefined ? [] : body.driveIds;
   if (!Array.isArray(driveIds) || driveIds.length > 100)
     throw new ApiError('validation_error', 'driveIds must be an array of UUIDs.');
@@ -308,18 +386,17 @@ function approvalInput(body: Record<string, unknown>) {
   ];
   const newDriveName =
     body.newDriveName === undefined ? undefined : stringField(body, 'newDriveName', { max: 128 });
-  if (!drives.length && !newDriveName)
-    throw new ApiError('validation_error', 'Choose a drive or a new drive name.');
   if (
-    !Array.isArray(body.scopes) ||
-    body.scopes.length === 0 ||
-    body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value))
+    (body.scopes !== undefined || !isEmpty) &&
+    (!Array.isArray(body.scopes) ||
+      body.scopes.length === 0 ||
+      body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value)))
   )
     throw new ApiError(
       'validation_error',
       'scopes must be a non-empty list of read, write, delete, or share.',
     );
-  const scopes = [...new Set(body.scopes as string[])];
+  const scopes = isEmpty ? DEFAULT_SCOPES : [...new Set(body.scopes as string[])];
   const agentId =
     body.agentId === undefined
       ? undefined
@@ -338,7 +415,47 @@ function approvalInput(body: Record<string, unknown>) {
       }
     }
   }
-  return { drives, newDriveName, scopes, agentId, sealed };
+  return { drives, newDriveName, scopes, agentId, sealed, isEmpty };
+}
+
+type Queryable = Pick<PoolClient, 'query'>;
+
+// Reconnect drives (contract v2.1): requested ids that the previous key holds and that are live
+// drives of the approving account. The previous key must be unrevoked, belong to this account,
+// and belong to the agent named client_name. Otherwise there are none.
+async function reconnectDrives(
+  db: Queryable,
+  accountId: string,
+  row: { client_name: string; previous_api_key_id: string | null; requested_drive_ids: string[] },
+) {
+  if (!row.previous_api_key_id) return [];
+  const { rows } = await db.query<{ id: string; name: string }>(
+    `SELECT d.id, d.name FROM drives d
+       JOIN api_keys k ON k.id = $2 AND k.account_id = $1 AND k.revoked_at IS NULL
+                      AND d.id = ANY(k.drive_ids)
+       JOIN agents g ON g.id = k.agent_id AND g.account_id = $1 AND g.name = $3
+      WHERE d.account_id = $1 AND d.deleting_at IS NULL AND d.id = ANY($4::uuid[])
+      ORDER BY d.name, d.id`,
+    [accountId, row.previous_api_key_id, row.client_name, row.requested_drive_ids],
+  );
+  return rows;
+}
+
+// client_name, then "client_name (machine)", then "client_name 2", "client_name 3", ...
+async function freeDriveName(
+  client: PoolClient,
+  accountId: string,
+  row: { client_name: string; machine: string | null },
+) {
+  const base = row.client_name;
+  const candidates = [base, ...(row.machine ? [`${base} (${row.machine})`.slice(0, 128)] : [])];
+  const { rows } = await client.query<{ name: string }>(
+    'SELECT name FROM drives WHERE account_id = $1 AND name LIKE $2',
+    [accountId, `${base.replace(/[\\%_]/gu, '\\$&')}%`],
+  );
+  const taken = new Set(rows.map((drive) => drive.name));
+  for (const name of candidates) if (!taken.has(name)) return name;
+  for (let n = 2; ; n += 1) if (!taken.has(`${base} ${n}`)) return `${base} ${n}`;
 }
 
 async function approve(
@@ -349,7 +466,8 @@ async function approve(
 ) {
   await lockBillingAccount(client, accountId);
   const found = await client.query(
-    `SELECT id, client_name FROM device_authorizations WHERE ${pendingRequest}
+    `SELECT id, client_name, machine, requested_drive_ids, previous_api_key_id FROM device_authorizations
+      WHERE ${pendingRequest}
       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
     [code],
   );
@@ -381,18 +499,25 @@ async function approve(
       )
     ).rows[0].id as string;
   }
+  let drives = input.drives;
+  let newDriveName = input.newDriveName;
+  if (input.isEmpty) {
+    // Defaults (contract v2.1): reconnect with proof, else create one named for the agent.
+    drives = (await reconnectDrives(client, accountId, row)).map((drive) => drive.id);
+    if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
+  }
   let newDriveId: string | null = null;
-  if (input.newDriveName) {
-    const exists = await client.query(
-      'SELECT 1 FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name = $2',
-      [accountId, input.newDriveName],
-    );
+  if (newDriveName) {
+    const exists = await client.query('SELECT 1 FROM drives WHERE account_id = $1 AND name = $2', [
+      accountId,
+      newDriveName,
+    ]);
     if (exists.rowCount) throw new ApiError('conflict', 'A drive with this name already exists.');
     await enforceWriteBudget(client, accountId, { drives: 1n });
     newDriveId = (
       await client.query('INSERT INTO drives (account_id, name) VALUES ($1, $2) RETURNING id', [
         accountId,
-        input.newDriveName,
+        newDriveName,
       ])
     ).rows[0].id as string;
   }
@@ -405,7 +530,7 @@ async function approve(
       row.id,
       accountId,
       agentId,
-      newDriveId ? [...input.drives, newDriveId] : input.drives,
+      newDriveId ? [...drives, newDriveId] : drives,
       input.scopes,
       newDriveId,
       Object.keys(input.sealed).length ? JSON.stringify(input.sealed) : null,
@@ -468,13 +593,17 @@ async function consoleDeviceAction(
   const code = userCodeFrom(parts[1]);
   if (parts.length === 2 && request.method === 'GET') {
     const found = await getPool().query(
-      `SELECT user_code, client_name, machine, created_at, expires_at, public_key
+      `SELECT user_code, client_name, machine, created_at, expires_at, public_key,
+              requested_drive_ids, previous_api_key_id
          FROM device_authorizations WHERE ${pendingRequest} ORDER BY created_at DESC LIMIT 1`,
       [code],
     );
     const row = found.rows[0];
     if (!row) throw new ApiError('not_found', 'Device request not found.');
+    const known = { rows: await reconnectDrives(getPool(), accountId, row) };
     return reply({
+      drives: known.rows,
+      creates_drive: known.rows.length === 0,
       user_code: row.user_code,
       client_name: row.client_name,
       machine: row.machine,

@@ -10,7 +10,7 @@ Drive-key precedence is the per-drive `AGENT_DRIVE_KEY_<DRIVE_ID>` variable (upp
 non-alphanumeric characters replaced by `_`), then `AGENT_DRIVE_KEY`, then `--key-file`, then the
 locally saved key. Drive keys are client secrets and are never sent to the API or S3.
 
-Commands include `login`, `whoami`, `agent create`, `drive create`, `key create`, `key revoke`,
+Commands include `login`, `whoami`, `agent create`, `drive create`, `check`, `key create`, `key revoke`,
 `put`, `get`, `ls`, `mv`, `cp`, `rm`, `versions`, `restore`, `search`, `recent`, and `sync`.
 `put LOCAL REMOTE --drive ID` is create-only by default and encrypts before requesting an upload URL.
 Use `--overwrite` for an unconditional replacement, or `--if-version ID` for an optimistic
@@ -47,8 +47,25 @@ API URL is `https://agent-drive.vercel.app/api` (override with `--api` or `AGENT
 `agent-drive login [--name AGENT] [--no-browser]` runs the OAuth device flow when no
 `AGENT_DRIVE_API_KEY` or `--token-stdin` is given. It prints a link and a code, opens a browser only
 when stdout is a TTY, `CI` is unset, and `--no-browser` is absent, then polls until the human
-approves. It saves the API key and unsealed drive keys to the private config and never prints
-them. A drive key that fails to unseal is reported and skipped. See `docs/agent-login.md`.
+approves. The default name is `<machine> agent`. It sends the saved drive IDs for the same API origin
+as `known_drive_ids`, saves the API key and unsealed drive keys to the private config, and never
+prints them. A drive key that fails to unseal is reported and skipped. If no granted drive has a
+usable key, login exits 1 (the config is still saved); run `login` again. Otherwise it prints the
+usable drives and the config path. See `docs/agent-login.md`.
+
+`agent-drive whoami` adds `localDriveKeys`, a map of authorized drive IDs to whether this machine
+holds a key. `agent-drive check [--drive ID]` first downloads the newest existing file (other than
+the check file) and fails with "This drive key cannot decrypt existing files." if the key cannot
+open it. Then it writes a random file to `/.agent-drive/check.txt` with overwrite, reads it back, and prints `check ok drive=<id>`, or fails with exit 1. `drive create`
+prints only the drive and a note on stderr that the key is saved to the config; it never prints the
+key. A `permission_denied` error adds a hint to run `agent-drive login` again.
+
+On reconnect, `login` sends the saved API key as a bearer header only when the saved API URL has the
+same origin as the login URL. The config records each drive key's origin in `driveKeyOrigins`. Keys
+with a different or unknown origin, or that do not decode to 32 bytes, are not sent or counted as
+usable. Configs written before origins were recorded are migrated when read: a drive key with no
+origin is assigned the origin of the saved `apiUrl` (and kept only if one is saved); the migration is
+written back on the next config write. The default agent name is `<machine> agent`, truncated to 64 characters.
 
 `agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]` uploads every regular
 file to `PATH/<relative path>` (default `/backups/<machine>`) with overwrite, so history is kept.

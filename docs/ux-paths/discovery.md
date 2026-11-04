@@ -116,7 +116,7 @@ Guides "Save or not" (no secrets, no chat transcripts, no disposable scratch), f
 - Stripe (test mode): Checkout, customer portal, webhook, metered usage price; `STRIPE_*` env; checkout gated by `checkoutConfigured`.
 - Cloudflare R2 (S3 API): presigned PUT/GET, `ListObjectsV2` purge; `S3_EGRESS_METERING=none`; bucket CORS GET/HEAD/PUT; `staging/` 1-day lifecycle.
 - Resend: spend/usage alert emails (`RESEND_API_KEY`, `EMAIL_FROM`); undelivered work stays pending.
-- Vercel Cron: maintenance cleanup (*/5) and billing (hourly), bearer `CRON_SECRET`.
+- Vercel Cron: maintenance cleanup (\*/5) and billing (hourly), bearer `CRON_SECRET`.
 - PostgreSQL via `DATABASE_URL`. MCP hosts: Claude Code (`claude mcp add --transport stdio agent-drive ... cli.js mcp`), Codex (`config.toml`).
 - Env-gated behavior: Clerk keys (auth pages/console protection), `AGENT_DRIVE_TEST_AUTH` (e2e stub), Stripe prices/rates (checkout buttons disabled), `S3_EGRESS_METERING`/`S3_LOGS_*` (egress "Not connected"/"Not charged"), `CRON_SECRET` (503 without), HTTPS-only share/API in production.
 

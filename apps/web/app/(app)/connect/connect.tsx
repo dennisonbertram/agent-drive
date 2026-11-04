@@ -1,8 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
-import { decodeDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
-import { parseRecoveryFile, sealDriveKey, type SealedKey } from '@/src/device/seal';
+import { useEffect, useState } from 'react';
 
 type Drive = { id: string; name: string };
 type DeviceRequest = {
@@ -11,17 +9,10 @@ type DeviceRequest = {
   machine: string | null;
   created_at: string;
   expires_at: string;
-  public_key: string;
+  drives?: Drive[];
+  creates_drive?: boolean;
 };
-type Page<T> = { items: T[]; nextCursor: string | null };
 
-const NEW = 'new';
-const scopeChoices = [
-  { id: 'read', label: 'Read files' },
-  { id: 'write', label: 'Write files' },
-  { id: 'delete', label: 'Delete files' },
-  { id: 'share', label: 'Create share links' },
-];
 const codePattern = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
 
 class HttpError extends Error {
@@ -63,17 +54,12 @@ function normalizeCode(value: string) {
 export default function Connect({ initialCode }: { initialCode: string }) {
   const [codeInput, setCodeInput] = useState(initialCode);
   const [request, setRequest] = useState<DeviceRequest | null>(null);
-  const [drives, setDrives] = useState<Drive[]>([]);
   const [problem, setProblem] = useState<{ kind: 'missing' | 'error'; message: string } | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<'approved' | 'denied' | null>(null);
-  const [driveChoice, setDriveChoice] = useState(NEW);
-  const [newDriveName, setNewDriveName] = useState('');
-  const [picked, setPicked] = useState<string[]>(['read', 'write']);
-  const [keyInput, setKeyInput] = useState('');
   const [formError, setFormError] = useState('');
 
   async function load(raw: string) {
@@ -87,18 +73,6 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     setLoading(true);
     try {
       const found = await api<DeviceRequest>(`device/${encodeURIComponent(code)}`);
-      const items: Drive[] = [];
-      let cursor: string | null = null;
-      do {
-        const page: Page<Drive> = await api(
-          `drives?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        );
-        items.push(...page.items);
-        cursor = page.nextCursor;
-      } while (cursor);
-      setDrives(items);
-      setDriveChoice(items[0]?.id ?? NEW);
-      setNewDriveName(found.client_name);
       setRequest(found);
     } catch (error) {
       if (error instanceof HttpError && error.status === 404)
@@ -124,44 +98,12 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function readKeyFile(file?: File) {
-    if (!file) return;
-    setFormError('');
-    try {
-      const key = parseRecoveryFile(await file.text(), driveChoice);
-      decodeDriveKey(key);
-      setKeyInput(key);
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'This is not a valid drive key file.');
-    }
-  }
-
-  async function approve(event: FormEvent) {
-    event.preventDefault();
+  async function approve() {
     if (!request) return;
     setFormError('');
-    if (!picked.length) return setFormError('Choose at least one permission.');
-    const creating = driveChoice === NEW;
-    if (creating && !newDriveName.trim()) return setFormError('Name the new drive.');
     setBusy(true);
     try {
-      const sealedDriveKeys: Record<string, SealedKey> = {};
-      const key = keyInput.trim();
-      if (!creating && key) {
-        try {
-          decodeDriveKey(key);
-        } catch {
-          throw new Error('That drive key is not valid.');
-        }
-        sealedDriveKeys[driveChoice] = await sealDriveKey(request.public_key, driveChoice, key);
-      }
-      await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', {
-        scopes: picked,
-        ...(creating
-          ? { newDriveName: newDriveName.trim() }
-          : { driveIds: [driveChoice], sealedDriveKeys }),
-      });
-      setKeyInput('');
+      await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', {});
       setDone('approved');
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
@@ -231,14 +173,17 @@ export default function Connect({ initialCode }: { initialCode: string }) {
       </section>
     );
 
-  const creating = driveChoice === NEW;
-  const selectedDrive = drives.find((d) => d.id === driveChoice);
+  const reconnect = request.drives ?? [];
   return (
     <section className="panel">
-      <h1>Approve {request.client_name}?</h1>
+      <h1>Connect {request.client_name}?</h1>
+      <div className="connect-code-box">
+        <span className="connect-code" aria-label={`Code ${request.user_code}`}>
+          {request.user_code}
+        </span>
+        <p>Check that this matches your agent’s terminal. If it does not, deny.</p>
+      </div>
       <dl className="connect-facts">
-        <dt>Code</dt>
-        <dd className="connect-code">{request.user_code}</dd>
         <dt>Agent</dt>
         <dd>{request.client_name}</dd>
         {request.machine && (
@@ -251,99 +196,23 @@ export default function Connect({ initialCode }: { initialCode: string }) {
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
       <p className="banner info">
-        Check that this code matches the one in your agent’s terminal. If it does not, deny.
+        {reconnect.length > 0
+          ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
+          : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.'}
       </p>
       {formError && (
         <div role="alert" className="banner error">
           {formError}
         </div>
       )}
-      <form onSubmit={approve}>
-        <label>
-          Drive
-          <select
-            value={driveChoice}
-            onChange={(event) => {
-              setDriveChoice(event.target.value);
-              setKeyInput('');
-            }}
-          >
-            {drives.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-            <option value={NEW}>Create a new drive for this agent</option>
-          </select>
-        </label>
-        {creating ? (
-          <>
-            <label>
-              New drive name
-              <input
-                value={newDriveName}
-                onChange={(event) => setNewDriveName(event.target.value)}
-                maxLength={64}
-                required
-              />
-            </label>
-            <p className="banner info">
-              The agent creates this drive’s encryption key on its machine and keeps it there. Back
-              the key up from the agent’s config if you need to open this drive in the console.
-            </p>
-          </>
-        ) : (
-          <>
-            <label>
-              Drive key for {selectedDrive?.name} (optional)
-              <input
-                type="password"
-                autoComplete="off"
-                value={keyInput}
-                onChange={(event) => setKeyInput(event.target.value)}
-              />
-            </label>
-            <label>
-              Or choose a recovery file
-              <input
-                type="file"
-                accept="application/json,.json"
-                onChange={(event) => void readKeyFile(event.target.files?.[0])}
-              />
-            </label>
-            <p className="banner info">
-              {keyInput
-                ? 'The key is encrypted in this browser for the agent only. The service never sees it.'
-                : 'Without the key, the agent can list file names but cannot decrypt or add readable files.'}
-            </p>
-          </>
-        )}
-        <fieldset>
-          <legend>Permissions</legend>
-          {scopeChoices.map((s) => (
-            <label className="check-label" key={s.id}>
-              <input
-                type="checkbox"
-                checked={picked.includes(s.id)}
-                onChange={(event) =>
-                  setPicked((cur) =>
-                    event.target.checked ? [...cur, s.id] : cur.filter((x) => x !== s.id),
-                  )
-                }
-              />
-              {s.label}
-            </label>
-          ))}
-        </fieldset>
-        <div className="connect-actions">
-          <button className="button primary" disabled={busy}>
-            {busy ? 'Working…' : 'Approve agent'}
-          </button>
-          <button type="button" className="button secondary" disabled={busy} onClick={deny}>
-            Deny
-          </button>
-        </div>
-      </form>
+      <div className="connect-actions">
+        <button className="button primary" disabled={busy} onClick={() => void approve()}>
+          {busy ? 'Working…' : 'Approve agent'}
+        </button>
+        <button type="button" className="button secondary" disabled={busy} onClick={deny}>
+          Deny
+        </button>
+      </div>
     </section>
   );
 }

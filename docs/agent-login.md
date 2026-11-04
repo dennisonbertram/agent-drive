@@ -222,3 +222,121 @@ failed unseal is reported per drive and does not abort login.
   agent names as text (no logos), and a three-step "how connecting works".
 - Console: a "Connect an agent" panel on Agents and API keys with the same instruction, plus
   per-client snippets using the real origin. Manual API keys remain as the alternative.
+
+## 7. Version 2: one-click connect (supersedes conflicting parts of §2, §3, §5, §6)
+
+Field report (2026-11-04): a human approved an agent onto an existing drive without supplying its
+key, so the agent could list names but never decrypt. Login still exited 0, and every repeat
+login repeated the same state. First-time humans have no context for drive, permission, or
+recovery-key choices. The agent owns those decisions.
+
+### Approval has no choices
+
+- `/connect` shows the code, agent name, machine, and request time, then **Approve agent** and
+  **Deny** only. There are no drive, permission, or key fields.
+- The copy says: "This agent gets its own encrypted drive. Its key is created and kept on that
+  machine; Agent Drive never sees it." When reconnecting, it says "Reconnects to: <drive names>".
+- `POST /api/console/device/{code}/approve` with an empty body (`{}`) applies the defaults
+  below. The optional explicit fields from §2 stay accepted for API compatibility, but the page
+  no longer sends them.
+
+### Defaults on approve
+
+- **Scopes:** `read`, `write`, `delete`, `share`, scoped to the granted drives. Never `manage`.
+- **Agent:** reuse the account's agent named `client_name`, otherwise create it (as before).
+- **Drives:** `known_drive_ids` from the request (below), filtered to drives that belong to the
+  approving account and are not being deleted. If none remain, create a new drive named
+  `client_name`; if that name is taken, use `client_name (machine)`, then append ` 2`, ` 3`, …
+  The new drive is returned as `new_drive_id`.
+- **Previous keys:** when issuing the token, revoke the account's active API keys for the same
+  agent with the same label (`client_name on machine`), so a repeat login replaces that
+  machine's key instead of accumulating keys.
+
+### Request: `known_drive_ids`
+
+- `POST /api/oauth/device_authorization` accepts an optional `known_drive_ids`: up to 20 UUIDs,
+  the drives whose keys the CLI already holds for this API origin. They are stored in a new
+  column, `requested_drive_ids uuid[] not null default '{}'` (migration 0012).
+- `GET /api/console/device/{code}` additionally returns
+  `drives: [{ id, name }]` (the requested drives that pass the account filter) and
+  `creates_drive: boolean`.
+
+### Errors
+
+- Missing-scope errors name the scope: `The API key lacks the "<scope>" scope.` The CLI adds:
+  "Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope."
+
+### CLI changes
+
+- `login` sends `known_drive_ids`, the saved drive-key IDs for the target origin (none on a
+  fresh machine).
+- `login` counts usable drives: granted drives with a saved, unsealed, or newly generated key.
+  - If there are none, it exits 1 with: "Login finished but this agent has no usable drive key.
+    Run `agent-drive login` again; the owner's approval will create a drive for this agent."
+  - Otherwise it prints the usable drives by name/ID and the config path, never secrets.
+- Default `--name` is `<machine> agent`, where machine is `AGENT_DRIVE_MACHINE` or the
+  hostname.
+- `whoami` adds `localDriveKeys: { "<driveId>": true|false }` for the authorized drives.
+- New `agent-drive check [--drive ID]` is the final setup check. It needs one usable drive
+  (the only one, or `--drive`). It writes a small random file to `/.agent-drive/check.txt` with
+  overwrite, reads it back, and compares bytes. It prints `check ok drive=<id>`, or a clear
+  failure with exit 1.
+- `drive create` no longer prints `driveKey`. It prints the drive and "Drive key saved to <config
+  path>; back it up." (It still needs `manage`; agents should not use it.)
+
+### llms.txt changes
+
+- **Steps:** install → `agent-drive login --name "<your name>"` → tell the human to open the
+  link and click Approve → `agent-drive check`. Setup is complete only when `check ok` prints.
+- **Troubleshooting:**
+  - No usable drive key: run `login` again.
+  - Missing-scope error: run `login` again; do not use `drive create`.
+  - The `/connect` page requires the human to be signed in.
+
+## 8. Version 2.1: reconnect requires proof (supersedes `known_drive_ids` trust in §7)
+
+The security review found that trusting requester-supplied `known_drive_ids` let an agent that
+knew a drive ID obtain write/delete access to it with one approval. Replacing keys by label also
+revoked unrelated keys.
+
+- `POST /api/oauth/device_authorization` accepts an optional `Authorization: Bearer <api key>`
+  header: the CLI's current key for this origin.
+  - If the key is valid and unrevoked, the server records it as `previous_api_key_id` (new
+    column, migration 0013).
+  - An invalid or revoked key is ignored, never an error, and is never logged.
+- **Reconnect drives** = `known_drive_ids` ∩ the previous key's `drive_ids`, filtered to
+  non-deleting drives of the approving account. The previous key must also belong to the
+  approving account and to the agent being approved, otherwise it is ignored. With no previous
+  key, `known_drive_ids` are ignored entirely, and the approval creates a new drive.
+- **Replacement:** token issuance revokes exactly `previous_api_key_id`, and only when it
+  belongs to the same account and agent. Label-based revocation is removed.
+- **Defaults** apply only to an empty approve body. A non-empty legacy body keeps the §2 rules,
+  so `scopes` is required.
+- **Drive names:** allocation treats drives pending deletion as occupied, because the unique
+  index includes them.
+- **CLI:**
+  - It sends its saved API key as the bearer header only when the saved `apiUrl` origin equals
+    the login origin.
+  - Drive keys gain a per-key origin: config `driveKeyOrigins: { "<driveId>": "<origin>" }`,
+    written whenever a key is saved. Keys whose origin is unknown or different are not sent and
+    don't count as usable.
+  - Keys must decode to 32 bytes to be sent or counted.
+  - The default name is truncated so the result is at most 64 characters.
+- **`check`:** before writing, it lists the drive and, if any file other than the check file
+  exists, downloads the most recent one and requires decryption to succeed. Then it does the
+  round trip. A wrong key fails `check` with "This drive key cannot decrypt existing files."
+
+### Fixes to v2.1
+
+- **Redemption rechecks the previous key.** Inside the redemption transaction, after the account,
+  agent and request locks, the server locks the previous key's row (`FOR UPDATE`; key revoke only
+  touches that one row, so no lock cycle). It must still be unrevoked, with the same account and
+  agent. For a reconnect that creates no drive, a key that no longer qualifies marks the request
+  `denied` and returns `access_denied` ("The previous key was revoked; run agent-drive login
+  again.") without issuing. Of two approved requests citing the same key, only the first issues.
+  The revoking `UPDATE` must affect exactly one row.
+- **Legacy key origins.** `readConfig` assigns the saved `apiUrl` origin to any drive key with no
+  `driveKeyOrigins` entry (persisted on the next write). Without a valid saved `apiUrl` such keys
+  stay untrusted.
+- **`check`** finds the newest existing file with the `recent` feed (newest first, skipping the
+  check file) instead of the first page of `list`; with no other file it does the round trip only.

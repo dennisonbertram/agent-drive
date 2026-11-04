@@ -149,18 +149,23 @@ test.describe('agent device login', () => {
     return userId;
   }
 
-  async function approveNewDrive(page: Page, path: string, name: string, code: string) {
+  async function approve(page: Page, path: string, name: string, code: string) {
     await page.goto(path);
-    await expect(page.getByRole('heading', { name: `Approve ${name}?` })).toBeVisible();
+    await expect(page.getByRole('heading', { name: `Connect ${name}?` })).toBeVisible();
     await expect(page.locator('.connect-code')).toHaveText(code);
-    await page.locator('select').selectOption({ label: 'Create a new drive for this agent' });
-    await expect(page.getByLabel('Read files')).toBeChecked();
-    await expect(page.getByLabel('Write files')).toBeChecked();
+    // One click: no drive, key, or permission choices.
+    await expect(
+      page.locator('select, input[type="checkbox"], input[type="password"]'),
+    ).toHaveCount(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(
       page.getByText('Approved. Return to your agent; it will finish setup'),
     ).toBeVisible();
   }
+
+  type Config = { apiKey: string; driveKeys: Record<string, string> };
+  const readConfig = async (env: NodeJS.ProcessEnv) =>
+    JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as Config;
 
   test('new drive: login, put/get, and incremental backup', async ({ page, context, baseURL }) => {
     test.setTimeout(180_000);
@@ -168,15 +173,16 @@ test.describe('agent device login', () => {
     const machine = `m-${randomBytes(3).toString('hex')}`;
     const env = cliEnv(baseURL!, root, 'trace', machine);
     const { login, code, path } = await startLogin(env, 'trace-bot');
-    await approveNewDrive(page, path, 'trace-bot', code);
+    await approve(page, path, 'trace-bot', code);
     const result = await login.done;
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout + result.stderr).not.toMatch(/adk_/);
-    const config = JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as {
-      apiKey: string;
-      driveKeys: Record<string, string>;
-    };
+    const config = await readConfig(env);
+    expect(Object.keys(config.driveKeys)).toHaveLength(1);
     const [driveId, driveKey] = Object.entries(config.driveKeys)[0]!;
+    const check = await cli(['check'], env);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain(`check ok drive=${driveId}`);
     expect(config.apiKey).toMatch(/^adk_/);
     expect(result.stdout + result.stderr).not.toContain(config.apiKey);
     expect(result.stdout + result.stderr).not.toContain(driveKey);
@@ -212,61 +218,59 @@ test.describe('agent device login', () => {
     expect(listing.stdout.split(`/backups/${machine}/`).length - 1).toBe(3);
   });
 
-  test('existing drive: sealed drive key reaches the agent', async ({ page, context, baseURL }) => {
+  test('reconnect: second login reuses the drive and replaces the old key', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     test.setTimeout(180_000);
     await newUser(context);
-    await page.goto('/console');
-    await page.getByRole('button', { name: 'Create your first drive' }).click();
-    await page.getByLabel('Drive name').fill('Sealed drive');
-    await page.getByRole('button', { name: 'Create drive', exact: true }).click();
-    const driveKey = await page.getByTestId('drive-key').inputValue();
-    await page.getByLabel('I saved my drive key securely').check();
-    await page.getByRole('button', { name: 'Continue to drive' }).click();
-    const driveId = await page.getByTestId('drive-id').innerText();
+    const machine = `m-${randomBytes(3).toString('hex')}`;
+    const env = cliEnv(baseURL!, root, 'again', machine);
 
-    const env = cliEnv(baseURL!, root, 'sealed', 'sealed-box');
-    const { login, code, path } = await startLogin(env, 'sealed-bot');
-    await page.goto(path);
-    await expect(page.locator('.connect-code')).toHaveText(code);
-    await page.locator('select').selectOption({ label: 'Sealed drive' });
-    await page.getByLabel(/^Drive key for Sealed drive/).fill(driveKey);
+    const first = await startLogin(env, 'again-bot');
+    await approve(page, first.path, 'again-bot', first.code);
+    const firstResult = await first.login.done;
+    expect(firstResult.status, firstResult.stderr).toBe(0);
+    const before = await readConfig(env);
+    const [driveId] = Object.keys(before.driveKeys);
+    expect(Object.keys(before.driveKeys)).toHaveLength(1);
+
+    const second = await startLogin(env, 'again-bot');
+    await page.goto(second.path);
+    await expect(page.getByText(/^Reconnects to: /)).toBeVisible();
+    await expect(page.getByText('This agent gets its own encrypted drive')).toHaveCount(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(
       page.getByText('Approved. Return to your agent; it will finish setup'),
     ).toBeVisible();
-    const result = await login.done;
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout + result.stderr).not.toContain(driveKey);
-    expect(result.stdout + result.stderr).not.toMatch(/adk_/);
+    const secondResult = await second.login.done;
+    expect(secondResult.status, secondResult.stderr).toBe(0);
+    expect(secondResult.stdout + secondResult.stderr).not.toMatch(/adk_/);
 
-    const config = JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as {
-      driveKeys: Record<string, string>;
+    // Same drive and key, no new drive, new API key.
+    const after = await readConfig(env);
+    expect(after.driveKeys).toEqual(before.driveKeys);
+    expect(after.apiKey).not.toBe(before.apiKey);
+    const check = await cli(['check'], env);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain(`check ok drive=${driveId}`);
+    const count = await database.query<{ n: string }>(
+      `SELECT count(*) AS n FROM drives WHERE account_id =
+         (SELECT account_id FROM drives WHERE id=$1)`,
+      [driveId],
+    );
+    expect(Number(count.rows[0]!.n)).toBe(1);
+
+    // The key from the first login was revoked when the second was issued.
+    const stale = {
+      ...cliEnv(baseURL!, root, 'stale', machine),
+      AGENT_DRIVE_API_KEY: before.apiKey,
     };
-    expect(config.driveKeys[driveId]).toBe(driveKey);
-
-    // The agent encrypts with the unsealed key, the console decrypts with the original key,
-    // and the agent can read it back.
-    const original = Buffer.concat([Buffer.from(`SEALED-${randomUUID()}\n`), randomBytes(1024)]);
-    const local = join(root, 'sealed.bin');
-    await writeFile(local, original);
-    const put = await cli(['put', local, '/agent/sealed.bin', '--drive', driveId], env);
-    expect(put.status, put.stderr).toBe(0);
-    const back = join(root, 'sealed.out');
-    const get = await cli(['get', '/agent/sealed.bin', '--drive', driveId, '--output', back], env);
-    expect(get.status, get.stderr).toBe(0);
-    expect((await readFile(back)).equals(original)).toBe(true);
-
-    await page.goto('/console');
-    await page.getByRole('button', { name: /^Files/ }).click();
-    await page.getByRole('button', { name: 'Load drive key' }).click();
-    await page.getByLabel('Drive key', { exact: true }).fill(driveKey);
-    await page.getByRole('button', { name: 'Load key', exact: true }).click();
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    const row = page.getByRole('row').filter({ hasText: '/agent/sealed.bin' });
-    await expect(row).toBeVisible();
-    const download = page.waitForEvent('download');
-    await row.getByRole('button', { name: 'Download', exact: true }).click();
-    expect((await readFile((await (await download).path())!)).equals(original)).toBe(true);
+    const old = await cli(['whoami'], stale);
+    expect(old.status).not.toBe(0);
+    const fresh = await cli(['whoami'], env);
+    expect(fresh.status, fresh.stderr).toBe(0);
   });
 
   test('deny: the agent stops with a denial message', async ({ page, context, baseURL }) => {
