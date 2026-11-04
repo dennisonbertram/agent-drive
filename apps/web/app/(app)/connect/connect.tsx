@@ -1,5 +1,7 @@
 'use client';
 
+import '../../styles/connect.css';
+
 import { useEffect, useState } from 'react';
 
 type Drive = { id: string; name: string };
@@ -128,7 +130,14 @@ export default function Connect({ initialCode }: { initialCode: string }) {
 
   if (done)
     return (
-      <section className="panel" role="status">
+      <section className={`panel connect-card ${done}`} role="status">
+        <span className="connect-tag">
+          <span
+            className={`connect-led ${done === 'approved' ? 'on' : 'off'}`}
+            aria-hidden="true"
+          />
+          {done === 'approved' ? 'Paired' : 'Refused'}
+        </span>
         <h1>{done === 'approved' ? 'Approved' : 'Denied'}</h1>
         <p>
           {done === 'approved'
@@ -140,7 +149,11 @@ export default function Connect({ initialCode }: { initialCode: string }) {
 
   if (!request)
     return (
-      <section className="panel">
+      <section className="panel connect-card">
+        <span className="connect-tag">
+          <span className={`connect-led ${loading ? 'on' : 'dim'}`} aria-hidden="true" />
+          {loading ? 'Looking up' : problem ? 'No pairing' : 'Awaiting code'}
+        </span>
         <h1>Connect an agent</h1>
         <p>Enter the code your agent printed after running agent-drive login.</p>
         {problem && (
@@ -166,7 +179,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
               required
             />
           </label>
-          <button className="button primary" disabled={loading}>
+          <button className="button primary connect-approve" disabled={loading}>
             {loading ? 'Looking up…' : 'Continue'}
           </button>
         </form>
@@ -175,9 +188,13 @@ export default function Connect({ initialCode }: { initialCode: string }) {
 
   const reconnect = request.drives ?? [];
   return (
-    <section className="panel">
+    <section className="panel connect-card">
       <h1>Connect {request.client_name}?</h1>
       <div className="connect-code-box">
+        <span className="connect-tag">
+          <span className="connect-led on" aria-hidden="true" />
+          Pairing code
+        </span>
         <span className="connect-code" aria-label={`Code ${request.user_code}`}>
           {request.user_code}
         </span>
@@ -206,13 +223,18 @@ export default function Connect({ initialCode }: { initialCode: string }) {
         </div>
       )}
       <div className="connect-actions">
-        <button className="button primary" disabled={busy} onClick={() => void approve()}>
+        <button
+          className="button primary connect-approve"
+          disabled={busy}
+          onClick={() => void approve()}
+        >
           {busy ? 'Working…' : 'Approve agent'}
         </button>
         <button type="button" className="button secondary" disabled={busy} onClick={deny}>
           Deny
         </button>
       </div>
+      <p className="connect-note">You can revoke access any time in Console, Agents.</p>
     </section>
   );
 }
