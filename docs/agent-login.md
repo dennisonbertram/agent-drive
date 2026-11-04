@@ -292,3 +292,36 @@ recovery-key choices. The agent owns those decisions.
   - No usable drive key: run `login` again.
   - Missing-scope error: run `login` again; do not use `drive create`.
   - The `/connect` page requires the human to be signed in.
+
+## 8. Version 2.1: reconnect requires proof (supersedes `known_drive_ids` trust in §7)
+
+The security review found that trusting requester-supplied `known_drive_ids` let an agent that
+knew a drive ID obtain write/delete access to it with one approval. Replacing keys by label also
+revoked unrelated keys.
+
+- `POST /api/oauth/device_authorization` accepts an optional `Authorization: Bearer <api key>`
+  header: the CLI's current key for this origin.
+  - If the key is valid and unrevoked, the server records it as `previous_api_key_id` (new
+    column, migration 0013).
+  - An invalid or revoked key is ignored, never an error, and is never logged.
+- **Reconnect drives** = `known_drive_ids` ∩ the previous key's `drive_ids`, filtered to
+  non-deleting drives of the approving account. The previous key must also belong to the
+  approving account and to the agent being approved, otherwise it is ignored. With no previous
+  key, `known_drive_ids` are ignored entirely, and the approval creates a new drive.
+- **Replacement:** token issuance revokes exactly `previous_api_key_id`, and only when it
+  belongs to the same account and agent. Label-based revocation is removed.
+- **Defaults** apply only to an empty approve body. A non-empty legacy body keeps the §2 rules,
+  so `scopes` is required.
+- **Drive names:** allocation treats drives pending deletion as occupied, because the unique
+  index includes them.
+- **CLI:**
+  - It sends its saved API key as the bearer header only when the saved `apiUrl` origin equals
+    the login origin.
+  - Drive keys gain a per-key origin: config `driveKeyOrigins: { "<driveId>": "<origin>" }`,
+    written whenever a key is saved. Keys whose origin is unknown or different are not sent and
+    don't count as usable.
+  - Keys must decode to 32 bytes to be sent or counted.
+  - The default name is truncated so the result is at most 64 characters.
+- **`check`:** before writing, it lists the drive and, if any file other than the check file
+  exists, downloads the most recent one and requires decryption to succeed. Then it does the
+  round trip. A wrong key fails `check` with "This drive key cannot decrypt existing files."
