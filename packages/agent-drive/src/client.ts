@@ -137,7 +137,7 @@ function isLoopback(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
 }
 
-function validateUrl(value: string, api: boolean) {
+export function validateUrl(value: string, api: boolean) {
   let parsed: URL;
   try {
     parsed = new URL(value);

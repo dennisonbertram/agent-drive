@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { validateUrl } from './client.js';
 import { configPath, writeConfig } from './config.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
@@ -46,12 +47,15 @@ export function shouldOpenBrowser(noBrowser: boolean | undefined) {
 export async function deviceLogin(options: DeviceLoginOptions) {
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
+  // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
+  validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
   const post = async (path: string, body: Record<string, string>) => {
     let response: Response;
     try {
       response = await fetcher(`${base}${path}`, {
         method: 'POST',
+        redirect: 'error',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify(body),
       });
@@ -146,9 +150,11 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       noKey.push(driveId);
     }
   }
+  if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
+    options.log('Ignored a different API URL returned by the server.');
   if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
   await writeConfig({
-    apiUrl: token.api_url ?? base,
+    apiUrl: base,
     apiKey: token.access_token,
     driveKeys,
   });
