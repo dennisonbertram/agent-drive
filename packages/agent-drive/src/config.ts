@@ -118,8 +118,13 @@ export async function writeConfig(config: AgentDriveConfig) {
 
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let temporaryCreated = false;
+  let backupsCleared = false;
   try {
     const current = await readConfig();
+    // A new API key invalidates every exported bundle, so earlier backup records are stale.
+    const keyChanged = config.apiKey !== undefined && config.apiKey !== current.apiKey;
+    backupsCleared = keyChanged && Object.keys(current.keyBackup ?? {}).length > 0;
+    const previousBackup = keyChanged ? undefined : current.keyBackup;
     const mergedDriveKeys = { ...current.driveKeys, ...config.driveKeys };
     const merged: AgentDriveConfig = {
       ...current,
@@ -128,10 +133,11 @@ export async function writeConfig(config: AgentDriveConfig) {
       ...(current.driveKeyOrigins || config.driveKeyOrigins
         ? { driveKeyOrigins: { ...current.driveKeyOrigins, ...config.driveKeyOrigins } }
         : {}),
-      ...(current.keyBackup || config.keyBackup
-        ? { keyBackup: { ...current.keyBackup, ...config.keyBackup } }
+      ...(previousBackup || config.keyBackup
+        ? { keyBackup: { ...previousBackup, ...config.keyBackup } }
         : {}),
     };
+    if (keyChanged && !config.keyBackup) delete merged.keyBackup;
     const handle = await open(temporary, 'wx', 0o600);
     temporaryCreated = true;
     try {
@@ -156,6 +162,7 @@ export async function writeConfig(config: AgentDriveConfig) {
       }
     }
   }
+  return { backupsCleared };
 }
 
 function isCode(error: unknown, code: string): boolean {

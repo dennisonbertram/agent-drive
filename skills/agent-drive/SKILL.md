@@ -40,7 +40,8 @@ The drive key exists only in this machine's config. Back it up before the machin
 
 ```sh
 agent-drive credentials export --to <path that survives>       # file, mode 600
-agent-drive credentials export --stdout | <your secret store>  # refuses on a terminal
+agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm
+#   --stdout alone records nothing; `confirm` records it only after the store succeeded
 agent-drive credentials status                                 # what is backed up
 ```
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -29,4 +29,15 @@ it('supports explicit targets and finds nothing without dirs', async () => {
   const custom = join(h, 'custom');
   expect(await installSkill(custom, h)).toEqual([join(custom, 'SKILL.md')]);
   expect(packagedSkillPath()).toMatch(/SKILL\.md$/);
+});
+
+it('refuses to overwrite a symlink destination', async () => {
+  const h = await home();
+  const dir = join(h, 'custom');
+  await mkdir(dir);
+  const victim = join(h, 'victim');
+  await writeFile(victim, 'keep');
+  await symlink(victim, join(dir, 'SKILL.md'));
+  await expect(installSkill(dir, h)).rejects.toThrow(/symlink/);
+  expect(await readFile(victim, 'utf8')).toBe('keep');
 });

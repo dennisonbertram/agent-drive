@@ -13,6 +13,7 @@ import {
 } from './check.js';
 import {
   BACKUP_HINT,
+  confirmCredentials,
   exportCredentials,
   importCredentials,
   loadConfig,
@@ -69,6 +70,7 @@ function parse(raw: string[]) {
       from: { type: 'string' },
       force: { type: 'boolean' },
       stdout: { type: 'boolean' },
+      method: { type: 'string' },
       target: { type: 'string' },
     },
     allowPositionals: true,
@@ -78,6 +80,22 @@ function parse(raw: string[]) {
 
 function output(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+const STALE_BACKUP_NOTE =
+  'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.\n';
+
+/** Resolves once stdout has accepted the text; rejects on EPIPE or any write error. */
+function writeStdout(text: string) {
+  return new Promise<void>((resolve, reject) => {
+    const fail = (error: Error) => reject(error);
+    process.stdout.once('error', fail);
+    process.stdout.write(text, (error) => {
+      process.stdout.off('error', fail);
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 async function stdinText() {
@@ -153,7 +171,8 @@ async function run(command: string, raw: string[]) {
     }
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
     const who = await client.whoami();
-    await writeConfig({ apiUrl, apiKey });
+    const { backupsCleared } = await writeConfig({ apiUrl, apiKey });
+    if (backupsCleared) process.stderr.write(STALE_BACKUP_NOTE);
     output(who);
     return;
   }
@@ -212,11 +231,28 @@ async function run(command: string, raw: string[]) {
           ...(args.values.force ? { force: true } : {}),
           ...(args.values.stdout ? { stdout: true } : {}),
         },
-        { isTTY: Boolean(process.stdout.isTTY), write: (text) => process.stdout.write(text) },
+        { isTTY: Boolean(process.stdout.isTTY), write: writeStdout },
       );
-      // With --stdout the bundle owns stdout, so keep this note on stderr.
+      if (result.method === 'stdout') {
+        // The bundle owns stdout, so notes go to stderr. Nothing is recorded until `confirm`.
+        process.stderr.write(
+          'Exported. After the secret store has saved it, run `agent-drive credentials confirm`.\n',
+        );
+        return;
+      }
       process.stderr.write(
         `Backed up credentials for ${result.driveIds.length} drive(s) (${result.method}).\n`,
+      );
+      await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
+      return;
+    }
+    if (sub === 'confirm') {
+      const method = args.values.method ?? 'stdout';
+      if (method !== 'stdout' && method !== 'file')
+        throw new Error('--method must be "stdout" or "file".');
+      const result = await confirmCredentials(method);
+      process.stderr.write(
+        `Recorded the credential backup for ${result.driveIds.length} drive(s) (${result.method}).\n`,
       );
       await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
       return;
@@ -241,7 +277,7 @@ async function run(command: string, raw: string[]) {
       });
     }
     throw new Error(
-      'Usage: credentials export (--to PATH [--force] | --stdout) | import [--from PATH] | status',
+      'Usage: credentials export (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
   const client = await connect(args);
@@ -510,6 +546,7 @@ Commands:
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
   credentials export (--to PATH [--force] | --stdout)   Back up the API key and drive keys (bundle "adcred1.…")
+  credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
   credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
   credentials status                    Which drive keys are backed up, when, and how
   skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent

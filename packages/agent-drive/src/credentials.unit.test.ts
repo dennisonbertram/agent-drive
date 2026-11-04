@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,8 +7,10 @@ import { readConfig, resolveConnection, writeConfig } from './config.js';
 import {
   decodeBundle,
   encodeBundle,
+  confirmCredentials,
   exportCredentials,
   importCredentials,
+  reportEnvBackups,
   loadConfig,
   reportKeyBackup,
   unbackedUp,
@@ -40,7 +42,7 @@ async function setup() {
 
 const io = (isTTY: boolean) => {
   const out: string[] = [];
-  return { isTTY, write: (s: string) => out.push(s), out };
+  return { isTTY, write: async (s: string) => void out.push(s), out };
 };
 
 describe('bundle', () => {
@@ -67,7 +69,33 @@ describe('export', () => {
     const result = await exportCredentials({ stdout: true }, pipe);
     expect(result.method).toBe('stdout');
     expect(decodeBundle(pipe.out.join('')).apiKey).toBe('tok');
+    // --stdout alone does not record a backup: only `credentials confirm` does.
+    expect((await readConfig()).keyBackup?.d1).toBeUndefined();
+    await confirmCredentials('stdout');
     expect((await readConfig()).keyBackup?.d1?.method).toBe('stdout');
+  });
+
+  it('fails when stdout cannot be written (EPIPE)', async () => {
+    await setup();
+    const broken = {
+      isTTY: false,
+      write: async () => {
+        throw new Error('EPIPE');
+      },
+    };
+    await expect(exportCredentials({ stdout: true }, broken)).rejects.toThrow(/EPIPE/);
+    expect((await readConfig()).keyBackup?.d1).toBeUndefined();
+  });
+
+  it('refuses to write through a symlink and never follows it', async () => {
+    const { dir } = await setup();
+    const victim = join(dir, 'victim');
+    await writeFile(victim, 'keep', { mode: 0o644 });
+    const link = join(dir, 'link');
+    await symlink(victim, link);
+    await expect(exportCredentials({ to: link, force: true }, io(true))).rejects.toThrow(/symlink/);
+    expect(await readFile(victim, 'utf8')).toBe('keep');
+    expect((await stat(victim)).mode & 0o777).toBe(0o644);
   });
 
   it('writes --to with mode 600, refuses an existing path, and --force overwrites', async () => {
@@ -79,6 +107,7 @@ describe('export', () => {
     expect(quiet.out.join('')).not.toContain('tok');
     await expect(exportCredentials({ to: path }, quiet)).rejects.toThrow(/exists/);
     await exportCredentials({ to: path, force: true }, quiet);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect((await readConfig()).keyBackup?.d1?.method).toBe('file');
   });
 });
@@ -150,7 +179,64 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
   });
 });
 
+describe('login replacing the API key', () => {
+  it('clears backup records, which describe a stale bundle', async () => {
+    await setup();
+    await exportCredentials({ to: join(dirs[0]!, 'b') }, io(true));
+    expect((await readConfig()).keyBackup?.d1).toBeTruthy();
+    expect(await writeConfig({ apiKey: 'tok' })).toEqual({ backupsCleared: false });
+    expect((await readConfig()).keyBackup?.d1).toBeTruthy();
+    expect(await writeConfig({ apiKey: 'new' })).toEqual({ backupsCleared: true });
+    expect((await readConfig()).keyBackup).toBeUndefined();
+  });
+});
+
+describe('env bundle reporting', () => {
+  it('reports only drives whose effective key and origin match the bundle', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    const [a, b, c, d] = [1, 2, 3, 4].map(() => generateDriveKey());
+    await writeConfig({ driveKeys: { b: generateDriveKey() } });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://x.test/api',
+        apiKey: 'k',
+        driveKeys: { a: a!, b: b!, c: c!, d: d! },
+        driveKeyOrigins: {
+          a: 'https://x.test',
+          b: 'https://x.test',
+          c: 'https://other.test',
+          d: 'https://x.test',
+        },
+      }),
+    );
+    vi.stubEnv('AGENT_DRIVE_KEY_D', generateDriveKey());
+    const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
+    await reportEnvBackups('https://x.test/api', 'k', {
+      fetch: fetcher as unknown as typeof fetch,
+    });
+    const urls = fetcher.mock.calls.map((call) => (call as unknown as [string])[0]);
+    expect(urls).toEqual(['https://x.test/api/v1/drives/a/key-backup']);
+  });
+});
+
 describe('enforcement and reporting', () => {
+  it('does not send the token to an insecure URL', async () => {
+    const warn: string[] = [];
+    const fetcher = vi.fn(async () => new Response('', { status: 200 }));
+    await reportKeyBackup('http://evil.test/api', 'tok', ['d1'], 'file', {
+      fetch: fetcher as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(warn.join('')).toMatch(/d1/);
+  });
+
   it('lists drives with no backup record', async () => {
     const { key } = await setup();
     expect(unbackedUp(await loadConfig(), ['d1'])).toEqual(['d1']);

@@ -1001,6 +1001,8 @@ describe('Phase 1 core API', () => {
     expect((await request(path, writeToken, 'POST', { method: 'cloud' })).status).toBe(400);
     const withKey = await request(path, writeToken, 'POST', { method: 'file', driveKey: 'x' });
     expect(withKey.status).toBe(400);
+    const emptyName = await request(path, writeToken, 'POST', { method: 'file', '': 'x' });
+    expect(emptyName.status).toBe(400);
     const foreign = await request(`/drives/${otherDriveId}/key-backup`, writeToken, 'POST', {
       method: 'file',
     });

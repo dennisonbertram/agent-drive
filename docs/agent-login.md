@@ -353,15 +353,26 @@ human never handles the key.
 - `agent-drive credentials export (--to <path> | --stdout)` writes a bundle.
   - Contents: base64url of JSON `{"v":1,"apiUrl","apiKey","driveKeys":{id:key},"driveKeyOrigins":{id:origin}}`, prefixed `adcred1.`.
   - `--to` writes the file with mode 600 and refuses an existing path unless `--force`.
+  - `--to` writes through a temp file in the same directory (O_EXCL, O_NOFOLLOW, mode 600) and
+    renames it into place; a symlink destination is refused.
   - `--stdout` prints only when stdout is not a TTY (meant for a pipe into a secret store) and
-    otherwise refuses with a hint.
-  - Both record `keyBackup: { "<driveId>": { "at": ISO time, "method": "file"|"stdout" } }` in
-    the config for every drive key in the bundle.
+    otherwise refuses with a hint. It waits for stdout to drain and fails on EPIPE. It does **not**
+    record a backup.
+  - `--to` records `keyBackup: { "<driveId>": { "at": ISO time, "method": "file" } }` in the config
+    for every drive key in the bundle.
+- `agent-drive credentials confirm [--method stdout]` records the backup (and reports it). The
+  pattern for stdout is `agent-drive credentials export --stdout | <secret store> && agent-drive credentials confirm`
+  (use `set -o pipefail`), so a failed store records nothing.
+- A login that replaces the API key clears all `keyBackup` records, because the exported bundle
+  holds the replaced (revoked) key. The CLI prints a line saying so, and `check` asks for a new
+  export.
 - `agent-drive credentials import (--from <path> | stdin)` merges a bundle into the config.
 - Environment variable `AGENT_DRIVE_CREDENTIALS=<bundle>`:
   - When present, it is merged in memory at startup and never written to disk unless
     `credentials import` runs.
   - Drives it supplies count as backed up, since the bundle already lives outside the machine.
+    Only drives whose effective key (after precedence) equals the bundle's key, for the same
+    origin, are counted and reported to the service.
   - It is never printed.
 - `agent-drive credentials status` prints, for each drive key: whether it is backed up, when, and
   how.
@@ -369,7 +380,7 @@ human never handles the key.
 ### Enforcement
 
 - `login` and `drive create`, when they create a new drive key, end with:
-  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store>`. Until then `agent-drive check` will not pass.
+  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Until then `agent-drive check` will not pass.
 - `check` prints `check ok` only when every usable drive key is backed up. Otherwise it exits 1
   with "drive key not backed up" plus the commands above.
 - `whoami` includes `keyBackup`.
@@ -407,7 +418,7 @@ that the human's browser already holds, but it cannot recover an agent's key.
   - It needs the `write` scope on that drive.
   - It stores `key_backup_at` and `key_backup_method` on the drive (migration 0014) and is
     audited as `drive.key_backup`. It never receives the key.
-  - The CLI calls it after a successful `credentials export`, and when `AGENT_DRIVE_CREDENTIALS`
+  - The CLI calls it after a successful `credentials export --to`, after `credentials confirm`, and when `AGENT_DRIVE_CREDENTIALS`
     supplies a drive's key. A failed report is a warning, not a failure.
 - The console Files tab shows the selected drive's status:
   - "Key backed up <date> (<method>)" when reported.

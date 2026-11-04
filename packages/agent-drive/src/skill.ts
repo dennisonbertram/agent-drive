@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, stat } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeFileSafely } from './safe-write.js';
 
 /** dist/SKILL.md when built (copied by the build script); the repo copy when run from src. */
 export function packagedSkillPath() {
@@ -31,7 +32,10 @@ export async function installSkill(
   const written: string[] = [];
   for (const dir of dirs) {
     await mkdir(dir, { recursive: true });
-    await copyFile(packagedSkillPath(), join(dir, 'SKILL.md'));
+    await writeFileSafely(join(dir, 'SKILL.md'), await readFile(packagedSkillPath(), 'utf8'), {
+      mode: 0o644,
+      overwrite: true,
+    });
     written.push(join(dir, 'SKILL.md'));
   }
   return written;

@@ -21,6 +21,10 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('Back up your credentials');
     expect(body).toContain('agent-drive credentials export --to');
     expect(body).toContain('agent-drive credentials export --stdout |');
+    expect(body).toContain('<your secret store> && agent-drive credentials confirm');
+    expect(body).toContain(
+      'gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm',
+    );
     expect(body).toContain('gh secret set AGENT_DRIVE_CREDENTIALS');
     expect(body).toContain('vercel env add AGENT_DRIVE_CREDENTIALS production');
     expect(body).toContain('agent-drive skill install');

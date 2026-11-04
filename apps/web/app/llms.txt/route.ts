@@ -34,12 +34,12 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
    sandbox is deleted, your files can never be opened again. Do one of these (examples):
 
    agent-drive credentials export --to <a path that survives, outside the sandbox>
-   agent-drive credentials export --stdout | <your secret store>
+   agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm
 
    Examples of a secret store (use whatever you have):
 
-   agent-drive credentials export --stdout | gh secret set AGENT_DRIVE_CREDENTIALS
-   agent-drive credentials export --stdout | vercel env add AGENT_DRIVE_CREDENTIALS production
+   agent-drive credentials export --stdout | gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm
+   agent-drive credentials export --stdout | vercel env add AGENT_DRIVE_CREDENTIALS production && agent-drive credentials confirm
 
 5. Install the skill, so you save and recall files without being asked:
 
@@ -66,7 +66,7 @@ tell the human. Do not try to work around it.
 ## Sandboxes
 
 If you run in a sandbox that is deleted or recreated, set AGENT_DRIVE_CREDENTIALS as a secret
-in the sandbox platform, using the output of \`agent-drive credentials export --stdout\`. Every
+in the sandbox platform, using the output of \`agent-drive credentials export --stdout\` (run \`agent-drive credentials confirm\` after the secret store has saved it). Every
 new sandbox is then already connected and can read earlier files. The human does not need to
 approve again for each run.
 

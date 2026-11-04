@@ -193,13 +193,17 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
     options.log('Ignored a different API URL returned by the server.');
   if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
-  await writeConfig({
+  const { backupsCleared } = await writeConfig({
     apiUrl: base,
     apiKey: token.access_token,
     driveKeys,
     driveKeyOrigins: Object.fromEntries(Object.keys(driveKeys).map((id) => [id, origin])),
   });
 
+  if (backupsCleared)
+    options.log(
+      'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.',
+    );
   const usable = [
     ...new Set(
       [...(token.drive_ids ?? []), ...(token.new_drive_id ? [token.new_drive_id] : [])].filter(

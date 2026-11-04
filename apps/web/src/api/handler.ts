@@ -489,7 +489,8 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     need(auth, 'write');
     const body = await jsonBody(request);
     const unknown = Object.keys(body).find((name) => name !== 'method');
-    if (unknown) throw new ApiError('validation_error', `Unknown field: ${unknown.slice(0, 64)}.`);
+    if (unknown !== undefined)
+      throw new ApiError('validation_error', `Unknown field: ${unknown.slice(0, 64)}.`);
     const backupMethod = body.method;
     if (backupMethod !== 'file' && backupMethod !== 'stdout' && backupMethod !== 'env')
       throw new ApiError('validation_error', 'method must be "file", "stdout", or "env".');
