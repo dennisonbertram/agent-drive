@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { BACKUP_HINT } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 import { AgentDriveApiError, type AgentDriveClient } from './client.js';
 
@@ -13,6 +14,10 @@ export function apiErrorLines(error: AgentDriveApiError) {
     error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
     error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
   ].filter(Boolean);
+}
+
+export function notBackedUpMessage(driveIds: string[]) {
+  return `drive key not backed up: ${driveIds.join(', ')}\n${BACKUP_HINT}`;
 }
 
 export function createdDriveNote(configPath: string) {

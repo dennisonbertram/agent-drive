@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Archive old trace files to Agent Drive; delete a local file only after the
 # remote copy has been downloaded, decrypted and hash-matched.
-# Usage: archive-traces.sh --dir DIR --drive DRIVE_ID [--older-than-days N] [--week YYYY-Www] [--dry-run]
+# Usage: archive-traces.sh --dir DIR --drive DRIVE_ID [--older-than-days N] [--week YYYY-Www] [--dry-run] [--hold-back-secrets]
+#   --hold-back-secrets: keep files that look like they hold secrets local (exit 3).
+#   Default: upload them; contents are encrypted.
 # Env: AGENT_DRIVE_API_URL, AGENT_DRIVE_API_KEY, AGENT_DRIVE_KEY_<DRIVE_ID>,
 #      AGENT_DRIVE_BIN (single executable path, default: agent-drive).
 set -euo pipefail
 
 BIN=${AGENT_DRIVE_BIN:-agent-drive}
-DIR= DRIVE= DAYS=7 WEEK=$(date +%G-W%V) DRY=0
+DIR= DRIVE= DAYS=7 WEEK=$(date +%G-W%V) DRY=0 HOLD=0
 die() { echo "error: $*" >&2; exit 2; }
 
 while [ $# -gt 0 ]; do
@@ -17,6 +19,7 @@ while [ $# -gt 0 ]; do
     --older-than-days) DAYS=${2:?}; shift 2 ;;
     --week) WEEK=${2:?}; shift 2 ;;
     --dry-run) DRY=1; shift ;;
+    --hold-back-secrets) HOLD=1; shift ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -72,14 +75,16 @@ while IFS= read -r -d '' f; do
     failed=$((failed + 1)); continue
   fi
 
-  # LC_ALL=C: byte-wise matching, so invalid UTF-8 cannot hide a secret.
-  rc=0; LC_ALL=C grep -aqE "$SECRET_RE" "$snap" 2>/dev/null || rc=$?
-  if [ "$rc" -eq 0 ]; then
-    echo "HELD (possible secret, left local): $rel" >&2
-    held=$((held + 1)); continue
-  elif [ "$rc" -ne 1 ]; then
-    echo "HELD (scan failed, left local): $rel" >&2
-    held=$((held + 1)); continue
+  if [ "$HOLD" = 1 ]; then
+    # LC_ALL=C: byte-wise matching, so invalid UTF-8 cannot hide a secret.
+    rc=0; LC_ALL=C grep -aqE "$SECRET_RE" "$snap" 2>/dev/null || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "HELD (possible secret, left local): $rel" >&2
+      held=$((held + 1)); continue
+    elif [ "$rc" -ne 1 ]; then
+      echo "HELD (scan failed, left local): $rel" >&2
+      held=$((held + 1)); continue
+    fi
   fi
   if [ "$DRY" = 1 ]; then echo "would archive: $rel -> $remote"; continue; fi
 

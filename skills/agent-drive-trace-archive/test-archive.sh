@@ -59,6 +59,10 @@ setup; old a.jsonl hello; STUB_GET_CORRUPT=1 run
 check mismatch-rc $RC 1; check mismatch-kept "$([ -e "$ROOT/t/a.jsonl" ] && echo kept || echo gone)" kept
 
 setup; old a.jsonl 'key sk-abcdefghijklmnopqrstuvwxyz'; run
+check secret-default-rc $RC 0; check secret-default-uploaded "$(find "$STORE/files" -type f 2>/dev/null | wc -l | tr -d ' ')" 1
+has "held_back_secrets=0" || { fail=$((fail+1)); echo "FAIL: default held a file: $OUTTXT"; }
+
+setup; old a.jsonl 'key sk-abcdefghijklmnopqrstuvwxyz'; run --hold-back-secrets
 check held-empty-listing-rc $RC 3; has "held_back_secrets=1" || { fail=$((fail+1)); echo "FAIL: no summary on empty listing: $OUTTXT"; }
 
 setup; old a.jsonl hello; STUB_LS_FAIL=1 run
@@ -66,7 +70,7 @@ check ls-fail-rc $RC 1; has "FAILED listing" || { fail=$((fail+1)); echo "FAIL: 
 has "failed=1" || { fail=$((fail+1)); echo "FAIL: ls failure not counted"; }
 
 setup; printf 'x\xff y sk-abcdefghijklmnopqrstuvwxyz\n' > "$ROOT/t/bin.jsonl"; touch -t 202001010000 "$ROOT/t/bin.jsonl"
-LC_ALL=en_US.UTF-8 run
+LC_ALL=en_US.UTF-8 run --hold-back-secrets
 check nonutf8-rc $RC 3; check nonutf8-kept "$([ -e "$ROOT/t/bin.jsonl" ] && echo kept || echo gone)" kept
 check nonutf8-not-uploaded "$(find "$STORE/files" -type f 2>/dev/null | wc -l | tr -d ' ')" 0
 

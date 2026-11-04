@@ -8,6 +8,7 @@ import {
   readConfig,
   writeConfig,
 } from './config.js';
+import { BACKUP_HINT } from './credentials.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
 
@@ -215,9 +216,8 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   options.log(`Scopes: ${token.scope ?? ''}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
-    options.log(
-      `New drive ${token.new_drive_id} created. Back up this drive key; it cannot be recovered. It is saved in the config file.`,
-    );
+    options.log(`New drive ${token.new_drive_id} created; its key is saved in the config file.`);
+    options.log(BACKUP_HINT);
   }
   if (noKey.length)
     options.log(

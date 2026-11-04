@@ -180,6 +180,12 @@ test.describe('agent device login', () => {
     const config = await readConfig(env);
     expect(Object.keys(config.driveKeys)).toHaveLength(1);
     const [driveId, driveKey] = Object.entries(config.driveKeys)[0]!;
+    const unbacked = await cli(['check'], env);
+    expect(unbacked.status).toBe(1);
+    expect(unbacked.stderr).toContain('drive key not backed up');
+    const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
+    expect(exported.status, exported.stderr).toBe(0);
+    expect(exported.stdout + exported.stderr).not.toMatch(/adk_|adcred1/);
     const check = await cli(['check'], env);
     expect(check.status, check.stderr).toBe(0);
     expect(check.stdout).toContain(`check ok drive=${driveId}`);
@@ -252,6 +258,12 @@ test.describe('agent device login', () => {
     const after = await readConfig(env);
     expect(after.driveKeys).toEqual(before.driveKeys);
     expect(after.apiKey).not.toBe(before.apiKey);
+    const unbacked = await cli(['check'], env);
+    expect(unbacked.status).toBe(1);
+    expect(unbacked.stderr).toContain('drive key not backed up');
+    const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
+    expect(exported.status, exported.stderr).toBe(0);
+    expect(exported.stdout + exported.stderr).not.toMatch(/adk_|adcred1/);
     const check = await cli(['check'], env);
     expect(check.status, check.stderr).toBe(0);
     expect(check.stdout).toContain(`check ok drive=${driveId}`);

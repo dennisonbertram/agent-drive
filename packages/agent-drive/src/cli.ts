@@ -3,13 +3,29 @@ import { parseArgs } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError } from './client.js';
 import { generateDriveKey } from './crypto.js';
-import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
+import {
+  apiErrorLines,
+  createdDriveNote,
+  localKeyMap,
+  notBackedUpMessage,
+  pickCheckDrive,
+  runCheck,
+} from './check.js';
+import {
+  BACKUP_HINT,
+  exportCredentials,
+  importCredentials,
+  loadConfig,
+  reportEnvBackups,
+  unbackedUp,
+  reportKeyBackup,
+} from './credentials.js';
+import { installSkill, packagedSkillPath } from './skill.js';
 import {
   DEFAULT_API_URL,
   configPath,
   driveKeyEnvironmentName,
   machineName,
-  readConfig,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
@@ -49,6 +65,11 @@ function parse(raw: string[]) {
       'expires-in': { type: 'string' },
       'no-browser': { type: 'boolean' },
       'dry-run': { type: 'boolean' },
+      to: { type: 'string' },
+      from: { type: 'string' },
+      force: { type: 'boolean' },
+      stdout: { type: 'boolean' },
+      target: { type: 'string' },
     },
     allowPositionals: true,
     strict: true,
@@ -71,6 +92,7 @@ async function stdinText() {
 
 async function connect(args: ReturnType<typeof parse>) {
   const connection = await resolveConnection();
+  await reportEnvBackups(connection.apiUrl, connection.apiKey);
   const drive = args.values.drive?.[0];
   const driveKey = drive
     ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
@@ -138,6 +160,7 @@ async function run(command: string, raw: string[]) {
   if (command === 'backup') {
     if (!args.positionals[0]) throw new Error('backup requires LOCAL_DIRECTORY.');
     const connection = await resolveConnection();
+    await reportEnvBackups(connection.apiUrl, connection.apiKey);
     let driveId = args.values.drive?.[0];
     if (!driveId) {
       const ids = Object.keys(connection.config.driveKeys ?? {});
@@ -171,14 +194,69 @@ async function run(command: string, raw: string[]) {
     if (result.failed) process.exitCode = 1;
     return;
   }
+  if (command === 'skill' && args.positionals[0] === 'install') {
+    const written = await installSkill(args.values.target);
+    if (!written.length)
+      process.stdout.write(
+        `No ~/.claude or ~/.codex directory found. The skill is at ${packagedSkillPath()}; copy it to <skills dir>/agent-drive/SKILL.md, or use --target <dir>.\n`,
+      );
+    for (const path of written) process.stdout.write(`wrote ${path}\n`);
+    return;
+  }
+  if (command === 'credentials') {
+    const sub = args.positionals[0];
+    if (sub === 'export') {
+      const result = await exportCredentials(
+        {
+          ...(args.values.to ? { to: args.values.to } : {}),
+          ...(args.values.force ? { force: true } : {}),
+          ...(args.values.stdout ? { stdout: true } : {}),
+        },
+        { isTTY: Boolean(process.stdout.isTTY), write: (text) => process.stdout.write(text) },
+      );
+      // With --stdout the bundle owns stdout, so keep this note on stderr.
+      process.stderr.write(
+        `Backed up credentials for ${result.driveIds.length} drive(s) (${result.method}).\n`,
+      );
+      await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
+      return;
+    }
+    if (sub === 'import') {
+      const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
+      const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
+      process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
+      return;
+    }
+    if (sub === 'status') {
+      const config = await loadConfig();
+      return output({
+        drives: Object.fromEntries(
+          Object.keys(config.driveKeys ?? {}).map((id) => [
+            id,
+            config.keyBackup?.[id]
+              ? { backedUp: true, ...config.keyBackup[id] }
+              : { backedUp: false },
+          ]),
+        ),
+      });
+    }
+    throw new Error(
+      'Usage: credentials export (--to PATH [--force] | --stdout) | import [--from PATH] | status',
+    );
+  }
   const client = await connect(args);
   if (command === 'whoami') {
     const who = await client.whoami();
-    const config = await readConfig();
+    const config = await loadConfig();
     return output({
       ...who,
       localDriveKeys: await localKeyMap(who.driveIds, (id) =>
         resolveDriveKey(id, args.values['key-file'], config),
+      ),
+      keyBackup: Object.fromEntries(
+        Object.keys(config.driveKeys ?? {})
+          .filter((id) => !who.driveIds || who.driveIds.includes(id))
+          .map((id) => [id, config.keyBackup?.[id] ?? null]),
       ),
     });
   }
@@ -191,6 +269,18 @@ async function run(command: string, raw: string[]) {
       resolveDriveKey(id, args.values['key-file'], connection.config),
     );
     const driveId = pickCheckDrive(explicit, candidates, keys);
+    const unbacked = unbackedUp(
+      connection.config,
+      // A key supplied by the environment or --key-file already lives outside the config.
+      Object.keys(keys).filter(
+        (id) =>
+          keys[id] &&
+          !process.env[driveKeyEnvironmentName(id)] &&
+          !process.env.AGENT_DRIVE_KEY &&
+          !args.values['key-file'],
+      ),
+    );
+    if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
     const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
     const checker = new AgentDriveClient({
       apiUrl: connection.apiUrl,
@@ -207,7 +297,7 @@ async function run(command: string, raw: string[]) {
     const name = args.values.name ?? args.positionals[1];
     if (!name) throw new Error('A drive name is required.');
     const drive = await client.createDrive(name, limit(args.values.quota));
-    const saved = await readConfig();
+    const saved = await loadConfig();
     const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
     if (drive.created) {
       const key = generateDriveKey();
@@ -216,7 +306,7 @@ async function run(command: string, raw: string[]) {
         driveKeyOrigins: { [drive.id]: new URL((await resolveConnection()).apiUrl).origin },
       });
       output(drive);
-      process.stderr.write(`${createdDriveNote(configPath())}\n`);
+      process.stderr.write(`${createdDriveNote(configPath())}\n${BACKUP_HINT}\n`);
     } else {
       if (!existingKey)
         throw new Error(
@@ -399,7 +489,7 @@ Commands:
   login [--name AGENT] [--no-browser]   Approve in a browser (device flow); name defaults to "<machine> agent"
   login --api URL --token-stdin         Save an existing API key
   whoami                                Also shows localDriveKeys (which drives have a key here)
-  check [--drive ID]                    Write, read back, and compare a test file; prints "check ok"
+  check [--drive ID]                    Write, read back, compare a test file; needs backed-up keys; prints "check ok"
   agent create --name NAME
   drive create --name NAME
   key create --agent ID --drive ID --label LABEL --scope read --scope write
@@ -419,12 +509,17 @@ Commands:
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
+  credentials export (--to PATH [--force] | --stdout)   Back up the API key and drive keys (bundle "adcred1.…")
+  credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
+  credentials status                    Which drive keys are backed up, when, and how
+  skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent
   mcp
 
 Without installing: npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
-AGENT_DRIVE_API_KEY, and AGENT_DRIVE_MACHINE.
+AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
+memory, never written to disk; its drives count as backed up).
 `;
 if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
   process.stdout.write(help);

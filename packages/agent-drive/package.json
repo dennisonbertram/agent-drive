@@ -19,7 +19,7 @@
     "agent-drive": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js',0o755)\"",
+    "build": "tsc --project tsconfig.build.json && node -e \"const f=require('fs');f.chmodSync('dist/cli.js',0o755);f.copyFileSync('../../skills/agent-drive/SKILL.md','dist/SKILL.md')\"",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
