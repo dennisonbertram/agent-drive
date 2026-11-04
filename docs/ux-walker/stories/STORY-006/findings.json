@@ -1,0 +1,58 @@
+[
+  {
+    "id": "F-006-01",
+    "story_id": "STORY-006",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Labels/copy / honesty",
+    "score": "warn",
+    "description": "The landing says contents encrypt and the service 'never' gets the drive key but does not mention that paths, sizes, tags and activity metadata stay visible; that disclosure exists only on /pricing. A privacy-focused reader would see the landing as overselling.",
+    "expected": "One-line metadata caveat next to the landing privacy claim, or a link to the pricing data section.",
+    "actual": "Metadata disclosure only in the pricing 'Private contents.' card.",
+    "screenshot": "STORY-006/screenshots/step-1.png",
+    "suggested_fix": "Add 'Paths, sizes and tags stay visible' to the landing card with a link.",
+    "files_likely_involved": ["apps/web/app/page.tsx"]
+  },
+  {
+    "id": "F-006-02",
+    "story_id": "STORY-006",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Theme consistency",
+    "score": "warn",
+    "description": "The share page logo mark reads 'ad' while every other page uses 'a/'.",
+    "expected": "Same logo mark everywhere.",
+    "actual": "Share error page shows 'ad agent drive'.",
+    "screenshot": "STORY-006/screenshots/step-3.png",
+    "suggested_fix": "Reuse the shared logo component.",
+    "files_likely_involved": ["apps/web/app/s/[id]/share-client.tsx"]
+  },
+  {
+    "id": "F-006-03",
+    "story_id": "STORY-006",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Feedback / recovery",
+    "score": "warn",
+    "description": "The share-error page for a link without a key gives only 'Ask the sender'; there is no link to the home page except the small logo, and a title widow ('key') on its own line at desktop. Note a revoked link cannot be told apart from a key-missing link when opened without the key.",
+    "expected": "A clear secondary link (e.g. 'What is Agent Drive?') and balanced heading wrap.",
+    "actual": "Single message, no action.",
+    "screenshot": "STORY-006/screenshots/step-3.png",
+    "suggested_fix": "Add a home link; use text-wrap: balance on the heading.",
+    "files_likely_involved": ["apps/web/app/s/[id]/share-client.tsx"]
+  },
+  {
+    "id": "F-006-04",
+    "story_id": "STORY-006",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Console errors",
+    "score": "warn",
+    "description": "Visiting /pricing and following to the console logs '[error] Failed to fetch RSC payload for /console/billing. Falling back to browser navigation.' because the Next prefetch of /console/billing is redirected cross-origin to Clerk.",
+    "expected": "No console errors on public pages.",
+    "actual": "RSC fetch failure logged (seen in the same session after the pricing page).",
+    "screenshot": "STORY-006/screenshots/step-2.png",
+    "suggested_fix": "Use prefetch={false} on links to protected routes, or fix the sign-in redirect domain.",
+    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
+  }
+]

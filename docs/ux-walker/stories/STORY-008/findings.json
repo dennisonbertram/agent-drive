@@ -1,0 +1,44 @@
+[
+  {
+    "id": "F-008-01",
+    "story_id": "STORY-008",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Overflow / responsive",
+    "score": "warn",
+    "description": "Landing terminal command is clipped at 390px ('/memory/ha').",
+    "expected": "Wrapped or scrollable command.",
+    "actual": "Clipped text.",
+    "screenshot": "STORY-008/screenshots/step-1.png",
+    "suggested_fix": "Wrap the command or allow horizontal scroll.",
+    "files_likely_involved": ["apps/web/app/page.tsx"]
+  },
+  {
+    "id": "F-008-02",
+    "story_id": "STORY-008",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Interactive sizing",
+    "score": "warn",
+    "description": "Header buttons 'Quickstart' and 'Sign in' on mobile are about 40px tall and 60-80px wide (below the 44px touch target).",
+    "expected": "Targets at least 44x44px.",
+    "actual": "Approximately 40px high header buttons.",
+    "screenshot": "STORY-008/screenshots/step-2.png",
+    "suggested_fix": "Increase mobile button min-height to 44px.",
+    "files_likely_involved": ["apps/web/app/globals.css"]
+  },
+  {
+    "id": "F-008-03",
+    "story_id": "STORY-008",
+    "severity": "suggestion",
+    "category": "simplicity",
+    "criterion": "Scroll necessity",
+    "score": "warn",
+    "description": "On mobile the Start with Free button is visible without scrolling, but comparing plans takes about two screens of stacked cards before the fine print; there is no compact comparison.",
+    "expected": "Quick compare of plan limits.",
+    "actual": "Three tall stacked cards (page 2943px).",
+    "screenshot": "STORY-008/screenshots/step-3-1.png",
+    "suggested_fix": "Consider a condensed comparison on narrow screens.",
+    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
+  }
+]

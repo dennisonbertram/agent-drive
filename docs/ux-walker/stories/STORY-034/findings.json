@@ -1,0 +1,30 @@
+[
+  {
+    "id": "F-034-001",
+    "story_id": "STORY-034",
+    "severity": "medium",
+    "category": "hierarchy",
+    "criterion": "Current version identifiable",
+    "score": "fail",
+    "description": "Version history lists versions with identical rows; nothing marks the current version, and the current one also offers 'Restore this version'.",
+    "expected": "The newest version labelled 'Current' with no restore button.",
+    "actual": "Two identical rows, both with 'Restore this version'.",
+    "screenshot": "screenshots/finding-1-version-history.jpg",
+    "suggested_fix": "Label the first (current) row 'Current' and hide its restore button.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-034-002",
+    "story_id": "STORY-034",
+    "severity": "medium",
+    "category": "visual",
+    "criterion": "No internal identifiers in UI",
+    "score": "fail",
+    "description": "After a console restore, the Author column shows the raw internal id '__console__'.",
+    "expected": "A readable label such as 'You (console)'.",
+    "actual": "'__console__' in the Author column for restored files.",
+    "screenshot": "screenshots/finding-2-console-author.jpg",
+    "suggested_fix": "Map the __console__ author to a display label wherever authors render.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
+]
