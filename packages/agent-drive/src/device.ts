@@ -1,6 +1,13 @@
 import { spawn } from 'node:child_process';
 import { validateUrl } from './client.js';
-import { configPath, machineName, readConfig, writeConfig } from './config.js';
+import {
+  configPath,
+  isValidDriveKey,
+  keysForOrigin,
+  machineName,
+  readConfig,
+  writeConfig,
+} from './config.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
 
@@ -25,7 +32,7 @@ export type DeviceLoginOptions = {
 };
 
 export function defaultAgentName() {
-  return `${machineName()} agent`;
+  return `${machineName().slice(0, 64 - ' agent'.length)} agent`;
 }
 
 function sameOrigin(a: string | undefined, b: string) {
@@ -62,13 +69,17 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
   validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
-  const post = async (path: string, body: Record<string, unknown>) => {
+  const post = async (path: string, body: Record<string, unknown>, bearer?: string) => {
     let response: Response;
     try {
       response = await fetcher(`${base}${path}`, {
         method: 'POST',
         redirect: 'error',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        },
         body: JSON.stringify(body),
       });
     } catch {
@@ -78,19 +89,25 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     return { ok: response.ok, status: response.status, data };
   };
 
-  // Saved keys are not scoped per origin, so only trust them for the saved origin.
+  // The saved API key and drive keys are only trusted for the origin they were saved for.
+  const origin = new URL(base).origin;
   const saved = await readConfig();
-  const savedKeys = sameOrigin(saved.apiUrl, base) ? (saved.driveKeys ?? {}) : {};
+  const savedKeys = sameOrigin(saved.apiUrl, base) ? keysForOrigin(saved, origin) : {};
+  const previousKey = sameOrigin(saved.apiUrl, base) ? saved.apiKey : undefined;
   const knownDriveIds = Object.keys(savedKeys).slice(0, 20);
   const { privateKey, publicKey } = await generateDeviceKeyPair();
   let started;
   try {
-    started = await post('/oauth/device_authorization', {
-      client_name: options.name,
-      machine: options.machine,
-      public_key: publicKey,
-      ...(knownDriveIds.length ? { known_drive_ids: knownDriveIds } : {}),
-    });
+    started = await post(
+      '/oauth/device_authorization',
+      {
+        client_name: options.name,
+        machine: options.machine,
+        public_key: publicKey,
+        ...(knownDriveIds.length ? { known_drive_ids: knownDriveIds } : {}),
+      },
+      previousKey,
+    );
   } catch {
     throw new Error(`Could not reach Agent Drive at ${base}. Check the network and try again.`);
   }
@@ -163,7 +180,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       continue;
     }
     try {
-      driveKeys[driveId] = await unsealDriveKey(privateKey, driveId, sealed);
+      const key = await unsealDriveKey(privateKey, driveId, sealed);
+      if (!isValidDriveKey(key)) throw new Error('Invalid key.');
+      driveKeys[driveId] = key;
       unsealed.push(driveId);
     } catch {
       options.log(`Could not unseal the key for drive ${driveId}; it is not saved.`);
@@ -177,6 +196,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     apiUrl: base,
     apiKey: token.access_token,
     driveKeys,
+    driveKeyOrigins: Object.fromEntries(Object.keys(driveKeys).map((id) => [id, origin])),
   });
 
   const usable = [

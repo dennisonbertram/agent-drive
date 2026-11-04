@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { DriveCryptoError } from './crypto.js';
 import { AgentDriveApiError, type AgentDriveClient } from './client.js';
 
 export const SCOPE_HINT =
@@ -45,9 +46,24 @@ export function pickCheckDrive(
   return usable[0] as string;
 }
 
-export async function runCheck(client: Pick<AgentDriveClient, 'put' | 'get'>, driveId: string) {
+export async function runCheck(
+  client: Pick<AgentDriveClient, 'put' | 'get' | 'list'>,
+  driveId: string,
+) {
   const payload = randomBytes(16);
   const path = '/.agent-drive/check.txt';
+  // A wrong key would still pass the round trip below, so first prove it opens an existing file.
+  const existing = (await client.list(driveId)).items.filter((item) => item.path !== path);
+  const newest = existing.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  if (newest) {
+    try {
+      await client.get(driveId, newest.path);
+    } catch (error) {
+      if (error instanceof DriveCryptoError)
+        throw new Error('This drive key cannot decrypt existing files.');
+      throw error;
+    }
+  }
   await client.put(driveId, path, payload, { mode: 'overwrite' });
   const back = await client.get(driveId, path);
   if (!Buffer.from(back.bytes).equals(payload))
