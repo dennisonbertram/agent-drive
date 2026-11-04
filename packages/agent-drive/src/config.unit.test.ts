@@ -2,7 +2,13 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { configPath, readConfig, writeConfig } from './config.js';
+import {
+  configPath,
+  DEFAULT_API_URL,
+  readConfig,
+  resolveLoginApiUrl,
+  writeConfig,
+} from './config.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -70,5 +76,15 @@ describe('private CLI configuration', () => {
     await writeConfig({ apiKey: 'token' });
     expect((await stat(directory)).mode & 0o777).toBe(0o755);
     expect((await stat(configPath())).mode & 0o777).toBe(0o600);
+  });
+
+  it('resolves the login URL as flag, env, saved config, then default', async () => {
+    await isolatedConfig();
+    expect(await resolveLoginApiUrl(undefined)).toBe(DEFAULT_API_URL);
+    await writeConfig({ apiUrl: 'https://agent-drive.vercel.app/api', apiKey: 'token' });
+    expect(await resolveLoginApiUrl(undefined)).toBe('https://agent-drive.vercel.app/api');
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://env.test/api');
+    expect(await resolveLoginApiUrl(undefined)).toBe('https://env.test/api');
+    expect(await resolveLoginApiUrl('https://flag.test/api')).toBe('https://flag.test/api');
   });
 });

@@ -107,7 +107,7 @@ function ConnectAgentPanel() {
   const origin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
-    () => 'https://agent-drive.vercel.app',
+    () => 'https://agentdrive.xyz',
   );
   const instruction = `Set up Agent Drive: ${origin}/llms.txt`;
   const snippets = [

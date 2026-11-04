@@ -24,10 +24,10 @@ import {
 } from './credentials.js';
 import { installSkill, packagedSkillPath } from './skill.js';
 import {
-  DEFAULT_API_URL,
   configPath,
   driveKeyEnvironmentName,
   machineName,
+  resolveLoginApiUrl,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
@@ -157,7 +157,7 @@ export function parseShareExpiry(value: string | undefined, now = Date.now()) {
 async function run(command: string, raw: string[]) {
   const args = parse(raw);
   if (command === 'login') {
-    const apiUrl = args.values.api ?? process.env.AGENT_DRIVE_API_URL ?? DEFAULT_API_URL;
+    const apiUrl = await resolveLoginApiUrl(args.values.api);
     const apiKey =
       process.env.AGENT_DRIVE_API_KEY ?? (args.values['token-stdin'] ? await stdinText() : '');
     if (!apiKey) {
@@ -546,7 +546,7 @@ Commands:
   skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent
   mcp
 
-Without installing: npx -y https://agent-drive.vercel.app/cli/agent-drive.tgz <command>
+Without installing: npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
