@@ -1,0 +1,321 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-populated-nokey.png",
+    "1440x900-populated-keyloaded.png",
+    "1920x1080-populated-nokey.png",
+    "768x1024-populated-nokey.png",
+    "375x812-populated-keyloaded.png",
+    "1440x900-onboarding.png",
+    "1440x900-empty-nokey.png",
+    "375x812-onboarding.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 52,
+      "costUsd": 0.147536,
+      "result": {
+        "verdict": "Not ready: the core confirm-and-download task works at 1920px, but at 1440px the file list does not fit or scroll inside its panel, at 768px the FILE PATH column disappears entirely, and on mobile the file list is pushed off-screen by stacked key/backup messaging. Terminology, duplicate creation actions, and ambiguous key state further hinder a first-time operator.",
+        "findings": [
+          {
+            "level": "layout",
+            "element": "Whole page / file table panel",
+            "problem": "At 1440x900 only 8 of 10 rows are visible and the table footer/status is below the fold; the page scrolls instead of the list scrolling inside the table panel as specified. The same content only fits fully at 1920x1080.",
+            "norm": "An app surface at >=1280x800 should fit one screen with long lists scrolling inside their panel, keeping headers, status and actions visible.",
+            "severity": "P1",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Constrain the console to 100dvh, make the table body the only scroll region, and keep the table header and '10 loaded' footer sticky inside the panel."
+          },
+          {
+            "level": "component",
+            "element": "Table header 'FILE PATH / ENCRYPTED SIZE' and file rows",
+            "problem": "The FILE PATH column is completely missing/overlapped: the header renders as garbled overlapping text ('ENCBYP...ED SIZE') and rows show size, author, date and Download but no filename or path. The user cannot confirm which files arrived. Versions and Trash also disappear with no scroll affordance.",
+            "norm": "A file browser must never hide the filename, its primary identifier; responsive tables should prioritise name, then progressively disclose or horizontally scroll secondary columns with a visible affordance.",
+            "severity": "P0",
+            "screenshot": "768x1024-populated-nokey.png",
+            "fix": "At tablet width switch to a name-first two-line row (path, then size/date/actions), drop or merge Author, and restore Versions/Trash in an overflow menu; test column min-widths so headers cannot overlap."
+          },
+          {
+            "level": "layout",
+            "element": "'Key loaded' banner, drive ID, backup warning and 'All files' panel",
+            "problem": "On mobile the stacked banners, drive ID, Forget key and backup warning push the actual file list to the very bottom edge of the viewport; no file is visible without scrolling, defeating the primary 'confirm files arrived' task.",
+            "norm": "Mobile task surfaces should surface the primary content/object within the first viewport and collapse secondary status into compact, dismissible or inline summaries.",
+            "severity": "P1",
+            "screenshot": "375x812-populated-keyloaded.png",
+            "fix": "Collapse key state to a single compact status row, make the backup warning collapsible, and place the file list immediately below the drive selector."
+          },
+          {
+            "level": "group",
+            "element": "Drive bay strip: 'Billing agent', 'Data pipeline...', 'Research worksp...'",
+            "problem": "The third drive chip and the '+ YOUR NEXT AGENT' chip are cut off at the right edge with no fade, arrow or scroll indication, so users may not know more drives exist or how to reach them. Chip labels are truncated mid-word.",
+            "norm": "Horizontally scrollable chip rails need a clear scroll affordance/edge treatment and must not silently clip interactive items.",
+            "severity": "P1",
+            "screenshot": "768x1024-populated-nokey.png",
+            "fix": "Add edge fade plus scroll buttons/snap scrolling, allow the strip to wrap on tablet, or replace it with a drive select menu below a breakpoint."
+          },
+          {
+            "level": "group",
+            "element": "Top navigation 'Files / Agents / API keys / Usage / Trash / $...'",
+            "problem": "On mobile the navigation is clipped at '$' with no indication it scrolls, and the workspace/session context from the desktop sidebar ('Personal workspace / OPERATOR CONSOLE', 'Keys stay with you') disappears entirely.",
+            "norm": "Responsive navigation must show all destinations or use a labelled menu; clipped scrollable nav needs an affordance.",
+            "severity": "P2",
+            "screenshot": "375x812-populated-keyloaded.png",
+            "fix": "Use a compact menu/bottom nav on mobile or show a fade + chevron on the scrollable tab bar; keep encryption/session status accessible."
+          },
+          {
+            "level": "component",
+            "element": "Long file path '/datasets/customers/europe/germany/berlin/2026/q3/customer-i...'",
+            "problem": "Truncation cuts off the actual filename — the most distinguishing part — while the long directory prefix is preserved. Even at 1920px it ends 'customer-interactions-export-with-...'. There is no visible wrap, expansion or title affordance, so similarly-prefixed files cannot be distinguished.",
+            "norm": "File lists should truncate the middle of paths, preserving both the start and the full filename, and provide the full path on hover/focus/details.",
+            "severity": "P1",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Middle-truncate the directory only, always show the full basename, and add a tooltip/copy-path action; allow row expansion for very long paths."
+          },
+          {
+            "level": "component",
+            "element": "Row actions 'Download / Versions / Trash'",
+            "problem": "Download is a faint grey underlined text link when no key is loaded, with no lock icon, tooltip or inline reason at the point of action; the explanation sits in a separate banner far above the table. Targets are small text links and destructive 'Trash' sits immediately beside Download/Versions in the same style and weight.",
+            "norm": "Disabled actions should communicate why and how to enable them in place; destructive actions need visual distinction, adequate target size and separation from primary actions.",
+            "severity": "P1",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Make Download a real button with a lock + 'Load key to download' hint when disabled, enlarge hit areas to >=32px, and move Trash into an overflow menu or style it as a distinct destructive action with confirmation."
+          },
+          {
+            "level": "group",
+            "element": "Backup warning banner + 'You can browse file names without a key...' banner + KEY REQUIRED pill + 'Load drive key' button",
+            "problem": "Four separate elements repeat overlapping key messaging in stacked full-width boxes before the table, consuming roughly a quarter of the viewport. In the loaded state the layout reorders: the browse banner is replaced by a 'Key loaded into page memory' banner above the drive ID and the button moves, causing a jarring shift.",
+            "norm": "One status should have one clear home; state changes should update in place without reflowing surrounding content or duplicating explanations.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-keyloaded.png",
+            "fix": "Merge into a single key-status bar beside the drive name (state, one-line consequence, Load/Forget action), keep the backup warning as a separate slim alert, and reserve fixed height so toggling state does not shift the table."
+          },
+          {
+            "level": "component",
+            "element": "Backup warning on empty drive: 'this drive's key hasn't been backed up... these files can't be opened' + 'Filter loaded files...'",
+            "problem": "Billing agent has 0 files, yet the console shows a data-loss warning about files that do not exist, a KEY REQUIRED pill, a Load drive key button, and a filter input for an empty list. This creates false urgency and noise before the actual empty-state guidance 'Connect an agent'.",
+            "norm": "Warnings and controls should be contextually relevant; empty states should show only the next step needed for that state.",
+            "severity": "P1",
+            "screenshot": "1440x900-empty-nokey.png",
+            "fix": "Suppress the backup warning, key-required pill and filter when a drive has 0 files; escalate the backup prompt only after the first file arrives or a key exists."
+          },
+          {
+            "level": "group",
+            "element": "Duplicated create actions: orange '+ New drive' button and dashed '+ YOUR NEXT AGENT' chip",
+            "problem": "Two differently styled, differently worded controls imply two different actions (create a drive vs add an agent) for what appears to be the same flow, alongside a third variant 'Create your first drive' in onboarding. A first-time user cannot tell which to use.",
+            "norm": "One primary action per concept, with consistent naming across empty and populated states.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Keep a single '+ New drive' primary action; remove the dashed chip or relabel it explicitly if it starts a different agent-connection flow."
+          },
+          {
+            "level": "page",
+            "element": "Terminology: 'Personal workspace', 'Workspace / Files', 'Drives & files', drive chips named 'Billing agent' and 'Research workspace', 'YOUR AGENTS' SHARED MEMORY'",
+            "problem": "Workspace, drive and agent are used interchangeably for the same objects: a drive is named 'Research workspace', another is 'Billing agent', inside a 'Personal workspace'. The brief's model 'one drive per agent' is not legible from these labels, and the subtitle 'A home for the work. A starting point for what's next.' does not clarify it.",
+            "norm": "Product nouns must map 1:1 to the domain model and be used consistently in nav, headings, breadcrumbs and cards.",
+            "severity": "P1",
+            "screenshot": "1920x1080-populated-nokey.png",
+            "fix": "Pick one noun (Drive), label chips 'Drive: Research workspace — agent: Research assistant', align breadcrumb/sidebar wording, and replace the poetic subtitle with a functional one."
+          },
+          {
+            "level": "component",
+            "element": "Drive identifier '1d6870fa-b556-442b-b7f4-a3bedd453cb1'",
+            "problem": "A raw UUID is displayed prominently with no label, no explanation and no copy control, directly under the heading. For a non-cryptographer operator it reads as an error code and wastes prime space that could identify the drive/agent.",
+            "norm": "Internal identifiers should be labelled, de-emphasised and copyable, never presented as primary content.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Label it 'Drive ID', move it into a details row with a copy button, and lead with drive + agent names instead."
+          },
+          {
+            "level": "component",
+            "element": "AUTHOR column 'Research assistant..' repeated on every row",
+            "problem": "Every row truncates the same author name with an ellipsis, adding no information while consuming ~150px that contributes to path truncation and the tablet column collapse. The orange dot beside it is unexplained and duplicates the orange used for selected drive, LEDs and warnings.",
+            "norm": "Columns must earn their width; repeated constant values should be summarised at group level, and colour semantics must be consistent.",
+            "severity": "P2",
+            "screenshot": "1920x1080-populated-nokey.png",
+            "fix": "Remove the column when all files share one author (state it in the panel header), define one meaning for the orange dot, and reinvest the width in FILE PATH."
+          },
+          {
+            "level": "component",
+            "element": "'Filter loaded files...' input",
+            "problem": "'Loaded' is unexplained jargon — files are listed, not obviously 'loaded' — and the filter remains present and enabled on an empty drive where there is nothing to filter. No no-match behaviour or result count is visible in context.",
+            "norm": "Search/filter labels should use the user's vocabulary ('Filter by name or path') and controls should be hidden/disabled when they cannot apply.",
+            "severity": "P2",
+            "screenshot": "1440x900-empty-nokey.png",
+            "fix": "Rename to 'Filter by path...', hide it in the empty state, and pair it with a result count and a clear-filter action for the no-match state."
+          },
+          {
+            "level": "group",
+            "element": "Onboarding steps '01 Create a drive / 02 Save your key / 03 Connect an agent' and 'Refresh' button",
+            "problem": "The three steps that define successful setup are rendered as static footer text, not clickable or stateful guidance, while an irrelevant 'Refresh' button competes with the single real CTA 'Create your first drive'. On mobile the steps wrap awkwardly with '03 Connect an agent' orphaned on a second line.",
+            "norm": "Onboarding checklists should be actionable/stateful and the empty state should contain only the actions relevant to getting started.",
+            "severity": "P2",
+            "screenshot": "1440x900-onboarding.png",
+            "fix": "Make step 1 the active CTA and steps 2–3 preview what happens next, remove Refresh in the no-drives state, and stack the steps vertically on mobile."
+          },
+          {
+            "level": "component",
+            "element": "Status dots and small grey mono labels: 'KEY REQUIRED FOR DOWNLOADS' pill, sidebar nav, disabled Download",
+            "problem": "Key state is communicated largely by a tiny grey-vs-orange dot and low-contrast grey uppercase mono text; disabled Download is light grey on white. Meaning depends on colour alone and several labels fall below comfortable legibility for small text.",
+            "norm": "Status must not rely on colour alone and small text needs WCAG AA contrast (4.5:1); pair dots with icons/text weight differences.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Add lock/check icons to key pills, darken label and disabled-action text, and increase pill/label sizes."
+          }
+        ],
+        "excellent": [
+          "Drive selection is unambiguous in the bay strip: 'Research workspace' gets a light surface, orange border and lit LED versus dark unselected chips (1440x900-populated-nokey.png).",
+          "Key state change is honestly reflected in the data: loading a key turns every row's Download from faint/disabled to bold/enabled and swaps 'Load drive key' for 'Forget key' with a 'KEY LOADED' pill (1440x900-populated-keyloaded.png).",
+          "File path basename emphasis works: directory in grey, filename in bold black (e.g. '/notes/summary.md', Japanese/emoji name '/notes/日本語のメモ-🚀.md' renders intact) makes scanning 10 rows fast (1920x1080-populated-nokey.png).",
+          "Encryption honesty is exemplary: the table footer 'File contents encrypted · Paths and metadata visible to the service' and the backup warning's concrete recovery instruction avoid false privacy claims (1920x1080-populated-nokey.png).",
+          "Onboarding hierarchy is clean: one orange primary 'Create your first drive', a plain-language value line, and a 3-step preview with no competing clutter in the card itself (1440x900-onboarding.png).",
+          "Empty-drive state keeps the full console chrome and gives a single clear next action 'Connect an agent' with CLI/MCP mentioned (1440x900-empty-nokey.png)."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 122,
+      "costUsd": 0.105176,
+      "result": {
+        "verdict": "The visual direction ('T1 Rack' warm aluminium palette, smoked-glass drive bay strip, and monospace typography) is distinctive and well-crafted, and the onboarding card is clean. However, the page fails core layout and responsive usability standards: a P0 table rendering bug at 768x1024 hides the entire File Path column and overlaps headers; the desktop app surface overflows the 1440x900 viewport instead of scrolling inside the table panel; mobile viewports push all file rows completely below the fold; and redundant/shifting status banners clutter the workspace header.",
+        "findings": [
+          {
+            "level": "component",
+            "element": "Files table header and FILE PATH column",
+            "problem": "At the 768x1024 tablet viewport, the 'FILE PATH' column collapses to zero width: the header text 'FILE PATH' directly overlaps 'ENCRYPTED SIZE' ('ENCRYPFILE PATH SIZE'), every file name/path in the table body disappears completely, and the 'Versions' and 'Trash' actions are clipped off the right edge.",
+            "norm": "Data tables must preserve their primary identifier column (file path/name) across all responsive breakpoints and never overlap column headers or silently hide primary data.",
+            "severity": "P0",
+            "screenshot": "768x1024-populated-nokey.png",
+            "fix": "Give the FILE PATH column a minimum width (e.g., minmax(220px, 1fr)) or make the table horizontally scrollable at tablet/mobile widths, and collapse secondary metadata (Author, Modified) or group secondary row actions ('Versions', 'Trash') into a compact overflow menu."
+          },
+          {
+            "level": "layout",
+            "element": "Main app surface and Files table panel",
+            "problem": "At 1440x900 (above the >=1280x800 single-screen requirement), the app surface does not fit on one screen. Over 500px of stacked headers and full-width banners push the bottom of the file table, the table summary footer ('10 loaded'), and the page footer below the viewport fold, causing the entire document to scroll instead of scrolling inside the table panel.",
+            "norm": "An application console surface should lock to the viewport height (100dvh) with compact top chrome so the primary data table fills the remaining height and scrolls internally.",
+            "severity": "P1",
+            "screenshot": "1440x900-populated-keyloaded.png",
+            "fix": "Set the console shell to height: 100dvh; overflow: hidden with a flex-column main pane where the table body is flex: 1; overflow-y: auto, and consolidate the header and status banners into a compact toolbar so all 10 rows or the internal scroll container fit comfortably above the fold."
+          },
+          {
+            "level": "page",
+            "element": "Above-the-fold content stack on mobile",
+            "problem": "At 375x812, zero file rows are visible above the fold. The entire 812px viewport is consumed by top navigation, breadcrumbs, the drive bay strip, marketing copy, action buttons, and three stacked key/backup status blocks, cutting off right below the 'Filter loaded files...' input.",
+            "norm": "On mobile viewports, users on a Files view must be able to see at least the top rows of their file list without scrolling past a full screen of chrome and banners.",
+            "severity": "P1",
+            "screenshot": "375x812-populated-keyloaded.png",
+            "fix": "Hide marketing taglines ('YOUR AGENTS' SHARED MEMORY', 'A home for the work...') on mobile, merge the drive ID and key status into a single compact row, and collapse non-critical banners into expandable or dismissible pills."
+          },
+          {
+            "level": "group",
+            "element": "Key status banner, Drive UUID row, and Backup warning banner",
+            "problem": "Loading a drive key causes a jarring layout shift in vertical hierarchy: in the no-key state, the key info banner sits at the bottom below the backup warning banner, whereas in the key-loaded state, the confirmation banner ('Key loaded into page memory...') jumps above the Drive UUID row and backup banner.",
+            "norm": "Stateful status messages for the same control should occupy a consistent slot in the layout rather than reordering surrounding elements when toggled.",
+            "severity": "P1",
+            "screenshot": "1440x900-populated-keyloaded.png",
+            "fix": "Combine the Drive UUID, key status badge ('KEY REQUIRED' / 'KEY LOADED'), helper text, and 'Load drive key' / 'Forget key' button into a single unified Key Bar component in a fixed position."
+          },
+          {
+            "level": "group",
+            "element": "Empty drive state ('Billing agent') status banners and table controls",
+            "problem": "When viewing an empty drive with 0 files and no connected agent ('Ready for your first file. Connect an agent...'), the UI still renders the urgent backup warning ('If the agent's machine is lost, these files can't be opened. Ask the agent to run...'), the 'KEY REQUIRED FOR DOWNLOADS' badge, the 'You can browse file names without a key' banner, an active filter input, and table column headers.",
+            "norm": "Empty states should suppress warnings and controls that only apply to populated data; warning a user that 'these files can't be opened' and telling them to ask an unconnected agent to export credentials is logically contradictory.",
+            "severity": "P1",
+            "screenshot": "1440x900-empty-nokey.png",
+            "fix": "When a drive has 0 files and no agent connected, hide the key-required/backup-warning banners and the table header/filter bar, focusing the view entirely on the 'Ready for your first file / Connect an agent' setup card."
+          },
+          {
+            "level": "component",
+            "element": "Backup warning banner ('Download recovery file' button and copy)",
+            "problem": "When the drive key is already loaded in memory, the backup warning banner still tells the user 'Ask the agent to run agent-drive credentials export [Copy]' while awkwardly appending a right-aligned 'Download recovery file' button on a second line without explaining that clicking it resolves the backup warning directly from the browser.",
+            "norm": "Alert banners should present one clear resolution path appropriate to the current state and align actions consistently.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-keyloaded.png",
+            "fix": "When the key is loaded in browser memory, update the banner copy to prompt immediate local backup ('Save a recovery file now or export from your agent') and place 'Download recovery file' inline as the primary banner action."
+          },
+          {
+            "level": "component",
+            "element": "Backup warning banner on mobile and tablet",
+            "problem": "In 768x1024-populated-nokey.png, the orange LED indicator dot sits alone on the first line while the paragraph wraps onto a new line below it. In 375x812-populated-keyloaded.png, the inline code block 'agent-drive credentials export' breaks across two lines and nearly touches the top border of the 'Download recovery file' button (almost 0px vertical gap).",
+            "norm": "Flex/grid banner layouts must keep leading status icons aligned with the first line of text and maintain at least 8px-12px spacing between wrapped inline elements and action buttons.",
+            "severity": "P2",
+            "screenshot": "768x1024-populated-nokey.png",
+            "fix": "Use display: flex; align-items: flex-start with flex: 1; min-width: 0 on the text container so text stays beside the LED dot, and put banner CTA buttons in a dedicated action row with row-gap: 10px."
+          },
+          {
+            "level": "component",
+            "element": "Drive bay strip horizontal overflow",
+            "problem": "In 375x812-populated-keyloaded.png, the currently active drive chip ('Research workspace') is third in the strip and clipped off the right edge of the screen ('R... / 4...'). In 768x1024-populated-nokey.png, the '+ YOUR NEXT AGENT' chip is clipped off the right edge with no scroll affordance.",
+            "norm": "Horizontally scrolling selector strips must automatically scroll the active item fully into view and provide visual scroll/fade affordances when items overflow.",
+            "severity": "P2",
+            "screenshot": "375x812-populated-keyloaded.png",
+            "fix": "Call scrollIntoView({ inline: 'center' }) on the active drive chip on mount/selection, or order the active drive first on mobile, and add right-edge gradient fade masks when the strip overflows."
+          },
+          {
+            "level": "component",
+            "element": "Mobile top navigation bar",
+            "problem": "On mobile viewports (375x812), the horizontal navigation bar clips the sixth item ('$ Billing & limits') mid-character right at the viewport edge ('$ ]') with no overflow indicator or menu pattern.",
+            "norm": "Navigation bars on mobile should either fit within the viewport, use a clear scrollable track with edge fade/peek affordances, or collapse overflow items into a 'More' menu.",
+            "severity": "P2",
+            "screenshot": "375x812-populated-keyloaded.png",
+            "fix": "Add horizontal padding/scroll fade indicators to the mobile nav track or move secondary workspace links ('Usage', 'Trash', 'Billing & limits', 'Activity & deletion') into a compact menu drawer."
+          },
+          {
+            "level": "group",
+            "element": "Primary action hierarchy ('+ New drive' vs 'Load drive key' and 'Create your first drive')",
+            "problem": "Signal orange is reserved for the primary action, yet '+ New drive' in the header is always bright orange across all states: on the onboarding screen it duplicates the orange 'Create your first drive ↗' CTA right below it, and on populated nokey drives it outranks 'Load drive key' (which is styled as a plain secondary button despite being required to download files). Also, 'Create your first drive ↗' uses an external-link arrow icon for an in-app action.",
+            "norm": "Each screen state should have a single unmistakable primary CTA matching the user's primary task for that state.",
+            "severity": "P2",
+            "screenshot": "1440x900-onboarding.png",
+            "fix": "Hide the top-right '+ New drive' and 'Refresh' buttons during the zero-drive onboarding state (and remove the '↗' external arrow), and style 'Load drive key' with stronger visual prominence when viewing a populated drive with no key loaded."
+          },
+          {
+            "level": "component",
+            "element": "FILE PATH and AUTHOR columns in Files table",
+            "problem": "In 1440x900-populated-nokey.png, the long file path on row 2 truncates the actual filename at the end ('.../2026/q3/customer-i...') despite ~180px of unused whitespace before the ENCRYPTED SIZE column. Furthermore, even at 1920x1080, every single entry in the AUTHOR column is truncated with a double period ('Research assistant..') and preceded by a repetitive signal-orange LED dot on all 10 rows.",
+            "norm": "File browsers should preserve the filename and extension (using middle-truncation on long directory paths if needed), allocate enough width on 1920px screens to show full author names, and reserve signal-orange LEDs for true status/alerts rather than decorative row repetition.",
+            "severity": "P2",
+            "screenshot": "1920x1080-populated-nokey.png",
+            "fix": "Widen the AUTHOR column (or use fluid column sizing) so 'Research assistant' displays without truncation on desktop, replace the orange author dot with a neutral agent icon or avatar badge, and use middle-truncation on long directory paths so the full filename and extension remain visible."
+          },
+          {
+            "level": "component",
+            "element": "Table row actions ('Download', 'Versions', 'Trash')",
+            "problem": "When the key is loaded, 'Download', 'Versions', and 'Trash' are rendered as identical black underlined text links side-by-side on every row. The primary user goal ('Download') has no visual elevation over secondary ('Versions') or destructive ('Trash') actions.",
+            "norm": "Primary row actions should be visually distinct from secondary and destructive actions to speed up scanning and prevent accidental deletion.",
+            "severity": "P2",
+            "screenshot": "1440x900-populated-keyloaded.png",
+            "fix": "Style 'Download' as a compact button or high-contrast action with a download icon, and de-emphasize 'Versions' and 'Trash' (e.g., muted text with red hover state for 'Trash', or place them in a row '...' menu)."
+          },
+          {
+            "level": "component",
+            "element": "Sidebar 'Files' navigation badge count",
+            "problem": "The 'Files' item under the 'WORKSPACE' sidebar header displays a badge of '10' when 'Research workspace' is selected (1440x900-populated-nokey.png), changes to '0' when 'Billing agent' is selected (1440x900-empty-nokey.png), and disappears in onboarding—even though total files across the workspace's 3 drives is 12.",
+            "norm": "Counts on global workspace navigation items should reflect workspace-wide totals (or be omitted), as drive-specific file counts are already shown inside each drive bay chip.",
+            "severity": "P3",
+            "screenshot": "1440x900-empty-nokey.png",
+            "fix": "Either display the total workspace file count ('12') on the sidebar 'Files' item or remove the sidebar badge and rely on the per-drive file counts already visible in the drive bay chips."
+          },
+          {
+            "level": "component",
+            "element": "Drive UUID string ('1d6870fa-b556-442b-b7f4-a3bedd453cb1')",
+            "problem": "The raw 36-character drive UUID is displayed without a label (such as 'DRIVE ID') and without a copy button, whereas the CLI command right below it has an explicit 'Copy' button.",
+            "norm": "Technical identifiers exposed in developer consoles should be labeled and include a one-click copy affordance.",
+            "severity": "P3",
+            "screenshot": "1440x900-populated-nokey.png",
+            "fix": "Prefix the UUID with a muted 'DRIVE ID' label (or shorten it to '1d6870fa…453cb1' with a click-to-copy icon button)."
+          }
+        ],
+        "excellent": [
+          "Cohesive 'T1 Rack' industrial design language: the warm aluminium background, crisp black borders, IBM Plex Mono metadata, and restrained signal-orange accents feel authentic and distinctive.",
+          "Hardware-inspired drive bay strip: the recessed bay bar with smoked-glass drive chips, LED status dots, and inline size/file-count metadata makes switching between agent drives intuitive.",
+          "Zero-drives onboarding card (1440x900-onboarding.png): well-proportioned empty state with a clear 3-step progression ('01 Create a drive · 02 Save your key · 03 Connect an agent').",
+          "Clear, non-cryptographer security messaging: persistent trust cues in the top bar ('CLIENT-SIDE ENCRYPTED'), sidebar footer ('Keys stay with you'), and table footer clearly explain what is encrypted vs. visible."
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+# Marketing (`/` landing and `/pricing`), T1 Rack, local dev server, 2026-11-04
+
+Shots in `shots/` (`<viewport>-<state>.png`, `-full.png`). Measures in `audit.json` (layout-audit and geometry-audit per viewport and page). Second opinions in `second-opinion.json` (muse-wonder, gemini-4-argon). No horizontal page overflow at any viewport (pageScrollX 0). Marketing pages scroll by design (L1 does not apply).
+
+## Verdicts
+
+| viewport x state | verdict | refs |
+|---|---|---|
+| 1440 landing | Strong. One focal headline, one orange primary, rack is a credible hero. Weak points: rack micro-labels are 7.5-8px, hero column ends with two same-weight outline buttons, and Create workspace is the weakest button while Open console is the strongest. | `1440x900-landing.png`, `-full.png` |
+| 1920 landing | Same as 1440 in a capped 1208px container; fine, side gutters are large but intentional. Fold cuts at the three feature columns, acceptable. | `1920x1080-landing-full.png` |
+| 768 landing | Rack and legend are inset 68px from the left (88 vs 20) while headline, setup rows and feature grid start at 20, so the page has two left edges. Nav loses llms.txt silently. | `768x1024-landing-full.png`; measured `.hero-copy 20-748`, `.rack 88-748` |
+| 375 landing | Works, no overflow. Row 01 button drops under its label left-aligned while row 02 stays right-aligned. Nav loses Pricing and llms.txt (Pricing remains in the hero buttons). Rack becomes a 2x2 grid with unreadable 7.5px labels. | `375x812-landing-full.png` |
+| Landing, reduced motion | Pass. `document.getAnimations().length` is 0 with reduced motion and 7 without (rk-rd, rk-write, rk-invite); static frame keeps all content. | `1440x900-landing-reduced-motion.png` |
+| 1440 pricing | Clear and calm, but it is visibly a different template from the landing: old `a/ agent drive` mark, different nav, double rule under the header, narrower container (152 vs 116 edge). | `1440x900-pricing-full.png` |
+| 1920 pricing | Same as 1440 centered; fine. | `1920x1080-pricing-full.png` |
+| 768 pricing | Plan cards stack one per row (cards are wide and sparse), then a 2-column fine-print panel. Acceptable but long; feature columns stack with hairlines. | `768x1024-pricing-full.png` |
+| 375 pricing | Clean stack. Header buttons fit. Fine print runs 2 screens of grey 13px text. | `375x812-pricing-full.png` |
+| Pricing, checkout disabled (local) | Banner shown, but Choose Developer and Choose Team still look live and lead to `/console/billing` then `/sign-in` (observed redirect), so the banner and buttons contradict each other. | `1440x900-pricing-choose-developer.png` |
+
+## Findings
+
+| id | level | element | problem | norm | evidence | sev | found by | verified |
+|---|---|---|---|---|---|---|---|---|
+| MARKETING-01 | layout | `/pricing` header (`.brand-mark`, `.billing-header`) | Pricing and sign-in show the old `a/ agent drive` mark and lowercase wordmark; landing shows the new rack-icon mark and "Agent Drive". Two brands on two marketing pages. Confirmed (known item). | H5 | `1440x900-pricing-full.png`, `1440x900-landing.png`; link text "a/ agent drive" | P1 | own, muse, argon | yes (measured DOM) |
+| MARKETING-02 | layout | `/pricing` vs `/` nav | Landing nav: Pricing, llms.txt, Sign in, Open console (black button). Pricing nav: Quickstart, Sign in (both outlined buttons). No Pricing "current" state, no path to console, different container width (152 vs 116 left edge at 1440). | H5, L4, I6 | both full shots; link inventories | P1 | own, muse, argon | yes |
+| MARKETING-03 | group | Pricing header double rule | Hairline under the header at y=83 and a solid black rule at y=124 (`.billing-header` border-bottom plus `.billing-heading` border-top), 41px apart, the second heavier. Looks like a rendering bug. Confirmed (known item). | D2, H5 | `1440x900-pricing-full.png`; measured bb1px 0-84, bt1px 124 | P2 | own | yes |
+| MARKETING-04 | component | Pricing plan cards and banner | Banner says paid checkout is not enabled, yet Choose Developer and Choose Team are normal enabled buttons that go to `/console/billing`, which redirects a visitor to sign-in. Developer card is labeled "SELECTED" with a heavy black frame though the visitor selected nothing, while Free carries the only orange button, so there are two competing emphasis signals. | I1, I8, C3, H1 | `1440x900-pricing-full.png`; click test ended at `/sign-in` | P1 | own, argon, muse | yes |
+| MARKETING-05 | page | Landing CTA hierarchy | First-time user action "Create your workspace" is an outline button at the bottom of the hero column; the strongest static button is header "Open console" (a returning-user action). Orange "Copy for your agent" is the true primary, which is reasonable, but Create/Pricing then sit as equal-weight twins and Pricing duplicates the nav link. | H1, C2 | `1440x900-landing.png`; hrefs `/sign-up`, `/pricing` | P2 | own, muse, argon | yes |
+| MARKETING-06 | component | Rack labels | MEM/OUT/WRK/HND, paths and file counts are 7.5px (12 elements at 8px per audit type.sizes) and become 2x2 at 375; these are the hero's only concrete evidence. Audit lowContrast ratio 2.38 for them is a false reading (text rgb(154,151,142) on near-black is about 6:1); the problem is size. | A1, D1 | `375x812-landing-full.png`; computed font-size 7.5px | P2 | own, argon | yes (size), contrast audit rejected |
+| MARKETING-07 | layout | Landing at 768 | Rack and legend start at x=88, hero copy and feature grid at x=20 (`.rack` has `margin-left:auto; max-width:660px`). Two left edges; rack looks pushed off-grid. | L4, H6 | `768x1024-landing-full.png`; measured | P2 | argon, own | yes |
+| MARKETING-08 | component | Setup rows at 375 | Row 01's "Copy for your agent" wraps under its label, left-aligned; row 02's "Copy" stays inline right-aligned. Inconsistent twin rows. | H5, H6 | `375x812-landing-full.png` | P2 | muse, argon, own | yes |
+| MARKETING-09 | component | Responsive nav | llms.txt disappears at 768 and 375, Pricing at 375, no menu. Header links are 21px tall (Pricing, llms.txt, Sign in), under 24px (44 on touch). | I4, I5 | audit smallTargets; `375x812-landing.png` | P2 | own, muse, argon | yes |
+| MARKETING-10 | component | Copy button failure state | When the Clipboard API is unavailable or denied the visible label does not change; "Copy failed" goes only to an sr-only live region and never clears. Sighted users get no feedback. Observed in headless run (button text stayed "Copy for your agent", live text "Copy failed"). | I2, I3 | `copy-button.tsx`; eval result | P2 | own | yes |
+| MARKETING-11 | page | Footer and trust links | Both footers are a wordmark and a tagline. No Docs, GitHub, security or contact link on landing (Quickstart exists only in pricing nav). Pricing footer text (mono) differs from landing footer text (sans). Landing is a developer-trust page for an encryption product. | P1, I6, H5 | both full shots | P2 | own, muse, argon | yes |
+| MARKETING-12 | group | Setup rows | "01 / 02" read as ordered steps but 02 is an alternative ("Or install"). Minor; the word "Or" is present. | C1 | `1440x900-landing.png` | P3 | muse | partly |
+| MARKETING-13 | component | Rack callout 3 | Badge 3 sits on the top-right corner of the empty bay, close to the rack's header LED, so it can read as pointing at the LED. | C3, I1 | `1440x900-landing.png` | P3 | argon | yes |
+| MARKETING-14 | component | Small mono text | "Encrypted on the agent's machine." is 11.5px grey mono, the key trust line is the faintest text in the hero (color rgb(93,91,86), about 5.5:1, passes, but size is small). | D1, H2 | `1440x900-landing.png` | P3 | own, muse | yes |
+| MARKETING-15 | component | Pricing buttons | Free button is 40px tall, outlined buttons are 42px (border adds 2px); heights differ in one row. Header buttons on pricing are 100px and 76px wide. | H6 | measured btn heights 40/42/42 | P3 | own | yes |
+| MARKETING-16 | page | Pricing fine print | Two dense columns of 13px grey legal-style copy; at 375 it spans two screens. Content is honest; presentation is heavy. | D1, C4 | `375x812-pricing-full.png` | P3 | muse, own | yes |
+| MARKETING-17 | page | Metadata | No Open Graph tags on either page; pricing `<title>` is "Agent Drive", identical to landing. | P1 | `og:title` absent; titles | P3 | own | yes |
+| MARKETING-18 | component | Feature columns | Landing feature grid has no dividers, pricing feature grid has hairline dividers and a different eyebrow size. Same pattern, two looks. | H5 | both full shots | P3 | argon, own | yes |
+| MARKETING-19 | component | Hero fold at 1440 | Rack is vertically centered against the copy column, leaving 60px+ of empty space above the rack; the legend ends 130px above the hero rule. Slightly unbalanced but acceptable. | D2 | `1440x900-landing.png` | P3 | own | observed |
+
+Rejected external claims: muse P0 "localhost URLs in copy strings" is a dev-server artifact (`page.tsx` builds them from the request host, defaulting to agentdrive.xyz), not a product defect (rejected). Muse's "no copied state" is rejected; label changes to Copied on success (`copy-button.tsx`). Muse's "rack badges mismatch legend" is only partly true (see 13). Leftover lime/green: none found on either page (confirmed absent; focus ring is dark ink, accent orange only).
+
+Counts: P0 0, P1 3 (01, 02, 04), P2 8 (03, 05, 06, 07, 08, 09, 10, 11), P3 8 (12-19). By level: component 10, page 4, layout 3, group 2 (19 total).
+
+## Excellent as is
+
+- Landing hero: one headline, one orange primary, rack illustration is original and on-brand; matches `docs/design/t1-rack-reference.html`.
+- Reduced motion: all rack animation stops (0 animations running), content intact.
+- Focus: every control shows a visible 2px ink ring with 2px offset, including on the black "Open console" button (`1440x900-landing-focus-console.png`); tab order is logical (logo, Pricing, llms.txt, Sign in, Open console, Copy, Copy, Create, Pricing).
+- No lime or green left; orange used only for LEDs, readouts, primary buttons.
+- Pricing cards: monospace price readouts, "UNIT 0x" labels, aligned rows, honest copy about metadata and caps.
+- No horizontal overflow at any of the four viewports.
+
+## Where to fix
+
+- 01, 02, 03, 15, 16, 18: `apps/web/app/(app)/pricing/page.tsx` (use the landing header markup and `landing-footer`), `apps/web/app/styles/account.css` (`.billing-header`, `.billing-heading` border-top, `.brand-mark`).
+- 04: `pricing/page.tsx` (`selected` class, disable or relabel paid buttons when `!paidAvailable`), `account.css` `.billing-plan.selected`.
+- 05, 12: `apps/web/app/(app)/page.tsx` `.landing-actions`; `styles/landing.css` `.landing-btn`.
+- 06, 13: `styles/landing.css` `.rk-segl`, `.rk-parts`, `.rk-mk` (mobile block at max-width 860 and 480).
+- 07: `styles/landing.css` `.rack { margin-left:auto }` inside the 860px block; set `margin-left:0` or `max-width:none`.
+- 08: `styles/landing.css` `.setup-head` wrap rule at 480.
+- 09: `styles/landing.css` `.landing-links` hide rules and link padding.
+- 10: `apps/web/app/(app)/copy-button.tsx` (show "Copy failed" in the visible label).
+- 11, 17: `page.tsx` footers, `apps/web/app/layout.tsx` metadata.

@@ -1,0 +1,336 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440-billing-full.png",
+    "1440-settings-full.png",
+    "1440-sign-in.png",
+    "375-billing-full.png",
+    "375-settings-full.png",
+    "768-billing-full.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 59,
+      "costUsd": 0.182104,
+      "result": {
+        "verdict": "Visually distinctive and unusually honest about billing uncertainty, but not yet excellent: critical tables truncate on mobile, destructive and spend-control forms are ambiguous about state, paid-plan CTAs look actionable while disabled, and there is no account identity or navigation between account pages. The billing page also buries the user's primary control task below three large sales cards.",
+        "findings": [
+          {
+            "level": "layout",
+            "element": "Header on all account pages — 'agent drive' + single 'Back to workspace' / 'Back to files' button",
+            "problem": "No account identity (email, workspace name, avatar), no tabs/links between Billing and Settings, and the back destination/label changes between pages ('Back to workspace' on billing vs 'Back to files' on settings). A user about to delete an account or set a spend cap cannot confirm which account they are acting on, and must leave the page to switch account tasks.",
+            "norm": "Account/settings areas show the signed-in identity and persistent sub-navigation (Billing, Settings, etc.) with consistent wayfinding (Stripe, GitHub, Vercel consoles).",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Add a persistent account header: workspace/email identifier plus tab nav 'Billing & limits | Activity & deletion'. Use one consistent back destination/label everywhere."
+          },
+          {
+            "level": "page",
+            "element": "Whole 'Billing & limits' page order: usage cards → 'A plan for your agents' plan cards → 'Boundaries, not surprises.' spend-cap form → 'Usage by agent'",
+            "problem": "The persona's stated tasks (check spend, set a write cap) are split by a full-width, three-card sales section, so the actionable spend-cap form sits far below the fold even at 1440x900 and after ~3 screens at 375px. The page does not fit its job on one screen and the primary control is the last thing reached.",
+            "norm": "Billing consoles lead with usage + controls for the current plan; upgrade marketing is secondary/collapsed (Stripe Billing, AWS Cost Management).",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Move 'Save spending controls' form directly under the usage summary, demote plans below usage-by-agent or behind a 'Compare plans' disclosure, and add anchor links at the top."
+          },
+          {
+            "level": "component",
+            "element": "'Choose developer' button (UNIT 02 DEVELOPER card)",
+            "problem": "Paid checkout is disabled (banner above), yet this button is filled in pale signal-orange with grey text — it reads as the page's enabled primary CTA while 'Choose team' is an outline disabled button and 'Current plan' is a third style. Three supposedly equivalent disabled states look completely different, and the orange fill contradicts 'one signal orange' reserved for action.",
+            "norm": "Disabled controls share one clearly non-interactive treatment with an adjacent reason; primary colour is reserved for the available action (here, 'Save spending controls').",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Give all three plan buttons the same disabled treatment, add 'Checkout not enabled' microcopy inside each paid card, and remove the orange fill until checkout works."
+          },
+          {
+            "level": "component",
+            "element": "Usage summary cards '$0.00', '0 B', 'Not connected'",
+            "problem": "No usage is visualised against allowance: '0 B' with '5.0 GiB included' has no progress bar or % used, and 'Not connected' mixes a system status into a metric slot with no explanation or action to connect it. A first-time user cannot judge 'am I close to a limit?' at a glance.",
+            "norm": "Usage consoles pair every quantity with its limit and a meter (x of 5 GiB, bar, %); a disconnected data source carries a status pill plus a 'learn more/connect' affordance.",
+            "severity": "P2",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Add progress bars and '0 B of 5.0 GiB' phrasing to storage/downloads cards; move 'Not connected' into a status banner with one line on what to do about it."
+          },
+          {
+            "level": "component",
+            "element": "Spend-cap inputs 'No cap', 'No alert', 'you@example.com' (MONTHLY WRITE CAP (USD) / EMAIL ME AT (USD) / ALERT EMAIL)",
+            "problem": "Placeholders read as saved values, so the user cannot tell whether a cap/alert is currently set or the fields are empty. There is no currency adornment, numeric hint, unit step, or visible inline validation, and the dependency between the three fields (alert threshold useless without a deliverable email, which the note admits is 'not configured') is unstated until after saving.",
+            "norm": "Forms show persisted values as values, placeholders as examples ('e.g. 50'), prefix currency symbols, validate inline at the field, and surface blocking configuration problems before the save action.",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Render actual saved values or an explicit 'Not set' state, add '$' prefix and inputmode='decimal', inline errors under each field, and put the 'email delivery not configured' warning above the (disabled-until-fixed or clearly queued) alert fields."
+          },
+          {
+            "level": "component",
+            "element": "'Save spending controls' orange button",
+            "problem": "The button is always fully enabled/saturated even when nothing has changed and email delivery is broken, with no dirty state, saving state, or success confirmation pattern visible. Combined with the orange 'Choose developer' fill, the page has two competing orange primaries.",
+            "norm": "One primary action per view; save buttons reflect dirty state and confirm outcome ('Saved ✓' / toast) for consequential financial settings.",
+            "severity": "P2",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Disable until a field changes, show saved timestamp/last-saved values, and make this the only saturated-orange button on the page."
+          },
+          {
+            "level": "component",
+            "element": "'Usage by agent' table",
+            "problem": "On mobile the table is clipped mid-data: only AGENT and RETAINED STORAGE render; OBSERVED DOWNLOADS and OPERATIONS are cut off with no horizontal-scroll affordance, fade, or stacked-card alternative. The per-agent breakdown — the section's entire purpose — is unreadable.",
+            "norm": "Data tables on ≤375px either scroll horizontally with a visible cue or reflow to labelled key-value rows; no column is silently truncated.",
+            "severity": "P0",
+            "screenshot": "375-billing-full.png",
+            "fix": "Reflow each agent to a stacked card (Agent / Storage / Downloads / Operations label-value pairs) below 640px, or add overflow-x scroll with sticky first column and edge fade."
+          },
+          {
+            "level": "group",
+            "element": "'Usage by agent' header row: 'EXPORT PERIOD' label + 'Current month' select + 'Download CSV' button",
+            "problem": "The 'EXPORT PERIOD' label sits only over the select, the CSV button's period dependency is unlabelled, and on desktop the pair floats far right, detached from the 'Usage by agent / November 2026' title it modifies. Users may not realise the download follows the select.",
+            "norm": "Export controls are grouped as one labelled unit adjacent to the data they export.",
+            "severity": "P3",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Wrap select+button in one fieldset labelled 'Export period', keep it next to the section title, and label the button 'Download CSV for selected period' accessibly."
+          },
+          {
+            "level": "component",
+            "element": "Plan cards UNIT 01/02/03 feature lists ('3 drives', '5.0 GiB encrypted storage', ...)",
+            "problem": "Rows are bare text separated by hairlines with no indication of what differs meaningfully, no 'recommended' or usage-fit guidance, and identical prices repeated as '$0.00 / $20.00 / $200.00' with no overage rates — yet the banner says overage rates are core to billing. Comparison requires reading every row of all three cards.",
+            "norm": "Pricing tables highlight the recommended tier, mark included limits consistently, and disclose overage pricing at the point of choice.",
+            "severity": "P2",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Add a comparison treatment: bold the differing limits, tag Developer 'Recommended for most agents', and add an 'overage rates' footnote row (even if 'not yet configured')."
+          },
+          {
+            "level": "component",
+            "element": "Audit log table (WHEN / ACTION / ACTOR / RESULT)",
+            "problem": "On mobile the table truncates ACTION values mid-string ('console.delet:', 'console.audit.') and ACTOR and RESULT columns are pushed entirely off-screen with no scroll cue — an audit log whose actor and outcome are invisible fails its purpose. Rows also appear far more numerous (with 'Load older events') than on desktop, so the two viewports present inconsistent records.",
+            "norm": "Audit logs must keep actor, action and result legible at all breakpoints (stacked rows on mobile) and paginate identically across viewports.",
+            "severity": "P0",
+            "screenshot": "375-settings-full.png",
+            "fix": "Convert rows to stacked cards on mobile (When / Action / Actor / Result labelled), allow action strings to wrap instead of clip, and unify pagination."
+          },
+          {
+            "level": "component",
+            "element": "Audit log rows repeating 'drives.list / Console user / SUCCESS / HTTP 200' and 'unknown' actions; desktop card ends after 8 rows with no pagination control",
+            "problem": "Half the desktop rows are the console's own list calls and several actions render literally as 'unknown', so the log is noisy and partly meaningless. On desktop there is no 'Load older events'/pagination (it only appears on mobile), so history beyond 8 rows is unreachable; SUCCESS badge + 'HTTP 200' stacked under it duplicates the same fact and doubles row height.",
+            "norm": "Audit logs filter out self-referential noise by default, never emit 'unknown' (fallback to a raw event name), combine status into one pill, and always expose pagination/filtering.",
+            "severity": "P1",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Merge badge+HTTP into one '200 · Success' pill, filter 'drives.list' noise behind a toggle, add search/filter + 'Load older events' on desktop, and map unknown actions to their raw type."
+          },
+          {
+            "level": "group",
+            "element": "'Delete your data' panel: 'Delete one drive' and 'Delete your account' forms side by side",
+            "problem": "Two irreversible actions of very different blast radius share one panel with equal visual weight, separated only by whitespace. A user scanning for 'delete drive' can type into the account confirmation by mistake. The type-to-confirm safeguard helps, but proximity of two live destructive forms is a classic slip risk.",
+            "norm": "Destructive actions are isolated per section, with account deletion visually separated and subordinated (GitHub separates 'Delete repository' and 'Delete account' into distinct danger zones).",
+            "severity": "P1",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Split into two separate bordered danger cards with vertical spacing, and require an extra expand step ('Delete account…' reveals the form) for the account-level action."
+          },
+          {
+            "level": "component",
+            "element": "'Delete one drive' form: 'No active drives' select + 'Type the exact drive name to confirm' input + 'Permanently delete drive' button",
+            "problem": "With no drives, the form is a dead apparatus: the confirmation input remains enabled and typable for a drive that cannot be selected, and the disabled button gives no reason. The empty state is only implied by the select text. Label-to-field gaps inside this panel are also very large (~40px+), weakening label/input association.",
+            "norm": "Impossible actions collapse to an explicit empty state ('You have no drives to delete') with the whole form disabled/hidden and a next step.",
+            "severity": "P1",
+            "screenshot": "1440-settings-full.png",
+            "fix": "When no active drives exist, replace the form with an empty-state line and link to create/manage drives; tighten label-field spacing to ~8px."
+          },
+          {
+            "level": "component",
+            "element": "'▶ When is data actually removed?' collapsed disclosure inside 'Delete your data'",
+            "problem": "The single most decision-critical fact for an irreversible deletion — actual removal timing (immediate vs queued vs retained backups) — is hidden behind a collapsed disclosure above the delete forms. Users can complete deletion without ever seeing it.",
+            "norm": "Material consequences of destructive actions are stated inline, expanded, adjacent to the action (GDPR erasure flows state retention windows upfront).",
+            "severity": "P2",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Expand this content by default as plain text in the panel intro; keep the disclosure only for extra detail."
+          },
+          {
+            "level": "component",
+            "element": "Disabled destructive buttons 'Permanently delete drive' / 'Permanently delete account' (pale pink, white text)",
+            "problem": "White text on the washed pink fill has very low contrast, so the button label is hard to read even as a disabled element, and pink is a third colour language unrelated to the ink/orange Rack system — it neither signals danger (red) nor clearly reads disabled (grey). It also sits enabled-looking next to empty inputs, inviting typing with no feedback on what will unlock it.",
+            "norm": "Danger buttons use a recognised danger red; disabled states stay legible (≥3:1) and the UI states the unlock condition near the button.",
+            "severity": "P2",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Use neutral grey disabled style that turns solid danger-red only when confirmation matches, plus helper text 'Type the drive name to enable deletion'."
+          },
+          {
+            "level": "component",
+            "element": "'Deletion requests' card: 'No deletion requests loaded.'",
+            "problem": "The copy is ambiguous between 'none exist', 'not fetched yet', and 'failed to load' — bad states grammar for a panel whose job is tracking irreversible background jobs. Its recovery action ('Refresh') lives at the top of the page, far from this card (on mobile it scrolls away entirely).",
+            "norm": "Status panels distinguish empty vs loading vs error and co-locate their refresh/retry action with the status.",
+            "severity": "P2",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Change copy to 'No deletion requests yet' when confirmed empty, and add an in-card Refresh button with last-checked timestamp."
+          },
+          {
+            "level": "page",
+            "element": "'Refresh' button placement on Activity & deletion",
+            "problem": "On desktop it sits top-right by the title (controlling the audit log at top), but the text in 'Deletion requests' and 'Audit log' both depend on it at the bottom/middle of a very long page; on mobile it drops to below the subtitle, detached from both. One remote control serving two distant panels is undiscoverable in context.",
+            "norm": "Refresh/retry controls live inside the panel they refresh, with scope-labelled text.",
+            "severity": "P2",
+            "screenshot": "375-settings-full.png",
+            "fix": "Put 'Refresh audit log' in the Audit log card header and 'Refresh' in Deletion requests; remove the page-level one."
+          },
+          {
+            "level": "page",
+            "element": "Sign-in fallback card 'Sign in / Sign-in is not configured on this installation…'",
+            "problem": "A dead end floating in a vast empty dot-grid viewport: no CTA, no link back to marketing/home, no docs/support path, no environment/config hint beyond naming 'the Agent Drive Clerk instance', and no route to sign-up. A first-time user (or a developer evaluating self-hosting) has literally nothing to do here.",
+            "norm": "Auth fallback/error pages always offer a next action (retry, home, documentation, admin setup instructions with the exact env vars to set).",
+            "severity": "P1",
+            "screenshot": "1440-sign-in.png",
+            "fix": "Add 'Back to home', a link to setup docs naming the required Clerk env variables, and visually size the panel to the viewport (reduce dead space); differentiate sign-up copy on /sign-up."
+          },
+          {
+            "level": "layout",
+            "element": "Tablet (768px) billing layout: 2-column usage cards with 'OBSERVED DOWNLOADS' orphaned full-width, then single-column plan cards, then two-column 'Boundaries' text+form",
+            "problem": "The 2+1 summary grid leaves an awkward full-width orphan card, plans collapse to one column making an already long page much longer, while the spend-cap section stubbornly stays two-column and cramps the explanatory text next to the form. Breakpoint behaviour feels unplanned rather than designed.",
+            "norm": "Intermediate breakpoints get deliberate grids (3→1 or 3-across condensed) and consistent stacking rules per section type.",
+            "severity": "P2",
+            "screenshot": "768-billing-full.png",
+            "fix": "At 768px stack summary cards 1-up (or keep 3 equal mini-stats), keep plans 1-up, and stack the spend-cap text above its form like other sections."
+          },
+          {
+            "level": "component",
+            "element": "Micro-typography: mono eyebrow labels ('YOUR WORKSPACE', 'NOVEMBER 2026 · ESTIMATE'), small grey helper text and 'FREE · NO CARD REQUIRED' pill with orange dot",
+            "problem": "Secondary text is low-contrast light grey on warm grey, eyebrows are tiny letterspaced mono, and the orange dot in the FREE pill borrows the signal/alert colour for a benign status — orange also means SELECTED, the disabled Developer CTA and Save, diluting the 'one signal orange' system. Body copy repeats long caveats (transfer delays, tax, proration) in three places, adding density without hierarchy.",
+            "norm": "WCAG AA contrast for text (4.5:1), signal colour reserved for one meaning, caveats consolidated into one footnote/tooltip.",
+            "severity": "P3",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Darken secondary text one step, make the FREE dot ink/green-neutral, keep orange only for the enabled primary action and selected state, and consolidate disclaimers into a single footnotes block."
+          }
+        ],
+        "excellent": [
+          "Selected plan treatment is genuinely clear: UNIT 01 FREE card's black header bar with orange 'UNIT 01 ● SELECTED' text plus heavier border makes current-plan state unmistakable at a glance (1440-billing-full.png).",
+          "Billing honesty is exemplary: 'Not connected', 'Actual transfer reports can be delayed or incomplete. Authorizations are not charges', and 'This is not a guaranteed invoice ceiling' pre-empt false confidence instead of faking precision (1440-billing-full.png).",
+          "Destructive design intent is strong: the red-outlined, tinted 'Delete your data' panel, 'Deletion cannot be undone' lead, and type-to-confirm ('Type DELETE MY ACCOUNT to confirm') follow best practice for irreversible actions (1440-settings-full.png).",
+          "Audit log reassurance copy 'Metadata only—never file contents or credentials' and the 'OWNER ONLY' pill communicate privacy and permission scoping exactly where a security-conscious developer looks (1440-settings-full.png).",
+          "Spend-cap explanation is plain-language and behaviourally precise: 'A write cap stops new uploads… Existing files remain readable within your download allowance' distinguishes write-block from data loss (1440-billing-full.png).",
+          "The Rack system is consistently executed across all six screenshots — aluminium ground, dot grid, Space Grotesk display headings with mono data labels, and disciplined ink/orange palette give the account pages a coherent, memorable identity."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 107,
+      "costUsd": 0.09108,
+      "result": {
+        "verdict": "The T1 'Rack' industrial aesthetic—dot-grid aluminium ground, crisp Space Grotesk + IBM Plex Mono typography, and hardware-inspired unit headers—is cohesive and distinctive. However, the account pages suffer from severe mobile table clipping (cutting off critical columns on 375px viewports), dead-end navigation between Billing and Settings, noisy/duplicate `unknown` entries in the Audit Log, and confusing disabled states in both the plan cards and destructive deletion forms.",
+        "findings": [
+          {
+            "level": "component",
+            "element": "Audit log table (`.audit-log` table container)",
+            "problem": "On the 375px mobile viewport, the 4-column Audit Log table overflows horizontally and clips cleanly at the right border: the `ACTION` column is cut off mid-word (`console.delet:`, `console.audit.`), and the `ACTOR` and `RESULT` (`SUCCESS / HTTP 200`) columns are completely invisible with no visible scrollbar or overflow affordance.",
+            "norm": "Mobile data tables must either stack into responsive multi-line rows/cards at narrow viewports or provide a clear horizontal scroll indicator without clipping text mid-character.",
+            "severity": "P0",
+            "screenshot": "375-settings-full.png",
+            "fix": "At viewports below 640px, convert each audit log row into a compact stacked two-line layout (Row 1: Action name + Result badge; Row 2: Timestamp + Actor in muted monospace), or wrap the table in an explicit scrollable container with a right-edge scroll shadow and `text-overflow: ellipsis`."
+          },
+          {
+            "level": "component",
+            "element": "Usage by agent table",
+            "problem": "On the 375px mobile viewport, the 'Usage by agent' table only renders the `AGENT` and `RETAINED STORAGE` columns; the `OBSERVED DOWNLOADS` and `OPERATIONS` columns are completely clipped off-screen to the right with no indication that additional data exists.",
+            "norm": "All usage metrics in a billing breakdown must be accessible on mobile viewports without hidden horizontal clipping.",
+            "severity": "P0",
+            "screenshot": "375-billing-full.png",
+            "fix": "Render each agent row as a responsive key-value card on mobile (<640px) showing Agent name as the header and a 3-row metric list (`Retained storage`, `Observed downloads`, `Operations`), or add a visible horizontal scroll track."
+          },
+          {
+            "level": "layout",
+            "element": "Top header navigation bar ('Back to workspace' / 'Back to files')",
+            "problem": "There is no navigation linking `/console/billing` ('Billing & limits') and `/console/settings` ('Activity & deletion'), forcing users to exit back to the main console just to switch between account pages. Additionally, the exit button label is inconsistent between the two pages: 'Back to workspace' on Billing versus 'Back to files' on Settings.",
+            "norm": "Sibling account/workspace settings pages should share a persistent secondary navigation (tabs or segmented links) and use consistent terminology for returning to the primary workspace.",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Standardize the return CTA to 'Back to workspace' on all account pages and add a top-level tab bar or nav pills ('Billing & limits' | 'Activity & deletion') in the header or directly above the page title."
+          },
+          {
+            "level": "component",
+            "element": "Audit log rows ('unknown' actions and duplicate timestamps)",
+            "problem": "Every console page load/refresh logs duplicate pairs of internal read requests at the exact same second (`drives.list` x2, `console.deletions.list` x2, `console.audit...` x2) alongside multiple rows labeled `unknown`. Furthermore, on 375px mobile, these repeated refreshes expand the card to 21 rows (~1,400px tall), pushing the primary 'Delete your data' controls far down the page.",
+            "norm": "Security audit logs should record meaningful state-changing or access events with human-readable action names, deduplicate double-fired client fetches, and cap initial vertical height so critical page controls remain reachable.",
+            "severity": "P1",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Map all internal endpoints to explicit action names instead of `unknown`, filter or deduplicate read-only console polling (`console.audit.list`, `console.deletions.list`), and constrain the Audit Log table body to 8–10 rows with internal scroll or pagination."
+          },
+          {
+            "level": "group",
+            "element": "'Delete one drive' form in 'Delete your data' card",
+            "problem": "When there are no drives in the workspace (`No active drives` in the select dropdown), the select box still displays an active dropdown chevron and the 'Type the exact drive name to confirm' text input remains visually enabled and editable, inviting the user to type a non-existent drive name.",
+            "norm": "When a destructive action has no valid target entities, dependent confirmation inputs and selects should be explicitly disabled or replaced with a clear empty-state message.",
+            "severity": "P1",
+            "screenshot": "1440-settings-full.png",
+            "fix": "When active drive count is zero, apply `disabled` styling (muted background `#E5E5E0`, `cursor: not-allowed`) to both the `Drive` select and confirmation text input, or replace the form controls with a muted callout: 'No active drives in this workspace to delete.'"
+          },
+          {
+            "level": "component",
+            "element": "Developer plan CTA button ('Choose developer' in UNIT 02)",
+            "problem": "Although the banner states 'Paid checkout is not enabled', the `Choose developer` button in UNIT 02 uses a washed-out salmon/peach fill (`#F59B7B`) with low-contrast grey text (~2.6:1 contrast ratio), making it look half-active compared to the neutral outline button on `Choose team` (UNIT 03) and failing WCAG AA contrast standards.",
+            "norm": "Disabled buttons across sibling pricing tiers should share a clear, accessible disabled visual state and never pair muted grey text with a mid-tone colored background.",
+            "severity": "P1",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Give both unavailable paid tiers (`Choose developer` and `Choose team`) a consistent disabled outline treatment with dark muted text (`#666660` on `#EEEEEA`), or change the button label to 'Checkout unavailable' while Stripe is unconfigured."
+          },
+          {
+            "level": "layout",
+            "element": "Metric summary cards and Pricing plan cards at 768px viewport",
+            "problem": "At 768px (`768-billing-full.png`), the 3 top usage cards wrap into a 2+1 layout where the 3rd card ('OBSERVED DOWNLOADS') stretches across 100% of the row, while the 3 pricing tier cards ('UNIT 01', 'UNIT 02', 'UNIT 03') collapse into single-column full-width blocks (~700px wide each), preventing side-by-side plan comparison and creating excessive vertical scrolling.",
+            "norm": "At 768px tablet breakpoints, 3-card summary rows and 3-tier pricing tables should either maintain a 3-column grid or use a balanced layout that preserves side-by-side comparison.",
+            "severity": "P2",
+            "screenshot": "768-billing-full.png",
+            "fix": "Keep both the 3 metric cards and the 3 plan cards in a `grid-template-columns: repeat(3, minmax(0, 1fr))` layout starting at `768px` (`md` breakpoint) with tightened horizontal padding (`16px`)."
+          },
+          {
+            "level": "group",
+            "element": "'Delete one drive' and 'Delete your account' two-column grid",
+            "problem": "In the desktop 2-column destructive section, the left column ('Delete one drive') has no descriptive subtitle under its heading while the right column ('Delete your account') has a two-line paragraph. As a result, the inputs, labels, and red destructive buttons sit at mismatched vertical positions across the two columns. Additionally, the disabled button text (`white` on `#C49A95`) has poor contrast (~2.4:1).",
+            "norm": "Side-by-side form cards should align their inputs and primary action buttons along the same horizontal baseline, and disabled destructive buttons must maintain legible label contrast.",
+            "severity": "P2",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Add a brief helper paragraph under 'Delete one drive' (e.g., 'Permanently remove a single drive, its file versions, and associated agent access.') and use `display: flex; flex-direction: column; justify-content: space-between` on both columns so the destructive buttons align along the bottom edge."
+          },
+          {
+            "level": "group",
+            "element": "'Refresh' button placement vs. 'Deletion requests' card",
+            "problem": "The 'Deletion requests' card at the bottom of the Settings page instructs the user to 'Refresh to check background progress', but the only 'Refresh' button is located at the very top of the page next to the 'Activity & deletion' title—requiring the user to scroll all the way back to the top (over 2,000px on mobile).",
+            "norm": "Action controls referenced by a section's helper copy should be co-located within or immediately adjacent to that section.",
+            "severity": "P2",
+            "screenshot": "1440-settings-full.png",
+            "fix": "Add a compact secondary 'Refresh' button in the top-right header of the 'Deletion requests' card (or move the refresh button into the card headers of 'Audit log' and 'Deletion requests')."
+          },
+          {
+            "level": "component",
+            "element": "Sign-in fallback card",
+            "problem": "The `/sign-in` fallback panel is a complete dead end: there is no link to return to the workspace or landing page, and the message ('Configure the Agent Drive Clerk instance to enable human access') omits the specific environment variables needed by a developer setting up a local installation.",
+            "norm": "Self-hosted/local configuration fallback screens for developers should specify the exact environment keys required and provide a navigation escape hatch.",
+            "severity": "P2",
+            "screenshot": "1440-sign-in.png",
+            "fix": "Include the required variable names in inline monospace (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`) and add a '← Back to home' or 'View setup docs' link at the bottom of the card."
+          },
+          {
+            "level": "component",
+            "element": "'OBSERVED DOWNLOADS' KPI card ('Not connected' headline)",
+            "problem": "Displaying 'Not connected' in 32px bold hero typography—matching `$0.00` and `0 B`—makes it look like a broken user integration or error state, while the subtext ('0 B authorized this month') contradicts the 'Not connected' headline without explaining what is disconnected or whether user action is required.",
+            "norm": "Hero metric values should display consistent quantitative values (`0 B` or `—`) and use a secondary status badge or tooltip for telemetry connection status.",
+            "severity": "P2",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Display `0 B` (or `—`) as the primary metric headline for consistency with Retained Storage, and show a small muted pill badge `TELEMETRY NOT CONNECTED` with a brief explanation."
+          },
+          {
+            "level": "layout",
+            "element": "Double horizontal divider lines below top navigation bar and missing Settings footer",
+            "problem": "Both Billing and Settings render a full-width light grey header border followed ~24px lower by a second full-width solid black horizontal rule above the page eyebrow ('YOUR WORKSPACE'), creating an empty dead strip between two parallel lines. Additionally, Billing has a bottom footer ('Client-side encrypted. Account-level control.') while Settings lacks a footer entirely.",
+            "norm": "Page chrome (header dividers and footers) should avoid redundant stacked horizontal rules and remain consistent across all console pages.",
+            "severity": "P3",
+            "screenshot": "1440-billing-full.png",
+            "fix": "Remove one of the two horizontal dividers below the top header bar, and include the standard console footer ('Client-side encrypted. Account-level control.') at the bottom of `/console/settings`."
+          }
+        ],
+        "excellent": [
+          "Cohesive T1 'Rack' industrial aesthetic: the dot-grid aluminium canvas, high-contrast black ink rules, signal-orange accents, and `UNIT 01 • SELECTED` hardware-module headers give the app a distinctive, memorable identity.",
+          "Typographic pairing and hierarchy: Space Grotesk for display headers paired with IBM Plex Mono for numbers, timestamps, and unit labels feels crisp, technical, and well-suited to an AI agent developer tool.",
+          "Clear, transparent microcopy: explanations around write caps ('This is not a guaranteed invoice ceiling: reads continue, transfer logs can arrive later, and tax is excluded') and deletion scope ('This removes retained versions, trash, sharing links, and upload metadata') build high developer trust."
+        ]
+      }
+    }
+  ]
+}

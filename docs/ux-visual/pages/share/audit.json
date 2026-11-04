@@ -1,226 +1,3064 @@
 {
-  "1440": {
-    "layout": {
-      "viewport": {
-        "width": 1440,
-        "height": 900,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 24, 40, 48, 56],
-        "offScale": [10],
-        "nearDupes": [[10, 12]]
-      },
-      "type": {
-        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
-        "sizes": {
-          "19px/650": 1,
-          "22px/750": 1,
-          "10px/650": 1,
-          "34px/700": 1,
-          "13px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
-          "ratio": 4.29
-        },
-        {
-          "el": "p \"Ask the sender for the complet\"",
-          "ratio": 4.46
-        },
-        {
-          "el": "p.share-footer \"Client-side encryption. The ke\"",
-          "ratio": 4.18
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
+ "1440x900/ready": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 9,
+     "pctOfViewport": 100
     }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"48,254 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:49 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
   },
-  "1920": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"adagent driveENCRYPTED FILE TR\"",
-          "w": 680,
-          "h": 1080,
-          "fillPct": 12,
-          "pctOfViewport": 35
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 24, 40, 48, 56],
-        "offScale": [10],
-        "nearDupes": [[10, 12]]
-      },
-      "type": {
-        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
-        "sizes": {
-          "19px/650": 1,
-          "22px/750": 1,
-          "10px/650": 1,
-          "34px/700": 1,
-          "13px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
-          "ratio": 4.29
-        },
-        {
-          "el": "p \"Ask the sender for the complet\"",
-          "ratio": 4.46
-        },
-        {
-          "el": "p.share-footer \"Client-side encryption. The ke\"",
-          "ratio": 4.18
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "768": {
-    "layout": {
-      "viewport": {
-        "width": 768,
-        "height": 1024,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 24, 40, 48, 56],
-        "offScale": [10],
-        "nearDupes": [[10, 12]]
-      },
-      "type": {
-        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
-        "sizes": {
-          "19px/650": 1,
-          "22px/750": 1,
-          "10px/650": 1,
-          "34px/700": 1,
-          "13px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
-          "ratio": 4.29
-        },
-        {
-          "el": "p \"Ask the sender for the complet\"",
-          "ratio": 4.46
-        },
-        {
-          "el": "p.share-footer \"Client-side encryption. The ke\"",
-          "ratio": 4.18
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 16, 24, 28, 36],
-        "offScale": [10],
-        "nearDupes": [[10, 12]]
-      },
-      "type": {
-        "distinctFontSizes": ["19px", "22px", "10px", "26px", "13px"],
-        "sizes": {
-          "19px/650": 1,
-          "22px/750": 1,
-          "10px/650": 1,
-          "26px/700": 1,
-          "13px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
-          "ratio": 4.29
-        },
-        {
-          "el": "p \"Ask the sender for the complet\"",
-          "ratio": 4.46
-        },
-        {
-          "el": "p.share-footer \"Client-side encryption. The ke\"",
-          "ratio": 4.18
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
   }
+ },
+ "1440x900/ready-longname": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 11,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"3,041 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:50 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/missing-key": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 6,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/bad-key-format": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 6,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/not-found": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 5,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/expired": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 5,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/revoked-onload": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 5,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/wrong-key": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 6,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1440x900/loading": {
+  "layout": {
+   "viewport": {
+    "width": 1440,
+    "height": 900,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1440,
+     "h": 900,
+     "fillPct": 4,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Checking this share link…\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/ready": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 5,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"48,254 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:49 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/ready-longname": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 7,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"3,041 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:50 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/missing-key": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 4,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/bad-key-format": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 4,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/not-found": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 3,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/expired": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 3,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/revoked-onload": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 3,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/wrong-key": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 4,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "1920x1080/loading": {
+  "layout": {
+   "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 1920,
+     "h": 1080,
+     "fillPct": 3,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Checking this share link…\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/ready": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"48,254 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:49 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/ready-longname": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "10px",
+     "22px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "10px/500": 2,
+     "22px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"3,041 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:50 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/missing-key": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 10,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/bad-key-format": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 10,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/not-found": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 9,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/expired": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 9,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/revoked-onload": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 9,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/wrong-key": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 10,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "768x1024/loading": {
+  "layout": {
+   "viewport": {
+    "width": 768,
+    "height": 1024,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+     "w": 768,
+     "h": 1024,
+     "fillPct": 7,
+     "pctOfViewport": 100
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     24,
+     28,
+     56
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "19px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "19px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Checking this share link…\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/ready": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "10px",
+     "19px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "10px/500": 2,
+     "19px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"48,254 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:49 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/ready-longname": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "h1.share-label \"a-very-long-synthetic-file-nam\"",
+     "w": 287,
+     "h": 129,
+     "fillPct": 0,
+     "pctOfViewport": 12
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "10px",
+     "19px",
+     "15px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "10px/500": 2,
+     "19px/500": 2,
+     "15px/600": 1,
+     "12px/400": 2
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "span \"TRANSFER SIZE\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"3,041 encrypted bytes\"",
+     "ratio": 2.11
+    },
+    {
+     "el": "span \"LINK EXPIRES\"",
+     "ratio": 2.38
+    },
+    {
+     "el": "strong \"11/11/2026, 4:55:50 PM\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/missing-key": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/bad-key-format": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/not-found": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/expired": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/revoked-onload": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for a new share\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/wrong-key": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Ask the sender for the complet\"",
+     "ratio": 1.19
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ },
+ "375x812/loading": {
+  "layout": {
+   "viewport": {
+    "width": 375,
+    "height": 812,
+    "pageScrollY": 0,
+    "pageScrollX": 0
+   },
+   "offscreenPrimary": [],
+   "scrollers": [],
+   "deadSpace": [
+    {
+     "el": "div.share-window \"Checking this share link…\"",
+     "w": 287,
+     "h": 132,
+     "fillPct": 10,
+     "pctOfViewport": 12
+    }
+   ],
+   "spacing": {
+    "observed": [
+     10,
+     12,
+     14,
+     16,
+     20,
+     36
+    ],
+    "offScale": [
+     10,
+     14
+    ],
+    "nearDupes": [
+     [
+      10,
+      12
+     ],
+     [
+      12,
+      14
+     ],
+     [
+      14,
+      16
+     ]
+    ]
+   },
+   "type": {
+    "distinctFontSizes": [
+     "17px",
+     "11px",
+     "13px",
+     "12px"
+    ],
+    "sizes": {
+     "17px/600": 1,
+     "11px/500": 1,
+     "17px/500": 1,
+     "13px/400": 1,
+     "12px/400": 1
+    }
+   },
+   "alignment": {
+    "nearMissEdges": []
+   },
+   "smallTargets": [],
+   "lowContrast": [
+    {
+     "el": "p.share-msg \"Checking this share link…\"",
+     "ratio": 2.11
+    }
+   ],
+   "overlaps": [],
+   "fixedOverlays": []
+  },
+  "geometry": {
+   "pageOverflowX": 0,
+   "unevenRows": [],
+   "overflowSpills": [],
+   "wrappedControls": []
+  }
+ }
 }
