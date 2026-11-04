@@ -1,9 +1,19 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDriveClient } from './client.js';
-import { backupDirectory } from './backup.js';
+import { backupDirectory, readFileInside } from './backup.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -91,5 +101,73 @@ describe('backupDirectory', () => {
     const { client, puts } = mock();
     await backupDirectory(client, 'd', root, '/p');
     expect(puts.map((p) => p.path)).not.toContain('/p/link.txt');
+  });
+
+  it('excludes the config and state when the config path goes through a symlink', async () => {
+    const { dir } = await fixture();
+    const real = join(dir, 'real');
+    await mkdir(join(real, 'cfg'), { recursive: true });
+    await writeFile(join(real, 'a.txt'), 'A');
+    await writeFile(join(real, 'cfg', 'config.json'), '{"apiKey":"x"}');
+    await mkdir(join(real, 'cfg', 'config.json.state'));
+    await writeFile(join(real, 'cfg', 'config.json.state', 'm.json'), '{}');
+    const link = join(dir, 'link');
+    await symlink(real, link);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(link, 'cfg', 'config.json'));
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', real, '/p');
+    expect(puts.map((p) => p.path)).toEqual(['/p/a.txt']);
+  });
+
+  it('excludes the key file and config temp files', async () => {
+    const { dir } = await fixture();
+    const root = join(dir, 'cfgroot');
+    await mkdir(root);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(root, 'config.json'));
+    await writeFile(join(root, 'a.txt'), 'A');
+    await writeFile(join(root, 'drive.key'), 'secret');
+    await writeFile(
+      join(root, 'config.json.123.0b6f1e0a-1111-4222-8333-444455556666.tmp'),
+      'secret',
+    );
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', root, '/p', { keyFile: join(root, 'drive.key') });
+    expect(puts.map((p) => p.path)).toEqual(['/p/a.txt']);
+  });
+
+  it('refuses a file swapped for a symlink after listing', async () => {
+    const { dir, root } = await fixture();
+    const file = join(root, 'a.txt');
+    const info = await lstat(file);
+    await writeFile(join(dir, 'outside.txt'), 'secret');
+    await rm(file);
+    await symlink(join(dir, 'outside.txt'), file);
+    await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
+  });
+
+  it('refuses a file whose directory was swapped for a symlink', async () => {
+    const { dir, root } = await fixture();
+    const file = join(root, 'sub', 'b.txt');
+    const info = await lstat(file);
+    await mkdir(join(dir, 'evil'));
+    await writeFile(join(dir, 'evil', 'b.txt'), 'secret');
+    await rename(join(root, 'sub'), join(dir, 'moved'));
+    await symlink(join(dir, 'evil'), join(root, 'sub'));
+    await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
+  });
+
+  it.skipIf(process.getuid?.() === 0)('reports an unreadable directory and continues', async () => {
+    const { root } = await fixture();
+    await chmod(join(root, 'sub'), 0);
+    try {
+      const { client, puts } = mock();
+      const lines: string[] = [];
+      const result = await backupDirectory(client, 'd', root, '/p', { log: (l) => lines.push(l) });
+      expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+      expect(puts.map((p) => p.path)).toEqual(['/p/a.txt']);
+      expect(lines.join('\n')).toContain('sub');
+    } finally {
+      await chmod(join(root, 'sub'), 0o700);
+    }
   });
 });

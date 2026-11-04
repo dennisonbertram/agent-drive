@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { validateUrl } from './client.js';
 import { configPath, writeConfig } from './config.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
@@ -46,12 +47,15 @@ export function shouldOpenBrowser(noBrowser: boolean | undefined) {
 export async function deviceLogin(options: DeviceLoginOptions) {
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
+  // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
+  validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
   const post = async (path: string, body: Record<string, string>) => {
     let response: Response;
     try {
       response = await fetcher(`${base}${path}`, {
         method: 'POST',
+        redirect: 'error',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify(body),
       });

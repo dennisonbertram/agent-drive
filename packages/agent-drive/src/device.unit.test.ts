@@ -154,4 +154,34 @@ describe('deviceLogin', () => {
     await expect(r.promise).rejects.toThrow(/expired/iu);
     expect(r.sleeps.length).toBeLessThanOrEqual(121);
   });
+
+  it('rejects a non-loopback http API URL without sending a request', async () => {
+    const fetcher = vi.fn();
+    await expect(
+      deviceLogin({
+        apiUrl: 'http://example.com/api',
+        name: 'bot',
+        machine: 'box',
+        fetch: fetcher as unknown as typeof fetch,
+        log: () => undefined,
+        openBrowser: false,
+      }),
+    ).rejects.toThrow(/HTTPS/);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('allows loopback http and refuses redirects', async () => {
+    const fetcher = vi.fn(async (_url: unknown, _init?: RequestInit) => json(500, {}));
+    await expect(
+      deviceLogin({
+        apiUrl: 'http://127.0.0.1:3100/api',
+        name: 'bot',
+        machine: 'box',
+        fetch: fetcher as unknown as typeof fetch,
+        log: () => undefined,
+        openBrowser: false,
+      }),
+    ).rejects.toThrow(/refused/);
+    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
+  });
 });

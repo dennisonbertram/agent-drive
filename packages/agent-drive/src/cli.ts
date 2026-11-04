@@ -156,7 +156,11 @@ async function run(command: string, raw: string[]) {
       driveId,
       args.positionals[0],
       args.values.prefix ?? `/backups/${machineName()}`,
-      { dryRun, log: (line) => process.stderr.write(`${line}\n`) },
+      {
+        dryRun,
+        ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
+        log: (line) => process.stderr.write(`${line}\n`),
+      },
     );
     for (const path of result.wouldUpload) process.stdout.write(`would upload ${path}\n`);
     process.stdout.write(
