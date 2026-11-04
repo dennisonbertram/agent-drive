@@ -103,7 +103,8 @@ describe('deviceLogin', () => {
         scope: 'read write',
         api_url: 'https://x.test/api',
         agent_name: 'bot',
-        drive_ids: ['d1', 'd2'],
+        // The server lists the new drive in drive_ids too.
+        drive_ids: ['d1', 'd2', 'd3'],
         new_drive_id: 'd3',
         sealed_drive_keys: {
           d1: await seal(publicKey, 'd1', 'KEY-ONE'),
@@ -132,6 +133,7 @@ describe('deviceLogin', () => {
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');
     expect(printed).toMatch(/d2/u);
+    expect(printed).toMatch(/No usable key for: d2\./u);
     for (const secret of ['adk_SECRETTOKEN', 'KEY-ONE', saved.driveKeys.d3 ?? 'x'])
       expect(printed).not.toContain(secret);
   });
