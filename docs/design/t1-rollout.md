@@ -15,7 +15,7 @@ Message: every agent gets its own portable drive. Encryption is small print only
 ## Waves (one loop iteration each; mark [x] when merged into feat/t1-rack-design)
 
 - [x] 0 Foundation (0bc98f1): tokens, fonts, body/dot grid, typography scale, buttons (primary/secondary/copy), badges, inputs/forms, focus ring, status LED primitive, eyebrow/labels, links
-- [ ] 1 Landing (`app/(app)/page.tsx`): nav, brand, hero copy "Every agent gets a drive.", rack illustration (inline SVG/CSS), setup rows + copy, works-with, numbered callouts, footer
+- [x] 1 Landing (8fdd038) (`app/(app)/page.tsx`): nav, brand, hero copy "Every agent gets a drive.", rack illustration (inline SVG/CSS), setup rows + copy, works-with, numbered callouts, footer
 - [ ] 2 Console shell (`console.tsx`): sidebar → drive bay strip + section nav, topbar/breadcrumb, workspace, panels, files table (path/size/author/modified/actions), backup status line (LED + one line), empty/loading states
 - [ ] 3 Console secondary: agents, API keys, usage stats, trash, versions, dialogs (Load drive key, New drive), onboarding, privacy note, forms
 - [ ] 4 Connect / approval (`connect.tsx`): device-pairing card, code on smoked display, one Approve button, revoke note; all its states (waiting, approved, expired, error)
