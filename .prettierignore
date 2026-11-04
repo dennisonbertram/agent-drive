@@ -8,3 +8,4 @@ pnpm-lock.yaml
 docs/plan.md
 docs/user-stories.md
 apps/web/next-env.d.ts
+docs/design/*.html

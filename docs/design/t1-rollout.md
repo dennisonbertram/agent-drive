@@ -24,4 +24,5 @@ Message: every agent gets its own portable drive. Encryption is small print only
 - [ ] 7 /ux-visual audit across all surfaces and viewports; fix findings
 
 Waves 1–6 run in parallel on branches t1/landing, t1/console-shell, t1/console-panels, t1/connect, t1/share, t1/account (see parallel-brief.md); the lead merges them here.
+
 - Audit notes: pricing/billing use the old "a/ agent drive" brand mark (landing uses the new one); double rule under the pricing header.
