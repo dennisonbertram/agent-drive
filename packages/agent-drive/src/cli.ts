@@ -3,8 +3,10 @@ import { parseArgs } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError } from './client.js';
 import { generateDriveKey } from './crypto.js';
+import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
 import {
   DEFAULT_API_URL,
+  configPath,
   driveKeyEnvironmentName,
   machineName,
   readConfig,
@@ -14,7 +16,7 @@ import {
 } from './config.js';
 import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
-import { deviceLogin, shouldOpenBrowser } from './device.js';
+import { defaultAgentName, deviceLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
 
 function parse(raw: string[]) {
@@ -120,7 +122,7 @@ async function run(command: string, raw: string[]) {
     if (!apiKey) {
       await deviceLogin({
         apiUrl,
-        name: args.values.name ?? 'agent',
+        name: args.values.name ?? defaultAgentName(),
         machine: machineName(),
         log: (line) => process.stdout.write(`${line}\n`),
         openBrowser: shouldOpenBrowser(args.values['no-browser']),
@@ -170,7 +172,35 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const client = await connect(args);
-  if (command === 'whoami') return output(await client.whoami());
+  if (command === 'whoami') {
+    const who = await client.whoami();
+    const config = await readConfig();
+    return output({
+      ...who,
+      localDriveKeys: await localKeyMap(who.driveIds, (id) =>
+        resolveDriveKey(id, args.values['key-file'], config),
+      ),
+    });
+  }
+  if (command === 'check') {
+    const connection = await resolveConnection();
+    const who = await client.whoami();
+    const candidates = who.driveIds ?? Object.keys(connection.config.driveKeys ?? {});
+    const explicit = args.values.drive?.[0];
+    const keys = await localKeyMap([...candidates, ...(explicit ? [explicit] : [])], (id) =>
+      resolveDriveKey(id, args.values['key-file'], connection.config),
+    );
+    const driveId = pickCheckDrive(explicit, candidates, keys);
+    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const checker = new AgentDriveClient({
+      apiUrl: connection.apiUrl,
+      apiKey: connection.apiKey,
+      machine: machineName(),
+      ...(key ? { driveKey: key } : {}),
+    });
+    process.stdout.write(`${await runCheck(checker, driveId)}\n`);
+    return;
+  }
   if (command === 'agent' && args.positionals[0] === 'create')
     return output(await client.createAgent(args.values.name ?? args.positionals[1] ?? ''));
   if (command === 'drive' && args.positionals[0] === 'create') {
@@ -182,11 +212,8 @@ async function run(command: string, raw: string[]) {
     if (drive.created) {
       const key = generateDriveKey();
       await writeConfig({ driveKeys: { [drive.id]: key } });
-      output({
-        ...drive,
-        driveKey: key,
-        warning: 'Back up this drive key; it cannot be recovered.',
-      });
+      output(drive);
+      process.stderr.write(`${createdDriveNote(configPath())}\n`);
     } else {
       if (!existingKey)
         throw new Error(
@@ -366,9 +393,10 @@ const [name, ...raw] = process.argv.slice(2);
 const help = `Agent Drive CLI
 
 Commands:
-  login [--name AGENT] [--no-browser]   Approve in a browser (device flow)
+  login [--name AGENT] [--no-browser]   Approve in a browser (device flow); name defaults to "<machine> agent"
   login --api URL --token-stdin         Save an existing API key
-  whoami
+  whoami                                Also shows localDriveKeys (which drives have a key here)
+  check [--drive ID]                    Write, read back, and compare a test file; prints "check ok"
   agent create --name NAME
   drive create --name NAME
   key create --agent ID --drive ID --label LABEL --scope read --scope write
@@ -405,11 +433,7 @@ if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
 } else {
   run(name, raw).catch((error: unknown) => {
     if (error instanceof AgentDriveApiError) {
-      const details = [
-        error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
-        error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
-      ].filter(Boolean);
-      process.stderr.write(`${[error.message, ...details].join('\n')}\n`);
+      process.stderr.write(`${apiErrorLines(error).join('\n')}\n`);
     } else {
       process.stderr.write(`${error instanceof Error ? error.message : 'Command failed.'}\n`);
     }

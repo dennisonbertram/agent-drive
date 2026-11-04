@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { validateUrl } from './client.js';
-import { configPath, writeConfig } from './config.js';
+import { configPath, machineName, readConfig, writeConfig } from './config.js';
 import { generateDriveKey } from './crypto.js';
 import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
 
@@ -23,6 +23,18 @@ export type DeviceLoginOptions = {
   log: (line: string) => void;
   openBrowser: boolean;
 };
+
+export function defaultAgentName() {
+  return `${machineName()} agent`;
+}
+
+function sameOrigin(a: string | undefined, b: string) {
+  try {
+    return a !== undefined && new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
 
 function openUrl(url: string) {
   const [command, args] =
@@ -50,7 +62,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
   validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
-  const post = async (path: string, body: Record<string, string>) => {
+  const post = async (path: string, body: Record<string, unknown>) => {
     let response: Response;
     try {
       response = await fetcher(`${base}${path}`, {
@@ -66,6 +78,10 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     return { ok: response.ok, status: response.status, data };
   };
 
+  // Saved keys are not scoped per origin, so only trust them for the saved origin.
+  const saved = await readConfig();
+  const savedKeys = sameOrigin(saved.apiUrl, base) ? (saved.driveKeys ?? {}) : {};
+  const knownDriveIds = Object.keys(savedKeys).slice(0, 20);
   const { privateKey, publicKey } = await generateDeviceKeyPair();
   let started;
   try {
@@ -73,6 +89,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       client_name: options.name,
       machine: options.machine,
       public_key: publicKey,
+      ...(knownDriveIds.length ? { known_drive_ids: knownDriveIds } : {}),
     });
   } catch {
     throw new Error(`Could not reach Agent Drive at ${base}. Check the network and try again.`);
@@ -141,6 +158,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     if (driveId === token.new_drive_id) continue;
     const sealed = token.sealed_drive_keys?.[driveId];
     if (!sealed) {
+      if (savedKeys[driveId]) continue;
       noKey.push(driveId);
       continue;
     }
@@ -161,8 +179,19 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     driveKeys,
   });
 
+  const usable = [
+    ...new Set(
+      [...(token.drive_ids ?? []), ...(token.new_drive_id ? [token.new_drive_id] : [])].filter(
+        (id) => driveKeys[id] || savedKeys[id],
+      ),
+    ),
+  ];
+  if (!usable.length)
+    throw new Error(
+      `Login finished but this agent has no usable drive key. Run \`agent-drive login\` again; the owner's approval will create a drive for this agent. (The login was saved to ${configPath()}.)`,
+    );
   options.log(`Logged in as agent ${token.agent_name ?? options.name}.`);
-  options.log(`Drives: ${(token.drive_ids ?? []).join(', ') || 'none'}`);
+  options.log(`Usable drives: ${usable.join(', ')}`);
   options.log(`Scopes: ${token.scope ?? ''}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
@@ -174,7 +203,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     options.log(
       `No usable key for: ${noKey.join(', ')}. You can list names but not read contents.`,
     );
-  return { unsealed, noKey, newDriveId: token.new_drive_id ?? null };
+  return { unsealed, noKey, usable, newDriveId: token.new_drive_id ?? null };
 }
 
 class NetworkError extends Error {}
