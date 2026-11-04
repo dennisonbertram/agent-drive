@@ -51,7 +51,8 @@ export default function Home() {
           <h2>You hold the keys.</h2>
           <p>
             File contents encrypt on your device. The storage service receives ciphertext, never
-            your drive key.
+            your drive key. File names, sizes, tags, and activity stay visible to the service so it
+            can list and bill them.
           </p>
         </article>
         <article>
