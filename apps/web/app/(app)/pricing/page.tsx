@@ -1,8 +1,7 @@
 import Link from 'next/link';
 import { billingRates, downloadsLabel, GIB, PLANS } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
-import '../console/billing/billing.css';
-import './pricing.css';
+import '../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
 

@@ -345,22 +345,6 @@ button {
   padding: 25px 0;
   border-top: 1px solid var(--border);
 }
-.auth-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 20px;
-  gap: 40px;
-}
-.auth-page .panel {
-  max-width: 480px;
-  padding: 35px;
-}
-.auth-page h1 {
-  margin-bottom: 18px;
-}
 .console-shell {
   min-height: 100vh;
   display: grid;
