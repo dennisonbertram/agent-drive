@@ -1,0 +1,182 @@
+import { spawn } from 'node:child_process';
+import { validateUrl } from './client.js';
+import { configPath, writeConfig } from './config.js';
+import { generateDriveKey } from './crypto.js';
+import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
+
+type TokenResponse = {
+  access_token: string;
+  scope?: string;
+  api_url?: string;
+  agent_name?: string;
+  drive_ids?: string[];
+  new_drive_id?: string | null;
+  sealed_drive_keys?: Record<string, SealedDriveKey>;
+};
+
+export type DeviceLoginOptions = {
+  apiUrl: string;
+  name: string;
+  machine: string;
+  fetch?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  log: (line: string) => void;
+  openBrowser: boolean;
+};
+
+function openUrl(url: string) {
+  const [command, args] =
+    process.platform === 'darwin'
+      ? ['open', [url]]
+      : process.platform === 'win32'
+        ? ['cmd', ['/c', 'start', '', url]]
+        : ['xdg-open', [url]];
+  try {
+    const child = spawn(command as string, args as string[], { detached: true, stdio: 'ignore' });
+    child.on('error', () => undefined);
+    child.unref();
+  } catch {
+    // The URL is printed anyway.
+  }
+}
+
+export function shouldOpenBrowser(noBrowser: boolean | undefined) {
+  return !noBrowser && Boolean(process.stdout.isTTY) && !process.env.CI;
+}
+
+export async function deviceLogin(options: DeviceLoginOptions) {
+  const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
+  // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
+  validateUrl(options.apiUrl, true);
+  const base = options.apiUrl.replace(/\/+$/u, '');
+  const post = async (path: string, body: Record<string, string>) => {
+    let response: Response;
+    try {
+      response = await fetcher(`${base}${path}`, {
+        method: 'POST',
+        redirect: 'error',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new NetworkError();
+    }
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ok: response.ok, status: response.status, data };
+  };
+
+  const { privateKey, publicKey } = await generateDeviceKeyPair();
+  let started;
+  try {
+    started = await post('/oauth/device_authorization', {
+      client_name: options.name,
+      machine: options.machine,
+      public_key: publicKey,
+    });
+  } catch {
+    throw new Error(`Could not reach Agent Drive at ${base}. Check the network and try again.`);
+  }
+  if (!started.ok) {
+    const description = started.data.error_description ?? started.data.error ?? started.status;
+    throw new Error(`Agent Drive refused the login request: ${String(description)}`);
+  }
+  const grant = started.data as {
+    device_code: string;
+    user_code: string;
+    verification_uri: string;
+    verification_uri_complete?: string;
+    expires_in: number;
+    interval?: number;
+  };
+  const link = grant.verification_uri_complete ?? grant.verification_uri;
+  options.log(`Open this link to approve: ${link}`);
+  options.log(`Check that the code matches: ${grant.user_code}`);
+  options.log('Waiting for approval...');
+  if (options.openBrowser) openUrl(link);
+
+  let interval = grant.interval ?? 5;
+  let elapsed = 0;
+  let failures = 0;
+  let token: TokenResponse | undefined;
+  while (!token) {
+    if (elapsed + interval > grant.expires_in) throw expired();
+    await sleep(interval * 1000);
+    elapsed += interval;
+    let result;
+    try {
+      result = await post('/oauth/token', {
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        device_code: grant.device_code,
+      });
+      failures = 0;
+    } catch {
+      if (++failures >= 5)
+        throw new Error(
+          `Lost contact with Agent Drive at ${base}. Run \`agent-drive login\` again.`,
+        );
+      continue;
+    }
+    if (result.ok) {
+      token = result.data as unknown as TokenResponse;
+      continue;
+    }
+    const code = result.data.error;
+    if (code === 'authorization_pending') continue;
+    if (code === 'slow_down') interval += 5;
+    else if (code === 'access_denied')
+      throw new Error('Approval was denied. No access was granted.');
+    else if (code === 'expired_token') throw expired();
+    else
+      throw new Error(
+        `Login failed: ${String(code ?? result.status)}. Run \`agent-drive login\` again.`,
+      );
+  }
+
+  const driveKeys: Record<string, string> = {};
+  const unsealed: string[] = [];
+  const noKey: string[] = [];
+  for (const driveId of token.drive_ids ?? []) {
+    const sealed = token.sealed_drive_keys?.[driveId];
+    if (!sealed) {
+      noKey.push(driveId);
+      continue;
+    }
+    try {
+      driveKeys[driveId] = await unsealDriveKey(privateKey, driveId, sealed);
+      unsealed.push(driveId);
+    } catch {
+      options.log(`Could not unseal the key for drive ${driveId}; it is not saved.`);
+      noKey.push(driveId);
+    }
+  }
+  if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
+    options.log('Ignored a different API URL returned by the server.');
+  if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
+  await writeConfig({
+    apiUrl: base,
+    apiKey: token.access_token,
+    driveKeys,
+  });
+
+  options.log(`Logged in as agent ${token.agent_name ?? options.name}.`);
+  options.log(`Drives: ${(token.drive_ids ?? []).join(', ') || 'none'}`);
+  options.log(`Scopes: ${token.scope ?? ''}`);
+  options.log(`Config: ${configPath()}`);
+  if (token.new_drive_id) {
+    options.log(
+      `New drive ${token.new_drive_id} created. Back up this drive key; it cannot be recovered. It is saved in the config file.`,
+    );
+  }
+  if (noKey.length)
+    options.log(
+      `No usable key for: ${noKey.join(', ')}. You can list names but not read contents.`,
+    );
+  return { unsealed, noKey, newDriveId: token.new_drive_id ?? null };
+}
+
+class NetworkError extends Error {}
+
+function expired() {
+  return new Error('The login code expired. Run `agent-drive login` again.');
+}

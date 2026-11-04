@@ -41,6 +41,7 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 export const config = {
   matcher: [
     '/console/:path*',
+    '/connect/:path*',
     '/sign-in/:path*',
     '/sign-up/:path*',
     '/api/console/:path*',

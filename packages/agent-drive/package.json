@@ -19,7 +19,7 @@
     "agent-drive": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && node -e \"require('fs').chmodSync('dist/cli.js',0o755)\"",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "dependencies": {
@@ -30,5 +30,8 @@
   "devDependencies": {
     "@types/pg": "8.15.6",
     "pg": "8.23.1"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

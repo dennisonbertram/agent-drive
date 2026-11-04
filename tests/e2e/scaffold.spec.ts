@@ -15,6 +15,15 @@ test.describe('public landing page', () => {
     await expect(page).toHaveURL(/\/sign-in/);
   });
 
+  test('shows the agent setup instruction with a copy button', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByText('Give this to your agent')).toBeVisible();
+    await expect(page.getByText(/^Set up Agent Drive: https?:\/\/.+\/llms\.txt$/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy agent instruction' })).toBeVisible();
+    await expect(page.getByText('Works with Claude Code, Codex, Cursor')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'How connecting works' })).toBeVisible();
+  });
+
   test('shows the whole CLI command on a phone', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
@@ -29,6 +38,6 @@ test.describe('public landing page', () => {
       );
     });
     expect(fits).toBe(true);
-    await expect(page.getByRole('button', { name: 'Copy command' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Copy command', exact: true })).toBeVisible();
   });
 });

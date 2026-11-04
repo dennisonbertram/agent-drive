@@ -28,6 +28,7 @@ import {
   presignedUpload,
 } from './storage';
 import { cleanupExpiredUploads } from './upload-cleanup';
+import { consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
   billingState,
@@ -264,6 +265,11 @@ function errorStatus(error: unknown) {
 }
 
 function actionFor(method: string, parts: string[]) {
+  if (parts[0] === 'device' && parts.length === 2 && method === 'GET') return 'console.device.read';
+  if (parts[0] === 'device' && parts.length === 3 && method === 'POST' && parts[2] === 'approve')
+    return 'console.device.approve';
+  if (parts[0] === 'device' && parts.length === 3 && method === 'POST' && parts[2] === 'deny')
+    return 'console.device.deny';
   if (parts.length === 1 && parts[0] === 'deletions' && method === 'GET')
     return 'console.deletions.list';
   if (parts.length === 1 && parts[0] === 'audit' && method === 'GET') return 'console.audit.list';
@@ -936,6 +942,12 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
             SET revoked_at = COALESCE(revoked_at, now())
           WHERE agent_id = $1 AND account_id = $2 AND revoked_at IS NULL
           RETURNING id`,
+        [agentId, auth.accountId],
+      );
+      // Approved but unredeemed device logins would otherwise still mint a key afterwards.
+      await client.query(
+        `UPDATE device_authorizations SET status = 'denied'
+          WHERE agent_id = $1 AND account_id = $2 AND status = 'approved'`,
         [agentId, auth.accountId],
       );
       return revoked.rowCount ?? 0;
@@ -1701,6 +1713,12 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
 
 function consoleRouteAllowed(method: string, parts: string[]) {
+  if (parts[0] === 'device') {
+    if (parts.length === 2) return method === 'GET';
+    return (
+      parts.length === 3 && method === 'POST' && (parts[2] === 'approve' || parts[2] === 'deny')
+    );
+  }
   if (method === 'GET' && parts.length === 1 && ['deletions', 'audit'].includes(parts[0]!))
     return true;
   if (method === 'DELETE' && parts.length === 1 && parts[0] === 'account') return true;
@@ -1791,7 +1809,10 @@ async function handleRequest(request: Request, mode: RequestMode) {
     await enforceKeyRateLimit(auth.keyId);
     if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
-      mode.kind === 'console' ? await consoleEndpoint(request, auth, relative, url) : undefined;
+      mode.kind === 'console'
+        ? ((await consoleDeviceEndpoint(request, auth.accountId, relative)) ??
+          (await consoleEndpoint(request, auth, relative, url)))
+        : undefined;
     const control = consoleOutput ?? (await controlPlane(request, auth, relative));
     if (control) output = control;
     else if (relative[0] === 'drives' && relative[2] === 'shares' && relative.length === 3) {

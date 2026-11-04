@@ -411,6 +411,25 @@ export const apiKeyRateLimits = pgTable(
   (table) => [check('api_key_rate_limits_requests_positive', sql`${table.requests} > 0`)],
 );
 
+// Per-account attempt budget for the console device-code endpoints (docs/agent-login.md section 2).
+export const deviceConsoleLimits = pgTable(
+  'device_console_limits',
+  {
+    accountId: uuid('account_id')
+      .primaryKey()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    windowStart: timestamp('window_start', { withTimezone: true, mode: 'date' }).notNull(),
+    attempts: integer('attempts').notNull(),
+    failures: integer('failures').notNull(),
+  },
+  (table) => [
+    check(
+      'device_console_limits_counts_nonnegative',
+      sql`${table.attempts} >= 0 AND ${table.failures} >= 0`,
+    ),
+  ],
+);
+
 export const billingMeterReports = pgTable(
   'billing_meter_reports',
   {
@@ -533,4 +552,47 @@ export const consoleUserTombstones = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex('console_user_tombstones_hash_unique').on(table.externalUserHash)],
+);
+
+export const deviceAuthorizations = pgTable(
+  'device_authorizations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    deviceCodeHash: text('device_code_hash').notNull(),
+    userCode: text('user_code').notNull(),
+    clientName: text('client_name').notNull(),
+    machine: text('machine'),
+    publicKey: text('public_key').notNull(),
+    ipHash: text('ip_hash').notNull(),
+    status: text('status').notNull().default('pending'),
+    accountId: uuid('account_id').references(() => accounts.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
+    driveIds: uuid('drive_ids')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::uuid[]`),
+    scopes: text('scopes')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    newDriveId: uuid('new_drive_id'),
+    sealedDriveKeys: jsonb('sealed_drive_keys').$type<Record<string, unknown>>(),
+    apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
+    intervalSeconds: integer('interval_seconds').notNull().default(5),
+    lastPolledAt: timestamp('last_polled_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true, mode: 'date' }),
+    consumedAt: timestamp('consumed_at', { withTimezone: true, mode: 'date' }),
+  },
+  (table) => [
+    uniqueIndex('device_authorizations_device_code_hash_unique').on(table.deviceCodeHash),
+    index('device_authorizations_user_code_idx').on(table.userCode),
+    index('device_authorizations_ip_created_idx').on(table.ipHash, table.createdAt),
+    index('device_authorizations_created_idx').on(table.createdAt),
+    check(
+      'device_authorizations_status_check',
+      sql`${table.status} IN ('pending', 'approved', 'denied', 'consumed')`,
+    ),
+  ],
 );

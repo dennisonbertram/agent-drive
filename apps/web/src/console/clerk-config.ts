@@ -14,5 +14,10 @@ export function clerkKeysConfigured(
 }
 
 export function isClerkConsolePage(pathname: string) {
-  return pathname === '/console' || pathname.startsWith('/console/');
+  return (
+    pathname === '/console' ||
+    pathname.startsWith('/console/') ||
+    pathname === '/connect' ||
+    pathname.startsWith('/connect/')
+  );
 }

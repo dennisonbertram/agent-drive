@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { runDeletionMaintenance } from '@/src/api/deletion';
-import { cleanupAllExpiredUploads } from '@/src/api/upload-cleanup';
+import { cleanupAllExpiredUploads, cleanupDeviceAuthorizations } from '@/src/api/upload-cleanup';
 import { runBillingMaintenance } from '@/src/billing/maintenance';
 
 export const runtime = 'nodejs';
@@ -48,6 +48,14 @@ export async function GET(request: Request) {
     } catch {
       console.error('Expired upload cleanup failed.');
       results.uploads = 'failed';
+    }
+
+    try {
+      await cleanupDeviceAuthorizations();
+      results.deviceAuthorizations = 'ok';
+    } catch {
+      console.error('Device authorization cleanup failed.');
+      results.deviceAuthorizations = 'failed';
     }
   } else {
     try {

@@ -242,7 +242,7 @@ async function loadManifest(path: string): Promise<Manifest> {
   return { files: safeFiles };
 }
 
-async function ensurePrivateStateDirectory(path: string) {
+export async function ensurePrivateStateDirectory(path: string) {
   await mkdir(path, { recursive: true, mode: 0o700 });
   const directory = await lstat(path);
   if (!directory.isDirectory() || directory.isSymbolicLink() || (directory.mode & 0o077) !== 0) {
