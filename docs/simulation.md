@@ -80,9 +80,15 @@ customers. Never reuse keys belonging to another application.
 
 - **Clerk:** complete real signup and returning signin on the deployed origin; verify signout,
   expiry, two-user isolation, and that the synthetic-session endpoint is disabled.
-- **AWS/PostgreSQL:** run encrypted upload/download from both CLI and browser, inspect deployed
-  private-access/CORS policies, verify actual S3 log arrival, migrate through the intended connection,
-  and exercise the deployed cleanup worker on disposable data.
+- **Storage and PostgreSQL (Cloudflare R2 in production):** run encrypted upload/download from both CLI
+  and browser, inspect deployed private-access/CORS policies, migrate through the intended connection,
+  and exercise the deployed cleanup worker on disposable data. With `S3_EGRESS_METERING=none`, which
+  production uses with R2, `ingestLogs()` skips log ingestion and downloads are not charged, so log
+  arrival is not an R2 acceptance criterion.
+- **AWS S3 only (when `S3_EGRESS_METERING` is not `none`):** also verify that S3 server-access logs
+  actually arrive and are ingested into usage.
+- **Maintenance:** Vercel Cron calls `/api/cron/maintenance` (authenticated with `CRON_SECRET`).
+  Verify the deployed schedules run the cleanup and billing jobs; see [deployment](deployment.md).
 - **Stripe test mode:** configure the exact base prices and usage meter; complete hosted checkout,
   deliver signed webhooks to the deployed route, replay events, simulate failed payment and recovery,
   upgrade/cancel, and reconcile usage against the resulting test invoice. Verify webhook delivery
@@ -93,6 +99,6 @@ customers. Never reuse keys belonging to another application.
 - **Hosted release:** follow the [staged deployment procedure](deployment.md), including candidate
   smoke, promotion only on success, and post-promotion smoke. A local pass cannot waive these gates.
 
-Even after those checks, reusable presigned S3 URLs and delayed access logs mean usage allowances
-are not exact per-transfer network caps. That is a documented architecture limitation, not something
+Even after those checks, reusable presigned S3 URLs (and, on AWS with log-based egress metering, delayed
+access logs) mean usage allowances are not exact per-transfer network caps. That is a documented architecture limitation, not something
 a passing mock can eliminate.

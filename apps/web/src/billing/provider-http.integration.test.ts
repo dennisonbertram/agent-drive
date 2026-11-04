@@ -250,7 +250,7 @@ function signedEvent(type: string, object: unknown, created: number, livemode = 
 const billingRow = async () =>
   (
     await pool.query(
-      'SELECT plan,subscription_status,checkout_session_id FROM billing_accounts WHERE account_id=$1',
+      'SELECT plan,subscription_status,checkout_session_id,checkout_created_at FROM billing_accounts WHERE account_id=$1',
       [accountId],
     )
   ).rows[0];
@@ -280,8 +280,9 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     cancel_url: 'https://drive.example.test/console/billing?checkout=cancelled',
   });
   expect(form.has('line_items[1][quantity]')).toBe(false);
-  expect(Number(form.get('subscription_data[billing_cycle_anchor]'))).toBeGreaterThan(
-    Date.now() / 1000,
+  const reservedAt: Date = (await billingRow()).checkout_created_at;
+  expect(Number(form.get('subscription_data[billing_cycle_anchor]'))).toBe(
+    Date.UTC(reservedAt.getUTCFullYear(), reservedAt.getUTCMonth() + 1, 1) / 1000,
   );
   const now = Math.floor(Date.now() / 1000);
   const activation = signedEvent(
