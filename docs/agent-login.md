@@ -397,3 +397,23 @@ human never handles the key.
 
 `archive-traces.sh` no longer holds back secret-looking files by default. `--hold-back-secrets`
 restores the old behaviour, which still exits 3 when files are held back.
+
+### Dashboard (human side)
+
+The server never holds a drive key, so the dashboard can show backup status and back up a key
+that the human's browser already holds, but it cannot recover an agent's key.
+
+- `POST /api/v1/drives/:id/key-backup` with `{ "method": "file"|"stdout"|"env" }`.
+  - It needs the `write` scope on that drive.
+  - It stores `key_backup_at` and `key_backup_method` on the drive (migration 0014) and is
+    audited as `drive.key_backup`. It never receives the key.
+  - The CLI calls it after a successful `credentials export`, and when `AGENT_DRIVE_CREDENTIALS`
+    supplies a drive's key. A failed report is a warning, not a failure.
+- The console Files tab shows the selected drive's status:
+  - "Key backed up <date> (<method>)" when reported.
+  - Otherwise a warning: "This drive's key hasn't been backed up. If the agent's machine is lost,
+    these files can't be opened. Ask the agent to run `agent-drive credentials export`."
+- The console's "Load drive key" accepts a recovery file or an `adcred1.` credentials bundle.
+  From a bundle it takes the key for the selected drive only.
+- With a key loaded, "Download recovery file" saves the same JSON the drive-creation dialog
+  offers and records `method: "file"` through the console's API.
