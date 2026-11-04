@@ -171,7 +171,7 @@ describe('deviceLogin', () => {
   });
 
   it('allows loopback http and refuses redirects', async () => {
-    const fetcher = vi.fn(async (_url: unknown, _init?: RequestInit) => json(500, {}));
+    const fetcher = vi.fn(async () => json(500, {}));
     await expect(
       deviceLogin({
         apiUrl: 'http://127.0.0.1:3100/api',
@@ -182,6 +182,22 @@ describe('deviceLogin', () => {
         openBrowser: false,
       }),
     ).rejects.toThrow(/refused/);
-    expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
+    expect((fetcher.mock.calls[0] as unknown[] | undefined)?.[1]).toMatchObject({
+      redirect: 'error',
+    });
+  });
+
+  it('saves the login URL, not a server-supplied api_url', async () => {
+    const path = await setup();
+    const r = run(() =>
+      json(200, {
+        access_token: 'adk_T',
+        api_url: 'http://evil.example/api',
+        drive_ids: [],
+      }),
+    );
+    await r.promise;
+    const saved = JSON.parse(await readFile(path, 'utf8')) as { apiUrl: string };
+    expect(saved.apiUrl).toBe('https://x.test/api');
   });
 });

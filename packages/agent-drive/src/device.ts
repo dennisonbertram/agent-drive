@@ -150,9 +150,11 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       noKey.push(driveId);
     }
   }
+  if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
+    options.log('Ignored a different API URL returned by the server.');
   if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
   await writeConfig({
-    apiUrl: token.api_url ?? base,
+    apiUrl: base,
     apiKey: token.access_token,
     driveKeys,
   });
