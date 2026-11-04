@@ -24,10 +24,10 @@ import {
 } from './credentials.js';
 import { installSkill, packagedSkillPath } from './skill.js';
 import {
-  DEFAULT_API_URL,
   configPath,
   driveKeyEnvironmentName,
   machineName,
+  resolveLoginApiUrl,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
@@ -157,7 +157,7 @@ export function parseShareExpiry(value: string | undefined, now = Date.now()) {
 async function run(command: string, raw: string[]) {
   const args = parse(raw);
   if (command === 'login') {
-    const apiUrl = args.values.api ?? process.env.AGENT_DRIVE_API_URL ?? DEFAULT_API_URL;
+    const apiUrl = await resolveLoginApiUrl(args.values.api);
     const apiKey =
       process.env.AGENT_DRIVE_API_KEY ?? (args.values['token-stdin'] ? await stdinText() : '');
     if (!apiKey) {
