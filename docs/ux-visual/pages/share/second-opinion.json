@@ -1,0 +1,242 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-default-1.png",
+    "1920x1080-default-1.png",
+    "768x1024-default-1.png",
+    "375x812-default-1.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 64,
+      "costUsd": 0.126288,
+      "result": {
+        "verdict": "Fail — not shippable for a non-technical recipient. This is a visually calm dead end: it names a technical problem the recipient did not cause and cannot fix, offers no recovery action, no manual key/link entry, no way to ask the sender for help, and no trust context, then abandons the lower two-thirds of every viewport. The headline alone failing with the word 'key' stranded on line two is symptomatic of the lack of polish.",
+        "findings": [
+          {
+            "level": "page",
+            "element": "Error card — entire card contains no button, link, input, or any interactive recovery element",
+            "problem": "Complete dead end. The recipient's only implied task is to go elsewhere and 'ask the sender', with no in-page way to do it. A first-time, non-technical user who received a truncated link (e.g. a chat app stripped the fragment) has zero path forward from this screen and will likely abandon or blame the sender/product.",
+            "norm": "NN/g error-message guidelines and every comparable share-link flow (Google Drive, Dropbox, WeTransfer): an error state must offer at least one concrete next action in the same view — retry, paste the correct link, or request access — never a passive notice.",
+            "severity": "P0",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Add a primary action inside the card: a 'Paste the complete link or key' field with an 'Open file' button, plus a secondary 'Copy a message to the sender' button. Keep the explanatory text as supporting copy, not as the whole experience."
+          },
+          {
+            "level": "component",
+            "element": "Body copy: 'Ask the sender for the complete link, including everything after the # symbol.'",
+            "problem": "Un-actionable jargon for the stated audience. A non-technical recipient does not know what a URL fragment is, cannot recognise whether their link has one, and is given no visual of what a complete link looks like versus the broken one they have. It also silently assumes they know who the sender is and how to reach them.",
+            "norm": "Plain-language error writing (GOV.UK / Microsoft style): name what went wrong in everyday words, show an example, and give numbered steps. Technical terms like 'decryption key' and '#' must be translated, e.g. '…the long code after the # at the end of the link'.",
+            "severity": "P1",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Rewrite in plain language with a concrete example and steps: 'The link you opened is incomplete — the secret part at the end is missing. 1) Ask whoever sent it to send the full link again. 2) Open it exactly as sent, without shortening it.' Optionally render a mock link highlighting the part after '#'."
+          },
+          {
+            "level": "component",
+            "element": "Headline: 'This link is missing a valid decryption key'",
+            "problem": "Leads with product-internal terminology. 'Decryption key' and 'valid' are meaningless to a recipient who just clicked a link; nothing here tells them in human terms 'you can't open this file yet' or that they did nothing wrong, so the message reads as blame/security alarm rather than a fixable mishap.",
+            "norm": "Recipient-facing share pages lead with the user-visible outcome ('You can't open this file with this link'), then explain cause. Blame-free, jargon-free headlines are the standard for Drive/Dropbox/Box link errors.",
+            "severity": "P1",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Headline: 'This link is incomplete, so the file can't be opened.' Sub-copy explains the key simply: 'Files shared this way are locked with a code built into the link. This link is missing that code.'"
+          },
+          {
+            "level": "component",
+            "element": "Lock icon in pale-green rounded tile at top of card",
+            "problem": "Wrong signal. A padlock on a soft success-green tint reads as 'secure / protected / all good' — the visual language of reassurance — on a page whose entire purpose is to say something is broken. There is no error colour, no warning/alert glyph, and no status styling anywhere, so a skimming user may not even register this as an error.",
+            "norm": "Error and warning states use a distinct status colour (amber/red) and an alert icon (triangle/!) separable from brand/success green; brand decoration must not override status communication (Material, Apple HIG, Carbon status patterns).",
+            "severity": "P1",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Swap the green tile and padlock for an amber/red-tinted tile with a link-broken or alert icon, and consider a left status border or 'Link problem' status chip. Reserve green padlock styling for the successful decrypt/download state."
+          },
+          {
+            "level": "group",
+            "element": "Eyebrow 'ENCRYPTED FILE TRANSFER' above the headline",
+            "problem": "Wasted highest-attention slot. The smallest, first-read line states a generic product category instead of the state of this specific link, forcing the user to parse the headline to learn anything. It also foregrounds 'encrypted' — anxiety-raising for a non-technical recipient mid-error.",
+            "norm": "Eyebrows/kickers on status pages carry status or context ('LINK INCOMPLETE', 'FILE NOT AVAILABLE'), not marketing category labels; marketing taxonomy belongs on landing pages.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Change eyebrow to the state: 'INCOMPLETE LINK' (styled with the error status colour), or delete it and let the corrected headline lead."
+          },
+          {
+            "level": "component",
+            "element": "Headline line break: 'This link is missing a valid decryption / key'",
+            "problem": "Textbook widow: the single word 'key' — also the most important word — sits orphaned on line two at 1440, 1920 and 768 widths, making the headline look unfinished and cheap. It recurs across breakpoints because nothing constrains the measure or balances the break.",
+            "norm": "Display headlines must not end in a single-word widow; use text-wrap: balance/pretty, adjust card max-width or font size so breaks fall evenly (e.g. 'This link is missing / a valid decryption key').",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Apply balanced wrapping and/or narrow the card or reduce headline size until the break is roughly even at all breakpoints; re-test at 375 where the two lines currently break acceptably ('…missing a valid / decryption key') so the fix does not regress mobile."
+          },
+          {
+            "level": "page",
+            "element": "Missing context: no file name, sender, file size, expiry, help, or 'What is Agent Drive?' anywhere on the page",
+            "problem": "The recipient cannot verify what they were sent, cannot tell the sender precisely what failed, and gets no proof this page is legitimate. For an unknown brand asking them to chase a 'decryption key', that is exactly the surface a phishing page would have — the design actively undermines trust at the moment trust matters most.",
+            "norm": "Share-recipient error pages identify the resource where possible ('report.pdf shared by Alex') and provide brand context plus a help/support route (Drive and Dropbox both anchor errors to the file and offer Help).",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Where the link ID resolves, show file name and sender ('Someone shared a file with you using this link'); add a footer line 'Agent Drive is an encrypted file-sharing service' with links to the homepage and help/support."
+          },
+          {
+            "level": "page",
+            "element": "Footer line under card: 'Client-side encryption. The key stays in your browser.'",
+            "problem": "Contradictory and irrelevant in this state: it proudly explains where the key lives on a page reached precisely because there is no key, in more unexplained jargon ('client-side'). It answers a question nobody asked while the actual question — 'what do I do now?' — gets one vague sentence.",
+            "norm": "Reassurance copy must be state-relevant; security mechanics are explained at the point of success (download/decrypt), while error states spend their copy budget on cause and recovery.",
+            "severity": "P2",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Replace in this state with recovery-relevant reassurance: 'Nothing was uploaded or exposed — the file simply can't be unlocked without the complete link.' Move the client-side-encryption line to the working download page."
+          },
+          {
+            "level": "layout",
+            "element": "Overall page composition: header + card occupy only the top ~40% of the viewport; the rest is empty off-white",
+            "problem": "Severe top-heavy dead space at every size, worst at 1920x1080 where roughly 60% of the screen is blank beneath the footer line. The page looks broken/unfinished — like content failed to load — which compounds the error message, and the empty area is not used for the help, recovery form, or explanation this state desperately needs.",
+            "norm": "Single-card status pages are vertically centred (or near-centred) in the viewport so the state reads as intentional and complete, especially when total content is this small (standard for 404/error/auth screens).",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Vertically centre the header+card+footer group (or add the recovery content that earns the space). If top-anchored layout is a house pattern, cap it with a proper footer (help, privacy, homepage) instead of void."
+          },
+          {
+            "level": "layout",
+            "element": "Card width and margins on tablet (768) and mobile (375)",
+            "problem": "On 768 the card stretches to nearly full viewport width, producing an over-long, sparse text measure and a card that feels like a stretched desktop afterthought; on 375 the same card crowds the edges while the page still ends in a huge empty lower half. Width behaviour is inconsistent with the constrained desktop card and no breakpoint uses the space to add the missing actions.",
+            "norm": "Text cards cap at a readable measure (~560–640px) and centre at all breakpoints; responsive changes should reflow content and actions, not merely stretch the container.",
+            "severity": "P3",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Set one max-width for the card and centre it at every breakpoint with consistent gutters (16–24px mobile); use freed tablet/mobile space for the paste-link field and copy-message button rather than longer lines."
+          },
+          {
+            "level": "component",
+            "element": "Eyebrow 'ENCRYPTED FILE TRANSFER' and footer 'Client-side encryption…' small grey/green text",
+            "problem": "Both are rendered in small, low-contrast muted green-grey on white/off-white. The eyebrow is letter-spaced uppercase at a tiny size — the hardest style to read — and the footer is the only trust line yet is visually the weakest element on the page. Low-vision and bright-light mobile users will simply not read either.",
+            "norm": "WCAG 2.2 AA: small text needs ≥4.5:1 contrast; don't encode the only trust/reassurance message in the faintest type on the page.",
+            "severity": "P2",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Darken both to a compliant text colour (keep green as an accent in the icon/graphic only), bump footer to at least 13–14px, and reduce letter-spacing/size penalty on the eyebrow."
+          },
+          {
+            "level": "group",
+            "element": "Brand block 'ad agent drive' (top of page)",
+            "problem": "Branding is present but inert and unexplained: it is the page's only trust anchor for a recipient who has never heard of Agent Drive, yet it offers no destination, no tagline, and no 'what is this?' affordance, sitting disconnected from the card below. The recipient must take legitimacy entirely on faith — while being asked to hunt for a 'decryption key', a phrase scammers also use.",
+            "norm": "Unknown-brand recipient pages make the brand a working home link and pair it with a one-line descriptor and visible support/privacy links; the brand block is a trust device, not decoration.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Make the wordmark a link to the homepage, add a short descriptor in the footer ('Agent Drive — encrypted file sharing'), and add Help / Privacy links. If the wordmark is already a link, give it hover/focus affordance so that is discoverable."
+          },
+          {
+            "level": "page",
+            "element": "Missing sender-contact scaffold: no pre-written request text, share-back, or support route (only the instruction 'Ask the sender')",
+            "problem": "The entire recovery burden is outsourced to the least-equipped person: they must find the sender, invent an explanation of a 'decryption key', and hope the sender understands. Most will write 'the link doesn't work', the sender may resend the same truncated link, and the loop repeats with no product involvement.",
+            "norm": "Best-in-class link-error flows close the loop for the user: 'Copy message to sender' with a pre-written explanation, or a one-tap 'Request a new link' (Drive's request-access pattern).",
+            "severity": "P1",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Add 'Copy message for the sender' that copies: 'The Agent Drive link you sent me is incomplete — could you resend the full link, including the part after the #?' plus, where feasible, a 'Request new link' action. This plus the paste-link field removes the dead end entirely."
+          }
+        ],
+        "excellent": [
+          "Fits on one screen with no scrolling, clipping, or horizontal overflow at all four sizes — the card and headline wrap cleanly even at 375 (375x812-default-1.png, 768x1024-default-1.png).",
+          "Consistent left-aligned column: logo block, card, and footer line align on the same edge and card internal padding/spacing is generous and even at every breakpoint (1440x900-default-1.png).",
+          "Clear basic typographic hierarchy: large bold headline dominates, body copy is quieter, and nothing competes with the message — the restraint would work well once error-status styling and actions are added (1920x1080-default-1.png).",
+          "No distracting chrome, ads, or competing calls to action; the recipient is never upsold or asked to sign up mid-error, which is the right instinct for a share-recipient page (1440x900-default-1.png)."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 74,
+      "costUsd": 0.060714,
+      "result": {
+        "verdict": "Visually clean but functionally a complete dead end for a non-technical recipient. The page lacks any error-recovery mechanism (such as an input to paste the missing key or full link), uses positive green security styling for a fatal error state, leaves a single-word typographic widow ('key') on desktop and tablet viewports, and suffers from unbalanced vertical layout and inconsistent alignment axes.",
+        "findings": [
+          {
+            "level": "page",
+            "element": "Error card recovery actions (entire card body)",
+            "problem": "The page is a total dead end with zero interactive elements. When messaging or email apps truncate URLs at the '#' fragment or when a sender sends the key separately, the recipient has no way to paste the full link or manually enter the decryption key directly on the page.",
+            "norm": "Error states must provide an inline recovery path whenever possible. Zero-knowledge file-sharing apps (e.g., Proton Drive, Bitwarden Send, Tresorit) provide an input field to paste the missing key or complete URL alongside a primary 'Unlock' CTA.",
+            "severity": "P0",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Add a recovery form inside the card containing a text input labeled 'Have the complete link or decryption key?' (placeholder: 'Paste full link or #key here...') paired with a primary 'Unlock file' button, plus a secondary 'Copy error details for sender' button."
+          },
+          {
+            "level": "group",
+            "element": "Error card body copy ('Ask the sender for the complete link, including everything after the # symbol.')",
+            "problem": "For a non-technical recipient, 'decryption key' and 'everything after the # symbol' are abstract technical concepts without visual context. They cannot tell why their link broke (e.g., an email client unlinked the text after '#') or what a complete link is supposed to look like.",
+            "norm": "Error messages for non-technical users should use plain language and visual examples showing what went wrong and how to spot the missing piece in the original message.",
+            "severity": "P1",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Explain in plain language that chat/email apps sometimes cut off the end of secure links, and render a compact visual URL comparison snippet inside a muted code box showing the base link plus a highlighted pill for the '#decryption-key' suffix so the user knows what to look for in their message."
+          },
+          {
+            "level": "component",
+            "element": "Top-left padlock icon badge and 'ENCRYPTED FILE TRANSFER' eyebrow label",
+            "problem": "The card uses a closed padlock inside a soft green badge paired with the neutral eyebrow 'ENCRYPTED FILE TRANSFER'. Green + closed padlock universally signals 'secure and ready' rather than 'broken link / missing key', contradicting the error headline below it.",
+            "norm": "Status iconography and color tokens must match semantic state. A blocked or incomplete link state requires warning/error semantics (amber or coral/red badge with a broken-link, key-off, or warning-lock icon).",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Change the icon badge from soft green to a warm amber/warning or error tint, swap the standard closed padlock for a 'key-off' or 'broken-link' icon, and change the eyebrow label to 'INCOMPLETE SHARE LINK' or 'CANNOT UNLOCK FILE'."
+          },
+          {
+            "level": "component",
+            "element": "Card headline ('This link is missing a valid decryption key')",
+            "problem": "Across all desktop and tablet viewports (1440x900, 1920x1080, and 768x1024), the headline wraps leaving the single 3-letter word 'key' stranded alone on the second line as a glaring typographic widow.",
+            "norm": "Primary headings in focal cards must never leave single-word widows, especially short words that break reading cadence and create uneven whitespace inside the card.",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Apply 'text-wrap: balance' to the heading element (or constrain the heading max-width to ~22ch) so it breaks cleanly into two balanced lines: 'This link is missing a / valid decryption key'."
+          },
+          {
+            "level": "component",
+            "element": "Footer caption ('Client-side encryption. The key stays in your browser.')",
+            "problem": "When the error explicitly states that the decryption key is missing, telling a non-technical user 'The key stays in your browser' is contradictory and confusing—it implies the key is already hidden somewhere inside their browser.",
+            "norm": "Microcopy on error screens must be context-aware and reinforce the current state rather than repeating generic happy-path marketing slogans that contradict the error.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Rewrite the footer caption for this error state to explain why Agent Drive cannot recover the key for them: 'End-to-end encrypted. Because the key is never sent to our servers, only the sender can provide the complete link.'"
+          },
+          {
+            "level": "layout",
+            "element": "Page vertical positioning and viewport whitespace",
+            "problem": "The entire content group is top-anchored with a fixed ~52px top offset instead of being vertically centered in the viewport, leaving over 55% of the screen as empty beige dead space at the bottom on 1440x900, 1920x1080, and 768x1024.",
+            "norm": "Single-card utility and share pages should vertically center the primary card within the viewport (using a flex/grid container with min-height: 100dvh) while anchoring branding and footer metadata cleanly.",
+            "severity": "P2",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Use a full-viewport flex column layout ('min-height: 100dvh; justify-content: space-between') with the brand header at the top, the error card vertically centered in the available space, and the security footer anchored near the bottom."
+          },
+          {
+            "level": "layout",
+            "element": "Brand header ('agent drive'), card inner content, and footer caption alignment axes",
+            "problem": "Three competing horizontal alignment axes exist on the same vertical stack: the brand header is flush-left with the outer card border, the card's internal icon/text is indented 40px to the right, and the footer caption below the card is center-aligned.",
+            "norm": "Minimalist single-card layouts require strict alignment discipline—either center-align the brand lockup and footer relative to the card, or maintain a consistent left alignment axis.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Center-align the 'agent drive' brand lockup above the card to match the centered footer caption below the card, or move the brand lockup into a full-width top navigation bar."
+          },
+          {
+            "level": "group",
+            "element": "Brand header ('agent drive') and page footer",
+            "problem": "A first-time recipient who received a link out of the blue has zero context about what 'agent drive' is, whether it is legitimate, or how to learn more, as neither the logo nor any footer element is clickable or informative.",
+            "norm": "Public recipient-facing share pages (like WeTransfer, Dropbox, or Proton Drive) use the header/footer to establish trust and provide a non-intrusive link to learn about the product or visit the home page.",
+            "severity": "P3",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Make the 'agent drive' header lockup a link to the main site (opening in a new tab) and add a subtle 'What is Agent Drive?' or 'Privacy & Security' link in the footer."
+          },
+          {
+            "level": "component",
+            "element": "Headline and wordmark letter-spacing ('agent drive', 'This link is missing a valid decryption key')",
+            "problem": "Overly tight negative letter-spacing (-0.03em to -0.04em) causes adjacent glyphs to collide—most visibly 'nt' in 'agent', 'in' in 'link', 'li' in 'valid', and 'ry'/'ti' in 'decryption'—reducing legibility at a glance.",
+            "norm": "Display headings in UI cards should keep tracking between -0.015em and -0.02em so strokes remain distinct across pixel densities.",
+            "severity": "P3",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Relax the letter-spacing on the card H1 and brand wordmark to '-0.015em' and style the '#' reference in the body text as an inline monospace badge ('#') for better scannability."
+          }
+        ],
+        "excellent": [
+          "Clean, calm visual surface with a warm off-white canvas (#f8f8f5) and crisp white card container with subtle border contrast across all four viewports.",
+          "Fits comfortably on a single screen across 1440x900, 1920x1080, 768x1024, and 375x812 with zero horizontal or vertical overflow.",
+          "Avoids raw technical jargon like HTTP error codes or cryptographic stack traces in the main headline."
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,638 @@
+{
+  "1440": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 546,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 16, 17, 18, 20, 24, 25, 26, 34, 36, 45, 48, 64],
+        "offScale": [10, 17, 18, 25, 26, 34, 45],
+        "nearDupes": [
+          [10, 12],
+          [16, 17],
+          [17, 18],
+          [18, 20],
+          [24, 25],
+          [25, 26],
+          [34, 36]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "19px",
+          "22px",
+          "13px",
+          "15px",
+          "48px",
+          "18px",
+          "34px",
+          "24px",
+          "14px",
+          "12px",
+          "9px",
+          "10px"
+        ],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "13px/600": 5,
+          "15px/650": 1,
+          "48px/700": 1,
+          "15px/400": 1,
+          "18px/700": 3,
+          "13px/400": 20,
+          "34px/550": 3,
+          "13px/650": 1,
+          "24px/700": 1,
+          "19px/700": 1,
+          "14px/400": 7,
+          "14px/600": 4,
+          "12px/400": 1,
+          "9px/400": 3,
+          "19px/550": 3,
+          "10px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 69,
+          "h": 12
+        }
+      ],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"START SMALL. KEEP YOUR KEYS.\"",
+          "ratio": 4.02
+        },
+        {
+          "el": "p \"Client-side encryption on ever\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"$0.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"$20.00 / month\"",
+          "ratio": 4.39
+        },
+        {
+          "el": "p \"$200.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.eyebrow \"NO SURPRISES IN THE FINE PRINT\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Limits apply across your accou\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"Free accounts stop at their in\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.billing-caption \"Downloads are measured from ob\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "span.feature-number \"01 / YOUR ENCRYPTION KEYS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"File contents are encrypted on\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"02 / PURPOSE-BUILT ACCESS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Create scoped, revocable crede\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"03 / YOU CONTROL RETENTION\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Restore files from trash or re\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "ratio": 2.91
+        },
+        {
+          "el": "span \"Persistent storage. Independen\"",
+          "ratio": 2.91
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "nav.actions \"QuickstartSign in\"",
+          "children": 2,
+          "widths": [101, 77]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 366,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 16, 17, 18, 20, 24, 25, 26, 34, 36, 45, 48, 64],
+        "offScale": [10, 17, 18, 25, 26, 34, 45],
+        "nearDupes": [
+          [10, 12],
+          [16, 17],
+          [17, 18],
+          [18, 20],
+          [24, 25],
+          [25, 26],
+          [34, 36]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "19px",
+          "22px",
+          "13px",
+          "15px",
+          "48px",
+          "18px",
+          "34px",
+          "24px",
+          "14px",
+          "12px",
+          "9px",
+          "10px"
+        ],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "13px/600": 5,
+          "15px/650": 1,
+          "48px/700": 1,
+          "15px/400": 1,
+          "18px/700": 3,
+          "13px/400": 20,
+          "34px/550": 3,
+          "13px/650": 1,
+          "24px/700": 1,
+          "19px/700": 1,
+          "14px/400": 7,
+          "14px/600": 4,
+          "12px/400": 1,
+          "9px/400": 3,
+          "19px/550": 3,
+          "10px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 69,
+          "h": 12
+        }
+      ],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"START SMALL. KEEP YOUR KEYS.\"",
+          "ratio": 4.02
+        },
+        {
+          "el": "p \"Client-side encryption on ever\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"$0.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"$20.00 / month\"",
+          "ratio": 4.39
+        },
+        {
+          "el": "p \"$200.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.eyebrow \"NO SURPRISES IN THE FINE PRINT\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Limits apply across your accou\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"Free accounts stop at their in\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.billing-caption \"Downloads are measured from ob\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "span.feature-number \"01 / YOUR ENCRYPTION KEYS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"File contents are encrypted on\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"02 / PURPOSE-BUILT ACCESS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Create scoped, revocable crede\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"03 / YOU CONTROL RETENTION\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Restore files from trash or re\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "ratio": 2.91
+        },
+        {
+          "el": "span \"Persistent storage. Independen\"",
+          "ratio": 2.91
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "nav.actions \"QuickstartSign in\"",
+          "children": 2,
+          "widths": [101, 77]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 568,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 16, 17, 18, 20, 22, 24, 25, 34, 45, 48, 64],
+        "offScale": [10, 17, 18, 22, 25, 34, 45],
+        "nearDupes": [
+          [10, 12],
+          [16, 17],
+          [17, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24],
+          [24, 25]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "19px",
+          "22px",
+          "13px",
+          "15px",
+          "38px",
+          "18px",
+          "34px",
+          "24px",
+          "14px",
+          "12px",
+          "9px",
+          "10px"
+        ],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "13px/600": 5,
+          "15px/650": 1,
+          "38px/700": 1,
+          "15px/400": 1,
+          "18px/700": 3,
+          "13px/400": 20,
+          "34px/550": 3,
+          "13px/650": 1,
+          "24px/700": 1,
+          "19px/700": 1,
+          "14px/400": 7,
+          "14px/600": 4,
+          "12px/400": 1,
+          "9px/400": 3,
+          "19px/550": 3,
+          "10px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 69,
+          "h": 12
+        }
+      ],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"START SMALL. KEEP YOUR KEYS.\"",
+          "ratio": 4.02
+        },
+        {
+          "el": "p \"Client-side encryption on ever\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"$0.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"$20.00 / month\"",
+          "ratio": 4.39
+        },
+        {
+          "el": "p \"$200.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.eyebrow \"NO SURPRISES IN THE FINE PRINT\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Limits apply across your accou\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"Free accounts stop at their in\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.billing-caption \"Downloads are measured from ob\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "span.feature-number \"01 / YOUR ENCRYPTION KEYS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"File contents are encrypted on\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"02 / PURPOSE-BUILT ACCESS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Create scoped, revocable crede\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"03 / YOU CONTROL RETENTION\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Restore files from trash or re\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "ratio": 2.91
+        },
+        {
+          "el": "span \"Persistent storage. Independen\"",
+          "ratio": 2.91
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "nav.actions \"QuickstartSign in\"",
+          "children": 2,
+          "widths": [101, 77]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 2210,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "p \"Free accounts stop at their in\"",
+          "w": 297,
+          "h": 127,
+          "fillPct": 0,
+          "pctOfViewport": 12
+        }
+      ],
+      "spacing": {
+        "observed": [8, 10, 12, 16, 18, 20, 22, 24, 25, 28, 30, 34, 64],
+        "offScale": [10, 18, 22, 25, 30, 34],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24],
+          [24, 25],
+          [28, 30]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "16px",
+          "22px",
+          "11px",
+          "15px",
+          "32px",
+          "18px",
+          "13px",
+          "34px",
+          "24px",
+          "19px",
+          "14px",
+          "12px",
+          "9px",
+          "10px"
+        ],
+        "sizes": {
+          "16px/650": 1,
+          "22px/750": 1,
+          "11px/600": 2,
+          "15px/650": 1,
+          "32px/700": 1,
+          "15px/400": 1,
+          "18px/700": 3,
+          "13px/400": 20,
+          "34px/550": 3,
+          "13px/600": 3,
+          "13px/650": 1,
+          "24px/700": 1,
+          "19px/700": 1,
+          "14px/400": 7,
+          "14px/600": 4,
+          "12px/400": 1,
+          "9px/400": 3,
+          "19px/550": 3,
+          "10px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 69,
+          "h": 12
+        }
+      ],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"START SMALL. KEEP YOUR KEYS.\"",
+          "ratio": 4.02
+        },
+        {
+          "el": "p \"Client-side encryption on ever\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"$0.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"$20.00 / month\"",
+          "ratio": 4.39
+        },
+        {
+          "el": "p \"$200.00 / month\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.eyebrow \"NO SURPRISES IN THE FINE PRINT\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Limits apply across your accou\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p \"Free accounts stop at their in\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.billing-caption \"Downloads are measured from ob\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "span.feature-number \"01 / YOUR ENCRYPTION KEYS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"File contents are encrypted on\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"02 / PURPOSE-BUILT ACCESS\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Create scoped, revocable crede\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "span.feature-number \"03 / YOU CONTROL RETENTION\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "p \"Restore files from trash or re\"",
+          "ratio": 4.18
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "ratio": 2.91
+        },
+        {
+          "el": "span \"Persistent storage. Independen\"",
+          "ratio": 2.91
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "nav.actions \"QuickstartSign in\"",
+          "children": 2,
+          "widths": [80, 60]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  }
+}

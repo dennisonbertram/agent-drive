@@ -1,0 +1,180 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-default-1.png",
+    "1440x900-default-2.png",
+    "1920x1080-default-1.png",
+    "768x1024-default-1.png",
+    "375x812-default-1.png",
+    "375x812-default-3.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 66,
+      "costUsd": 0.15856,
+      "result": {
+        "verdict": "Visually clean but commercially and informationally weak: a signed-out visitor cannot confidently tell who each plan is for, which plan is recommended, what Team adds beyond larger quotas, or what an overage bill will actually be. The only visually primary CTA pushes Free, critical billing limits are buried in dense legalistic prose below the fold, and mobile destroys side-by-side comparison entirely.",
+        "findings": [
+          {
+            "level": "group",
+            "element": "Developer plan card (pale green border/tint, no badge)",
+            "problem": "Developer is implicitly highlighted with a green border and tinted background in every viewport, but there is no 'Recommended', 'Most popular', or audience label explaining why it is highlighted. It reads as a hover/selected state, not a recommendation. Free simultaneously has the strongest filled CTA, sending a contradictory hierarchy signal.",
+            "norm": "Pricing pages must make the recommended plan explicit with a labeled badge and a supporting reason ('Best for solo builders'); decoration alone does not communicate recommendation.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Add a 'Most popular' badge and a one-line audience statement to Developer, elevate that card, and give it the single primary filled CTA. Remove the tint if Developer is not actually the recommended plan."
+          },
+          {
+            "level": "component",
+            "element": "'Start with Free' lime-filled button vs white outline buttons on Developer and Team cards",
+            "problem": "Ignoring the known button-label issue, the visual CTA hierarchy is inverted: the $0 plan gets the only high-contrast lime fill identical to the brand accent, while the $20 and $200 revenue plans get low-emphasis ghost buttons. A first-time visitor's eye and click are steered to Free.",
+            "norm": "The primary visual CTA style belongs on the plan the business wants chosen; secondary plans get secondary styling. One page, one primary action style.",
+            "severity": "P1",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Make the recommended paid plan's button the filled lime primary, demote Free to an outline/secondary button, and keep button styling consistent in weight across all three cards."
+          },
+          {
+            "level": "group",
+            "element": "Team card feature list ('250 drives / 1024 GiB stored ciphertext / 1024 GiB monthly downloads included / 100,000,000 API operations / CLI, MCP, web console, and encrypted sharing')",
+            "problem": "Team costs 10x Developer but the list is only Developer quantities multiplied by ~10. There is no team-specific value at all: no seats/members, roles, shared administration, support level, SSO, audit, or retention difference. The plan name 'Team' is unsupported by its own feature list, so the $200 price looks arbitrary.",
+            "norm": "Each tier must differ on buyer-relevant value, not just meters; a tier named for a segment must list that segment's capabilities (seats, collaboration, admin, support).",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Either list Team-only capabilities (members/seats included, roles, admin controls, support/SLA) and per-seat terms, or rename the tier to a quota name like 'Scale' so the name matches what is sold."
+          },
+          {
+            "level": "group",
+            "element": "Repeated identical bullet 'CLI, MCP, web console, and encrypted sharing' on all three cards",
+            "problem": "The same non-differentiating bullet consumes a row in every card and, combined with quantities being the only differences, makes the three plans look like one plan with three meters. Nothing helps a visitor map their situation (one personal agent vs many agents vs a fleet) to a tier.",
+            "norm": "Shared features belong in a single 'Included in every plan' strip; card space is reserved for differentiators and for whom the plan is intended.",
+            "severity": "P2",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Remove the repeated bullet from cards, add a shared-features line under the grid, and add 'For…' descriptors per plan (e.g. 'For trying an agent', 'For one production agent workload', 'For multi-agent fleets')."
+          },
+          {
+            "level": "component",
+            "element": "'5 / 100 / 1024 GiB monthly downloads included' in plan cards vs 'Extra GiB downloaded — Not charged' in the overage table",
+            "problem": "Direct pricing contradiction on its face: cards imply downloads are allowance-capped ('included'), while the table says extra downloads are not charged. The visitor cannot tell whether exceeding the download number blocks them, bills them, or does nothing — on a page whose stated goal is trustworthy pricing under the heading 'NO SURPRISES IN THE FINE PRINT'.",
+            "norm": "Allowances, hard caps, and unmetered dimensions must be stated consistently in the card and the overage table; any cap-without-charge behavior must be named explicitly.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Reconcile the copy: if downloads are unmetered, delete 'monthly downloads included' from cards and state 'Unmetered downloads' as a feature; if a soft cap throttles/blocks, state exactly what happens at the limit next to both mentions."
+          },
+          {
+            "level": "page",
+            "element": "'How usage works' paragraphs (versions/trash count toward storage, 5 GiB max upload, high-water allocation, USD before taxes)",
+            "problem": "Material purchase constraints — all retained versions and trash count toward storage, each upload capped at 5 GiB, overages billed on monthly high-water allocation, prices exclude taxes — exist only as running prose inside a card below the plan grid. None of it is visible where the plan is chosen, so the 'no surprises' promise is structurally false: the surprises are merely disclosed lower down.",
+            "norm": "Limits that change effective value (what counts toward quota, max file size, tax treatment) must be footnoted at the point of decision on the pricing card, not buried in post-grid prose.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add short footnotes/links directly under card quotas ('Versions and trash count toward storage', 'Max 5 GiB per upload', 'USD, taxes may apply') and keep the detail section as expansion, not the sole disclosure."
+          },
+          {
+            "level": "group",
+            "element": "'How usage works' left column plus disclaimer under 'Additional usage on paid plans' (storage logs, issued links, spending caps)",
+            "problem": "The trust section is two dense unbroken paragraphs plus a third disclaimer paragraph written in defensive insider jargon: 'monthly high-water allocation', 'Downloads are measured from observed storage logs, not just issued links', 'Spending caps block new writes; they are not guaranteed invoice or network-traffic ceilings'. A first-time visitor cannot extract 'what will I pay if I go over' without legal-grade reading effort, and the caveats actively erode confidence.",
+            "norm": "Billing explanations should be scannable: short labeled rows/bullets, plain-language cause and effect, and one worked example bill. Caveats follow the plain statement, not replace it.",
+            "severity": "P2",
+            "screenshot": "375x812-default-3.png",
+            "fix": "Rewrite as 4–5 labeled bullets (What counts / What happens at the limit / How overages are billed / Taxes) in plain language, and add a worked example: e.g. '130 GiB stored on Developer = $20 + 30 × $0.05 = $21.50'."
+          },
+          {
+            "level": "component",
+            "element": "Price typography '$0.00 / $20.00 / $200.00' with '/ month'",
+            "problem": "Cent-level precision ($20.00, $200.00) adds visual noise and an invoicing/utility-meter feel to headline prices, and nothing beside the price states billing terms — no billed-monthly/annually note, no trial, no cancellation terms. There is also no monthly/annual toggle, so a visitor cannot tell whether an annual discount even exists.",
+            "norm": "SaaS headline prices use whole dollars ($20/mo) with billing period and any annual option stated adjacent to the price; trial/cancel terms appear at the CTA.",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Render '$0', '$20', '$200 / month', add 'billed monthly, cancel anytime' (and an annual toggle/price if offered) directly under the price, and add trial terms for paid tiers at the button."
+          },
+          {
+            "level": "component",
+            "element": "Quota numbers '1,000,000 / 10,000,000 / 100,000,000 API operations / month'",
+            "problem": "Full comma-formatted 7–9 digit numbers force zero-counting to compare tiers, and capacities jump in mixed-feeling steps (5→100→1024 GiB) with no per-unit value framing. Comparison — the core job of this grid — requires arithmetic the layout should do for the reader.",
+            "norm": "Comparable quotas use compact, aligned units (1M / 10M / 100M operations) and, where helpful, relative cues so tier steps can be scanned in one glance.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Format API quotas as '1M / 10M / 100M API operations', keep units identical across cards, and consider a slim comparison table beneath the cards restating all quotas in aligned rows."
+          },
+          {
+            "level": "page",
+            "element": "Absence of any support/SLA/security-scope differentiation and of FAQ, cancellation, or payment information below the plan grid",
+            "problem": "Below the cards a visitor gets only metering rules and three brand pillars ('Private contents.', 'Built around agents.', 'Leave on your terms.'). Nothing answers standard pre-purchase trust questions: what support does $200 buy, is there an SLA, how do I cancel or downgrade, what payment/billing is required, what happens to data at plan end. The encryption disclosure (metadata 'remain[s] visible to the service', unrecoverable keys) appears only in small print far below the decision point.",
+            "norm": "Pricing pages for trust-sensitive infrastructure carry a compact FAQ plus per-plan support terms and security summary near the plans; material privacy limitations belong next to the encryption claim, not only in fine print.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add per-plan support/SLA rows, a 4–6 question billing FAQ (cancel, downgrade, overage opt-in, taxes), and move a one-line metadata/key-recovery disclosure up beside the 'Client-side encryption on every plan' subhead."
+          },
+          {
+            "level": "layout",
+            "element": "Three-column plan grid at tablet width",
+            "problem": "At 768px the three cards are squeezed side-by-side: feature text wraps awkwardly mid-phrase ('5 GiB monthly / downloads included', 'CLI, MCP, web console, / and encrypted sharing') with continuation lines losing alignment to the bullet text, prices dominate narrow columns, and the 'How usage works' two-column split below is similarly cramped. The breakpoint keeps a desktop composition instead of adapting.",
+            "norm": "At ~768px, 3-up pricing grids stack to one column (or 2+1) so feature lines never wrap mid-bullet and cards stay scannable; breakpoints serve readability, not column preservation.",
+            "severity": "P2",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Below ~900px, stack the recommended plan first in a single column (or 2+1 layout), let the usage card go single-column, and fix bullet hanging indents so wrapped lines align with text, not the bullet."
+          },
+          {
+            "level": "layout",
+            "element": "Stacked plan cards on mobile; Developer card clipped at viewport bottom ('Developer' heading and partially cut '$20.00')",
+            "problem": "On a 375px phone only the Free card is fully visible; the visitor must scroll past each entire card from memory to compare 3 vs 25 vs 250 drives and 5 vs 100 vs 1024 GiB. Side-by-side comparison — the entire purpose of a pricing grid — is impossible, and there is no sticky summary, mini comparison table, or plan jump-nav to compensate.",
+            "norm": "Mobile pricing needs a comparison affordance: a compact quota comparison table, sticky plan selector, or horizontally snap-scrolling cards with the recommended plan first.",
+            "severity": "P1",
+            "screenshot": "375x812-default-1.png",
+            "fix": "On mobile, lead with the recommended plan, reduce card padding/feature rows, and add a compact aligned comparison table (drives/storage/downloads/API per plan) above or between the cards so quotas can be compared without memory."
+          },
+          {
+            "level": "layout",
+            "element": "'How usage works' / 'Additional usage on paid plans' card cut off at the bottom of the first desktop viewport",
+            "problem": "At 1440×900 the overage card is sliced mid-table ('Extra GiB downloaded' half-visible) and at 1920×1080 the trust pillars are still entirely below the fold. Everything needed to trust the price — overage rates, limits, encryption caveats — sits below a first screen containing only prices and buttons.",
+            "norm": "First-viewport pricing should at least signal total cost of ownership (overage rates exist and their scale); key billing facts should not require a scroll of faith past the CTA.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Tighten hero/card vertical spacing (smaller headline block, denser cards) so the overage strip peeks meaningfully, and add a one-line overage summary under the grid: 'Overages on paid plans from $0.05/GiB — details below'."
+          },
+          {
+            "level": "component",
+            "element": "Header actions 'Quickstart' and 'Sign in' vs card CTA 'Start with Free'",
+            "problem": "A signed-out visitor faces three different entry verbs with no explanation of how they relate: Quickstart (header), Sign in (header), and Start with Free (card). Whether Quickstart creates an account, requires an account, or bypasses plan selection is unknowable from this page — an avoidable fork at the exact moment of conversion.",
+            "norm": "Public pages offer one clearly primary acquisition path; auxiliary entries (docs/quickstart, sign-in) are visually and verbally subordinate and their relationship to signup is obvious.",
+            "severity": "P2",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Demote Quickstart to a text/secondary link (or label it 'Developer quickstart'), keep Sign in tertiary, and make plan CTAs the unambiguous signup path; on mobile, consider collapsing header to logo + Sign in."
+          },
+          {
+            "level": "page",
+            "element": "Footer ('AGENT DRIVE' / 'Persistent storage. Independent agents.')",
+            "problem": "The entire footer is a wordmark and a tagline — no Privacy, Terms, Security, Status, or Documentation links. For an encrypted-storage product asking for $200/month and custody of agent data, the absence of any legal/security destination at the page's trust climax undermines credibility.",
+            "norm": "Trust-sensitive SaaS footers link Privacy, Terms, Security/trust, and Status at minimum, reachable from the pricing page without returning to the homepage.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add a minimal footer link row (Privacy, Terms, Security, Status, Docs) while keeping the tagline."
+          },
+          {
+            "level": "component",
+            "element": "Fine-print typography in 'How usage works' and pillar descriptions ('01 / YOUR ENCRYPTION KEYS', body copy)",
+            "problem": "The most consequential text on the page is set in the smallest, lowest-contrast gray type, with tiny letterspaced eyebrows ('01 / PURPOSE-BUILT ACCESS') that fall below comfortable legibility. Emphasis is allocated inversely to importance: prices are huge, billing consequences are faint.",
+            "norm": "Decision-relevant terms meet normal body-text size and contrast (≥4.5:1, ≥14px); de-emphasis is reserved for genuinely minor text.",
+            "severity": "P3",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Raise fine-print body to the same size/contrast as card feature text, bold the operative phrases (counts toward storage, max upload, taxes), and enlarge or drop the numbered eyebrows."
+          }
+        ],
+        "excellent": [
+          "Desktop plan grid in 1920x1080-default-1.png: three equal cards with identical feature ordering (drives, storage, downloads, API, access) makes row-wise quota scanning genuinely easy, and the right-aligned price column in 'Additional usage on paid plans' is clean and tabular.",
+          "Hero subhead in 1440x900-default-1.png — 'Client-side encryption on every plan. Choose the room your agents need.' — correctly pre-empts the most common pricing objection (encryption as a paid upsell) in one line above the cards.",
+          "Substantive honesty in 1440x900-default-2.png: 'Private contents.' discloses that file paths, sizes, tags and activity metadata remain visible and that lost keys cannot be recovered, and the deletion copy avoids instant-erasure claims — rare, trust-worthy candor for this category, even though it needs better placement and framing.",
+          "Visual system consistency across 1440x900-default-1.png and 375x812-default-1.png: same card radius, lime accent, and typography survive from desktop to mobile, and the page avoids badges, strikethroughs, and fake discount clutter."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": false,
+      "status": 200,
+      "error": "empty response"
+    }
+  ]
+}

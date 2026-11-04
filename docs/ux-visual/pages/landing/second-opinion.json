@@ -1,0 +1,272 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-default-1.png",
+    "1440x900-default-2.png",
+    "1920x1080-default-1.png",
+    "768x1024-default-1.png",
+    "375x812-default-1.png",
+    "375x812-default-2.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 55,
+      "costUsd": 0.126744,
+      "result": {
+        "verdict": "Fail for the stated goal. The page is typographically striking and scannable, but on first visit it reads as a slogan with a single unexplained CLI command — not as encrypted, persistent storage for agents. The hero wastes roughly half of desktop width, the only product evidence is one put command (truncated on mobile), and there is no proof, docs entry, install path, or closing CTA to convert a developer who is convinced by the three pillars.",
+        "findings": [
+          {
+            "level": "page",
+            "element": "H1 'Your agents. Their own drive.' + subhead",
+            "problem": "In 5 seconds a first-time developer cannot tell what this is. The H1 names neither files/storage, persistence, encryption, nor a category; the category explanation lives only in the small grey subhead 'Give your agents a place to keep their memory... Encrypted before it leaves their machine.' Cleverness outranks comprehension.",
+            "norm": "Landing-page convention: headline or immediate subhead must state category + differentiator in plain language (e.g. 'Encrypted persistent storage for AI agents') so a cold visitor self-qualifies instantly.",
+            "severity": "P0",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Keep the H1 if desired but make the subhead literal and first-line: 'Encrypted, persistent file storage your agents keep between sessions — via CLI, typed client, and MCP.' Move poetry to the eyebrow, not the explanation."
+          },
+          {
+            "level": "component",
+            "element": "Terminal code line '$ agent-drive put ./handoff.md /memory/handoff.md'",
+            "problem": "The command is cut off at the right edge — only '/memory/' is visible before the card ends. The page's single piece of product evidence is literally unreadable on mobile and the card produces horizontal clipping.",
+            "norm": "Mobile 375px: no clipped primary content; code must wrap, shrink, shorten the example, or allow intentional contained horizontal scroll with a visible affordance.",
+            "severity": "P0",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Use a shorter path on small screens ('agent-drive put ./handoff.md /memory/'), reduce mono size, allow wrapping, and test at 360/375px so the full command is visible without clipping."
+          },
+          {
+            "level": "layout",
+            "element": "Hero right half (desktop)",
+            "problem": "The entire right ~45% of the hero is empty off-white at 1440 and even more cavernous at 1920. The only visual — the dark terminal card — sits narrow at left and does not balance the composition, so the page looks unfinished rather than minimal.",
+            "norm": "Desktop hero convention: pair copy with product evidence (console/files UI, architecture/encryption diagram, or wider terminal) in a two-column or full-width composition; whitespace should frame content, not replace it.",
+            "severity": "P1",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Move to a two-column hero or widen the terminal: right side shows the console (drive tree, versions, agent access) or a put→new-session→get flow. Cap dead space; let the product be the visual."
+          },
+          {
+            "level": "group",
+            "element": "CTA pair 'Create your workspace ↗' / 'Open console'",
+            "problem": "'Open console' is unexplained for a signed-out first visitor: console of what, and are they allowed in without an account? It competes with the primary CTA and implies the product may require already having a workspace. No friction reducer sits under the pair (free tier, no card, setup time).",
+            "norm": "One dominant primary action for signed-out traffic; secondary actions must be self-explanatory ('View docs', 'See it in action') and primary CTAs carry risk-reducers ('Free · No card · 2 minutes').",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Replace 'Open console' with 'Read the docs' or 'View example', and add microcopy under 'Create your workspace': e.g. 'Free to start · No credit card · Keys stay on your device.'"
+          },
+          {
+            "level": "page",
+            "element": "Entire page below the three pillars / footer 'AGENT DRIVE — Persistent storage. Independent agents.'",
+            "problem": "After the only persuasive content (01/02/03) the page ends. There is no repeated 'Create your workspace' CTA, no docs/GitHub/security/terms links — the footer is two text fragments. A convinced reader has to scroll back up to act, and a skeptical developer has nowhere to verify anything.",
+            "norm": "Landing pages repeat the primary CTA after the value section and provide a real footer (Docs, Security, Pricing, GitHub, Privacy, Terms, Contact) as a baseline trust/navigation layer.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add a closing CTA block ('Give your next session its memory back' + Create your workspace) and a footer with Docs, Security/encryption notes, GitHub, Pricing, Privacy, Terms."
+          },
+          {
+            "level": "page",
+            "element": "Trust and proof content (absent across hero and pillars)",
+            "problem": "Strong claims — 'You hold the keys', 'service receives ciphertext, never your drive key' — are asserted with zero substantiation: no encryption specifics, no zero-knowledge statement, no open-source/audit mention, no logos, testimonials, stars, or usage numbers anywhere in any screenshot.",
+            "norm": "Security infrastructure for developers is bought on verifiability: name the scheme (e.g. client-side AES-256/XChaCha, key location), link a security page/docs, and show at least one form of social or technical proof near the claim.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add one proof strip under the hero or pillars: encryption specifics + 'Read the security model' link, plus GitHub/docs links and any customer/usage proof you actually have. Do not add claims you cannot support."
+          },
+          {
+            "level": "group",
+            "element": "Header nav 'Pricing' / 'Sign in' (only)",
+            "problem": "For a developer tool the header offers no Docs, Product, Security, or GitHub — the exact destinations this audience looks for first. 'Pricing' and 'Sign in' are also styled as identical white pills, indistinguishable in weight from the hero's secondary 'Open console'.",
+            "norm": "Developer-product headers conventionally include Docs (often the top entry point) and a differentiated text-link vs. button hierarchy; only one element should read as the button style per region.",
+            "severity": "P1",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Add Docs and GitHub/Security as plain text links, keep 'Sign in' as a text link, and reserve filled/outline button styling for one action."
+          },
+          {
+            "level": "component",
+            "element": "Dark terminal card 'FROM A SESSION TO SOMETHING LASTING'",
+            "problem": "As the sole demo it shows one write and no result: no install line, no output/confirmation, no read-back in a new session, no MCP/tool-call example despite the pillar promising 'CLI, typed client, and MCP tools'. Developers cannot judge integration effort or the 'fresh session, same context' claim from this.",
+            "norm": "Developer hero demos show the minimal end-to-end loop (install → write → retrieve in new context) with visible output; claims in feature copy should be demonstrated, not just captioned ('A fresh session. The same context.').",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Expand to 3–4 lines: install, 'put', a new-session 'get' or MCP call, and one line of output. Or add tabs (CLI / MCP / TypeScript) — one snippet per promised surface."
+          },
+          {
+            "level": "layout",
+            "element": "Fold at 1440x900 — pillar labels '01 / PRIVATE BY DESIGN' row",
+            "problem": "At the default viewport the three pillar labels are just visible at the very bottom with their headings below the fold and no scroll cue. The first screen therefore ends on a hairline and orphaned micro-labels, reading as an empty/broken page bottom.",
+            "norm": "Above-the-fold composition should either complete the hero cleanly with a scroll indicator or deliberately tease the next section with a visible heading; orphaned labels are neither.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Tighten hero vertical spacing (the gap under the header and above the terminal is generous) so at least pillar headings clear the fold, or end the hero above the rule and add a subtle scroll cue."
+          },
+          {
+            "level": "group",
+            "element": "Mobile CTA stack 'Create your workspace' over 'Open console'",
+            "problem": "The buttons stack with mismatched widths — primary is wide, 'Open console' shrinks to content — and on scroll the secondary button is left orphaned alone at the top of the second screen, disconnected from the action it belongs to. It also pushes the terminal further down.",
+            "norm": "Mobile CTA groups: full-width, equal-width stacked buttons (primary first, ≥44px tall), kept together; secondary actions may demote to a text link to save vertical space.",
+            "severity": "P2",
+            "screenshot": "375x812-default-2.png",
+            "fix": "Make both buttons full-width on ≤480px or demote 'Open console'/'Read the docs' to an inline text link under the primary; keep the group visually atomic."
+          },
+          {
+            "level": "group",
+            "element": "Three pillars at tablet '01/02/03' columns",
+            "problem": "At 768px the three columns are cramped: 'Less setup. More doing.' and 'A clear view of the work.' wrap to two lines while column one stays one line, and body copy runs long in narrow measures. The same content that breathes on desktop becomes the densest, hardest block on tablet.",
+            "norm": "Responsive convention: 3-column feature rows collapse to 1 (or 2+1) columns below ~900px to preserve readable measure (~45–75 chars) and aligned heading baselines.",
+            "severity": "P2",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Stack pillars vertically (or 1-col with dividers) at tablet, matching the successful mobile stacking in 375x812-default-2.png; align heading tops if columns are ever retained."
+          },
+          {
+            "level": "component",
+            "element": "Eyebrow 'A WORKSPACE THAT OUTLIVES THE SESSION', subhead, pillar micro-labels and body text",
+            "problem": "Muted grey/olive small text on the off-white background is low-contrast throughout: the 10–11px letterspaced all-caps labels ('01 / PRIVATE BY DESIGN') and the grey subhead/body are the hardest things to read on the page, yet the subhead carries the actual product definition.",
+            "norm": "WCAG AA: ≥4.5:1 for body text, ≥3:1 minimum for large text; micro-labels should be ≥11–12px and not rely on letterspaced all-caps in a washed-out tint for meaning.",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Darken body/label colour to pass 4.5:1 on the background, bump micro-labels to 12px, and keep letterspacing only where size/weight still guarantee legibility."
+          },
+          {
+            "level": "component",
+            "element": "H1 type 'Your agents. / Their own drive.'",
+            "problem": "Extreme tight tracking and near-flush line-spacing make the display type dense at desktop and, on mobile, the break 'Your agents. / Their own / drive.' leaves 'drive.' as a one-word orphan line. It is memorable but at 375px it consumes the top third of the screen before any explanation appears.",
+            "norm": "Responsive display type should scale down (clamp) on small screens so headline + definition + primary CTA fit in the first viewport; avoid orphan final words via balanced wrapping.",
+            "severity": "P2",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Use clamp() to reduce mobile H1 size ~35–40%, apply text-wrap: balance, and verify headline + subhead + primary CTA are all visible at 375x812."
+          },
+          {
+            "level": "page",
+            "element": "Feature pillars 'You hold the keys.' / 'Less setup. More doing.' / 'A clear view of the work.'",
+            "problem": "These are the entire content of the page: three abstract benefits with no how-it-works, no file/version/access visuals, no use cases (memory, handoff, shared work are named in the subhead but never shown), and no differentiation against S3/Drive/roll-your-own that a developer will immediately ask about.",
+            "norm": "Infra landing pages need at least one concrete mechanism section (how keys/encryption work, how a drive is shared/scoped to agents, versioning/recovery) and an implicit or explicit 'vs. the alternative' answer below the benefit row.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add one 'How it works' band (3 steps with the terminal/console visual) and link each pillar to its doc/security page; show, don't assert, browsing files, recovering versions, and per-agent access."
+          },
+          {
+            "level": "component",
+            "element": "Logo mark 'a/' + 'agent drive'",
+            "problem": "The mark reads as 'a/' — ambiguous as a standalone symbol in the small lime tile, and the wordmark's tight lowercase tracking mirrors the headline's compression. At header size it does not yet encode 'drive/storage/agent' in any recognisable way.",
+            "norm": "Logo at nav size must be legible and ownable at 16–32px; if the glyph needs explanation, the wordmark spacing/case must compensate.",
+            "severity": "P3",
+            "screenshot": "768x1024-default-1.png",
+            "fix": "Test the mark at 16px favicon size; if it does not read, redraw around a storage/agent cue and relax wordmark tracking slightly."
+          }
+        ],
+        "excellent": [
+          "Primary CTA is unmistakable: the lime 'Create your workspace ↗' is the only saturated element in the hero (1440x900-default-1.png) and correctly dominates the muted palette.",
+          "Headline voice is genuinely ownable — 'Your agents. Their own drive.' is short, rhythmic and memorable; it fails only as a definition, not as a hook.",
+          "Disciplined left-aligned grid and consistent hairline rules across desktop, tablet and mobile give the page a calm, premium editorial structure.",
+          "The three pillars are well-written and well-chosen for this audience (keys/privacy, low setup via CLI+MCP, human oversight) and stack cleanly into a readable single column on mobile (375x812-default-2.png).",
+          "The dark terminal card is the right instinct for developers and its lime '$' prompt ties the one code moment back to the brand accent."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 70,
+      "costUsd": 0.059516,
+      "result": {
+        "verdict": "A clean, minimalist developer-tool aesthetic undermined by severe desktop dead space, a broken mobile code block that clips horizontally, ambiguous navigation/CTA hierarchy, and a complete absence of developer proof points (Docs, SDK/MCP examples, cryptographic specifics, or a console preview) needed to earn trust for an encrypted storage product.",
+        "findings": [
+          {
+            "level": "component",
+            "element": "Terminal code card ('$ agent-drive put ./handoff.md /memory/handoff.md')",
+            "problem": "On mobile viewports, the monospace command line overflows its container and is clipped mid-path right after '/memory/', hiding 'handoff.md' against the right edge with no horizontal scroll indicator or line wrapping.",
+            "norm": "Code snippets on mobile must either wrap cleanly with indentation, fit within a 375px viewport, or provide clear horizontal scroll affordance with right-side padding.",
+            "severity": "P0",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Allow the CLI arguments to wrap onto a second indented line on narrow screens or reduce the font size from ~14px to 12px with `overflow-x: auto` and internal right padding."
+          },
+          {
+            "level": "layout",
+            "element": "Hero section right-hand canvas and above-the-fold viewport",
+            "problem": "The hero stacks the headline, copy, CTAs, and terminal card in a single left-aligned column occupying only ~55% of the content container, leaving nearly half the desktop screen completely blank while pushing the three value-proposition columns ('01 / PRIVATE BY DESIGN', etc.) so far down that only their tiny eyebrow labels peek at the bottom edge of a 1440x900 screen.",
+            "norm": "Desktop hero layouts on 1440x900 and 1920x1080 should use horizontal space purposefully so key supporting proof and value pillars fit cleanly above the fold without vast dead zones.",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Convert the hero into a 12-column asymmetric split: place the headline, subcopy, and CTAs in the left 6 columns and the interactive terminal/console preview in the right 6 columns. This eliminates the dead space on the right and pulls the 3 value pillars fully above the fold on 1440x900."
+          },
+          {
+            "level": "layout",
+            "element": "Page vertical height and footer ('AGENT DRIVE / Persistent storage. Independent agents.')",
+            "problem": "Even on a large 1920x1080 desktop display, a sparse page with fewer than 130 words fails to fit on one screen—the footer text is sliced in half at the bottom viewport edge.",
+            "norm": "A minimal single-screen landing page on a 1080p monitor should either fit completely within the viewport or have deliberate below-the-fold sections, never clipping a single line of text at the bottom edge.",
+            "severity": "P2",
+            "screenshot": "1920x1080-default-1.png",
+            "fix": "Tighten vertical spacing between the header, hero, feature grid, and footer (and adopt the 2-column hero) so the entire page fits comfortably inside 1080p and 900p viewports."
+          },
+          {
+            "level": "group",
+            "element": "Primary CTA ('Create your workspace ↗'), secondary CTA ('Open console'), and top-nav ('Sign in')",
+            "problem": "First-time signed-out visitors are confronted with three competing account entry points ('Create your workspace ↗', 'Open console', and 'Sign in') with unclear differentiation. Worse, the primary CTA uses a north-east arrow ('↗'), which by convention signals leaving the site for an external third-party URL rather than starting an onboarding flow.",
+            "norm": "A landing page should present one unmistakable primary conversion path for new users and one secondary path for returning users, using standard directional icons ('→' for forward progression, reserving '↗' for external links).",
+            "severity": "P1",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Replace '↗' with a right arrow '→' on 'Create your workspace', remove 'Open console' from the hero (or replace it with 'Read the docs' / 'View CLI quickstart'), and let 'Sign in' in the top navbar serve returning users."
+          },
+          {
+            "level": "component",
+            "element": "Top navigation bar ('Pricing' and 'Sign in' buttons)",
+            "problem": "'Pricing' is styled as a bordered button identical in weight, height, and border-radius to 'Sign in', making a standard informational nav link look like an authentication action and crowding the mobile header.",
+            "norm": "Navigation links (like Pricing, Docs, Security) should use plain text link styling, reserving bordered or filled button treatments for utility/conversion actions like 'Sign in' or 'Get started'.",
+            "severity": "P2",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Remove the button border and background from 'Pricing' so it renders as a clean text link alongside a 'Docs' link, keeping only 'Sign in' as a bordered button."
+          },
+          {
+            "level": "page",
+            "element": "Navigation bar, feature columns, and footer",
+            "problem": "For an encrypted developer storage product, the page lacks essential technical trust signals: there is no link to Documentation, no mention of the encryption standard (e.g., AES-256-GCM / zero-knowledge key derivation), no install command (`npm`, `brew`, `curl`), no visual of the 'Human Oversight' web console, and a non-functional footer with zero legal, security, or GitHub links.",
+            "norm": "Developer infrastructure and security products must provide immediate access to Docs, verifiable cryptographic/architecture claims, and standard footer links (Docs, Security, Privacy, Terms, GitHub).",
+            "severity": "P1",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Add 'Docs' and 'Security' links to the header/footer, specify the client-side encryption cipher in pillar 01, and add tabs to the code block showing CLI (`put`/`get`), TypeScript SDK, and MCP configuration."
+          },
+          {
+            "level": "component",
+            "element": "Terminal code card ('FROM A SESSION TO SOMETHING LASTING')",
+            "problem": "The terminal shows only a single static command (`$ agent-drive put ./handoff.md /memory/handoff.md`) with no copy button, no output confirming client-side encryption, and no second step showing a new session reading the file back—failing to visually prove the caption 'A fresh session. The same context.'",
+            "norm": "Developer hero code blocks should demonstrate the complete 'aha' loop (write + read/resume or encryption output) and include one-click copy or language/tool tabs.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Show a two-step snippet inside the terminal (Session 1 encrypting & uploading `handoff.md`, Session 2 / MCP mounting `/memory/handoff.md` with a checkmark status line) and add tabs for `CLI`, `TypeScript`, and `MCP`."
+          },
+          {
+            "level": "component",
+            "element": "Hero display headline ('Your agents. Their own drive.')",
+            "problem": "Letter-spacing and word-spacing on the display headline are overly compressed (around -0.04em to -0.05em), causing adjacent glyphs (`r`+`a` in 'Your agents', `r`+`o` in 'Their own', `r`+`i` in 'drive') to nearly collide and making words blend together at a glance.",
+            "norm": "Large display typography should use tightened tracking (-0.02em to -0.03em) without sacrificing inter-word separation or causing glyph collisions.",
+            "severity": "P2",
+            "screenshot": "1440x900-default-1.png",
+            "fix": "Relax headline `letter-spacing` by 0.015em and increase `word-spacing` slightly so each word reads cleanly at a 5-second glance."
+          },
+          {
+            "level": "group",
+            "element": "Mobile hero CTA stack ('Create your workspace ↗' and 'Open console')",
+            "problem": "On 375px mobile, the two CTA buttons stack vertically with mismatched shrink-wrapped widths (~205px above ~122px), creating an unbalanced, jagged left-aligned stair-step.",
+            "norm": "Stacked mobile CTAs should either span full container width (`width: 100%`) or sit side-by-side if short enough, maintaining clean geometric alignment.",
+            "severity": "P3",
+            "screenshot": "375x812-default-1.png",
+            "fix": "Make the primary CTA full-width on viewports under 480px, or keep both CTAs on a single horizontal row by tightening horizontal button padding."
+          },
+          {
+            "level": "component",
+            "element": "Section eyebrows ('01 / PRIVATE BY DESIGN', '02 / BUILT FOR AGENTS', '03 / HUMAN OVERSIGHT') and footer text",
+            "problem": "The 11px uppercase muted grey labels (`~#7A7A72`) against the warm off-white background (`#FBFBF8`) have weak contrast (~3.8:1), making the structural numbering hard to read on lower-brightness displays.",
+            "norm": "Small uppercase body/label text (<14px) must meet at least WCAG AA 4.5:1 contrast ratio against the surface background.",
+            "severity": "P3",
+            "screenshot": "1440x900-default-2.png",
+            "fix": "Darken the muted label token from `#7A7A72` to `#57574F` (achieving >5.5:1 contrast) while keeping the uppercase tracking to preserve visual hierarchy."
+          }
+        ],
+        "excellent": [
+          "Strong, memorable brand palette: the high-contrast lime-green accent (`#CFF063`) paired with deep forest-black (`#18201B`) and warm paper-cream background (`#FBFBF8`) feels distinctive and modern without resorting to generic AI purple gradients.",
+          "Crisp, jargon-free value proposition copy: 'Your agents. Their own drive.' and the three pillar headlines ('You hold the keys.', 'Less setup. More doing.', 'A clear view of the work.') communicate the core user benefit in plain English within 5 seconds.",
+          "Clean tablet breakpoint (`768x1024-default-1.png`): the 3-column feature grid and terminal width scale proportionally on iPad portrait without awkward orphan columns or horizontal overflow."
+        ]
+      }
+    }
+  ]
+}

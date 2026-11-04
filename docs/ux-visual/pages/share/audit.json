@@ -1,0 +1,226 @@
+{
+  "1440": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 24, 40, 48, 56],
+        "offScale": [10],
+        "nearDupes": [[10, 12]]
+      },
+      "type": {
+        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "10px/650": 1,
+          "34px/700": 1,
+          "13px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Ask the sender for the complet\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.share-footer \"Client-side encryption. The ke\"",
+          "ratio": 4.18
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"adagent driveENCRYPTED FILE TR\"",
+          "w": 680,
+          "h": 1080,
+          "fillPct": 12,
+          "pctOfViewport": 35
+        }
+      ],
+      "spacing": {
+        "observed": [10, 12, 24, 40, 48, 56],
+        "offScale": [10],
+        "nearDupes": [[10, 12]]
+      },
+      "type": {
+        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "10px/650": 1,
+          "34px/700": 1,
+          "13px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Ask the sender for the complet\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.share-footer \"Client-side encryption. The ke\"",
+          "ratio": 4.18
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 24, 40, 48, 56],
+        "offScale": [10],
+        "nearDupes": [[10, 12]]
+      },
+      "type": {
+        "distinctFontSizes": ["19px", "22px", "10px", "34px", "13px"],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "10px/650": 1,
+          "34px/700": 1,
+          "13px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Ask the sender for the complet\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.share-footer \"Client-side encryption. The ke\"",
+          "ratio": 4.18
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 16, 24, 28, 36],
+        "offScale": [10],
+        "nearDupes": [[10, 12]]
+      },
+      "type": {
+        "distinctFontSizes": ["19px", "22px", "10px", "26px", "13px"],
+        "sizes": {
+          "19px/650": 1,
+          "22px/750": 1,
+          "10px/650": 1,
+          "26px/700": 1,
+          "13px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "p.eyebrow \"ENCRYPTED FILE TRANSFER\"",
+          "ratio": 4.29
+        },
+        {
+          "el": "p \"Ask the sender for the complet\"",
+          "ratio": 4.46
+        },
+        {
+          "el": "p.share-footer \"Client-side encryption. The ke\"",
+          "ratio": 4.18
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  }
+}
