@@ -214,3 +214,58 @@
   font-size: 0.8125rem;
   color: var(--muted, #6b6963);
 }
+
+/* add to an existing drive */
+.connect-shell .connect-link {
+  display: block;
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 0.8125rem var(--sans, 'Inter Tight', system-ui, sans-serif);
+  color: var(--ink, #111);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.connect-existing input:not([type='checkbox']),
+.connect-existing select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  text-align: left;
+  font: 400 0.875rem var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: normal;
+  color: var(--ink, #111);
+  background: var(--bg, #fff);
+}
+.connect-existing input[type='file'] {
+  padding: 10px 12px;
+  min-height: 0;
+}
+.connect-existing input[type='checkbox'] {
+  width: auto;
+  min-height: 0;
+}
+.connect-shell .connect-existing label.connect-check {
+  display: block;
+  letter-spacing: normal;
+  text-transform: none;
+  font-size: 0.875rem;
+  color: var(--ink, #111);
+}
+.connect-shell input[type='checkbox'] {
+  display: inline-block;
+  vertical-align: middle;
+}
+.connect-shell label.connect-delegate + .banner {
+  margin-top: 16px;
+}
+.connect-shell .connect-existing label.connect-check {
+  margin: 0 0 14px;
+}
+.connect-shell .connect-existing p.connect-note {
+  margin: 0 0 14px;
+  text-align: left;
+}

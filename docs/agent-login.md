@@ -467,6 +467,23 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   violation returns 403 `permission_denied`: `A key cannot grant more than it holds.` Keys without
   `delegate` get 403 naming the scope. `manage` keys are not subject to it.
 
+## 12. Add a first-time agent to an existing drive (handoff b)
+
+- When a request would create a new drive (`creates_drive`) and the account already has drives,
+  `/connect` shows the text button "Add to an existing drive instead". Reconnects do not show it.
+  The default one-click view is otherwise unchanged.
+- The human picks a drive and supplies its key in the browser: a pasted key or `adcred1.` bundle,
+  or a recovery file or bundle file. The key is checked with `decodeDriveKey`, sealed to the
+  request's `public_key` with `sealDriveKey` (section 4), and kept only in page state.
+- The page posts an explicit approve body: `driveIds: [driveId]`, `scopes` (`read` only when "Read
+  only" is ticked, otherwise `read write delete share`, plus `delegate` when that box is ticked),
+  `sealedDriveKeys: { [driveId]: sealed }`, and `writePaths` (one folder, or empty).
+- The service never receives the plaintext drive key or the bundle's API token. The e2e test
+  captures the approve request body and checks for both.
+- Verification is the user code, the agent name and the machine. There is no public-key
+  fingerprint: the server that binds the key also serves the page's JavaScript.
+- This needs recovery material in hand. Handoffs (a) and (c) cover the other cases.
+
 ## 13. Issued credentials
 
 - Handoff for a sandbox set up without a browser: an agent whose key holds `delegate` runs
