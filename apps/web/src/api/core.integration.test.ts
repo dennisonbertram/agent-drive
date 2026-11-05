@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -520,6 +521,58 @@ describe('Phase 1 core API', () => {
     expect(paths(await tail(`cursor=${encodeURIComponent(seen.latestCursor ?? '')}`))).toEqual([
       '/tail/older-tx.bin',
     ]);
+  });
+
+  it('migration 0015 numbers existing events by (created_at, id) and continues the sequence', async () => {
+    const sqlText = readFileSync(
+      resolve(__dirname, '../../drizzle/0015_typical_doctor_spectrum.sql'),
+      'utf8',
+    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('CREATE SCHEMA mig0015');
+      await client.query('SET LOCAL search_path = mig0015');
+      await client.query(
+        'CREATE TABLE file_events (id uuid PRIMARY KEY, drive_id uuid NOT NULL, created_at timestamptz NOT NULL)',
+      );
+      const drive = randomUUID();
+      // inserted out of (created_at, id) order
+      const rows: [string, string][] = [
+        ['00000000-0000-4000-8000-000000000003', '2025-01-02T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000002', '2025-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000001', '2025-01-01T00:00:00Z'],
+      ];
+      for (const [id, at] of rows)
+        await client.query('INSERT INTO file_events VALUES ($1, $2, $3)', [id, drive, at]);
+      for (const statement of sqlText.split('--> statement-breakpoint'))
+        await client.query(statement);
+      const ordered = await client.query('SELECT id FROM file_events ORDER BY seq');
+      expect(ordered.rows.map((row) => row.id.slice(-1))).toEqual(['1', '2', '3']);
+      await client.query(
+        'INSERT INTO file_events (id, drive_id, created_at) VALUES ($1, $2, now())',
+        [randomUUID(), drive],
+      );
+      const max = await client.query('SELECT seq::int AS seq FROM file_events ORDER BY seq DESC');
+      expect(max.rows.map((row) => row.seq)).toEqual([4, 3, 2, 1]);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('ignores since when a cursor is sent, even if since is invalid', async () => {
+    const first = (await json(await request(`/drives/${driveId}/recent?limit=1`, writeToken))) as {
+      latestCursor: string | null;
+    };
+    const cursor = encodeURIComponent(first.latestCursor ?? '');
+    const ok = await request(
+      `/drives/${driveId}/recent?cursor=${cursor}&since=not-a-date`,
+      writeToken,
+    );
+    expect(ok.status).toBe(200);
+    const bad = await request(`/drives/${driveId}/recent?since=not-a-date`, writeToken);
+    expect(bad.status).toBe(400);
   });
 
   it('creates, scopes, expires, revokes, and audits encrypted shares without storing file keys', async () => {

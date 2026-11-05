@@ -174,5 +174,21 @@ describe('AgentDriveClient transport guards', () => {
       expect(Date.now() - started).toBeLessThan(1500);
       expect(result).toEqual({ items: [], nextCursor: null, latestCursor: null });
     });
+
+    it('stops polling when the caller aborts', async () => {
+      const fetcher = vi.fn(async () => page([]));
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100);
+      const started = Date.now();
+      const result = await make(fetcher as unknown as typeof fetch).waitForRecent('d', {
+        waitMs: 10_000,
+        signal: controller.signal,
+      });
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(result.items).toEqual([]);
+      const calls = fetcher.mock.calls.length;
+      await new Promise((resolve) => setTimeout(resolve, 2300));
+      expect(fetcher.mock.calls.length).toBe(calls);
+    });
   });
 });

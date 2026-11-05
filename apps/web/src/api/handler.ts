@@ -1501,9 +1501,10 @@ async function fileEndpoint(
     need(auth, 'read', driveId);
     const sinceValue = queryValue(url, 'since', 128);
     const since = sinceValue ?? new Date(0).toISOString();
-    if (Number.isNaN(Date.parse(since)))
-      throw new ApiError('validation_error', 'since must be an ISO timestamp.');
     const { limit, cursor } = page(url);
+    // since is ignored (and not validated) when a cursor is sent.
+    if (!cursor && Number.isNaN(Date.parse(since)))
+      throw new ApiError('validation_error', 'since must be an ISO timestamp.');
     const decoded = decodeCursor(cursor, 'seq');
     // With a cursor, seq is authoritative and since is ignored. Without one, since filters by
     // created_at (transaction start), which is approximate.

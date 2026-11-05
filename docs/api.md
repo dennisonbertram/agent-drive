@@ -35,7 +35,7 @@ File `list` and `search` accept `agentId`, `machine`, and `user` filters; `list`
 literal path `prefix` and optional path query `q`. `%` and `_` in a prefix are treated literally.
 `versions`, `recent`, and `search` use the same bounded pagination envelope as other collections.
 `recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) in commit
-order. Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
+order (guaranteed for events written after migration 0015; older events are ordered by their timestamps). Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
 cursor the order is exact and `since` is ignored. Without a cursor, the optional exclusive `since`
 timestamp compares with the transaction start time, so it is approximate. `latestCursor` is the last
 item's cursor, or the request cursor when there are no new events (`null` if none). Cursors from

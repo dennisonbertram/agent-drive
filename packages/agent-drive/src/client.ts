@@ -387,21 +387,30 @@ export class AgentDriveClient {
    */
   async waitForRecent(
     driveId: string,
-    options: { since?: string; cursor?: string; limit?: number; waitMs: number },
+    options: {
+      since?: string;
+      cursor?: string;
+      limit?: number;
+      waitMs: number;
+      signal?: AbortSignal;
+    },
     sleep: (ms: number) => Promise<void> = (ms) =>
       new Promise((resolve) => setTimeout(resolve, ms)),
   ): Promise<RecentPage> {
     const deadline = Date.now() + options.waitMs;
+    const caller = options.signal;
     for (;;) {
       const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
+      if (remaining <= 0 || caller?.aborted) break;
       try {
         const page = await this.recent(
           driveId,
           options.since,
           options.limit,
           options.cursor,
-          AbortSignal.timeout(remaining),
+          caller
+            ? AbortSignal.any([AbortSignal.timeout(remaining), caller])
+            : AbortSignal.timeout(remaining),
         );
         if (page.items.length > 0) return page;
       } catch (error) {
@@ -410,7 +419,15 @@ export class AgentDriveClient {
       }
       const left = deadline - Date.now();
       if (left <= 0) break;
-      await sleep(Math.min(RECENT_POLL_MS, left));
+      const napping = sleep(Math.min(RECENT_POLL_MS, left));
+      if (!caller) await napping;
+      else
+        await Promise.race([
+          napping,
+          new Promise<void>((resolve) =>
+            caller.addEventListener('abort', () => resolve(), { once: true }),
+          ),
+        ]);
     }
     return { items: [], nextCursor: null, latestCursor: options.cursor ?? null };
   }

@@ -332,17 +332,19 @@ export function createMcpServer(client: AgentDriveClient) {
         "List drive events in order with the author agent's name. Pass the returned latestCursor back as cursor to get only newer events (since is ignored when cursor is set). waitSeconds blocks up to that long for the next event.",
       inputSchema: {
         driveId: id,
-        since: z.string().datetime().optional(),
+        // validated by the server only when no cursor is sent
+        since: z.string().max(128).optional(),
         waitSeconds: z.number().int().min(1).max(30).optional(),
         ...page,
       },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async (args) =>
+    async (args, extra) =>
       safely(() =>
         args.waitSeconds
           ? client.waitForRecent(args.driveId, {
               waitMs: args.waitSeconds * 1000,
+              signal: extra.signal,
               ...(args.since ? { since: args.since } : {}),
               ...(args.cursor ? { cursor: args.cursor } : {}),
               ...(args.limit ? { limit: args.limit } : {}),
