@@ -324,7 +324,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     let active = true;
     void api<Page<FileEntry>>(`drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}?limit=100`)
       .then((result) => {
-        if (active) setFilePage({ ...result, scope: fileScope });
+        if (!active) return;
+        setFilePage({ ...result, scope: fileScope });
+        setFileFailure(null);
       })
       .catch((reason: Error) => {
         if (active) setFileFailure({ scope: fileScope, message: reason.message });
@@ -726,7 +728,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
               {(tab === 'Files' || tab === 'Trash') && drives.length > 0 && (
                 <>
-                  {tab === 'Files' && drive && loaded && fileItems.length > 0 && (
+                  {tab === 'Files' && drive && loaded && (
                     <div
                       className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
                       data-testid="key-backup-status"
@@ -806,6 +808,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         />
                       </div>
                     </div>
+                    {fileFailure?.scope === fileScope && (
+                      <div className="empty" role="alert">
+                        <h3>Could not load files.</h3>
+                        <p>{fileFailure.message}</p>
+                        <button
+                          className="button secondary"
+                          onClick={() => setFileRefresh((value) => value + 1)}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
                     {shownFiles.length > 0 && (
                       <div className="table-scroll table-stack">
                         <table role="table">
@@ -927,24 +941,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {!loaded && fileFailure?.scope === fileScope && (
-                      <div className="empty" role="alert">
-                        <h3>Could not load files.</h3>
-                        <p>{fileFailure.message}</p>
-                        <button
-                          className="button secondary"
-                          onClick={() => setFileRefresh((value) => value + 1)}
-                        >
-                          Retry
-                        </button>
-                      </div>
-                    )}
                     {!loaded && fileFailure?.scope !== fileScope && (
                       <div className="empty loading">
                         <h3>Loading files…</h3>
                       </div>
                     )}
-                    {loaded && !fileItems.length && (
+                    {loaded && !fileItems.length && fileFailure?.scope !== fileScope && (
                       <div className="empty">
                         <h3>
                           {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}

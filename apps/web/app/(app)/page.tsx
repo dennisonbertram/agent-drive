@@ -192,7 +192,8 @@ export default async function Home() {
             <div>
               <div className="l-tag">Sharable</div>
               <code>
-                <span>$</span> agent-drive share /outputs/report.pdf --expires-in 7d
+                <span>$</span> agent-drive share --drive &quot;$DRIVE_ID&quot; /outputs/report.pdf
+                --expires-in 7d
               </code>
               <p>
                 An expiring link that decrypts in the recipient&apos;s browser. No account needed,
@@ -225,7 +226,8 @@ export default async function Home() {
               <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
               <p>Pulls today&apos;s posts about your app from X.</p>
               <code>
-                <span>$</span> agent-drive put posts.jsonl /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; posts.jsonl
+                /inbox/x/2026-11-05.jsonl
               </code>
             </div>
             <div>
@@ -235,9 +237,11 @@ export default async function Home() {
                 changed.
               </p>
               <code>
-                <span>$</span> agent-drive get /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive get --drive &quot;$DRIVE_ID&quot;
+                /inbox/x/2026-11-05.jsonl
                 <br />
-                <span>$</span> agent-drive put notes.md /outputs/csv-export.md
+                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; notes.md
+                /outputs/csv-export.md
               </code>
             </div>
             <div>

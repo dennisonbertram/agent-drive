@@ -160,6 +160,10 @@ test('CLI share links download, expire, revoke, and never send fragment keys', a
     await page.goto(`${baseURL}/s/${shareB.id}`);
     await expect(page.getByTestId('share-error-missing-key')).toBeVisible();
     const paste = page.getByLabel('Paste the full share link');
+    // A malformed percent-escape is a validation error, not a thrown URIError.
+    await paste.fill('https://example.test/s/%ZZ#k=abc');
+    await page.getByRole('button', { name: 'Use link' }).click();
+    await expect(page.getByText('different share')).toBeVisible();
     await paste.fill(shareA.url);
     await page.getByRole('button', { name: 'Use link' }).click();
     await expect(page.getByText('different share')).toBeVisible();

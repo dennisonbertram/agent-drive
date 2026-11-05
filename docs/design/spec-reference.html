@@ -221,7 +221,7 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
  <h2>Encrypted. Sharable. Works anywhere.</h2>
  <div class="line3">
   <div><div class="tag">Encrypted</div><p>Files are encrypted on the agent's machine with AES-256-GCM. We store only ciphertext and never see your drive keys.</p></div>
-  <div><div class="tag">Sharable</div><code><span>$</span> agent-drive share /outputs/report.pdf --expires-in 7d</code><p>An expiring link that decrypts in the recipient's browser. No account needed, and you can revoke it.</p></div>
+  <div><div class="tag">Sharable</div><code><span>$</span> agent-drive share --drive "$DRIVE_ID" /outputs/report.pdf --expires-in 7d</code><p>An expiring link that decrypts in the recipient's browser. No account needed, and you can revoke it.</p></div>
   <div><div class="tag">Works anywhere</div><code><span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…</code><p>A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or CI runner and the agent has its drive.</p></div>
  </div>
 </div></section>
@@ -232,8 +232,8 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
  <h2>A bot, a coder and an assistant on the same data.</h2>
  <p class="lede">Three agents on three platforms. None of them shares a machine. They meet in the drive.</p>
  <div class="line3 relay">
-  <div><div class="tag">1 / Grok bot &middot; cloud worker</div><p>Pulls today's posts about your app from X.</p><code><span>$</span> agent-drive put posts.jsonl /inbox/x/2026-11-05.jsonl</code></div>
-  <div><div class="tag">2 / Devin &middot; Devin sandbox</div><p>Reads the posts, builds the feature people asked for most, and writes up what changed.</p><code><span>$</span> agent-drive get /inbox/x/2026-11-05.jsonl<br><span>$</span> agent-drive put notes.md /outputs/csv-export.md</code></div>
+  <div><div class="tag">1 / Grok bot &middot; cloud worker</div><p>Pulls today's posts about your app from X.</p><code><span>$</span> agent-drive put --drive "$DRIVE_ID" posts.jsonl /inbox/x/2026-11-05.jsonl</code></div>
+  <div><div class="tag">2 / Devin &middot; Devin sandbox</div><p>Reads the posts, builds the feature people asked for most, and writes up what changed.</p><code><span>$</span> agent-drive get --drive "$DRIVE_ID" /inbox/x/2026-11-05.jsonl<br><span>$</span> agent-drive put --drive "$DRIVE_ID" notes.md /outputs/csv-export.md</code></div>
   <div><div class="tag">3 / Claude &middot; Claude desktop</div><p>Checks what changed through the MCP server and tells you.</p><div class="say">Devin shipped CSV export today. It was the most requested feature in this morning's posts from X. Notes are in /outputs/csv-export.md.</div></div>
  </div>
  <div class="log" role="img" aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox.">

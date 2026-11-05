@@ -100,7 +100,13 @@ function keyFromPastedLink(value: string, id: string): { key: string } | { probl
     return { problem: 'That is not a full link. Paste the whole address, starting with https://.' };
   }
   const [, route, linkId] = url.pathname.split('/');
-  if (route !== 's' || decodeURIComponent(linkId ?? '') !== id) {
+  let linkedId = '';
+  try {
+    linkedId = decodeURIComponent(linkId ?? '');
+  } catch {
+    // A malformed percent-escape cannot match this share.
+  }
+  if (route !== 's' || linkedId !== id) {
     return { problem: 'That link is for a different share. Paste the link for this file.' };
   }
   const key = parseShareFragment(url.hash);

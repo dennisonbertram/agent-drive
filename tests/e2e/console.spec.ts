@@ -417,3 +417,43 @@ test('console trash: a failed load shows an error with Retry instead of loading 
     await cleanupUser(userId);
   }
 });
+
+test('console files: recovery download stays on an empty drive, and a failed reload shows Retry over cached files', async ({
+  page,
+  context,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Create your first drive' }).click({ timeout: 30_000 });
+    await page.getByLabel('Drive name').fill('Empty drive');
+    await page.getByRole('button', { name: 'Create drive', exact: true }).click();
+    await page.getByLabel('I saved my drive key securely').check();
+    await page.getByRole('button', { name: 'Continue to drive' }).click();
+    // No files, key loaded: the backup warning and recovery download remain available.
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    await expect(page.getByTestId('key-backup-status')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download recovery file' })).toBeVisible();
+
+    // The files list loaded once; a later reload of the cached scope fails.
+    await page.route('**/api/console/drives/*/list*', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'Listing is unavailable.' } }),
+      }),
+    );
+    await page.getByRole('button', { name: 'Agents', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Files', exact: true }).first().click();
+    await expect(page.getByText('Could not load files.')).toHaveCount(1);
+    await expect(page.getByText('Listing is unavailable.')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
