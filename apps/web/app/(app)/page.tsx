@@ -1,35 +1,75 @@
 import Link from 'next/link';
 import { headers } from 'next/headers';
+import { BrandMark } from '../brand-mark';
+import { billingRates, GIB, PLANS } from '@/src/billing/policy';
+import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
+import { LandingFigure } from './landing-figure';
 import '../styles/landing.css';
 
 export const dynamic = 'force-dynamic';
 
-// Deterministic activity bars so the server and client render the same markup.
-const spark = (k: number) => Array.from({ length: 16 }, (_, i) => 18 + ((i * 37 + k * 53) % 64));
+const allowance = (bytes: bigint) =>
+  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
+const count = (n: bigint) => new Intl.NumberFormat('en-US').format(n);
 
-const sleds = [
-  { name: 'trace-bot', on: [0, 1], size: '54.3', unit: 'KB', paths: '/memory /outputs', files: 2 },
-  { name: 'nightly-evals', on: [2, 3], size: '2.4', unit: 'MB', paths: '/work /handoff', files: 2 },
-  { name: 'research-agent', on: [0, 2], size: '118', unit: 'KB', paths: '/memory /work', files: 5 },
+function paidAvailable() {
+  try {
+    return billingRates() !== null && checkoutConfigured();
+  } catch {
+    return false;
+  }
+}
+
+const problems = [
+  [
+    'The sandbox ends',
+    'Codex cloud task',
+    'saves /memory/project-notes.md',
+    'Sandbox',
+    'deleted',
+    'Next task',
+    'reads the notes back',
+  ],
+  [
+    'The machine changes',
+    'Laptop',
+    'saves /outputs/report.pdf',
+    'Laptop',
+    'closed',
+    'CI runner',
+    'gets the report',
+  ],
+  [
+    'The platform switches',
+    'Claude Code',
+    'writes /handoff/next.md',
+    'Session',
+    'ended',
+    'Codex',
+    'reads the handoff',
+  ],
 ];
-const markers: Record<number, React.ReactNode> = {
-  0: (
-    <>
-      <span className="rk-mk" style={{ left: -9, top: '46%' }}>
-        1
-      </span>
-      <span className="rk-mk below" style={{ left: 6 }}>
-        2
-      </span>
-    </>
-  ),
-  2: (
-    <span className="rk-mk below" style={{ right: 22 }}>
-      4
-    </span>
-  ),
-};
+const folders = [
+  ['/memory', 'What the agent should remember.'],
+  ['/outputs', 'Finished files.'],
+  ['/work', 'Files still in progress.'],
+  ['/handoff', 'Notes for the next session.'],
+];
+
+function SetupPanel({ instruction, label }: { instruction: string; label: string }) {
+  return (
+    <div className="l-panel">
+      <div className="l-tag">Give this to your agent</div>
+      <div className="l-row">
+        <code>
+          <span className="l-p">&gt;</span> {instruction}
+        </code>
+        <CopyButton text={instruction} label={label} caption="Copy" className="l-btn signal" />
+      </div>
+    </div>
+  );
+}
 
 export default async function Home() {
   const h = await headers();
@@ -37,212 +77,286 @@ export default async function Home() {
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
   const install = `npm install -g ${proto}://${host}/cli/agent-drive.tgz`;
+  const paid = paidAvailable();
+  const plans = [
+    ['Free', PLANS.free],
+    ['Developer', PLANS.developer],
+    ['Team', PLANS.team],
+  ] as const;
   return (
-    <main className="landing">
-      <header className="landing-nav">
-        <Link href="/" className="landing-brand">
-          <span className="landing-logo" aria-hidden /> Agent Drive
-        </Link>
-        <nav className="landing-links" aria-label="Main">
-          <Link href="/pricing">Pricing</Link>
-          <a href="/llms.txt">llms.txt</a>
-          <Link href="/sign-in">Sign in</Link>
-          <Link className="landing-btn" href="/console">
-            Open console
-          </Link>
-        </nav>
+    <main className="landing" id="top">
+      <header className="l-nav">
+        <div className="l-wrap">
+          <BrandMark />
+          <nav className="l-links" aria-label="Main">
+            <a href="/llms.txt">Docs</a>
+            <Link href="/pricing">Pricing</Link>
+            <a href="/llms.txt">llms.txt</a>
+            <Link href="/sign-in">Sign in</Link>
+            <Link href="/console">Console</Link>
+          </nav>
+        </div>
       </header>
-      <section className="hero">
-        <div className="landing-grid">
-          <div className="hero-copy">
-            <p className="hero-eyebrow">
-              <i /> Portable storage for AI agents
+
+      <section className="l-hero">
+        <div className="l-wrap l-g">
+          <div>
+            <div className="l-tag">Portable storage for agents</div>
+            <h1>Agent files that outlive the sandbox.</h1>
+            <p className="l-lede">
+              Agents save to their drive as they work. When the sandbox ends, the machine changes,
+              or the work moves from Claude Code to Codex, the files are still there.
             </p>
-            <h1>Every agent gets a drive.</h1>
-            <p className="hero-sub">
-              The same files follow it to any machine, sandbox or new session.
+            <SetupPanel instruction={instruction} label="Copy agent instruction" />
+            <p className="l-cli">
+              or in a terminal: <b>{install}</b> <CopyButton text={install} className="l-copy" />
             </p>
-            <div className="setup-rows">
-              <div className="setup-row">
-                <div className="setup-head">
-                  <span className="landing-tag">
-                    <b>01</b> &nbsp;Paste into your agent
-                  </span>
-                  <CopyButton
-                    text={instruction}
-                    label="Copy agent instruction"
-                    caption="Copy for your agent"
-                    className="landing-btn sig sm"
-                  />
-                </div>
-                <code>{instruction}</code>
-              </div>
-              <div className="setup-row">
-                <div className="setup-head">
-                  <span className="landing-tag">
-                    <b>02</b> &nbsp;Or install the CLI
-                  </span>
-                  <CopyButton text={install} className="landing-btn out sm" />
-                </div>
-                <code>
-                  <span className="setup-prompt">$ </span>
-                  {install}
-                </code>
-              </div>
-            </div>
-            <p className="hero-works">
-              <span className="landing-tag">Works with</span>
-              <b>Claude Code</b>
-              <b>Codex</b>
-              <b>Cursor</b>
-              <b>any MCP client</b>
-            </p>
-            <p className="hero-fine">Encrypted on the agent&apos;s machine.</p>
-            <div className="landing-actions">
-              <Link className="landing-btn out" href="/sign-up">
-                Create your workspace <span aria-hidden>↗</span>
-              </Link>
-              <Link className="landing-btn out" href="/pricing">
-                Pricing
-              </Link>
-            </div>
           </div>
-          <div className="hero-rack">
-            <div
-              className="rack"
-              role="img"
-              aria-label="A rack unit with four drive bays: trace-bot, nightly-evals and research-agent drives, and one empty bay for your next agent"
-            >
-              <div className="rk-ear">
-                <i className="rk-slot" />
-                <i className="rk-slot" />
-              </div>
-              <div className="rk-face">
-                <div className="rk-fh">
-                  <span className="landing-tag ink">Agent Drive · AD-4</span>
-                  <i className="rk-vent" />
-                  <span className="landing-tag ink">4 bays</span>
-                  <span className="rk-led dim" />
-                </div>
-                <div className="rk-bays">
-                  {sleds.map((s, k) => (
-                    <div className="rk-bay" key={s.name}>
-                      {markers[k]}
-                      <div className={`rk-sled s${k}`}>
-                        <div className="rk-lab">{s.name}</div>
-                        <div className="rk-win">
-                          <div>
-                            <div className="rk-seg">
-                              {[0, 1, 2, 3].map((i) => (
-                                <i key={i} className={s.on.includes(i) ? 'on' : ''} />
-                              ))}
-                            </div>
-                            <div className="rk-segl">
-                              <span>MEM</span>
-                              <span>OUT</span>
-                              <span>WRK</span>
-                              <span>HND</span>
-                            </div>
-                          </div>
-                          <div className="rk-spark">
-                            {spark(k).map((v, i) => (
-                              <i key={i} style={{ height: `${v}%` }} />
-                            ))}
-                          </div>
-                          <div>
-                            <div className="rk-rd">
-                              {s.size}
-                              <small>{s.unit}</small>
-                            </div>
-                            <div className="rk-parts">
-                              <span>{s.paths}</span>
-                              <span>{s.files} files</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rk-sf">
-                          <span className="rk-led dim" />
-                          <i className="rk-pull" />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="rk-bay">
-                    <span className="rk-mk" style={{ right: -9, top: -9 }}>
-                      3
-                    </span>
-                    <div className="rk-sled empty">
-                      <div className="rk-ghost">
-                        <span className="plus">+</span>
-                        <span className="landing-tag">
-                          your next <br />
-                          agent
-                        </span>
-                      </div>
-                    </div>
+          <LandingFigure />
+        </div>
+      </section>
+
+      <section id="problem">
+        <div className="l-wrap">
+          <div className="l-tag">The problem</div>
+          <h2>Sandboxes end. Machines change. Platforms switch.</h2>
+          <p className="l-lede">
+            Each one wipes whatever the agent saved locally, and the next run starts from zero. With
+            a drive, the agent picks up where it stopped.
+          </p>
+          <div className="l-three">
+            {problems.map(([title, a, as, b, bs, c, cs]) => (
+              <div key={title}>
+                <h3>{title}</h3>
+                <div className="l-strip">
+                  <div className="l-cell">
+                    <b>{a}</b>
+                    <small>{as}</small>
+                  </div>
+                  <span className="l-arr" aria-hidden />
+                  <div className="l-cell gone">
+                    <b>{b}</b>
+                    <small>{bs}</small>
+                  </div>
+                  <span className="l-arr" aria-hidden />
+                  <div className="l-cell">
+                    <b>{c}</b>
+                    <small>{cs}</small>
                   </div>
                 </div>
               </div>
-              <div className="rk-ear">
-                <i className="rk-slot" />
-                <i className="rk-slot" />
-              </div>
-            </div>
-            <ol className="rk-notes">
-              <li>
-                <b>
-                  <span className="rk-n">1 / </span>DRIVE
-                </b>
-                One per agent.
-              </li>
-              <li>
-                <b>
-                  <span className="rk-n">2 / </span>LED
-                </b>
-                Blinks on every write.
-              </li>
-              <li>
-                <b>
-                  <span className="rk-n">3 / </span>BAY
-                </b>
-                New agent, new drive.
-              </li>
-              <li>
-                <b>
-                  <span className="rk-n">4 / </span>PORTABLE
-                </b>
-                Slot it into a laptop, CI or sandbox.
-              </li>
-            </ol>
+            ))}
           </div>
         </div>
       </section>
-      <div className="landing-wrap">
-        <section className="feature-grid" aria-label="Features">
-          <article>
-            <span className="feature-number">01 / PRIVATE BY DESIGN</span>
-            <h2>You hold the keys.</h2>
-            <p>
-              File contents encrypt on your device. The storage service receives ciphertext, never
-              your drive key. File names, sizes, tags, and activity stay visible to the service so
-              it can list and bill them.
-            </p>
-          </article>
-          <article>
-            <span className="feature-number">02 / BUILT FOR AGENTS</span>
-            <h2>Less setup. More doing.</h2>
-            <p>A CLI, typed client, and MCP tools fit the way your agents already work.</p>
-          </article>
-          <article>
-            <span className="feature-number">03 / HUMAN OVERSIGHT</span>
-            <h2>A clear view of the work.</h2>
-            <p>Browse files, recover versions, and decide which agents can access each drive.</p>
-          </article>
-        </section>
-        <footer className="landing-footer">
-          AGENT DRIVE <span>Persistent storage. Independent agents.</span>
-        </footer>
-      </div>
+
+      <section id="folders">
+        <div className="l-wrap">
+          <div className="l-tag">Every drive has</div>
+          <h2>Four folders, ready for the agent to use.</h2>
+          <div className="l-spec">
+            {folders.map(([name, text]) => (
+              <div key={name}>
+                <code>{name}</code>
+                <p>{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="connect">
+        <div className="l-wrap l-two">
+          <div>
+            <div className="l-tag">Connecting</div>
+            <h2>One line to the agent. One click from you.</h2>
+            <ol className="l-steps">
+              <li>
+                <i>1</i>
+                <b>Paste one line into your agent.</b>
+                <div className="t">{instruction}</div>
+              </li>
+              <li>
+                <i>2</i>
+                <b>The agent shows a pairing code.</b>
+                <div className="t">CXRH-TZJT</div>
+              </li>
+              <li>
+                <i>3</i>
+                <b>You approve it once.</b>
+              </li>
+            </ol>
+            <p className="l-nokey">No API key to copy.</p>
+          </div>
+          <div className="l-pair" role="img" aria-label="Example approval page">
+            <div className="top">
+              <span className="l-tag">Approve agent</span>
+              <span className="l-led" />
+            </div>
+            <div className="c">CXRH-TZJT</div>
+            <h3>Connect trace-bot?</h3>
+            <div className="rows">
+              <div>
+                <span>Agent</span>
+                <b>trace-bot</b>
+              </div>
+              <div>
+                <span>Machine</span>
+                <b>MacBook</b>
+              </div>
+              <div>
+                <span>Account</span>
+                <b>sam@northwind.dev</b>
+              </div>
+            </div>
+            <p className="can">Read, write, delete and share files in this drive</p>
+            <span className="l-btn signal">Approve</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="machines">
+        <div className="l-wrap">
+          <div className="l-tag">How it moves</div>
+          <h2>Take the key along, and the files follow.</h2>
+          <p className="l-lede">
+            The drive holds the files. The agent&apos;s credentials bundle holds the key. Wherever
+            the bundle goes, the agent can read its drive.
+          </p>
+          <div className="l-line3">
+            <div>
+              <div className="l-tag">1 / Save as you work</div>
+              <code>
+                <span>$</span> agent-drive put notes.md /memory/project-notes.md
+                <br />
+                <span>$</span> agent-drive backup ./work
+              </code>
+              <p>Ordinary commands, or the same actions as MCP tools.</p>
+            </div>
+            <div>
+              <div className="l-tag">2 / Keep the key safe</div>
+              <code>
+                <span>$</span> agent-drive credentials export --stdout
+              </code>
+              <p>Put the bundle in your secret store once.</p>
+            </div>
+            <div>
+              <div className="l-tag">3 / Anywhere next</div>
+              <code>
+                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
+                <br />
+                <span>$</span> agent-drive get /memory/project-notes.md
+              </code>
+              <p>Set it as a sandbox secret. The key is never written to disk.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="keys">
+        <div className="l-wrap">
+          <div className="l-tag">Privacy</div>
+          <h2>Your keys stay with the agent.</h2>
+          <p className="l-lede">
+            Files are encrypted on the agent&apos;s machine with AES-256-GCM. The service stores
+            only ciphertext.
+          </p>
+          <div className="l-see">
+            <div>
+              <div className="l-tag">We see</div>
+              <ul>
+                <li>File paths</li>
+                <li>File sizes</li>
+                <li>
+                  Versions <small>so we can list files and bill usage</small>
+                </li>
+              </ul>
+            </div>
+            <div className="no">
+              <div className="l-tag">We do not see</div>
+              <ul>
+                <li>File contents</li>
+                <li>Your drive keys</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="works">
+        <div className="l-wrap">
+          <div className="l-tag">Works with</div>
+          <h2>The agents you already use.</h2>
+          <div className="l-works">
+            <span>Claude Code</span>
+            <span>Codex</span>
+            <span>Cursor</span>
+            <span>Gemini CLI</span>
+            <span className="q">Any MCP client</span>
+          </div>
+          <p className="l-llms">
+            Agents can read the setup themselves. Point one at{' '}
+            <a href="/llms.txt">{host}/llms.txt</a> and it installs the CLI and connects.
+          </p>
+        </div>
+      </section>
+
+      <section id="pricing">
+        <div className="l-wrap">
+          <div className="l-tag">Pricing</div>
+          <h2>Start free.</h2>
+          <p className="l-lede">Encryption on the agent&apos;s machine is on every plan.</p>
+          <div className="l-plans">
+            {plans.map(([name, p]) => (
+              <div className="l-plan" key={name}>
+                <h3>{name}</h3>
+                <div className="pr">
+                  ${p.baseCents / 100}
+                  <small> / month</small>
+                </div>
+                <ul>
+                  <li>{String(p.drives)} drives</li>
+                  <li>{allowance(p.storageBytes)} stored</li>
+                  <li>{allowance(p.egressBytes)} downloads a month</li>
+                  <li>{count(p.operations)} API operations a month</li>
+                </ul>
+                {p.baseCents > 0 &&
+                  (paid ? (
+                    <Link className="l-btn" href="/pricing">
+                      Choose plan
+                    </Link>
+                  ) : (
+                    <span className="soon">Coming soon</span>
+                  ))}
+              </div>
+            ))}
+          </div>
+          <p className="l-pnote">
+            {paid ? '' : 'Paid checkout is not enabled yet. '}
+            <Link href="/pricing">See full pricing</Link>
+          </p>
+        </div>
+      </section>
+
+      <section className="l-final">
+        <div className="l-wrap">
+          <h2>Give your agent a drive.</h2>
+          <SetupPanel instruction={instruction} label="Copy agent instruction again" />
+        </div>
+      </section>
+
+      <footer className="l-footer">
+        <div className="l-wrap">
+          <nav aria-label="Footer">
+            <Link href="/pricing">Pricing</Link>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="/llms.txt">Docs</a>
+            <Link href="/sign-in">Sign in</Link>
+            <Link href="/console">Console</Link>
+          </nav>
+          <span>{host}</span>
+        </div>
+      </footer>
     </main>
   );
 }
