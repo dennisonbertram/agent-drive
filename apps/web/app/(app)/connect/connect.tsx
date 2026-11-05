@@ -19,6 +19,14 @@ type DeviceRequest = {
   public_key?: string;
   scopes?: string[] | null;
   write_paths?: string[] | null;
+  offer?: {
+    agentName: string;
+    drive: Drive;
+    scopes: string[];
+    writePaths: string[];
+    revision: number;
+  } | null;
+  offerRevision?: number;
 };
 
 const codePattern = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -86,10 +94,12 @@ export default function Connect({
   const [fileInputKey, setFileInputKey] = useState(0);
   const [readOnly, setReadOnly] = useState(false);
   const [folder, setFolder] = useState('');
+  const [notice, setNotice] = useState('');
 
   async function load(raw: string) {
     const code = normalizeCode(raw);
     setProblem(null);
+    setNotice('');
     setRequest(null);
     if (!codePattern.test(code)) {
       setProblem({ kind: 'error', message: 'Enter the code in the form XXXX-XXXX.' });
@@ -155,7 +165,9 @@ export default function Connect({
     setFormError('');
     setBusy(true);
     try {
-      let body: unknown = delegate ? { delegate: true } : {};
+      // The revision binds this approval to the offer (or lack of one) the page showed.
+      const offerRevision = request.offerRevision ?? 0;
+      let body: unknown = delegate ? { delegate: true, offerRevision } : { offerRevision };
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
         const pasted = keyText.trim();
@@ -179,13 +191,23 @@ export default function Connect({
           ],
           sealedDriveKeys: { [driveId]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
+          offerRevision,
         };
       }
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
       clearKey();
       setDone(true);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Approval failed.');
+      if (
+        error instanceof HttpError &&
+        error.status === 409 &&
+        error.message === 'The request changed; reload the page.'
+      ) {
+        // The request changed since this page loaded (for example an offer arrived): show it again.
+        clearKey();
+        await load(request.user_code);
+        setNotice('The request changed; review it again.');
+      } else setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
       setBusy(false);
     }
@@ -354,6 +376,15 @@ export default function Connect({
             Use a new drive instead
           </button>
         </div>
+      ) : request.offer ? (
+        <p className="banner info">
+          Offered by {request.offer.agentName}: drive {request.offer.drive.name},{' '}
+          {request.offer.scopes.join(', ')}
+          {request.offer.writePaths.length
+            ? `, writes under ${request.offer.writePaths.join(', ')}`
+            : ''}
+          . That agent sealed the drive key for this login; Agent Drive never sees it.
+        </p>
       ) : (
         <p className="banner info">
           {reconnect.length > 0
@@ -364,11 +395,15 @@ export default function Connect({
             : ''}
         </p>
       )}
-      {!existing && request.creates_drive && !request.scopes && accountDrives.length > 0 && (
-        <button type="button" className="connect-link" onClick={() => setExisting(true)}>
-          Add to an existing drive instead
-        </button>
-      )}
+      {!existing &&
+        !request.offer &&
+        request.creates_drive &&
+        !request.scopes &&
+        accountDrives.length > 0 && (
+          <button type="button" className="connect-link" onClick={() => setExisting(true)}>
+            Add to an existing drive instead
+          </button>
+        )}
       <label className="connect-delegate">
         <input
           type="checkbox"
@@ -381,6 +416,11 @@ export default function Connect({
           cannot pass this permission on. You still approve each new agent here.
         </small>
       </label>
+      {notice && (
+        <div role="status" className="banner info">
+          {notice}
+        </div>
+      )}
       {formError && (
         <div role="alert" className="banner error">
           {formError}

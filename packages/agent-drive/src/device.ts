@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { validateUrl } from './client.js';
+import { validateUrl, type AgentDriveClient } from './client.js';
 import {
   configPath,
   isValidDriveKey,
@@ -10,7 +10,12 @@ import {
 } from './config.js';
 import { BACKUP_HINT } from './credentials.js';
 import { generateDriveKey } from './crypto.js';
-import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './seal.js';
+import {
+  generateDeviceKeyPair,
+  sealDriveKey,
+  unsealDriveKey,
+  type SealedDriveKey,
+} from './seal.js';
 
 type TokenResponse = {
   access_token: string;
@@ -236,4 +241,49 @@ class NetworkError extends Error {}
 
 function expired() {
   return new Error('The login code expired. Run `agent-drive login` again.');
+}
+
+/**
+ * An agent that holds a drive seals its drive key to a pending login and offers it. The human
+ * still approves on /connect. Prints the request facts and the approval URL, never a key.
+ */
+export async function grantLogin(options: {
+  code: string;
+  drive?: string;
+  readOnly?: boolean;
+  scopes?: string[];
+  writePaths?: string[];
+  client: AgentDriveClient;
+  driveKeys: Record<string, string>;
+  log: (line: string) => void;
+}) {
+  const { client } = options;
+  const ids = Object.keys(options.driveKeys);
+  const drive = options.drive ?? (ids.length === 1 ? ids[0] : undefined);
+  if (!drive) throw new Error('Pass --drive <id>; this machine holds no single default drive key.');
+  const driveKey = options.driveKeys[drive];
+  if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
+  const code = options.code.toUpperCase();
+  const who = await client.whoami();
+  const scopes = options.scopes?.length
+    ? options.scopes
+    : options.readOnly
+      ? ['read']
+      : ['read', 'write'];
+  if (!options.scopes?.length && !scopes.every((scope) => who.scopes.includes(scope)))
+    throw new Error(
+      `This key does not hold ${scopes.join(' and ')}; pass --scope for what it may grant.`,
+    );
+  const writePaths = options.writePaths?.length ? options.writePaths : (who.writePaths ?? []);
+  const request = await client.deviceRequest(code);
+  options.log(
+    `Request from ${request.client_name}${request.machine ? ` on ${request.machine}` : ''}, made ${request.created_at}.`,
+  );
+  const sealedDriveKey = await sealDriveKey(request.public_key, drive, driveKey);
+  await client.grantDevice(code, { driveId: drive, scopes, writePaths, sealedDriveKey });
+  options.log(
+    `Offered drive ${drive} to ${request.client_name} (${scopes.join(' ')}; ${
+      writePaths.length ? `writes under ${writePaths.join(', ')}` : 'writes anywhere in the drive'
+    }). The owner approves at ${client.apiOrigin}/connect?code=${code}.`,
+  );
 }

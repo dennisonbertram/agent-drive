@@ -754,6 +754,134 @@ test.describe('agent device login', () => {
     again.login.child.kill();
   });
 
+  test('grant: the first agent seals the key for a second login and the human approves the offer it saw', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'granter', `m-${randomBytes(3).toString('hex')}`);
+    const a = await startLogin(envA, 'granter-bot');
+    await approve(page, a.path, 'granter-bot', a.code, true);
+    expect((await a.login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    const secret = `FIRST-${randomUUID()}`;
+    const local = join(root, 'x.txt');
+    await writeFile(local, secret);
+    expect((await cli(['put', local, '/notes/x', '--drive', driveId], envA)).status).toBe(0);
+
+    const envB = cliEnv(baseURL!, root, 'grantee', 'm-grantee');
+    const b = await startLogin(envB, 'grantee-bot');
+    const proxy = await startCaptureProxy(baseURL!);
+    const granted = await cli(['grant', b.code, '--write-path', '/inbox/b'], {
+      ...envA,
+      AGENT_DRIVE_API_URL: `${proxy.url}/api`,
+    });
+    await proxy.close();
+    expect(granted.status, granted.stderr).toBe(0);
+    expect(granted.stdout).toContain('Request from grantee-bot on m-grantee');
+    expect(granted.stdout).toContain(
+      `Offered drive ${driveId} to grantee-bot (read write; writes under /inbox/b)`,
+    );
+    expect(granted.stdout).toContain(`/connect?code=${b.code}`);
+
+    // The human sees who offered what, and approves once.
+    await page.goto(b.path);
+    await expect(page.getByText('Offered by granter-bot', { exact: false })).toBeVisible();
+    await expect(page.getByText('writes under /inbox/b')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Add to an existing drive instead' }),
+    ).toHaveCount(0);
+    await mkdir('docs/design/shots/spec-connect-share', { recursive: true });
+    for (const [width, height] of [
+      [1440, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.screenshot({
+        path: `docs/design/shots/spec-connect-share/offer-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    const resultB = await b.login.done;
+    expect(resultB.status, resultB.stderr).toBe(0);
+
+    const out = join(root, 'x.out');
+    const got = await cli(['get', '/notes/x', '--drive', driveId, '--output', out], envB);
+    expect(got.status, got.stderr).toBe(0);
+    expect(await readFile(out, 'utf8')).toBe(secret);
+    const denied = await cli(['put', local, '/notes/y', '--drive', driveId], envB);
+    expect(denied.status).not.toBe(0);
+    expect(denied.stderr).toContain('/inbox/b');
+    expect((await cli(['put', local, '/inbox/b/x', '--drive', driveId], envB)).status).toBe(0);
+    expect(await cli(['whoami'], envB)).toMatchObject({ status: 0 });
+
+    // The drive key and the granter's token never left the machine, appeared in output, or reached the DB.
+    const grantPost = proxy.requests.find((r) => r.path.endsWith('/grant'))!;
+    expect(grantPost.body).toContain('sealedDriveKey');
+    for (const text of [
+      ...proxy.requests.map((r) => r.body),
+      granted.stdout,
+      granted.stderr,
+      resultB.stdout,
+      resultB.stderr,
+    ]) {
+      expect(text).not.toContain(driveKey);
+      expect(text).not.toContain(configA.apiKey);
+    }
+    const stored = await database.query<{ row: string }>(
+      'SELECT o.sealed_key::text || o.scopes::text AS row FROM device_offers o JOIN agents g ON g.id = o.offered_by_agent_id WHERE g.name = $1',
+      ['granter-bot'],
+    );
+    expect(stored.rows).toHaveLength(1);
+    expect(stored.rows[0]!.row).not.toContain(driveKey);
+    const configB = await readConfig(envB);
+    expect(configB.driveKeys[driveId]).toBe(driveKey);
+    expect(resultB.stdout + resultB.stderr).not.toContain(configB.apiKey);
+  });
+
+  test('grant: a page loaded before the offer gets a 409 notice, reloads, and approves the offer', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'granter2', `m-${randomBytes(3).toString('hex')}`);
+    const a = await startLogin(envA, 'granter2-bot');
+    await approve(page, a.path, 'granter2-bot', a.code, true);
+    expect((await a.login.done).status).toBe(0);
+    const [driveId] = Object.keys((await readConfig(envA)).driveKeys);
+
+    const envB = cliEnv(baseURL!, root, 'grantee2', 'm-grantee2');
+    const b = await startLogin(envB, 'grantee2-bot');
+    await page.goto(b.path);
+    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    const granted = await cli(['grant', b.code, '--read-only'], envA);
+    expect(granted.status, granted.stderr).toBe(0);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(page.getByText('The request changed; review it again.')).toBeVisible();
+    await expect(page.getByText('Offered by granter2-bot', { exact: false })).toBeVisible();
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    const resultB = await b.login.done;
+    expect(resultB.status, resultB.stderr).toBe(0);
+    const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
+      scopes: string[];
+      driveIds: string[];
+    };
+    expect(who.scopes).toEqual(['read']);
+    expect(who.driveIds).toEqual([driveId]);
+  });
+
   test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
     test.setTimeout(120_000);
     await newUser(context);

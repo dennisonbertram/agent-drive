@@ -1,6 +1,6 @@
 import { webcrypto } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { unsealDriveKey } from './seal.js';
+import { sealDriveKey, unsealDriveKey } from './seal.js';
 
 const { subtle } = webcrypto;
 const text = new TextEncoder();
@@ -53,5 +53,18 @@ describe('unsealDriveKey', () => {
       'deriveBits',
     ]);
     await expect(unsealDriveKey(other.privateKey, 'drive-1', sealed)).rejects.toThrow();
+  });
+});
+
+describe('sealDriveKey', () => {
+  it('round-trips with unsealDriveKey and binds to the drive id', async () => {
+    const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ]);
+    const pub = Buffer.from(await subtle.exportKey('raw', pair.publicKey)).toString('base64url');
+    const sealed = await sealDriveKey(pub, 'drive-1', 'adk-secret-key');
+    expect(JSON.stringify(sealed)).not.toContain('adk-secret-key');
+    expect(await unsealDriveKey(pair.privateKey, 'drive-1', sealed)).toBe('adk-secret-key');
+    await expect(unsealDriveKey(pair.privateKey, 'drive-2', sealed)).rejects.toThrow();
   });
 });

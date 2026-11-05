@@ -35,7 +35,7 @@ import {
 } from './config.js';
 import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
-import { defaultAgentName, deviceLogin, shouldOpenBrowser } from './device.js';
+import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
 
 function parse(raw: string[]) {
@@ -74,6 +74,7 @@ function parse(raw: string[]) {
       from: { type: 'string' },
       force: { type: 'boolean' },
       stdout: { type: 'boolean' },
+      'read-only': { type: 'boolean' },
       method: { type: 'string' },
       target: { type: 'string' },
     },
@@ -308,6 +309,32 @@ async function run(command: string, raw: string[]) {
     throw new Error(
       'Usage: credentials export (--to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
+  }
+  if (command === 'grant') {
+    const code = args.positionals[0];
+    if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
+    const connection = await resolveConnection();
+    const drive = args.values.drive?.[0];
+    const driveKeys = { ...connection.config.driveKeys };
+    if (drive) {
+      const key = await resolveDriveKey(drive, args.values['key-file'], connection.config);
+      if (key) driveKeys[drive] = key;
+    }
+    await grantLogin({
+      code,
+      ...(drive ? { drive } : {}),
+      ...(args.values['read-only'] ? { readOnly: true } : {}),
+      ...(args.values.scope ? { scopes: args.values.scope } : {}),
+      ...(args.values['write-path'] ? { writePaths: args.values['write-path'] } : {}),
+      client: new AgentDriveClient({
+        apiUrl: connection.apiUrl,
+        apiKey: connection.apiKey,
+        machine: machineName(),
+      }),
+      driveKeys,
+      log: (line) => process.stdout.write(`${line}\n`),
+    });
+    return;
   }
   const client = await connect(args);
   if (command === 'whoami') {
@@ -586,6 +613,7 @@ Commands:
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
+  grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...   Seal this machine's drive key for the login showing CODE; the owner then approves it on /connect
   credentials export (--to PATH [--force] | --stdout)   Back up the API key and drive keys (bundle "adcred1.…")
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
                                         Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
