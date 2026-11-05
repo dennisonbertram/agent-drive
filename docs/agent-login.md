@@ -447,3 +447,22 @@ that the human's browser already holds, but it cannot recover an agent's key.
   (<scopes>; writes under <paths>)".
 - `check` on a key without `write` is read-only: it decrypts one existing live file and prints
   `check ok drive=<id> (read-only)`. Writers put the check file under their first write path.
+
+## 11. The delegate scope
+
+- `delegate` means: this key may hand access to its own drives to other agents, never more than
+  it holds, and never `delegate` itself. It is a scope like the others (`whoami`, `GET /keys` and
+  the CLI login summary list it) but it is never in the default scopes.
+- A human grants it explicitly: the unchecked box "Let this agent add other agents to its drives"
+  on `/connect`, or `key create --scope delegate` / `POST /keys` from a `manage` key.
+- The approve body may be a defaults body: its keys must be a subset of `{ delegate: boolean,
+offerRevision: number }`. It applies the defaults (reconnect with preserved permissions, or a new
+  drive) and, with `delegate: true`, adds `delegate` to the resulting scopes. Any other key makes
+  the body explicit, and the explicit rules apply (`scopes` required). `/connect` sends `{}` or
+  `{ "delegate": true }`.
+- `assertDelegation(auth, { driveIds, scopes, writePaths })` (`validation.ts`) is the single check
+  for handing out access: the caller must hold `delegate`; the drives must be among its own; the
+  scopes must be among its own and within `read write delete share` (never `manage`, never
+  `delegate`); if the caller has write paths, the request must name write paths inside them. A
+  violation returns 403 `permission_denied`: `A key cannot grant more than it holds.` Keys without
+  `delegate` get 403 naming the scope. `manage` keys are not subject to it.

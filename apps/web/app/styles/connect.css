@@ -195,3 +195,22 @@
     padding: 18px 16px 20px;
   }
 }
+
+.connect-shell label.connect-delegate {
+  display: block;
+  margin: 16px 0 0;
+  font-size: 0.875rem;
+  letter-spacing: normal;
+  text-transform: none;
+  color: inherit;
+}
+.connect-shell label.connect-delegate input {
+  min-height: 0;
+  width: auto;
+}
+.connect-shell label.connect-delegate small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--muted, #6b6963);
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './errors';
 import {
+  assertDelegation,
   canonicalPath,
   decodeCursor,
   encodeCursor,
@@ -91,5 +92,52 @@ describe('API validation helpers', () => {
     expect(withinWritePaths(['/inbox/x'], '/inbox/xy/a.txt')).toBe(false);
     expect(withinWritePaths(['/inbox/x'], '/inbox')).toBe(false);
     expect(withinWritePaths(['/a', '/b'], '/b/c')).toBe(true);
+  });
+});
+
+describe('assertDelegation', () => {
+  const drive = '11111111-1111-4111-8111-111111111111';
+  const other = '22222222-2222-4222-8222-222222222222';
+  const caller = (over: Partial<Parameters<typeof assertDelegation>[0]> = {}) => ({
+    driveIds: [drive],
+    scopes: ['read', 'write', 'share', 'delegate'],
+    writePaths: [] as string[],
+    ...over,
+  });
+  const ask = (over = {}) => ({ driveIds: [drive], scopes: ['read'], writePaths: [], ...over });
+  const limit = 'A key cannot grant more than it holds.';
+
+  it('allows a subset of what the caller holds', () => {
+    expect(() =>
+      assertDelegation(caller(), ask({ scopes: ['read', 'write', 'share'] })),
+    ).not.toThrow();
+    expect(() =>
+      assertDelegation(caller({ writePaths: ['/a'] }), ask({ writePaths: ['/a/b', '/a'] })),
+    ).not.toThrow();
+  });
+
+  it('names the missing delegate scope', () => {
+    expect(() => assertDelegation(caller({ scopes: ['read', 'write', 'share'] }), ask())).toThrow(
+      /delegate/,
+    );
+  });
+
+  it.each([
+    ['manage', ask({ scopes: ['manage'] }), { scopes: ['read', 'manage', 'delegate'] }],
+    ['delegate', ask({ scopes: ['delegate'] }), {}],
+    ['a foreign drive', ask({ driveIds: [drive, other] }), {}],
+    ['a scope it lacks', ask({ scopes: ['delete'] }), {}],
+    ['a path outside its own', ask({ writePaths: ['/b'] }), { writePaths: ['/a'] }],
+    ['no paths when restricted', ask({ writePaths: [] }), { writePaths: ['/a'] }],
+    ['a sibling prefix path', ask({ writePaths: ['/ab'] }), { writePaths: ['/a'] }],
+  ])('refuses %s', (_name, requested, over) => {
+    try {
+      assertDelegation(caller(over), requested);
+      throw new Error('did not throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).code).toBe('permission_denied');
+      expect((error as ApiError).message).toBe(limit);
+    }
   });
 });

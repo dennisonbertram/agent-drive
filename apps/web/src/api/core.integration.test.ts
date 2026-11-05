@@ -1258,6 +1258,17 @@ describe('Phase 1 core API', () => {
       scopes: ['read'],
     });
     expect(created.status).toBe(201);
+    const delegating = await request('/keys', manageToken, 'POST', {
+      agentId,
+      label: 'api-delegate',
+      driveIds: [driveId],
+      scopes: ['read', 'delegate'],
+    });
+    expect(delegating.status).toBe(201);
+    expect((await json(await request('/whoami', (await json(delegating)).token))).scopes).toEqual([
+      'read',
+      'delegate',
+    ]);
     const keysPage = await json(await request('/keys?limit=1', manageToken));
     expect(keysPage.items).toHaveLength(1);
     expect(keysPage.nextCursor).toEqual(expect.any(String));

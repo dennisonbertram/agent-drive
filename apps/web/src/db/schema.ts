@@ -120,7 +120,7 @@ export const apiKeys = pgTable(
     index('api_keys_account_idx').on(table.accountId),
     check(
       'api_keys_scopes_check',
-      sql`${table.scopes} <@ ARRAY['read', 'write', 'delete', 'share', 'manage']::text[]`,
+      sql`${table.scopes} <@ ARRAY['read', 'write', 'delete', 'share', 'manage', 'delegate']::text[]`,
     ),
   ],
 );

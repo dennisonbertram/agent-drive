@@ -149,14 +149,15 @@ test.describe('agent device login', () => {
     return userId;
   }
 
-  async function approve(page: Page, path: string, name: string, code: string) {
+  async function approve(page: Page, path: string, name: string, code: string, delegate = false) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: `Connect ${name}?` })).toBeVisible();
     await expect(page.locator('.connect-code')).toHaveText(code);
-    // One click: no drive, key, or permission choices.
-    await expect(
-      page.locator('select, input[type="checkbox"], input[type="password"]'),
-    ).toHaveCount(0);
+    // One click: no drive or key choices; one unchecked box for the delegate permission.
+    await expect(page.locator('select, input[type="password"]')).toHaveCount(0);
+    await expect(page.locator('input[type="checkbox"]')).toHaveCount(1);
+    await expect(page.locator('input[type="checkbox"]')).not.toBeChecked();
+    if (delegate) await page.getByLabel('Let this agent add other agents to its drives').check();
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(
       page.getByText('Approved. Return to your agent; it will finish setup'),
@@ -222,6 +223,24 @@ test.describe('agent device login', () => {
     for (const file of ['a.txt', 'b.txt', 'sub/c.txt'])
       expect(listing.stdout).toContain(`/backups/${machine}/${file}`);
     expect(listing.stdout.split(`/backups/${machine}/`).length - 1).toBe(3);
+  });
+
+  test('new drive with delegate ticked: whoami lists delegate', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    const machine = `m-${randomBytes(3).toString('hex')}`;
+    const env = cliEnv(baseURL!, root, 'delegate', machine);
+    const { login, code, path } = await startLogin(env, 'delegate-bot');
+    await approve(page, path, 'delegate-bot', code, true);
+    const result = await login.done;
+    expect(result.status, result.stderr).toBe(0);
+    const who = await cli(['whoami'], env);
+    expect(who.status, who.stderr).toBe(0);
+    expect(who.stdout).toContain('delegate');
   });
 
   test('reconnect: second login reuses the drive and replaces the old key', async ({
