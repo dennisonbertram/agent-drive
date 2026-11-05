@@ -1,11 +1,30 @@
 import Link from 'next/link';
 
-/** Shared T1 logo tile (decorative). Styles: `.brand-logo` in globals.css. */
+/** Shared square-with-bar logo mark (decorative). Styles: `.brand-logo` in globals.css. */
 export function BrandLogo({ className = '' }: { className?: string }) {
-  return <span className={`brand-logo ${className}`.trim()} aria-hidden />;
+  return (
+    <svg
+      className={`brand-logo ${className}`.trim()}
+      viewBox="0 0 16 16"
+      aria-hidden
+      focusable="false"
+    >
+      <rect
+        x="0.75"
+        y="0.75"
+        width="14.5"
+        height="14.5"
+        rx="3"
+        fill="#fff"
+        stroke="#111"
+        strokeWidth="1.5"
+      />
+      <rect x="2" y="11" width="12" height="3" fill="#111" />
+    </svg>
+  );
 }
 
-/** Logo tile plus "Agent Drive" wordmark. Pass `href={null}` for a non-link. */
+/** Logo mark plus "Agent Drive" wordmark. Pass `href={null}` for a non-link. */
 export function BrandMark({
   href = '/',
   className = '',
