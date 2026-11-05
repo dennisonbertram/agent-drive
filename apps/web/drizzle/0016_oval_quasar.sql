@@ -1,0 +1,2 @@
+ALTER TABLE "api_keys" ADD COLUMN "write_paths" text[] DEFAULT ARRAY[]::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "device_authorizations" ADD COLUMN "write_paths" text[] DEFAULT ARRAY[]::text[] NOT NULL;
