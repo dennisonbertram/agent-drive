@@ -2,7 +2,7 @@
 .connect-shell {
   max-width: 480px;
   margin: 0 auto;
-  padding: 40px 20px 64px;
+  padding: 40px 20px 40px;
 }
 .connect-shell .panel.connect-card {
   position: relative;
@@ -24,10 +24,15 @@
   font: 600 1.5rem/1.2 var(--sans, 'Space Grotesk', system-ui, sans-serif);
   letter-spacing: -0.03em;
 }
-.connect-shell .panel > p {
+.connect-shell .panel > p:not(.banner):not(.connect-note) {
   margin: 0 0 14px;
   font-size: 0.875rem;
   color: var(--muted, #5d5b56);
+}
+.connect-cmd {
+  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font-size: 0.92em;
+  white-space: nowrap;
 }
 .connect-tag {
   display: flex;
@@ -183,6 +188,7 @@
   background: transparent;
   color: var(--ink, #121211);
   border: 1px solid var(--ink, #121211);
+  font-size: 1rem;
 }
 .connect-shell .button.secondary:hover:not(:disabled) {
   background: var(--al1, #f4f3f0);

@@ -299,6 +299,32 @@ test.describe('agent device login', () => {
     await expect(readFile(env.AGENT_DRIVE_CONFIG!)).rejects.toThrow();
   });
 
+  test('connect card presentation: banner, note, Deny, login command', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    await page.goto('/connect?code=BCDF-GHJK');
+    const missing = page.locator('.banner.info');
+    await expect(missing).toBeVisible();
+    const login = missing.locator('code', { hasText: 'agent-drive login' });
+    await expect(login).toHaveCSS('white-space', 'nowrap');
+    await expect(missing).toHaveCSS('font-size', '13px');
+    const env = cliEnv(baseURL!, root, 'style', 'style-box');
+    const { login: cliLogin, path } = await startLogin(env, 'style-bot');
+    await page.goto(path);
+    await expect(page.locator('p.banner.info')).toHaveCSS('font-size', '13px');
+    await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '16px');
+    await expect(page.getByRole('button', { name: 'Deny', exact: true })).toHaveCSS(
+      'font-size',
+      '16px',
+    );
+    await page.getByRole('button', { name: 'Deny', exact: true }).click();
+    await cliLogin.done;
+  });
+
   test('signed out visitors are sent to sign-in', async ({ page }) => {
     await page.goto('/connect?code=BCDF-GHJK');
     await expect(page).toHaveURL(/\/sign-in/);
