@@ -82,6 +82,14 @@ The drive key lives only in the config file, so lose the machine and the files c
   (`confirm [--method stdout]` records the backup and reports it). Use `set -o pipefail` so a failed
   store stops `confirm`. A login that replaces the API key clears all backup records (the exported
   bundle holds the revoked key) and says so; `check` then asks for a new export.
+- `agent-drive credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)`
+  needs the `delegate` scope. It creates a new agent `NAME` with its own API key (default scopes
+  `read write`, which must be within the caller's own; the drive defaults to the only configured
+  drive key) and prints one `AGENT_DRIVE_CREDENTIALS=adcred1.…` line holding only that key and the
+  chosen drive's key. The caller's own API key and config are neither included nor changed. `--to`
+  and `--stdout` follow the same terminal and mode `0600` rules as `export`. Store the line as a
+  secret in the sandbox. A name that already exists returns 409; pick another. Revoke the issued
+  key alone from the console under Agents.
 - `agent-drive credentials import [--from PATH]` merges a bundle (file or stdin) into the config
   and marks its drives as backed up.
 - `agent-drive credentials status` prints, per drive key, whether and when it was backed up.

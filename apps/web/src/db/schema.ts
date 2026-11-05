@@ -102,6 +102,9 @@ export const apiKeys = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: 'cascade' }),
     label: text('label').notNull(),
+    issuedByAgentId: uuid('issued_by_agent_id').references(() => agents.id, {
+      onDelete: 'set null',
+    }),
     tokenHash: text('token_hash').notNull(),
     driveIds: uuid('drive_ids')
       .array()

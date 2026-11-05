@@ -483,3 +483,20 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
 - Verification is the user code, the agent name and the machine. There is no public-key
   fingerprint: the server that binds the key also serves the page's JavaScript.
 - This needs recovery material in hand. Handoffs (a) and (c) cover the other cases.
+
+## 13. Issued credentials
+
+- Handoff for a sandbox set up without a browser: an agent whose key holds `delegate` runs
+  `agent-drive credentials issue --name NAME --write-path P --stdout | <secret store>`. The human
+  stores the printed `AGENT_DRIVE_CREDENTIALS=adcred1.…` line in the sandbox.
+- The bundle is the `adcred1.` format of §9 with the new API key and only the chosen drive's key.
+  The issuer's token never appears in it or in any request body, and the drive key never reaches
+  the service. Whoever holds the line holds the full drive key; write paths limit writes through
+  the API only.
+- Server: `POST /keys` without `manage` needs `delegate` and `assertDelegation` (§11). It takes
+  `agentName`, creates a new agent (409 if the name exists; `agentId` returns 400) and a key with
+  `issued_by_agent_id` set to the caller's agent (migration 0018). The console shows "issued by
+  <agent>" in the Agents and API keys views. Revoking the key leaves the issuer and other keys
+  alone; revoking the issuer does not revoke what it issued (intended: no cascade). The issuer
+  validates the drive key locally before minting and checks that a `--to` path is free (a dangling
+  symlink counts as present) so a failed delivery never leaves an orphan key.
