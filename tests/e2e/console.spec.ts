@@ -108,6 +108,16 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     });
     expect(login.status()).toBe(200);
     await page.goto('/console');
+    // Onboarding has exactly one primary action.
+    await expect(page.getByRole('button', { name: 'Create your first drive' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.locator('.button.primary:visible')).toHaveCount(1);
+    // Closing a dialog returns focus to the button that opened it.
+    const opener = page.getByRole('button', { name: '+ New drive' });
+    await opener.click();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(opener).toBeFocused();
     await page.getByRole('button', { name: 'Create your first drive' }).click();
     await page.getByLabel('Drive name').fill('Browser acceptance');
     await page.getByRole('button', { name: 'Create drive', exact: true }).click();
@@ -329,6 +339,16 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       375,
     );
+
+    // Phone: a short tab (Trash) still fills the viewport height.
+    await page.locator('.nav-toggle').click();
+    await page.locator('#console-nav .nav-item').filter({ hasText: 'Trash' }).click();
+    await expect(page.getByRole('heading', { name: 'Nothing in the trash.' })).toBeVisible();
+    const mainBottom = await page.evaluate(
+      () => document.querySelector('.console-main')!.getBoundingClientRect().bottom,
+    );
+    expect(mainBottom).toBeGreaterThanOrEqual(812);
+    await openFiles();
 
     // Phone: all seven sections are reachable from the section menu.
     const toggle = page.locator('.nav-toggle');

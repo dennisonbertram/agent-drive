@@ -17,7 +17,7 @@ import {
   generateDriveKey,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
-import { BrandMark } from '../../brand-mark';
+import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
 import '../../styles/console.css';
 import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
@@ -212,6 +212,7 @@ function Dialog({
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;
+    const opener = document.activeElement as HTMLElement | null;
     dialog?.showModal();
     // Land on the first field, or the Copy button of a secret receipt, not on Close.
     dialog
@@ -219,7 +220,11 @@ function Dialog({
         'input:not([type=checkbox]):not([type=file]):not([readonly]), select, .copy-button, .version-row button',
       )
       ?.focus();
-    return () => dialog?.close();
+    return () => {
+      dialog?.close();
+      // Give focus back to whatever opened the dialog, unless it has left the page.
+      if (opener?.isConnected) opener.focus();
+    };
   }, []);
   return (
     <dialog
@@ -658,7 +663,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               </button>
               {tab === 'Files' && (
                 <button
-                  className="button primary"
+                  className={`button ${drives.length ? 'primary' : 'secondary'}`}
                   disabled={busy || !ready}
                   onClick={() => open('drive')}
                 >
@@ -695,7 +700,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <>
               {tab === 'Files' && !drives.length && (
                 <section className="onboarding panel">
-                  <div className="onboarding-symbol">a/</div>
+                  <BrandLogo className="onboarding-logo" />
                   <p className="eyebrow">A LITTLE SETUP. A LASTING WORKSPACE.</p>
                   <h2>Give your first agent a home.</h2>
                   <p>
@@ -755,6 +760,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </span>
                     </div>
                   )}
+                  {tab === 'Files' && drive && !loaded && (
+                    <div className="banner keyline keyline-reserve" aria-hidden />
+                  )}
                   <section className="panel file-panel">
                     <div className="panel-toolbar">
                       <h2>
@@ -803,8 +811,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           <thead role="rowgroup">
                             <tr role="row">
                               <th role="columnheader">FILE PATH</th>
-                              <th role="columnheader">
-                                {tab === 'Trash' ? 'DELETED' : 'ENCRYPTED SIZE'}
+                              <th
+                                role="columnheader"
+                                title={tab === 'Trash' ? undefined : 'Encrypted size'}
+                              >
+                                {tab === 'Trash' ? 'DELETED' : 'SIZE'}
                               </th>
                               <th role="columnheader">{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
                               <th role="columnheader">MODIFIED</th>
@@ -856,6 +867,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     {tab === 'Trash' ? (
                                       <>
                                         <button
+                                          className="row-primary"
                                           disabled={busy}
                                           onClick={() => void act(() => restore(file.path))}
                                         >
@@ -871,6 +883,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     ) : (
                                       <>
                                         <button
+                                          className="row-primary"
                                           disabled={busy || !hasKey}
                                           title={
                                             !hasKey
