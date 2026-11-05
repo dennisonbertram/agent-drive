@@ -142,8 +142,12 @@ button {
   box-shadow: 0 2px 0 var(--line-strong);
 }
 .button:hover:not(:disabled) {
-  transform: translateY(1px);
   box-shadow: 0 1px 0 var(--line-strong);
+}
+/* Press moves the button; hover does not, so a pointer resting on an edge cannot flicker it. */
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
 }
 .primary {
   background: var(--sig);

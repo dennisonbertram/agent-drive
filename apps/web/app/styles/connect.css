@@ -145,7 +145,6 @@
 }
 .connect-shell .button.primary:hover:not(:disabled) {
   background: var(--sig, #ff4a1c);
-  transform: translateY(1px);
   box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .connect-shell .button.primary:disabled {

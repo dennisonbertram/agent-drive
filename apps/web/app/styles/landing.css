@@ -57,8 +57,11 @@
   cursor: pointer;
 }
 .l-btn:hover {
-  transform: translateY(1px);
   box-shadow: 0 1px 0 var(--i);
+}
+.l-btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
 }
 .l-btn.signal {
   background: var(--sg);

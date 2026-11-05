@@ -42,7 +42,6 @@
   box-shadow: 0 2px 0 var(--line-strong, #111);
 }
 .billing-links a.billing-links-cta:hover {
-  transform: translateY(1px);
   box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .billing-page .brand,
@@ -382,7 +381,6 @@
   box-shadow: 0 2px 0 var(--line-strong, #111);
 }
 .billing-page .button:hover:not(:disabled) {
-  transform: translateY(1px);
   box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .billing-page .button.primary {

@@ -175,9 +175,6 @@
   cursor: pointer;
 }
 .share-card .button:hover:not(:disabled) {
-  /* No shift: a hover transform under a pointer parked on a button edge flickers hover on and off,
-     so Playwright never sees the button stable. */
-  transform: none;
   box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .share-card .button:disabled {
