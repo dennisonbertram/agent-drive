@@ -270,6 +270,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
   const [filter, setFilter] = useState('');
+  const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
     scope: string;
     items: FileEntry[];
@@ -326,7 +327,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         if (active) setFilePage({ ...result, scope: fileScope });
       })
       .catch((reason: Error) => {
-        if (active) setError(reason.message);
+        if (active) setFileFailure({ scope: fileScope, message: reason.message });
       });
     return () => {
       active = false;
@@ -926,7 +927,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {!loaded && (
+                    {!loaded && fileFailure?.scope === fileScope && (
+                      <div className="empty" role="alert">
+                        <h3>Could not load files.</h3>
+                        <p>{fileFailure.message}</p>
+                        <button
+                          className="button secondary"
+                          onClick={() => setFileRefresh((value) => value + 1)}
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    )}
+                    {!loaded && fileFailure?.scope !== fileScope && (
                       <div className="empty loading">
                         <h3>Loading files…</h3>
                       </div>

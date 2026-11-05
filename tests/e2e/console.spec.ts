@@ -379,3 +379,41 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('console trash: a failed load shows an error with Retry instead of loading forever', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await context.request.post('/api/console/drives', {
+      data: { name: 'Trash drive' },
+      headers: { Origin: baseURL! },
+    });
+    let failing = true;
+    await page.route('**/api/console/drives/*/trash*', (route) =>
+      failing
+        ? route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: { message: 'Trash is unavailable.' } }),
+          })
+        : route.continue(),
+    );
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Trash', exact: true }).first().click();
+    await expect(page.getByText('Could not load files.')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('Loading files…')).toHaveCount(0);
+    failing = false;
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Nothing in the trash.' })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
