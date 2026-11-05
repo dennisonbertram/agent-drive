@@ -1,16 +1,17 @@
-/* T1 "Rack" — account surfaces: pricing, console billing, console settings, sign-in/up.
+/* Spec-sheet — account surfaces: pricing, console billing, console settings, sign-in/up.
    Tokens always carry fallbacks so these pages render before the shared :root lands. */
 
-/* Same ground as the shared body (dot grid); scoped so it is harmless once :root owns it. */
 /* ---------- page frame ---------- */
 .billing-page {
   max-width: 1272px;
   margin: 0 auto;
   padding: 0 32px;
-  font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  font-family: var(--sans, 'Inter Tight', system-ui, sans-serif);
 }
 .billing-header {
-  padding: 16px 0;
+  padding: 0;
+  min-height: 60px;
+  border-bottom: 1px solid var(--line-strong, #111);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -22,20 +23,27 @@
   align-items: center;
   gap: 28px;
   font-size: 14px;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .billing-links a:hover {
-  color: var(--ink, #121211);
+  color: var(--ink, #111);
 }
 .billing-links a[aria-current='page'] {
-  color: var(--ink, #121211);
-  font-weight: 600;
+  color: var(--ink, #111);
+  font-weight: 500;
 }
 .billing-links a.billing-links-cta {
-  color: #fff;
-  background: var(--ink, #121211);
+  color: var(--ink, #111);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line-strong, #111);
   border-radius: 6px;
-  padding: 8px 14px;
+  padding: 7px 14px;
+  font-weight: 500;
+  box-shadow: 0 2px 0 var(--line-strong, #111);
+}
+.billing-links a.billing-links-cta:hover {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .billing-page .brand,
 .auth-page .brand {
@@ -45,7 +53,7 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   text-decoration: none;
-  color: var(--ink, #121211);
+  color: var(--ink, #111);
 }
 .billing-heading {
   display: flex;
@@ -54,25 +62,24 @@
   gap: 24px;
   margin: 44px 0 28px;
   padding-top: 20px;
-  border-top: 1px solid var(--ink, #121211);
 }
 .billing-heading h1 {
   font-size: clamp(2rem, 5vw, 3.25rem);
   line-height: 1;
-  letter-spacing: -0.045em;
-  font-weight: 600;
+  letter-spacing: -0.035em;
+  font-weight: 500;
   margin: 12px 0;
 }
 .billing-heading p:not(.eyebrow) {
   font-size: 1rem;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .billing-page .eyebrow,
 .billing-page .feature-number {
-  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.08em;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .billing-page main > section {
   margin-bottom: 28px;
@@ -81,9 +88,9 @@
 /* ---------- panels ---------- */
 .billing-card {
   padding: 24px;
-  background: var(--panel, #f3f2ee);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  border-radius: 10px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
   min-width: 0;
 }
 .billing-card p,
@@ -93,7 +100,7 @@
 }
 .billing-card small {
   display: block;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
   margin-top: 8px;
 }
 .billing-metrics,
@@ -105,7 +112,7 @@
 .billing-number {
   display: block;
   font: 500 clamp(1.4rem, 3vw, 2rem) / 1.1
-    var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+    var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: -0.03em;
   margin: 14px 0 8px;
   overflow-wrap: anywhere;
@@ -127,99 +134,89 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 11px/1 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 7px 10px;
   border-radius: 4px;
-  background: var(--al1, #f4f3f0);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  color: var(--ink, #121211);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line-strong, #111);
+  color: var(--ink, #111);
 }
 .billing-tag::before {
   content: '';
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--sig, #ff5a1f);
+  background: var(--sig, #ff4a1c);
   box-shadow:
-    0 0 0 2px rgba(255, 90, 31, 0.2),
-    0 0 8px rgba(255, 90, 31, 0.8);
+    0 0 0 2px var(--panel, #fff),
+    0 0 0 3px var(--line-strong, #111);
 }
 
-/* ---------- plans as numbered rack units ---------- */
+/* ---------- plans: three-column spec table ---------- */
 .billing-plans {
-  counter-reset: unit;
+  gap: 0;
+  border-top: 1px solid var(--line-strong, #111);
 }
-.billing-plan {
+.billing-plan.billing-card {
   display: flex;
   flex-direction: column;
-  padding: 0;
-  overflow: hidden;
-  counter-increment: unit;
+  padding: 26px 32px 24px 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
-.billing-plan::before {
-  content: 'UNIT 0' counter(unit);
-  display: block;
-  padding: 10px 20px;
-  background: var(--al1, #f4f3f0);
-  border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.08em;
-  color: var(--muted, #5d5b56);
-}
-.billing-plan > * {
-  margin-left: 20px;
-  margin-right: 20px;
+.billing-plan.billing-card + .billing-plan {
+  padding-left: 32px;
+  border-left: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .billing-plan h2,
 .billing-plan h3 {
+  font: 500 12px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  margin-top: 18px;
-  margin-bottom: 6px;
-  font: 600 1.125rem var(--sans, 'Space Grotesk', system-ui, sans-serif);
-  letter-spacing: 0.04em;
+  color: var(--muted, #6b6963);
+  margin: 0;
 }
-.billing-plan > p:first-of-type,
 .billing-plan > p {
-  margin-bottom: 0;
+  margin: 8px 0 14px;
+  font-size: 15px;
+  color: var(--muted, #6b6963);
 }
 .billing-price {
-  font: 500 2rem var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: -0.04em;
-  color: var(--ink, #121211);
+  font: 500 44px/1.1 var(--sans, 'Inter Tight', system-ui, sans-serif);
+  letter-spacing: -0.03em;
+  color: var(--ink, #111);
 }
 .billing-plan ul {
   list-style: none;
   padding: 0;
-  margin: 18px 20px 20px;
+  margin: 0 0 22px;
   flex: 1;
-  font: 400 12.5px/1.4 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  border-top: 1px solid var(--ink, #121211);
-}
-.billing-plan li {
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  font: 400 13px/1.5 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--ink-2, #3b3a37);
 }
 .billing-plan > .button,
 .billing-plan > button {
-  align-self: stretch;
-  margin-bottom: 20px;
+  align-self: flex-start;
   justify-content: center;
   text-align: center;
 }
 .billing-plan.selected {
-  border-color: var(--ink, #121211);
-  box-shadow: 0 0 0 1px var(--ink, #121211);
+  box-shadow: inset 0 3px 0 var(--sig, #ff4a1c);
 }
-.billing-plan.selected::before {
-  content: 'UNIT 0' counter(unit) '  \25CF  SELECTED';
-  background: var(--ink, #121211);
-  color: var(--sig-text, #ff7a45);
+.billing-plan.selected h2::after,
+.billing-plan.selected h3::after {
+  content: '  \25CF  SELECTED';
+  color: var(--sig-dark, #b8360c);
 }
 .billing-caption {
   font-size: 0.8125rem !important;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
   margin-top: 16px;
 }
 .billing-rates {
@@ -236,7 +233,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 48px;
   padding: 24px 0;
-  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .billing-controls h2 {
   margin: 14px 0 16px;
@@ -246,7 +243,7 @@
 .billing-controls > div > p {
   max-width: 420px;
   font-size: 0.9375rem;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .billing-form {
   display: flex;
@@ -257,7 +254,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -268,11 +265,11 @@
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
   border-radius: 7px;
   background: #fff;
-  color: var(--ink, #121211);
-  font: 400 14px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  color: var(--ink, #111);
+  font: 400 14px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
   text-transform: none;
   letter-spacing: 0;
@@ -287,7 +284,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font: 500 11px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 11px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -302,20 +299,20 @@
   text-align: left;
 }
 .billing-page thead {
-  background: var(--al1, #f4f3f0);
+  background: none;
 }
 .billing-page th {
-  font: 500 11px/1.2 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   text-transform: uppercase;
-  color: var(--muted, #5d5b56);
-  letter-spacing: 0.08em;
+  color: var(--muted, #6b6963);
+  letter-spacing: 0.12em;
   white-space: nowrap;
-  border-bottom: 1px solid var(--ink, #121211);
+  border-bottom: 1px solid var(--line-strong, #111);
 }
 .billing-page th,
 .billing-page td {
   padding: 13px 12px;
-  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .billing-page td {
   font-size: 0.8125rem;
@@ -323,7 +320,7 @@
   overflow-wrap: anywhere;
 }
 .billing-page td:not(:first-child) {
-  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
 }
 
 /* ---------- banners, notices ---------- */
@@ -334,10 +331,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: var(--panel, #f3f2ee);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  border-left: 3px solid var(--ink, #121211);
-  border-radius: 6px;
+  background: var(--panel, #fff);
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  border-left: 3px solid var(--ink, #111);
+  border-radius: 0;
   padding: 14px 18px;
   margin-bottom: 20px;
   font-size: 0.8125rem;
@@ -347,16 +344,16 @@
 .settings-page .banner.error {
   border-left-color: #8b3027;
   color: #8b3027;
-  background: #fbf1ee;
+  background: var(--panel, #fff);
 }
 .settings-notice {
-  border-left-color: var(--sig, #ff5a1f) !important;
+  border-left-color: var(--sig, #ff4a1c) !important;
   overflow-wrap: anywhere;
 }
 .billing-loading {
   padding: 50px 0;
-  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  color: var(--muted, #5d5b56);
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #6b6963);
 }
 .billing-footer,
 .billing-page .landing-footer {
@@ -365,42 +362,44 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  font: 400 11.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  color: var(--muted, #5d5b56);
-  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  font: 400 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #6b6963);
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .billing-page .landing-footer a {
   text-decoration: none;
   letter-spacing: 0.08em;
-  color: var(--ink, #121211);
+  color: var(--ink, #111);
 }
 
-/* ---------- buttons on these pages: one orange primary, hairline secondary ---------- */
+/* ---------- buttons on these pages: reference style, one orange primary ---------- */
+.billing-page .button {
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  font-weight: 500;
+  box-shadow: 0 2px 0 var(--line-strong, #111);
+}
+.billing-page .button:hover:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--line-strong, #111);
+}
 .billing-page .button.primary {
-  background: var(--sig, #ff5a1f);
-  color: var(--ink, #121211);
-  border: 0;
-  font-weight: 600;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.4) inset,
-    0 -2px 0 rgba(0, 0, 0, 0.18) inset;
+  background: var(--sig, #ff4a1c);
+  color: var(--ink, #111);
 }
 .billing-page .button.secondary {
-  background: transparent;
-  color: var(--ink, #121211);
-  border: 1px solid var(--ink, #121211);
+  background: var(--panel, #fff);
 }
 .billing-page .button:focus-visible {
-  outline: 2px solid var(--ink, #121211);
-  outline-offset: 2px;
+  outline: 2px solid var(--ink, #111);
+  outline-offset: 3px;
 }
 
 /* ---------- pricing ---------- */
 .pricing-page .billing-heading {
   margin-top: 40px;
-}
-.pricing-page .billing-plan h2 {
-  font-size: 1.125rem;
 }
 .pricing-availability {
   display: block;
@@ -410,16 +409,21 @@
   grid-template-columns: 1fr 1fr;
   gap: 48px;
 }
+.pricing-details.billing-card {
+  padding: 24px 0 0;
+  border-width: 1px 0 0;
+  border-radius: 0;
+}
 .pricing-details h2 {
   margin: 12px 0 18px;
   letter-spacing: -0.02em;
 }
 .pricing-details h3 {
   margin-bottom: 14px;
-  font: 500 11px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 11px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .pricing-details p + p {
   margin-top: 16px;
@@ -427,32 +431,32 @@
 .pricing-rate-list {
   margin: 0;
   font-size: 0.8125rem;
-  border-top: 1px solid var(--ink, #121211);
+  border-top: 1px solid var(--line-strong, #111);
 }
 .pricing-rate-list > div {
   display: flex;
   justify-content: space-between;
   gap: 20px;
   padding: 11px 0;
-  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .pricing-rate-list dd {
   margin: 0;
   white-space: nowrap;
-  font: 500 13px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
 }
 .pricing-page .feature-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  border-top: 1px solid var(--ink, #121211);
+  border-top: 1px solid var(--line-strong, #111);
 }
 .pricing-page .feature-grid article {
   padding: 20px 24px 8px 0;
 }
 .pricing-page .feature-grid article + article {
   padding-left: 24px;
-  border-left: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-left: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .pricing-page .feature-grid h2 {
   margin: 12px 0 10px;
@@ -461,7 +465,7 @@
 }
 .pricing-page .feature-grid p {
   font-size: 0.875rem;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 
 /* ---------- settings ---------- */
@@ -475,7 +479,7 @@
 }
 .settings-section-heading p {
   margin: 10px 0 0;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .settings-audit {
   min-width: 0;
@@ -483,7 +487,7 @@
 .settings-audit small {
   display: block;
   margin-top: 5px;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
   overflow-wrap: anywhere;
 }
 .settings-audit th,
@@ -498,16 +502,16 @@
   display: inline-block;
   white-space: nowrap;
   text-transform: uppercase;
-  font: 500 10.5px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 500 10.5px/1 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.06em;
   border-radius: 3px;
   padding: 4px 7px;
-  background: var(--al1, #f4f3f0);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  background: var(--paper-2, #f6f5f2);
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .settings-outcome.success,
 .settings-outcome.complete {
-  border-color: var(--ink, #121211);
+  border-color: var(--ink, #111);
 }
 .settings-outcome.failure,
 .settings-outcome.blocked {
@@ -519,18 +523,18 @@
 }
 .settings-empty {
   padding: 24px 0;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .settings-audit + button,
 .settings-page .table-scroll + button {
   margin-top: 20px;
 }
-/* destructive zone: set apart with a red rule and hatched header strip */
+/* destructive zone: set apart with a red rule */
 .settings-page .settings-danger {
   margin-top: 40px;
   border-color: #8b3027;
   border-width: 1px 1px 1px 4px;
-  background: #fbf6f4;
+  background: var(--panel, #fff);
 }
 .settings-danger h2 {
   margin: 12px 0 18px;
@@ -541,8 +545,8 @@
 .settings-explainer {
   margin: 22px 0;
   padding: 16px 18px;
-  background: #fff;
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  background: var(--paper-2, #f6f5f2);
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
   border-radius: 6px;
   font-size: 0.8125rem;
 }
@@ -581,7 +585,7 @@
   background: #8b3027;
   border: 1px solid #8b3027;
   color: #fff;
-  box-shadow: none;
+  box-shadow: 0 2px 0 #111;
 }
 .billing-page .button.settings-delete-button:hover:not(:disabled) {
   background: #6d241d;
@@ -593,7 +597,7 @@
 }
 .settings-jobs li {
   padding: 20px 0;
-  border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .settings-job-title {
   margin-bottom: 10px;
@@ -602,7 +606,7 @@
   margin-top: 10px;
 }
 .settings-id {
-  font: 400 11.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font: 400 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   overflow-wrap: anywhere;
 }
 .settings-job-error {
@@ -618,7 +622,8 @@
   justify-content: center;
   padding: 40px 16px;
   gap: 28px;
-  font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  background: var(--bg, #fff);
+  font-family: var(--sans, 'Inter Tight', system-ui, sans-serif);
 }
 .auth-page .brand {
   font-size: 1.0625rem;
@@ -627,33 +632,32 @@
   width: 100%;
   max-width: 440px;
   padding: 28px;
-  background: var(--panel, #f3f2ee);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  border-radius: 12px;
-  box-shadow:
-    0 1px 0 #fff inset,
-    0 24px 40px -28px rgba(40, 30, 20, 0.45);
+  background: var(--panel, #fff);
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  box-shadow: 0 2px 0 var(--line-strong, #111);
 }
 .auth-page h1 {
   margin-bottom: 14px;
   font-size: 1.75rem;
+  font-weight: 500;
   letter-spacing: -0.03em;
 }
 .auth-page .panel p {
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
   font-size: 0.875rem;
 }
-.auth-page .cl-card {
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  box-shadow:
-    0 1px 0 #fff inset,
-    0 24px 40px -28px rgba(40, 30, 20, 0.45);
+.auth-page .cl-card,
+.auth-page .cl-cardBox {
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  box-shadow: 0 2px 0 var(--line-strong, #111);
 }
 
 .settings-hint {
   margin-top: 8px;
   font-size: 0.75rem;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .billing-form .billing-banner {
   margin: 4px 0 0;
@@ -683,6 +687,14 @@
   .billing-plans {
     grid-template-columns: 1fr;
   }
+  .billing-plan.billing-card,
+  .billing-plan.billing-card + .billing-plan {
+    padding: 24px 0;
+    border-left: 0;
+  }
+  .billing-plan.billing-card + .billing-plan {
+    border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  }
   .billing-controls {
     gap: 28px;
   }
@@ -692,7 +704,7 @@
   .pricing-page .feature-grid article + article {
     padding-left: 0;
     border-left: 0;
-    border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+    border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
   }
 }
 @media (max-width: 700px) {
@@ -745,7 +757,7 @@
 /* Global .primary is the button fill; table title cells must not inherit it. */
 .billing-page td.primary {
   background: none;
-  border-color: var(--line-soft, rgba(18, 18, 17, 0.09));
+  border-color: var(--line, rgba(17, 17, 17, 0.16));
   color: inherit;
   box-shadow: none;
 }
@@ -753,8 +765,8 @@
 .billing-page .button:disabled,
 .billing-page .button.primary:disabled,
 .billing-page .button.settings-delete-button:disabled {
-  background: var(--al2, #ebeae6);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
-  color: var(--muted, #5d5b56);
+  background: var(--paper-2, #f6f5f2);
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  color: var(--muted, #6b6963);
   box-shadow: none;
 }
