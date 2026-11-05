@@ -1249,6 +1249,24 @@ describe('grant by an existing agent (handoff a)', () => {
     expect((await approveWith(k, narrowed.user_code, { offerRevision: 1 })).status).toBe(409);
   });
 
+  it('fails closed at exchange when the offer or its key row is gone', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'orphan' });
+    await offer(g, started.user_code);
+    expect((await approveWith(g, started.user_code, { offerRevision: 1 })).status).toBe(200);
+    // Deleting the key cascades to the offer and nulls approved_offer_id.
+    await pool.query('DELETE FROM api_keys WHERE id = $1', [g.keyId]);
+    await allowPoll(started.device_code);
+    const denied = await poll(started.device_code);
+    expect(denied.status).toBe(400);
+    expect((await json(denied)).error).toBe('access_denied');
+    const row = await pool.query(
+      'SELECT status, api_key_id FROM device_authorizations WHERE user_code = $1',
+      [started.user_code],
+    );
+    expect(row.rows[0]).toEqual({ status: 'denied', api_key_id: null });
+  });
+
   for (const route of ['GET', 'POST'] as const) {
     it(`shares the console attempt budget on ${route} (10 not_found, then 30 attempts)`, async () => {
       const call = (g: Granter, code: string) =>

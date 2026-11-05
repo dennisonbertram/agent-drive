@@ -227,11 +227,14 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
     // An approved offer is revalidated against the key that made it, which may have been revoked
     // or narrowed since approval. Nothing is issued then.
-    if (row.approved_offer_id) {
-      const offered = await client.query<OfferRow>('SELECT * FROM device_offers WHERE id = $1', [
-        row.approved_offer_id,
-      ]);
-      if (offered.rows[0] && !(await offeringKeyAllows(client, offered.rows[0]))) {
+    if (row.approved_from_offer) {
+      const offered = row.approved_offer_id
+        ? await client.query<OfferRow>('SELECT * FROM device_offers WHERE id = $1', [
+            row.approved_offer_id,
+          ])
+        : { rows: [] };
+      // A missing offer or key row counts as withdrawn.
+      if (!offered.rows[0] || !(await offeringKeyAllows(client, offered.rows[0]))) {
         await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
           row.id,
         ]);
@@ -672,7 +675,8 @@ async function approve(
     `UPDATE device_authorizations
         SET status = 'approved', account_id = $2, agent_id = $3, drive_ids = $4::uuid[],
             scopes = $5::text[], new_drive_id = $6, sealed_drive_keys = $7::jsonb,
-            write_paths = $8::text[], approved_offer_id = $9, decided_at = now()
+            write_paths = $8::text[], approved_offer_id = $9, approved_from_offer = $10,
+            decided_at = now()
       WHERE id = $1`,
     [
       row.id,
@@ -684,6 +688,7 @@ async function approve(
       Object.keys(sealed).length ? JSON.stringify(sealed) : null,
       paths,
       offerId,
+      offerId !== null,
     ],
   );
 }

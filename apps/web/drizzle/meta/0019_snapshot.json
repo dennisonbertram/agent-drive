@@ -1,5 +1,5 @@
 {
-  "id": "8138fcf2-af2f-4e34-9bc4-bcd9259a10e6",
+  "id": "4829fd9a-939b-4f83-8e76-42c8ac2c1a8f",
   "prevId": "6bc394ec-d51f-4a27-8283-c4f319118478",
   "version": "7",
   "dialect": "postgresql",
@@ -1621,6 +1621,13 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "approved_from_offer": {
+          "name": "approved_from_offer",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "interval_seconds": {
           "name": "interval_seconds",

@@ -13,6 +13,7 @@ CREATE TABLE "device_offers" (
 );
 --> statement-breakpoint
 ALTER TABLE "device_authorizations" ADD COLUMN "approved_offer_id" uuid;--> statement-breakpoint
+ALTER TABLE "device_authorizations" ADD COLUMN "approved_from_offer" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "device_offers" ADD CONSTRAINT "device_offers_device_authorization_id_device_authorizations_id_fk" FOREIGN KEY ("device_authorization_id") REFERENCES "public"."device_authorizations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "device_offers" ADD CONSTRAINT "device_offers_account_id_accounts_id_fk" FOREIGN KEY ("account_id") REFERENCES "public"."accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "device_offers" ADD CONSTRAINT "device_offers_api_key_id_api_keys_id_fk" FOREIGN KEY ("api_key_id") REFERENCES "public"."api_keys"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

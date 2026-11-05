@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -606,6 +607,8 @@ export const deviceAuthorizations = pgTable(
     approvedOfferId: uuid('approved_offer_id').references((): AnyPgColumn => deviceOffers.id, {
       onDelete: 'set null',
     }),
+    // Survives deletion of the offer or its key, so exchange can fail closed.
+    approvedFromOffer: boolean('approved_from_offer').notNull().default(false),
     intervalSeconds: integer('interval_seconds').notNull().default(5),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
