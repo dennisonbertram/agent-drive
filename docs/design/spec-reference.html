@@ -89,6 +89,7 @@ svg .kled{fill:#ff4a1c;stroke:#111}
 .steps li{display:grid;grid-template-columns:28px 1fr;gap:6px 0}
 .steps li>i{font:500 12px var(--mono);font-style:normal;color:var(--muted);padding-top:3px}
 .steps b{font-weight:500;font-size:17px}
+.steps .p{grid-column:2;margin:4px 0 0;font-size:15px;color:var(--ink-2)}
 .steps .t{grid-column:2;font:400 13px var(--mono);color:var(--ink-2);background:#f6f5f2;border-radius:6px;padding:10px 12px;margin-top:6px;overflow-wrap:anywhere}
 .pair{border:1px solid var(--ink);border-radius:14px;padding:22px 24px 24px;box-shadow:0 3px 0 var(--ink);background:#fff}
 .pair .top{display:flex;justify-content:space-between;align-items:center}
@@ -257,9 +258,9 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
   <p class="nokey">No API key to copy.</p>
   <h3>Three ways to add a second agent to a drive</h3>
   <ul class="steps">
-   <li><i>&bull;</i><b>Approve it in the browser.</b><div class="t">Paste the same line into it, then on /connect choose the drive and supply its key (credentials bundle or recovery file).</div></li>
+   <li><i>&bull;</i><b>Approve it in the browser.</b><p class="p">Paste the same line into it, then on /connect choose the drive and supply its key (credentials bundle or recovery file).</p></li>
    <li><i>&bull;</i><b>Give a sandbox a .env line.</b><div class="t">agent-drive credentials issue --name devin --drive "$DRIVE_ID" --to sandbox.env</div></li>
-   <li><i>&bull;</i><b>Hand it over from an agent that has the drive.</b><div class="t">agent-drive grant CXRH-TZJT</div><div class="t">The granting agent needs the delegate permission. You approve once at /connect.</div></li>
+   <li><i>&bull;</i><b>Hand it over from an agent that has the drive.</b><div class="t">agent-drive grant CXRH-TZJT</div><p class="p">The granting agent needs the delegate permission. You approve once at /connect.</p></li>
   </ul>
  </div>
  <div class="pair" aria-label="Approval page">

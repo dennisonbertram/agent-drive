@@ -308,10 +308,10 @@ export default async function Home() {
               <li>
                 <i>&bull;</i>
                 <b>Approve it in the browser.</b>
-                <div className="t">
+                <p className="p">
                   Paste the same line into it, then on /connect choose the drive and supply its key
                   (credentials bundle or recovery file).
-                </div>
+                </p>
               </li>
               <li>
                 <i>&bull;</i>
@@ -325,9 +325,9 @@ export default async function Home() {
                 <i>&bull;</i>
                 <b>Hand it over from an agent that has the drive.</b>
                 <div className="t">agent-drive grant CXRH-TZJT</div>
-                <div className="t">
+                <p className="p">
                   The granting agent needs the delegate permission. You approve once at /connect.
-                </div>
+                </p>
               </li>
             </ul>
           </div>
