@@ -230,7 +230,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "openWorldHint": true,
       "readOnlyHint": true,
     },
-    "description": "List one page of recent drive events, optionally since an ISO timestamp.",
+    "description": "List drive events in order with the author agent's name. Pass the returned latestCursor back as cursor to get only newer events (since is ignored when cursor is set). waitSeconds blocks up to that long for the next event.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -250,6 +250,11 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "format": "date-time",
           "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
           "type": "string",
+        },
+        "waitSeconds": {
+          "maximum": 30,
+          "minimum": 1,
+          "type": "integer",
         },
       },
       "required": [

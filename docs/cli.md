@@ -18,7 +18,7 @@ conditional replacement; these flags are mutually exclusive. `get REMOTE --drive
 --output FILE` writes only after authenticated decryption succeeds; without `--output`, only
 small valid UTF-8 files are printed.
 Inline text output rejects binary control bytes while allowing tabs and line breaks. `ls` and
-`search` accept `--agent`, `--machine`, `--user`, and `--tag`; `recent` accepts `--since`.
+`search` accept `--agent`, `--machine`, `--user`, and `--tag`; `recent` accepts `--since`, `--cursor`, and `--wait SECONDS` (1 to 300; polls every 2 seconds for the next event, one metered operation per poll).
 
 Drive creation is idempotent. A newly created drive generates and prints a key once with a backup
 warning. Re-running against an existing drive uses the retained local key and refuses to invent a

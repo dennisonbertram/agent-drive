@@ -291,9 +291,13 @@ export const fileEvents = pgTable(
     machineId: uuid('machine_id').references(() => machines.id),
     userId: text('user_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    // Assigned at insert while the writer holds the drive row lock: strictly increasing in
+    // commit order per drive, unlike created_at (transaction start).
+    seq: bigint('seq', { mode: 'bigint' }).notNull().generatedAlwaysAsIdentity(),
   },
   (table) => [
     index('file_events_drive_created_idx').on(table.driveId, table.createdAt, table.id),
+    index('file_events_drive_seq_idx').on(table.driveId, table.seq),
     check(
       'file_events_operation_check',
       sql`${table.operation} IN ('put', 'copy', 'restore', 'move', 'delete')`,

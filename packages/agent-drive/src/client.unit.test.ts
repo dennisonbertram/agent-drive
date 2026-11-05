@@ -122,4 +122,57 @@ describe('AgentDriveClient transport guards', () => {
       retryAfter: undefined,
     });
   });
+
+  describe('waitForRecent', () => {
+    const page = (items: unknown[], latestCursor: string | null = null) =>
+      new Response(JSON.stringify({ items, nextCursor: null, latestCursor }), { status: 200 });
+    const make = (fetcher: typeof fetch) =>
+      new AgentDriveClient({ apiUrl: 'http://127.0.0.1:3000', apiKey: 't', fetch: fetcher });
+
+    it('polls until an item appears and never sleeps past the deadline', async () => {
+      const fetcher = vi
+        .fn()
+        .mockImplementationOnce(async () => page([]))
+        .mockImplementationOnce(async () => page([]))
+        .mockImplementationOnce(async () => page([{ id: 'e' }], 'c1'));
+      const sleeps: number[] = [];
+      const result = await make(fetcher).waitForRecent(
+        'd',
+        { cursor: 'c0', waitMs: 3000 },
+        async (ms) => {
+          sleeps.push(ms);
+        },
+      );
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(result.items).toHaveLength(1);
+      expect(sleeps).toHaveLength(2);
+      for (const ms of sleeps) expect(ms).toBeLessThanOrEqual(2000);
+      expect(String(fetcher.mock.calls[0]?.[0])).toContain('cursor=c0');
+    });
+
+    it('returns empty with the sent cursor when the deadline passes', async () => {
+      const result = await make(vi.fn(async () => page([], 'c0'))).waitForRecent('d', {
+        cursor: 'c0',
+        waitMs: 300,
+      });
+      expect(result).toEqual({ items: [], nextCursor: null, latestCursor: 'c0' });
+    });
+
+    it('is not held by a server that never responds', async () => {
+      const stalled = vi.fn(
+        (_url: unknown, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('aborted', 'AbortError')),
+            );
+          }),
+      );
+      const started = Date.now();
+      const result = await make(stalled as unknown as typeof fetch).waitForRecent('d', {
+        waitMs: 400,
+      });
+      expect(Date.now() - started).toBeLessThan(1500);
+      expect(result).toEqual({ items: [], nextCursor: null, latestCursor: null });
+    });
+  });
 });

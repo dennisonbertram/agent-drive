@@ -328,11 +328,27 @@ export function createMcpServer(client: AgentDriveClient) {
   server.registerTool(
     'recent',
     {
-      description: 'List one page of recent drive events, optionally since an ISO timestamp.',
-      inputSchema: { driveId: id, since: z.string().datetime().optional(), ...page },
+      description:
+        "List drive events in order with the author agent's name. Pass the returned latestCursor back as cursor to get only newer events (since is ignored when cursor is set). waitSeconds blocks up to that long for the next event.",
+      inputSchema: {
+        driveId: id,
+        since: z.string().datetime().optional(),
+        waitSeconds: z.number().int().min(1).max(30).optional(),
+        ...page,
+      },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async (args) => safely(() => client.recent(args.driveId, args.since, args.limit, args.cursor)),
+    async (args) =>
+      safely(() =>
+        args.waitSeconds
+          ? client.waitForRecent(args.driveId, {
+              waitMs: args.waitSeconds * 1000,
+              ...(args.since ? { since: args.since } : {}),
+              ...(args.cursor ? { cursor: args.cursor } : {}),
+              ...(args.limit ? { limit: args.limit } : {}),
+            })
+          : client.recent(args.driveId, args.since, args.limit, args.cursor),
+      ),
   );
   server.registerTool(
     'share',

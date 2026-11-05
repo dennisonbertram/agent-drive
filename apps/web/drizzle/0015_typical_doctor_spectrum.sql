@@ -1,0 +1,2 @@
+ALTER TABLE "file_events" ADD COLUMN "seq" bigint NOT NULL GENERATED ALWAYS AS IDENTITY (sequence name "file_events_seq_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1);--> statement-breakpoint
+CREATE INDEX "file_events_drive_seq_idx" ON "file_events" USING btree ("drive_id","seq");

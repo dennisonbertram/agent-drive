@@ -44,6 +44,7 @@ function parse(raw: string[]) {
       api: { type: 'string' },
       'token-stdin': { type: 'boolean' },
       name: { type: 'string' },
+      wait: { type: 'string' },
       drive: { type: 'string', multiple: true },
       agent: { type: 'string' },
       scope: { type: 'string', multiple: true },
@@ -388,7 +389,22 @@ async function run(command: string, raw: string[]) {
         args.values.cursor,
       ),
     );
-  if (command === 'recent')
+  if (command === 'recent') {
+    const wait = args.values.wait;
+    if (wait !== undefined) {
+      const seconds = Number(wait);
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300)
+        throw new Error('--wait must be a whole number of seconds from 1 to 300.');
+      const pageLimit = limit(args.values.limit);
+      return output(
+        await client.waitForRecent(requiredDrive(args), {
+          waitMs: seconds * 1000,
+          ...(args.values.since ? { since: args.values.since } : {}),
+          ...(args.values.cursor ? { cursor: args.values.cursor } : {}),
+          ...(pageLimit ? { limit: pageLimit } : {}),
+        }),
+      );
+    }
     return output(
       await client.recent(
         requiredDrive(args),
@@ -397,6 +413,7 @@ async function run(command: string, raw: string[]) {
         args.values.cursor,
       ),
     );
+  }
   if (command === 'search') {
     const query = {
       ...(args.values.query ? { q: args.values.query } : {}),
@@ -533,7 +550,7 @@ Commands:
   versions PATH --drive ID
   restore PATH --drive ID [--version ID]
   search --drive ID [--query TEXT] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
-  recent --drive ID [--since ISO_TIMESTAMP]
+  recent --drive ID [--since ISO_TIMESTAMP] [--cursor C] [--wait SECONDS]
   share PATH --drive ID [--version ID] [--expires-in 30m|24h|7d]
   share list --drive ID
   share revoke SHARE_ID --drive ID
