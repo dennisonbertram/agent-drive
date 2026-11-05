@@ -555,7 +555,12 @@ async function approve(
     const known = await reconnectDrives(client, accountId, row);
     drives = known.map((drive) => drive.id);
     const previous = await previousPermissions(client, accountId, row);
-    if (previous) ({ scopes, write_paths: paths } = previous);
+    // delegate is never inherited; only an explicit tick (below) grants it.
+    if (previous)
+      ({ scopes, write_paths: paths } = {
+        scopes: previous.scopes.filter((scope) => scope !== 'delegate'),
+        write_paths: previous.write_paths,
+      });
     if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
     if (input.delegate && !scopes.includes('delegate')) scopes = [...scopes, 'delegate'];
   }
@@ -660,7 +665,7 @@ async function consoleDeviceAction(
     return reply({
       drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
-      scopes: previous?.scopes ?? null,
+      scopes: previous?.scopes.filter((scope) => scope !== 'delegate') ?? null,
       write_paths: previous?.write_paths ?? null,
       user_code: row.user_code,
       client_name: row.client_name,
