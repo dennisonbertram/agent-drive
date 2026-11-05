@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import Link from 'next/link';
+import { BrandMark } from '../../brand-mark';
 import {
   decryptWithFileKey,
   DriveCryptoError,
@@ -30,6 +30,7 @@ const errorBodies: Record<string, string> = {
   'missing-key': 'Ask the sender for the complete link, including everything after the # symbol.',
   'decryption-failed':
     'Ask the sender for the complete link, including everything after the # symbol.',
+  unavailable: 'The file could not be downloaded. Check your connection and try again.',
   not_found:
     'This link does not match any shared file. Check the address, or ask the sender for a new link.',
   share_revoked:
@@ -88,6 +89,24 @@ function subscribeToHash(onChange: () => void) {
   return () => window.removeEventListener('hashchange', onChange);
 }
 
+const keyFixCodes = ['missing-key', 'decryption-failed'];
+
+/** Returns the key from a pasted full link for this share, or an inline error message. */
+function keyFromPastedLink(value: string, id: string): { key: string } | { problem: string } {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return { problem: 'That is not a full link. Paste the whole address, starting with https://.' };
+  }
+  const [, route, linkId] = url.pathname.split('/');
+  if (route !== 's' || decodeURIComponent(linkId ?? '') !== id) {
+    return { problem: 'That link is for a different share. Paste the link for this file.' };
+  }
+  const key = parseShareFragment(url.hash);
+  return key ? { key } : { problem: 'That link does not include a valid key after the # symbol.' };
+}
+
 function currentHash() {
   return window.location.hash;
 }
@@ -100,6 +119,9 @@ export default function ShareClient({ id }: { id: string }) {
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [pasted, setPasted] = useState('');
+  const [pasteProblem, setPasteProblem] = useState('');
 
   useEffect(() => {
     if (!fileKey) return;
@@ -123,11 +145,13 @@ export default function ShareClient({ id }: { id: string }) {
     return () => {
       active = false;
     };
-  }, [fileKey, id]);
+  }, [fileKey, id, attempt]);
 
-  async function download() {
-    if (!share || !fileKey) return;
+  async function download(key = fileKey) {
+    if (!share || !key) return;
     setBusy(true);
+    setError(null);
+    setErrorCode('');
     try {
       const metadata = await fetchShare(id, true);
       if (!metadata.downloadUrl) throw new Error('The download could not be authorized.');
@@ -137,7 +161,7 @@ export default function ShareClient({ id }: { id: string }) {
         cache: 'no-store',
       });
       if (!response.ok) throw new Error('The encrypted file could not be downloaded.');
-      const bytes = await decryptWithFileKey(new Uint8Array(await response.arrayBuffer()), fileKey);
+      const bytes = await decryptWithFileKey(new Uint8Array(await response.arrayBuffer()), key);
       const url = URL.createObjectURL(
         new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
       );
@@ -159,6 +183,32 @@ export default function ShareClient({ id }: { id: string }) {
     }
   }
 
+  function retry() {
+    if (share) void download();
+    else {
+      setError(null);
+      setErrorCode('');
+      setAttempt((n) => n + 1);
+    }
+  }
+
+  function usePastedLink(event: React.FormEvent) {
+    event.preventDefault();
+    const result = keyFromPastedLink(pasted, id);
+    if ('problem' in result) {
+      setPasteProblem(result.problem);
+      return;
+    }
+    // The key stays in this browser: update the fragment in place, never send it anywhere.
+    window.history.replaceState(null, '', `${window.location.pathname}#k=${result.key}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    setPasted('');
+    setPasteProblem('');
+    setError(null);
+    setErrorCode('');
+    if (share) void download(result.key);
+  }
+
   const displayError =
     error ?? (fileKey || fragment === null ? null : 'This link is missing a valid decryption key.');
   const displayErrorCode = errorCode || (fileKey || fragment === null ? '' : 'missing-key');
@@ -167,10 +217,7 @@ export default function ShareClient({ id }: { id: string }) {
 
   return (
     <main className="share-shell" data-testid="share-page">
-      <Link className="share-brand" href="/" aria-label="Agent Drive home">
-        <span className="share-logo" aria-hidden="true" />
-        Agent Drive
-      </Link>
+      <BrandMark />
       <section className="share-card" data-state={state} aria-live="polite">
         <div className="share-head">
           <span className="share-led" aria-hidden="true" />
@@ -190,6 +237,39 @@ export default function ShareClient({ id }: { id: string }) {
                 <p className="share-msg" data-testid="share-error">
                   {errorBodies[displayErrorCode] ?? defaultErrorBody}
                 </p>
+                {keyFixCodes.includes(displayErrorCode) ? (
+                  <form className="share-paste" onSubmit={usePastedLink}>
+                    <label htmlFor="share-paste-link">Paste the full share link</label>
+                    <div className="share-paste-row">
+                      <input
+                        id="share-paste-link"
+                        type="text"
+                        value={pasted}
+                        autoComplete="off"
+                        spellCheck={false}
+                        aria-invalid={pasteProblem ? true : undefined}
+                        aria-describedby={pasteProblem ? 'share-paste-problem' : undefined}
+                        onChange={(event) => {
+                          setPasted(event.target.value);
+                          setPasteProblem('');
+                        }}
+                      />
+                      <button className="button" type="submit" disabled={!pasted.trim()}>
+                        Use link
+                      </button>
+                    </div>
+                    {pasteProblem ? (
+                      <p id="share-paste-problem" className="share-paste-problem" role="alert">
+                        {pasteProblem}
+                      </p>
+                    ) : null}
+                  </form>
+                ) : null}
+                {displayErrorCode === 'unavailable' ? (
+                  <button className="button share-retry" disabled={busy} onClick={retry}>
+                    Try again
+                  </button>
+                ) : null}
               </div>
             ) : share ? (
               <div className="share-details">
