@@ -175,8 +175,7 @@ export default async function Home() {
                       <div className="rk-ghost">
                         <span className="plus">+</span>
                         <span className="landing-tag">
-                          your next
-                          <br />
+                          your next <br />
                           agent
                         </span>
                       </div>
