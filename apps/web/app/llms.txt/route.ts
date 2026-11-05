@@ -81,6 +81,16 @@ or credentials bundle, they choose "Add to an existing drive instead" on the app
 pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
 never sees it. They can make the new agent read-only or limit its writes to one folder.
 
+If you already hold the drive and your key has \`delegate\`, and a human is present, let the new
+agent run \`agent-drive login\` and show you its code, then run
+\`agent-drive grant <its code> --write-path <its folder>\` (add \`--read-only\` for read only).
+You seal the drive key to that login; the human clicks Approve once on the page, which shows
+"Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
+
+Which handoff when: the new agent has a shell and a human is present, use \`grant\` if you hold
+\`delegate\`, else the human's "Add to an existing drive instead" on the approval page (they need
+the recovery file); a sandbox with no browser, use \`credentials issue\`.
+
 ## Several agents on one drive
 
 A sandbox, CI job, or anything set up without a browser: if your key has \`delegate\`, run

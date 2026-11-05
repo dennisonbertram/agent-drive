@@ -1004,3 +1004,328 @@ describe('one-click connect (contract v2)', () => {
     });
   });
 });
+
+describe('grant by an existing agent (handoff a)', () => {
+  const blob = { epk: 'AAAA', iv: 'BBBB', ct: 'CCCC' };
+  type Granter = { user: string; account: string; token: string; keyId: string; drive: string };
+
+  // An approved agent holding all scopes plus delegate on its own new drive.
+  async function makeGranter(): Promise<Granter> {
+    const user = `device_grant_${randomUUID()}`;
+    const account = (await json(await consoleCall(user, '/session'))).account.id as string;
+    accountIds.push(account);
+    const started = await start({ client_name: `granter-${randomUUID().slice(0, 8)}` });
+    expect(
+      (await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', { delegate: true }))
+        .status,
+    ).toBe(200);
+    await allowPoll(started.device_code);
+    const issued = await json(await poll(started.device_code));
+    const who = await json(await agentCall(issued.access_token, '/whoami'));
+    return {
+      user,
+      account,
+      token: issued.access_token,
+      keyId: who.keyId,
+      drive: issued.drive_ids[0],
+    };
+  }
+
+  function agentCall(token: string, path: string, method = 'GET', body?: unknown) {
+    return handleApiRequest(
+      new Request(`${origin}/api/v1${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+    );
+  }
+  const offer = (g: Granter, code: string, over: Record<string, unknown> = {}) =>
+    agentCall(g.token, `/device/${code}/grant`, 'POST', {
+      driveId: g.drive,
+      scopes: ['read', 'write'],
+      writePaths: ['/inbox/b'],
+      sealedDriveKey: blob,
+      ...over,
+    });
+  const page = async (g: Granter, code: string) =>
+    json(await consoleCall(g.user, `/device/${code}`));
+  const approveWith = (g: Granter, code: string, body: Record<string, unknown>) =>
+    consoleCall(g.user, `/device/${code}/approve`, 'POST', body);
+
+  it('shows the request to a delegate key, and refuses others', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'newbot', machine: 'box' });
+    const read = await agentCall(g.token, `/device/${started.user_code}`);
+    expect(read.status).toBe(200);
+    expect(await json(read)).toMatchObject({
+      user_code: started.user_code,
+      client_name: 'newbot',
+      machine: 'box',
+      public_key: publicKey,
+    });
+    expect((await agentCall(g.token, '/device/BBBB-CCCC')).status).toBe(404);
+    // A key without delegate is refused before it touches the budget.
+    const plain = await start({ client_name: `plain-${suffix}` });
+    await consoleCall(g.user, `/device/${plain.user_code}/approve`, 'POST', {});
+    await allowPoll(plain.device_code);
+    const plainKey = (await json(await poll(plain.device_code))).access_token;
+    expect((await agentCall(plainKey, `/device/${started.user_code}`)).status).toBe(403);
+    expect(
+      (await agentCall(plainKey, `/device/${started.user_code}/grant`, 'POST', {})).status,
+    ).toBe(403);
+    // Expired requests are not found.
+    await pool.query('UPDATE device_authorizations SET expires_at = now() WHERE user_code = $1', [
+      started.user_code,
+    ]);
+    expect((await agentCall(g.token, `/device/${started.user_code}`)).status).toBe(404);
+  });
+
+  it('records an offer within the granter, replaces it, and applies it on a defaults approval', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'newbot', machine: 'box' });
+    const first = await offer(g, started.user_code);
+    expect(first.status).toBe(200);
+    expect(await json(first)).toEqual({ status: 'offered', revision: 1 });
+    expect(await json(await offer(g, started.user_code))).toEqual({
+      status: 'offered',
+      revision: 2,
+    });
+    const shown = await page(g, started.user_code);
+    expect(shown.offerRevision).toBe(2);
+    expect(shown.offer).toMatchObject({
+      drive: { id: g.drive },
+      scopes: ['read', 'write'],
+      writePaths: ['/inbox/b'],
+      revision: 2,
+    });
+    expect(shown.offer.agentName).toMatch(/^granter-/);
+    const stored = await pool.query(
+      'SELECT sealed_key, api_key_id FROM device_offers WHERE account_id = $1',
+      [g.account],
+    );
+    expect(stored.rows).toHaveLength(1);
+    expect(stored.rows[0].api_key_id).toBe(g.keyId);
+
+    expect((await approveWith(g, started.user_code, { offerRevision: 2 })).status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token).toMatchObject({
+      scope: 'read write',
+      write_paths: ['/inbox/b'],
+      drive_ids: [g.drive],
+      new_drive_id: null,
+      sealed_drive_keys: { [g.drive]: blob },
+    });
+  });
+
+  it('refuses offers wider than the granting key and never takes delegate from an offer', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'newbot' });
+    for (const over of [
+      { scopes: ['read', 'delegate'] },
+      { scopes: ['manage'] },
+      { driveId: otherDriveId },
+      { sealedDriveKey: { epk: 'no spaces', iv: 'BBBB', ct: 'CCCC' } },
+    ])
+      expect((await offer(g, started.user_code, over)).status).toBeGreaterThanOrEqual(400);
+    // A key limited to /inbox cannot offer writes elsewhere or without a path.
+    const narrow = await start({ client_name: 'narrow' });
+    await consoleCall(g.user, `/device/${narrow.user_code}/approve`, 'POST', {
+      driveIds: [g.drive],
+      scopes: ['read', 'write', 'delegate'],
+      writePaths: ['/inbox'],
+    });
+    await allowPoll(narrow.device_code);
+    const narrowKey = (await json(await poll(narrow.device_code))).access_token;
+    const target = await start({ client_name: 'target' });
+    const withNarrow = (over: Record<string, unknown>) =>
+      agentCall(narrowKey, `/device/${target.user_code}/grant`, 'POST', {
+        driveId: g.drive,
+        scopes: ['read', 'write'],
+        writePaths: ['/inbox/x'],
+        sealedDriveKey: blob,
+        ...over,
+      });
+    expect((await withNarrow({ writePaths: ['/other'] })).status).toBe(403);
+    expect((await withNarrow({ writePaths: [] })).status).toBe(403);
+    expect((await withNarrow({})).status).toBe(200);
+    // The human's tick adds delegate; the offer alone never does.
+    const plain = await start({ client_name: 'plain' });
+    await offer(g, plain.user_code);
+    expect(
+      (await approveWith(g, plain.user_code, { offerRevision: 1, delegate: true })).status,
+    ).toBe(200);
+    await allowPoll(plain.device_code);
+    expect((await json(await poll(plain.device_code))).scope).toBe('read write delegate');
+    const noTick = await start({ client_name: 'notick' });
+    await offer(g, noTick.user_code);
+    await approveWith(g, noTick.user_code, { offerRevision: 1 });
+    await allowPoll(noTick.device_code);
+    expect((await json(await poll(noTick.device_code))).scope).toBe('read write');
+  });
+
+  it('answers 409 when the page was loaded before the offer or an earlier offer', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'newbot' });
+    // Page loaded with no offer (revision 0), then the grant lands.
+    expect((await page(g, started.user_code)).offerRevision).toBe(0);
+    await offer(g, started.user_code);
+    const stale = await approveWith(g, started.user_code, { offerRevision: 0 });
+    expect(stale.status).toBe(409);
+    expect((await json(stale)).error.message).toBe('The request changed; reload the page.');
+    // An approve that sends no revision is also 0. The explicit form is checked the same way.
+    expect((await approveWith(g, started.user_code, {})).status).toBe(409);
+    expect(
+      (
+        await approveWith(g, started.user_code, {
+          offerRevision: 0,
+          driveIds: [g.drive],
+          scopes: ['read'],
+        })
+      ).status,
+    ).toBe(409);
+    await offer(g, started.user_code, { writePaths: ['/inbox/c'] });
+    expect((await approveWith(g, started.user_code, { offerRevision: 1 })).status).toBe(409);
+    expect((await approveWith(g, started.user_code, { offerRevision: 2 })).status).toBe(200);
+  });
+
+  it('keeps a foreign account offer out of the slot and out of sight', async () => {
+    const a = await makeGranter();
+    const b = await makeGranter();
+    const started = await start({ client_name: 'newbot' });
+    expect(await json(await offer(b, started.user_code))).toEqual({
+      status: 'offered',
+      revision: 1,
+    });
+    expect((await page(a, started.user_code)).offer).toBeNull();
+    expect((await page(a, started.user_code)).offerRevision).toBe(0);
+    // A's page, loaded before its own offer, still approves defaults: B's offer does not count.
+    expect(await json(await offer(a, started.user_code))).toEqual({
+      status: 'offered',
+      revision: 1,
+    });
+    expect((await page(a, started.user_code)).offer).toMatchObject({ drive: { id: a.drive } });
+    expect((await approveWith(a, started.user_code, { offerRevision: 1 })).status).toBe(200);
+    await allowPoll(started.device_code);
+    expect((await json(await poll(started.device_code))).drive_ids).toEqual([a.drive]);
+  });
+
+  it('rejects an offer whose key was revoked, at approval and at token exchange', async () => {
+    const g = await makeGranter();
+    const early = await start({ client_name: 'early' });
+    await offer(g, early.user_code);
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE id = $1', [g.keyId]);
+    const refused = await approveWith(g, early.user_code, { offerRevision: 1 });
+    expect(refused.status).toBe(409);
+    expect((await json(refused)).error.message).toBe(
+      "The offering agent's key no longer allows this; ask it to grant again, or deny.",
+    );
+    const h = await makeGranter();
+    const late = await start({ client_name: 'late' });
+    await offer(h, late.user_code);
+    expect((await approveWith(h, late.user_code, { offerRevision: 1 })).status).toBe(200);
+    await pool.query('UPDATE api_keys SET revoked_at = now() WHERE id = $1', [h.keyId]);
+    await allowPoll(late.device_code);
+    const denied = await poll(late.device_code);
+    expect(denied.status).toBe(400);
+    expect(await json(denied)).toEqual({
+      error: 'access_denied',
+      error_description: 'The offer was withdrawn; run agent-drive login again.',
+    });
+    const row = await pool.query(
+      'SELECT status, api_key_id FROM device_authorizations WHERE user_code = $1',
+      [late.user_code],
+    );
+    expect(row.rows[0]).toEqual({ status: 'denied', api_key_id: null });
+    // Narrowed instead of revoked: the key no longer holds what it offered.
+    const k = await makeGranter();
+    const narrowed = await start({ client_name: 'narrowed' });
+    await offer(k, narrowed.user_code);
+    await pool.query("UPDATE api_keys SET scopes = ARRAY['read','write'] WHERE id = $1", [k.keyId]);
+    expect((await approveWith(k, narrowed.user_code, { offerRevision: 1 })).status).toBe(409);
+  });
+
+  it('runs grant and approve in parallel without a deadlock or a 500', async () => {
+    const g = await makeGranter();
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const started = await start({ client_name: `race-${i}` });
+      const [granted, approved] = await Promise.all([
+        offer(g, started.user_code),
+        approveWith(g, started.user_code, { offerRevision: 0 }),
+      ]);
+      seen.push(`${granted.status}/${approved.status}`);
+      // Grant wins: approve sees a newer revision (409). Approve wins: the request is no longer pending (404).
+      expect([200, 404]).toContain(granted.status);
+      expect([200, 409]).toContain(approved.status);
+    }
+    expect(seen.some((pair) => pair.includes('500'))).toBe(false);
+  });
+
+  it('takes the account lock before the request lock, so an approving transaction cannot deadlock with grant', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'order' });
+    const tx = await pool.connect();
+    try {
+      // What approve does: the account row first, then the request row.
+      await tx.query('BEGIN');
+      await tx.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [g.account]);
+      const pendingGrant = offer(g, started.user_code);
+      await new Promise((wake) => setTimeout(wake, 300)); // let grant reach its first lock
+      await tx.query('SELECT 1 FROM device_authorizations WHERE user_code = $1 FOR UPDATE', [
+        started.user_code,
+      ]);
+      await tx.query('COMMIT');
+      expect((await pendingGrant).status).toBe(200);
+    } finally {
+      tx.release();
+    }
+  });
+
+  it('fails closed at exchange when the offer or its key row is gone', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'orphan' });
+    await offer(g, started.user_code);
+    expect((await approveWith(g, started.user_code, { offerRevision: 1 })).status).toBe(200);
+    // Deleting the key cascades to the offer and nulls approved_offer_id.
+    await pool.query('DELETE FROM api_keys WHERE id = $1', [g.keyId]);
+    await allowPoll(started.device_code);
+    const denied = await poll(started.device_code);
+    expect(denied.status).toBe(400);
+    expect((await json(denied)).error).toBe('access_denied');
+    const row = await pool.query(
+      'SELECT status, api_key_id FROM device_authorizations WHERE user_code = $1',
+      [started.user_code],
+    );
+    expect(row.rows[0]).toEqual({ status: 'denied', api_key_id: null });
+  });
+
+  for (const route of ['GET', 'POST'] as const) {
+    it(`shares the console attempt budget on ${route} (10 not_found, then 30 attempts)`, async () => {
+      const call = (g: Granter, code: string) =>
+        route === 'GET' ? agentCall(g.token, `/device/${code}`) : offer(g, code);
+      const g = await makeGranter();
+      const started = await start({ client_name: 'newbot' });
+      for (let i = 0; i < 10; i += 1) expect((await call(g, 'BBBB-CCCC')).status).toBe(404);
+      const limited = await call(g, started.user_code);
+      expect(limited.status).toBe(429);
+      expect((await json(limited)).error.code).toBe('rate_limited');
+      // The other route is refused too: one budget per account.
+      const other =
+        route === 'GET'
+          ? offer(g, started.user_code)
+          : agentCall(g.token, `/device/${started.user_code}`);
+      expect((await other).status).toBe(429);
+
+      const h = await makeGranter();
+      const second = await start({ client_name: 'newbot' });
+      // makeGranter's console approve already used one of the 30 attempts.
+      for (let i = 0; i < 29; i += 1) expect((await call(h, second.user_code)).status).toBe(200);
+      expect((await call(h, second.user_code)).status).toBe(429);
+    });
+  }
+});

@@ -90,6 +90,18 @@ The drive key lives only in the config file, so lose the machine and the files c
   and `--stdout` follow the same terminal and mode `0600` rules as `export`. Store the line as a
   secret in the sandbox. A name that already exists returns 409; pick another. Revoke the issued
   key alone from the console under Agents.
+- `agent-drive grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...` needs the
+  `delegate` scope. `CODE` is the code a new agent's `agent-drive login` showed. It prints
+  `Request from <client_name> on <machine>, made <time>.`, seals this machine's drive key to the
+  login's public key (the `adk-device-v1` format of agent-login.md section 4), posts the sealed
+  blob as an offer, and prints `Offered drive <id> to <name> (<scopes>; writes under <paths>). The
+owner approves at <origin>/connect?code=CODE.` It does not approve: the human opens that page and
+  clicks Approve once. The drive defaults to the only configured drive key. Scopes default to
+  `read write` (`read` with `--read-only`); they must be within the caller's own, else pass
+  `--scope`. Write paths default to the caller's own. It never prints or sends a key in the clear. It offers only a drive key saved for the current API origin (as login does); a key from `AGENT_DRIVE_KEY*`, `--key-file`, or saved for another origin is refused, so an endpoint other than the key's own cannot obtain it.
+  Which handoff when: `grant` when the new agent has a shell and a human is present; the human's
+  "Add to an existing drive instead" on `/connect` when they hold the recovery file; `credentials
+issue` for a sandbox with no browser.
 - `agent-drive credentials import [--from PATH]` merges a bundle (file or stdin) into the config
   and marks its drives as backed up.
 - `agent-drive credentials status` prints, per drive key, whether and when it was backed up.

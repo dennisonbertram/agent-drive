@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deviceLogin, defaultAgentName } from './device.js';
-import { AgentDriveApiError } from './client.js';
+import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
+import { AgentDriveApiError, AgentDriveClient } from './client.js';
+import { unsealDriveKey } from './seal.js';
 import { DriveCryptoError } from './crypto.js';
 import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
 
@@ -570,5 +571,120 @@ describe('check and key helpers', () => {
       'msg',
       'There is no file at this path now; write it without --if-version.',
     ]);
+  });
+});
+
+describe('grantLogin', () => {
+  const GRANTER_TOKEN = 'adk_GRANTERTOKEN';
+  async function grant(
+    options: Partial<Parameters<typeof grantLogin>[0]> = {},
+    scopes = ['read', 'write', 'delegate'],
+  ) {
+    const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ]);
+    const publicKey = b64(await subtle.exportKey('raw', pair.publicKey));
+    const bodies: string[] = [];
+    const out: string[] = [];
+    const fetcher = async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.body) bodies.push(String(init.body));
+      if (String(url).endsWith('/whoami'))
+        return json(200, {
+          accountId: 'a',
+          agentId: 'g',
+          keyId: 'k',
+          scopes,
+          writePaths: ['/inbox'],
+          driveIds: ['d1'],
+        });
+      if (String(url).endsWith('/device/BCDF-GHJK'))
+        return json(200, {
+          user_code: 'BCDF-GHJK',
+          client_name: 'newbot',
+          machine: 'box',
+          created_at: '2026-01-01T00:00:00Z',
+          expires_at: 'x',
+          public_key: publicKey,
+        });
+      return json(200, { status: 'offered', revision: 1 });
+    };
+    const client = new AgentDriveClient({
+      apiUrl: 'https://x.test/api',
+      apiKey: GRANTER_TOKEN,
+      fetch: fetcher as typeof fetch,
+    });
+    await grantLogin({
+      code: 'bcdf-ghjk',
+      client,
+      config: { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } },
+      log: (line) => out.push(line),
+      ...options,
+    });
+    return { pair, bodies, out };
+  }
+
+  it('seals the key to the request public key, posts it, and prints no key', async () => {
+    const r = await grant();
+    const posted = JSON.parse(r.bodies[0]!) as {
+      driveId: string;
+      scopes: string[];
+      writePaths: string[];
+      sealedDriveKey: { epk: string; iv: string; ct: string };
+    };
+    expect(posted).toMatchObject({
+      driveId: 'd1',
+      scopes: ['read', 'write'],
+      writePaths: ['/inbox'],
+    });
+    expect(await unsealDriveKey(r.pair.privateKey, 'd1', posted.sealedDriveKey)).toBe(K1);
+    const everything = [...r.bodies, ...r.out].join('\n');
+    expect(everything).not.toContain(K1);
+    expect(everything).not.toContain(GRANTER_TOKEN);
+    expect(r.out[0]).toBe('Request from newbot on box, made 2026-01-01T00:00:00Z.');
+    expect(r.out[1]).toContain('https://x.test/connect?code=BCDF-GHJK');
+  });
+
+  it('defaults to read only with --read-only and refuses defaults the key cannot grant', async () => {
+    const r = await grant({ readOnly: true });
+    expect(JSON.parse(r.bodies[0]!).scopes).toEqual(['read']);
+    await expect(grant({}, ['read', 'delegate'])).rejects.toThrow(/pass --scope/);
+  });
+
+  it('refuses a drive key saved for another origin and posts nothing', async () => {
+    const posts: string[] = [];
+    const client = new AgentDriveClient({
+      apiUrl: 'https://evil.test/api',
+      apiKey: GRANTER_TOKEN,
+      fetch: (async (_url: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') posts.push(String(init.body));
+        return json(200, {});
+      }) as typeof fetch,
+    });
+    const config = { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } };
+    await expect(
+      grantLogin({ code: 'BCDF-GHJK', client, config, drive: 'd1', log: () => undefined }),
+    ).rejects.toThrow(/no drive key for d1/);
+    await expect(
+      grantLogin({
+        code: 'BCDF-GHJK',
+        client,
+        config: { driveKeys: { d1: K1 } },
+        log: () => undefined,
+      }),
+    ).rejects.toThrow(/drive key/);
+    expect(posts).toEqual([]);
+  });
+
+  it('summarizes the offer from scopes and paths', async () => {
+    expect((await grant({ readOnly: true })).out[1]).toContain('(read; no writes)');
+    expect((await grant({ readOnly: true, writePaths: ['/x'] })).out[1]).toContain(
+      '(read; no writes)',
+    );
+    expect((await grant({ writePaths: ['/a', '/b'] })).out[1]).toContain(
+      '(read write; writes under /a, /b)',
+    );
+    expect((await grant({}, ['read', 'write', 'delegate'])).out[1]).toContain(
+      '(read write; writes under /inbox)',
+    );
   });
 });

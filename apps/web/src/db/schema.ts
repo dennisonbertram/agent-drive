@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
+  boolean,
   check,
   index,
   integer,
@@ -602,6 +604,11 @@ export const deviceAuthorizations = pgTable(
     newDriveId: uuid('new_drive_id'),
     sealedDriveKeys: jsonb('sealed_drive_keys').$type<Record<string, unknown>>(),
     apiKeyId: uuid('api_key_id').references(() => apiKeys.id, { onDelete: 'set null' }),
+    approvedOfferId: uuid('approved_offer_id').references((): AnyPgColumn => deviceOffers.id, {
+      onDelete: 'set null',
+    }),
+    // Survives deletion of the offer or its key, so exchange can fail closed.
+    approvedFromOffer: boolean('approved_from_offer').notNull().default(false),
     intervalSeconds: integer('interval_seconds').notNull().default(5),
     lastPolledAt: timestamp('last_polled_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
@@ -617,6 +624,44 @@ export const deviceAuthorizations = pgTable(
     check(
       'device_authorizations_status_check',
       sql`${table.status} IN ('pending', 'approved', 'denied', 'consumed')`,
+    ),
+  ],
+);
+
+// An existing agent's offer of a sealed drive key for a pending login (docs/agent-login.md section 14).
+// One row per (request, account): a foreign account's offer never occupies another account's slot.
+export const deviceOffers = pgTable(
+  'device_offers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    deviceAuthorizationId: uuid('device_authorization_id')
+      .notNull()
+      .references(() => deviceAuthorizations.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    apiKeyId: uuid('api_key_id')
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: 'cascade' }),
+    offeredByAgentId: uuid('offered_by_agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id, { onDelete: 'cascade' }),
+    scopes: text('scopes').array().notNull(),
+    writePaths: text('write_paths')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    sealedKey: jsonb('sealed_key').$type<Record<string, unknown>>().notNull(),
+    revision: integer('revision').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('device_offers_request_account_unique').on(
+      table.deviceAuthorizationId,
+      table.accountId,
     ),
   ],
 );

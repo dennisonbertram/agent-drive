@@ -32,7 +32,8 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('## Several agents on one drive');
     expect(body).toContain('agent-drive credentials issue --name <agent> --write-path');
     expect(body).toContain('Never copy your own bundle into');
-    expect(body).not.toContain('agent-drive grant');
+    expect(body).toContain('agent-drive grant <its code> --write-path <its folder>');
+    expect(body).toContain('Which handoff when');
     expect(body).toContain('Never put secrets in');
     expect(body).toContain('Never store a drive key in the drive it unlocks');
     expect(body.indexOf('credentials export')).toBeLessThan(body.indexOf('agent-drive check'));

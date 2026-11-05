@@ -458,8 +458,8 @@ that the human's browser already holds, but it cannot recover an agent's key.
 - The approve body may be a defaults body: its keys must be a subset of `{ delegate: boolean,
 offerRevision: number }`. It applies the defaults (reconnect with preserved permissions, or a new
   drive) and, with `delegate: true`, adds `delegate` to the resulting scopes. Any other key makes
-  the body explicit, and the explicit rules apply (`scopes` required). `/connect` sends `{}` or
-  `{ "delegate": true }`.
+  the body explicit, and the explicit rules apply (`scopes` required). `/connect` sends `{ "offerRevision": n }`, plus
+  `"delegate": true` when ticked (§14).
 - `assertDelegation(auth, { driveIds, scopes, writePaths })` (`validation.ts`) is the single check
   for handing out access: the caller must hold `delegate`; the drives must be among its own; the
   scopes must be among its own and within `read write delete share` (never `manage`, never
@@ -500,3 +500,42 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   alone; revoking the issuer does not revoke what it issued (intended: no cascade). The issuer
   validates the drive key locally before minting and checks that a `--to` path is free (a dangling
   symlink counts as present) so a failed delivery never leaves an orphan key.
+
+## 14. Grant by an existing agent (handoff a)
+
+- An agent whose key holds `delegate` seals its drive key to a pending login and offers it. The
+  human still approves once on `/connect`; `grant` never approves. A prompt-injected agent that
+  runs `grant <attacker code>` cannot hand over a key unseen: the human sees "Offered by <agent>:
+  drive <name>, <scopes>, writes under <paths>" and can deny or ignore it.
+- CLI: `agent-drive grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...`
+  (docs/cli.md). It reads the request (`GET /v1/device/:code`), seals the local drive key with
+  `sealDriveKey` (section 4), posts the offer (`POST /v1/device/:code/grant`), and prints the
+  `/connect` URL. Default scopes are `read write` (user decision) and must be within the caller's
+  own; default write paths are the caller's own. The offer must pass `assertDelegation` (§11), so
+  it never carries `delegate`; only the human's tick adds it at approval.
+- Offers: table `device_offers (id, device_authorization_id, account_id, api_key_id,
+offered_by_agent_id, drive_id, scopes, write_paths, sealed_key, revision, created_at)`, unique on
+  `(device_authorization_id, account_id)`. A grant upserts the caller's own account row and
+  increments `revision`. A foreign account's offer for the same code is a separate row: it never
+  occupies or blocks another account's slot and is never shown to it. `device_authorizations`
+  gains `approved_offer_id`. The row holds only the sealed blob.
+- Revision binding: the console `GET /device/:code` returns `offer` (`agentName`, `drive`,
+  `scopes`, `writePaths`, `revision`) or `null`, and `offerRevision` (0 when none). Every approve
+  body (defaults or explicit) sends `offerRevision`; a missing value counts as 0. If it differs
+  from the account's current offer revision, the server returns 409 `conflict` `The request
+changed; reload the page.`, and the page reloads the request ("The request changed; review it
+  again."). A defaults body with a matching offer approves exactly the offer: its drive, scopes,
+  write paths and sealed key (copied into `sealed_drive_keys`), plus `delegate` if ticked.
+- Revalidation: at approval and again in the token exchange, the server locks the offering
+  `api_keys` row `FOR UPDATE` and requires it unrevoked, in the same account, still holding
+  `delegate`, the offered drive, the offered scopes and write paths (`assertDelegation`). At
+  approval a failure is 409 `The offering agent's key no longer allows this; ask it to grant
+again, or deny.` At exchange it marks the request `denied` and returns `access_denied` `The
+offer was withdrawn; run agent-drive login again.` No key is issued.
+- Budget: both bearer routes call `takeConsoleAttempt` for the caller's account (30 calls, 10
+  `not_found`, per 10 minutes; 429 beyond that), the same budget as the console routes.
+- Which handoff when: `grant` for a new agent with a shell while a human is present and a
+  `delegate` holder has the drive; `/connect` "Add to an existing drive instead" when the human
+  holds recovery material; `credentials issue` (§13) for a sandbox with no browser.
+- Revoking the granting agent after exchange does not revoke the grantee; each key is revoked
+  alone.

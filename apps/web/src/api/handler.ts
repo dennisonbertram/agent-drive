@@ -31,7 +31,7 @@ import {
   presignedUpload,
 } from './storage';
 import { cleanupExpiredUploads } from './upload-cleanup';
-import { consoleDeviceEndpoint } from './device';
+import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
   billingState,
@@ -279,7 +279,11 @@ function errorStatus(error: unknown) {
   return error instanceof ApiError ? error.status : 500;
 }
 
-function actionFor(method: string, parts: string[]) {
+function actionFor(method: string, parts: string[], bearer = false) {
+  if (bearer && parts[0] === 'device' && parts.length === 2 && method === 'GET')
+    return 'device.read';
+  if (bearer && parts[0] === 'device' && parts.length === 3 && parts[2] === 'grant')
+    return 'device.grant';
   if (parts[0] === 'device' && parts.length === 2 && method === 'GET') return 'console.device.read';
   if (parts[0] === 'device' && parts.length === 3 && method === 'POST' && parts[2] === 'approve')
     return 'console.device.approve';
@@ -435,6 +439,7 @@ function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
 
 async function controlPlane(request: Request, auth: Auth, parts: string[]) {
   const method = request.method;
+  if (parts[0] === 'device') return bearerDeviceEndpoint(request, auth, parts);
   if (parts.length === 1 && parts[0] === 'whoami' && method === 'GET') {
     return response({
       accountId: auth.accountId,
@@ -1898,7 +1903,10 @@ async function handleRequest(request: Request, mode: RequestMode) {
   const base = mode.kind === 'console' ? '/api/console/' : '/api/v1/';
   const validBase = rawPath.startsWith(base) && !rawPath.includes('//') && !rawPath.endsWith('/');
   const relative = validBase ? rawPath.slice(base.length).split('/') : [];
-  const context: RequestContext = { action: actionFor(request.method, relative), status: 500 };
+  const context: RequestContext = {
+    action: actionFor(request.method, relative, mode.kind === 'bearer'),
+    status: 500,
+  };
   let output: Response;
   try {
     if (!secureTransportAllowed(url.protocol, process.env.NODE_ENV)) {
