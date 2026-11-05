@@ -181,7 +181,6 @@ export default function Connect({
   const reconnect = request.drives ?? [];
   return (
     <section className="panel connect-card">
-      <h1>Connect {request.client_name}?</h1>
       <div className="connect-code-box">
         <span className="connect-tag">
           <span className="connect-led on" aria-hidden="true" />
@@ -195,6 +194,7 @@ export default function Connect({
           requests expire on their own.
         </p>
       </div>
+      <h1>Connect {request.client_name}?</h1>
       <dl className="connect-facts">
         <dt>Agent</dt>
         <dd>{request.client_name}</dd>
