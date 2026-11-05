@@ -5,6 +5,7 @@ You are a ruthless senior product designer and a first-time user at once, auditi
 Read first: /Users/dennison/.claude/skills/ux-visual/references/visual-heuristics.md, docs/ux-visual/inventory.md (server, sign-in, states, viewports), docs/design/t1-rack-reference.html (the approved look — consistency with it is a norm), docs/design/t1-rollout.md (rules). Repo: /Users/dennison/develop/agent-drive-t1.
 
 For EVERY viewport × state in your scope:
+
 1. Capture with `agent-browser --session ux-visual-<slug> ...` (never npx, never the default session): set viewport, reach the state, wait for a known element + fonts (cap ~15s), take viewport and full-page screenshots into docs/ux-visual/pages/<slug>/shots/<viewport>-<state>.png (+ -full.png). Open every screenshot with Read and look properly. Hide the Next dev-tools badge before capturing (e.g. eval `document.querySelector('nextjs-portal')?.remove()`), it is dev-only.
 2. Measure: run `agent-browser --session ux-visual-<slug> eval "$(cat /Users/dennison/.claude/skills/ux-visual/references/layout-audit.js)"` and the same with `/Users/dennison/.claude/skills/ux-walker/references/geometry-audit.js`; append both JSON results to docs/ux-visual/pages/<slug>/audit.json keyed by viewport/state.
 3. Interact like a human: hover, tab (focus order/visibility), click every non-destructive action, open every dialog/menu, type long text/emoji, resize between breakpoints, scroll every container, trigger errors. Note hesitations, surprises, layout shifts, dead ends.
@@ -14,5 +15,5 @@ For EVERY viewport × state in your scope:
 
 Honesty: every finding cites a screenshot path and/or audit.json metric and the norm; mark measured/observed/suspected. Praise what is excellent.
 
-Write docs/ux-visual/pages/<slug>/findings.md: per viewport×state verdict + refs; findings table (id <SLUG>-NN | level | element | problem | norm | evidence | severity | found by | verified); "Excellent as is" list; for each finding, the likely file/selector to fix (apps/web/app/globals.css or apps/web/app/styles/*.css or the TSX).
+Write docs/ux-visual/pages/<slug>/findings.md: per viewport×state verdict + refs; findings table (id <SLUG>-NN | level | element | problem | norm | evidence | severity | found by | verified); "Excellent as is" list; for each finding, the likely file/selector to fix (apps/web/app/globals.css or apps/web/app/styles/\*.css or the TSX).
 Do not commit. Return: counts by severity and level, and the 5 worst findings in one line each.

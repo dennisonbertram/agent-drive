@@ -1,10 +1,6 @@
 {
   "mode": "judge",
-  "images": [
-    "mock-A.png",
-    "mock-B.png",
-    "mock-C.png"
-  ],
+  "images": ["mock-A.png", "mock-B.png", "mock-C.png"],
   "results": [
     {
       "model": "meta/muse-wonder",

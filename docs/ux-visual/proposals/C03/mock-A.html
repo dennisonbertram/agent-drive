@@ -1,40 +1,463 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>C03 A minimal</title><link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"><style>:root{--bg:#e9e8e4;--panel:#f3f2ee;--al1:#f4f3f0;--al2:#d6d4cf;--ink:#121211;--muted:#5d5b56;--line:rgba(18,18,17,.16);--line-soft:rgba(18,18,17,.09);--sig:#ff5a1f;--sans:'Space Grotesk',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,Menlo,monospace}
-*{box-sizing:border-box;margin:0}
-body{font-family:var(--sans);color:var(--ink);line-height:1.5;background:var(--bg);font-variant-numeric:tabular-nums;width:375px}
-main{padding:16px}
-h3{font:600 15px var(--sans);}
-.panel{background:#fbfaf8;border:1px solid var(--line);border-radius:10px;margin-bottom:16px;overflow:hidden}
-.ptool{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border-bottom:1px solid var(--line)}
-.ptool .muted,.muted{font:400 12px var(--mono);color:var(--muted)}
-.tag{font:500 10.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-.cap{font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:4px 0 8px}
-.led{display:inline-block;width:9px;height:9px;border-radius:50%;background:#c9663b;flex:none}
-table{width:100%;border-collapse:collapse;text-align:left}
-th{font:500 10.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);padding:10px 14px;background:#eceae6;border-bottom:1px solid var(--line);white-space:nowrap}
-td{padding:12px 14px;border-bottom:1px solid var(--line-soft);font:400 13px var(--mono)}
-tr:last-child td{border-bottom:0}
-.file-dir{color:var(--muted)}.file-path{font-weight:500}
-.author{display:inline-flex;align-items:center;gap:8px;font:400 13.5px var(--sans)}
-.modified{color:var(--muted)}
-.row-actions{display:flex;gap:14px;justify-content:flex-end}
-.row-actions button{padding:3px 0;border:0;background:none;color:var(--ink);font:500 12.5px var(--sans);text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:3px}
-code{font:400 12px var(--mono)}
-small{display:block;color:var(--muted);font:400 12px var(--sans);margin-top:4px}
-.pill{display:inline-block;font:500 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;border-radius:3px;padding:4px 7px;background:var(--al1);border:1px solid var(--ink)}
-.pill.fail{border-color:#8b3027;color:#8b3027}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>C03 A minimal</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #e9e8e4;
+        --panel: #f3f2ee;
+        --al1: #f4f3f0;
+        --al2: #d6d4cf;
+        --ink: #121211;
+        --muted: #5d5b56;
+        --line: rgba(18, 18, 17, 0.16);
+        --line-soft: rgba(18, 18, 17, 0.09);
+        --sig: #ff5a1f;
+        --sans: 'Space Grotesk', system-ui, sans-serif;
+        --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      body {
+        font-family: var(--sans);
+        color: var(--ink);
+        line-height: 1.5;
+        background: var(--bg);
+        font-variant-numeric: tabular-nums;
+        width: 375px;
+      }
+      main {
+        padding: 16px;
+      }
+      h3 {
+        font: 600 15px var(--sans);
+      }
+      .panel {
+        background: #fbfaf8;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin-bottom: 16px;
+        overflow: hidden;
+      }
+      .ptool {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .ptool .muted,
+      .muted {
+        font: 400 12px var(--mono);
+        color: var(--muted);
+      }
+      .tag {
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .cap {
+        font: 500 11px var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 4px 0 8px;
+      }
+      .led {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #c9663b;
+        flex: none;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+      th {
+        font: 500 10.5px var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--muted);
+        padding: 10px 14px;
+        background: #eceae6;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      td {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line-soft);
+        font: 400 13px var(--mono);
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .file-dir {
+        color: var(--muted);
+      }
+      .file-path {
+        font-weight: 500;
+      }
+      .author {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font: 400 13.5px var(--sans);
+      }
+      .modified {
+        color: var(--muted);
+      }
+      .row-actions {
+        display: flex;
+        gap: 14px;
+        justify-content: flex-end;
+      }
+      .row-actions button {
+        padding: 3px 0;
+        border: 0;
+        background: none;
+        color: var(--ink);
+        font: 500 12.5px var(--sans);
+        text-decoration: underline;
+        text-decoration-color: var(--line);
+        text-underline-offset: 3px;
+      }
+      code {
+        font: 400 12px var(--mono);
+      }
+      small {
+        display: block;
+        color: var(--muted);
+        font: 400 12px var(--sans);
+        margin-top: 4px;
+      }
+      .pill {
+        display: inline-block;
+        font: 500 10.5px/1 var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        border-radius: 3px;
+        padding: 4px 7px;
+        background: var(--al1);
+        border: 1px solid var(--ink);
+      }
+      .pill.fail {
+        border-color: #8b3027;
+        color: #8b3027;
+      }
 
-.table-scroll{position:relative;overflow-x:auto;background:
- linear-gradient(90deg,#fbfaf8 30%,rgba(251,250,248,0)) left center/40px 100% no-repeat local,
- linear-gradient(270deg,#fbfaf8 30%,rgba(251,250,248,0)) right center/40px 100% no-repeat local,
- linear-gradient(90deg,rgba(18,18,17,.18),rgba(18,18,17,0)) left center/12px 100% no-repeat scroll,
- linear-gradient(270deg,rgba(18,18,17,.18),rgba(18,18,17,0)) right center/12px 100% no-repeat scroll}
-.file-panel table{table-layout:fixed}
-.file-panel th:nth-child(2),.file-panel td:nth-child(2),.file-panel th:nth-child(3),.file-panel td:nth-child(3),.file-panel th:nth-child(4),.file-panel td:nth-child(4){display:none}
-.file-panel th:nth-child(5){width:96px}
-.file-panel td:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
-.file-panel .row-actions{flex-direction:column;align-items:flex-end;gap:6px}
-.file-panel .row-actions button{padding:6px 0}
-th,td{padding:10px 10px}
-.u th,.u td{white-space:normal;overflow-wrap:anywhere;font-size:12px}
-.u td:not(:first-child){text-align:right}.u th:not(:first-child){text-align:right}
-.audit td,.audit th{font-size:11.5px;white-space:normal;overflow-wrap:anywhere;vertical-align:top}.audit td:nth-child(1){white-space:nowrap}</style></head><body><main><div class="cap">1 · Files</div><section class="panel file-panel"><div class="ptool"><h3>Files</h3><span class="muted">Hidden columns: size, author, modified</span></div><div class="table-scroll"><table><thead><tr><th>FILE PATH</th><th>ENCRYPTED SIZE</th><th>AUTHOR</th><th>MODIFIED</th><th>ACTIONS</th></tr></thead><tbody><tr><td class="file-cell"><span class="file-path"><span class="file-dir">notes/</span>2026-q3-roadmap-and-planning-draft.md</span></td><td>4.2 KB</td><td><span class="author"><span class="led"></span>planner-agent</span></td><td class="modified">3h ago</td><td><div class="row-actions"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr><tr><td class="file-cell"><span class="file-path"><span class="file-dir">src/agents/</span>retrieval-pipeline-config.json</span></td><td>812 B</td><td><span class="author"><span class="led"></span>builder-agent</span></td><td class="modified">Yesterday</td><td><div class="row-actions"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr><tr><td class="file-cell"><span class="file-path"><span class="file-dir">reports/</span>weekly-summary.pdf</span></td><td>1.8 MB</td><td><span class="author"><span class="led"></span>Console</span></td><td class="modified">Mon, 2 Nov</td><td><div class="row-actions"><button>Download</button><button>Versions</button><button>Trash</button></div></td></tr></tbody></table></div></section><div class="cap">2 · Trash</div><section class="panel file-panel"><div class="ptool"><h3>Trash</h3><span class="muted">Restore and Versions stay in view</span></div><div class="table-scroll"><table><thead><tr><th>FILE PATH</th><th>DELETED</th><th>RECOVERY</th><th>MODIFIED</th><th>ACTIONS</th></tr></thead><tbody><tr><td class="file-cell"><span class="file-path"><span class="file-dir">notes/</span>old-brainstorm-with-a-long-name.md</span></td><td>Deleted 1 Nov</td><td>Versions preserved</td><td class="modified">1 Nov</td><td><div class="row-actions"><button>Restore</button><button>Versions</button></div></td></tr><tr><td class="file-cell"><span class="file-path"><span class="file-dir">tmp/</span>scratch.txt</span></td><td>Deleted 30 Oct</td><td>Versions preserved</td><td class="modified">1 Nov</td><td><div class="row-actions"><button>Restore</button><button>Versions</button></div></td></tr></tbody></table></div></section><div class="cap">3 · Usage by author</div><section class="panel "><div class="ptool"><h3>Usage by author</h3><span class="muted">Versions attributed to their author</span></div><div class="table-scroll u"><table><thead><tr><th>AGENT</th><th>STORAGE</th><th>VERSIONS</th><th>OPS</th></tr></thead><tbody><tr><td>planner-agent</td><td>5.1 KB</td><td>12</td><td>48</td></tr><tr><td>builder-agent</td><td>812 B</td><td>3</td><td>17</td></tr><tr><td>Console</td><td>1.8 MB</td><td>2</td><td>9</td></tr></tbody></table></div></section><div class="cap">4 · Billing: usage by agent</div><section class="panel "><div class="ptool"><h3>Billing: usage by agent</h3><span class="muted">Retained storage and observed downloads</span></div><div class="table-scroll u"><table><thead><tr><th>AGENT</th><th>RETAINED</th><th>DOWNLOADS</th><th>OPS</th></tr></thead><tbody><tr><td>planner-agent</td><td>5.1 KB</td><td>Not metered — provider does not charge egress</td><td>48</td></tr><tr><td>Console</td><td>1.8 MB</td><td>Not metered — provider does not charge egress</td><td>9</td></tr></tbody></table></div></section><div class="cap">5 · Settings: audit log</div><section class="panel "><div class="ptool"><h3>Settings: audit log</h3><span class="muted">Owner only</span></div><div class="table-scroll audit"><table><thead><tr><th>WHEN</th><th>ACTION</th><th>ACTOR</th><th>RESULT</th></tr></thead><tbody><tr><td><time>2 Nov, 14:02</time></td><td><code>file.version.create</code></td><td>Console user</td><td><span class="pill ">success</span><small>HTTP 200</small></td></tr><tr><td><time>2 Nov, 13:40</time></td><td><code>key.create</code></td><td>planner-agent<small>ak_live_…3f9</small></td><td><span class="pill fail">failure</span><small>HTTP 403 · forbidden</small></td></tr><tr><td><time>1 Nov, 09:15</time></td><td><code>file.download</code></td><td>Public / unauthenticated</td><td><span class="pill ">success</span><small>HTTP 200</small></td></tr></tbody></table></div></section></main></body></html>
+      .table-scroll {
+        position: relative;
+        overflow-x: auto;
+        background:
+          linear-gradient(90deg, #fbfaf8 30%, rgba(251, 250, 248, 0)) left center/40px 100%
+            no-repeat local,
+          linear-gradient(270deg, #fbfaf8 30%, rgba(251, 250, 248, 0)) right center/40px 100%
+            no-repeat local,
+          linear-gradient(90deg, rgba(18, 18, 17, 0.18), rgba(18, 18, 17, 0)) left center/12px 100%
+            no-repeat scroll,
+          linear-gradient(270deg, rgba(18, 18, 17, 0.18), rgba(18, 18, 17, 0)) right center/12px
+            100% no-repeat scroll;
+      }
+      .file-panel table {
+        table-layout: fixed;
+      }
+      .file-panel th:nth-child(2),
+      .file-panel td:nth-child(2),
+      .file-panel th:nth-child(3),
+      .file-panel td:nth-child(3),
+      .file-panel th:nth-child(4),
+      .file-panel td:nth-child(4) {
+        display: none;
+      }
+      .file-panel th:nth-child(5) {
+        width: 96px;
+      }
+      .file-panel td:first-child {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 0;
+      }
+      .file-panel .row-actions {
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+      }
+      .file-panel .row-actions button {
+        padding: 6px 0;
+      }
+      th,
+      td {
+        padding: 10px 10px;
+      }
+      .u th,
+      .u td {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        font-size: 12px;
+      }
+      .u td:not(:first-child) {
+        text-align: right;
+      }
+      .u th:not(:first-child) {
+        text-align: right;
+      }
+      .audit td,
+      .audit th {
+        font-size: 11.5px;
+        white-space: normal;
+        overflow-wrap: anywhere;
+        vertical-align: top;
+      }
+      .audit td:nth-child(1) {
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="cap">1 · Files</div>
+      <section class="panel file-panel">
+        <div class="ptool">
+          <h3>Files</h3>
+          <span class="muted">Hidden columns: size, author, modified</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>FILE PATH</th>
+                <th>ENCRYPTED SIZE</th>
+                <th>AUTHOR</th>
+                <th>MODIFIED</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="file-cell">
+                  <span class="file-path"
+                    ><span class="file-dir">notes/</span>2026-q3-roadmap-and-planning-draft.md</span
+                  >
+                </td>
+                <td>4.2 KB</td>
+                <td>
+                  <span class="author"><span class="led"></span>planner-agent</span>
+                </td>
+                <td class="modified">3h ago</td>
+                <td>
+                  <div class="row-actions">
+                    <button>Download</button><button>Versions</button><button>Trash</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td class="file-cell">
+                  <span class="file-path"
+                    ><span class="file-dir">src/agents/</span>retrieval-pipeline-config.json</span
+                  >
+                </td>
+                <td>812 B</td>
+                <td>
+                  <span class="author"><span class="led"></span>builder-agent</span>
+                </td>
+                <td class="modified">Yesterday</td>
+                <td>
+                  <div class="row-actions">
+                    <button>Download</button><button>Versions</button><button>Trash</button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td class="file-cell">
+                  <span class="file-path"
+                    ><span class="file-dir">reports/</span>weekly-summary.pdf</span
+                  >
+                </td>
+                <td>1.8 MB</td>
+                <td>
+                  <span class="author"><span class="led"></span>Console</span>
+                </td>
+                <td class="modified">Mon, 2 Nov</td>
+                <td>
+                  <div class="row-actions">
+                    <button>Download</button><button>Versions</button><button>Trash</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <div class="cap">2 · Trash</div>
+      <section class="panel file-panel">
+        <div class="ptool">
+          <h3>Trash</h3>
+          <span class="muted">Restore and Versions stay in view</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>FILE PATH</th>
+                <th>DELETED</th>
+                <th>RECOVERY</th>
+                <th>MODIFIED</th>
+                <th>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="file-cell">
+                  <span class="file-path"
+                    ><span class="file-dir">notes/</span>old-brainstorm-with-a-long-name.md</span
+                  >
+                </td>
+                <td>Deleted 1 Nov</td>
+                <td>Versions preserved</td>
+                <td class="modified">1 Nov</td>
+                <td>
+                  <div class="row-actions"><button>Restore</button><button>Versions</button></div>
+                </td>
+              </tr>
+              <tr>
+                <td class="file-cell">
+                  <span class="file-path"><span class="file-dir">tmp/</span>scratch.txt</span>
+                </td>
+                <td>Deleted 30 Oct</td>
+                <td>Versions preserved</td>
+                <td class="modified">1 Nov</td>
+                <td>
+                  <div class="row-actions"><button>Restore</button><button>Versions</button></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <div class="cap">3 · Usage by author</div>
+      <section class="panel">
+        <div class="ptool">
+          <h3>Usage by author</h3>
+          <span class="muted">Versions attributed to their author</span>
+        </div>
+        <div class="table-scroll u">
+          <table>
+            <thead>
+              <tr>
+                <th>AGENT</th>
+                <th>STORAGE</th>
+                <th>VERSIONS</th>
+                <th>OPS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>planner-agent</td>
+                <td>5.1 KB</td>
+                <td>12</td>
+                <td>48</td>
+              </tr>
+              <tr>
+                <td>builder-agent</td>
+                <td>812 B</td>
+                <td>3</td>
+                <td>17</td>
+              </tr>
+              <tr>
+                <td>Console</td>
+                <td>1.8 MB</td>
+                <td>2</td>
+                <td>9</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <div class="cap">4 · Billing: usage by agent</div>
+      <section class="panel">
+        <div class="ptool">
+          <h3>Billing: usage by agent</h3>
+          <span class="muted">Retained storage and observed downloads</span>
+        </div>
+        <div class="table-scroll u">
+          <table>
+            <thead>
+              <tr>
+                <th>AGENT</th>
+                <th>RETAINED</th>
+                <th>DOWNLOADS</th>
+                <th>OPS</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>planner-agent</td>
+                <td>5.1 KB</td>
+                <td>Not metered — provider does not charge egress</td>
+                <td>48</td>
+              </tr>
+              <tr>
+                <td>Console</td>
+                <td>1.8 MB</td>
+                <td>Not metered — provider does not charge egress</td>
+                <td>9</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <div class="cap">5 · Settings: audit log</div>
+      <section class="panel">
+        <div class="ptool">
+          <h3>Settings: audit log</h3>
+          <span class="muted">Owner only</span>
+        </div>
+        <div class="table-scroll audit">
+          <table>
+            <thead>
+              <tr>
+                <th>WHEN</th>
+                <th>ACTION</th>
+                <th>ACTOR</th>
+                <th>RESULT</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><time>2 Nov, 14:02</time></td>
+                <td><code>file.version.create</code></td>
+                <td>Console user</td>
+                <td><span class="pill">success</span><small>HTTP 200</small></td>
+              </tr>
+              <tr>
+                <td><time>2 Nov, 13:40</time></td>
+                <td><code>key.create</code></td>
+                <td>planner-agent<small>ak_live_…3f9</small></td>
+                <td><span class="pill fail">failure</span><small>HTTP 403 · forbidden</small></td>
+              </tr>
+              <tr>
+                <td><time>1 Nov, 09:15</time></td>
+                <td><code>file.download</code></td>
+                <td>Public / unauthenticated</td>
+                <td><span class="pill">success</span><small>HTTP 200</small></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

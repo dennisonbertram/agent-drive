@@ -1,1536 +1,946 @@
 {
- "1440/billing": {
-  "layout": {
-   "viewport": {
-    "width": 1440,
-    "height": 900,
-    "pageScrollY": 1066,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [
-    {
-     "el": "button.button.primary \"Save spending controls\"",
-     "top": 1469,
-     "bottom": 1509
-    }
-   ],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     7,
-     8,
-     9,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     32,
-     44,
-     48
-    ],
-    "offScale": [
-     7,
-     9,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      9
-     ],
-     [
-      9,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ],
-     [
-      20,
-      22
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "52px",
-     "16px",
-     "32px",
-     "18px",
-     "28px",
-     "15px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 6,
-     "11px/500": 14,
-     "52px/600": 1,
-     "16px/400": 1,
-     "32px/500": 6,
-     "13px/400": 32,
-     "20px/700": 2,
-     "18px/600": 3,
-     "28px/700": 1,
-     "15px/400": 1,
-     "12px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1440/settings": {
-  "layout": {
-   "viewport": {
-    "width": 1440,
-    "height": 900,
-    "pageScrollY": 1112,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     5,
-     7,
-     8,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28,
-     32,
-     40,
-     44
-    ],
-    "offScale": [
-     5,
-     7,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      4,
-      5
-     ],
-     [
-      5,
-      7
-     ],
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "52px",
-     "16px",
-     "24px",
-     "19px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 5,
-     "11px/500": 15,
-     "52px/600": 1,
-     "16px/400": 1,
-     "24px/700": 3,
-     "13px/400": 39,
-     "19px/700": 2,
-     "13px/500": 3,
-     "13px/700": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": [
-     [
-      177,
-      180
-     ]
-    ]
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1440/sign-in": {
-  "layout": {
-   "viewport": {
-    "width": 1440,
-    "height": 900,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
-     "w": 1440,
-     "h": 900,
-     "fillPct": 3,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1440/sign-up": {
-  "layout": {
-   "viewport": {
-    "width": 1440,
-    "height": 900,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveCreate your work\"",
-     "w": 1440,
-     "h": 900,
-     "fillPct": 3,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1920/billing": {
-  "layout": {
-   "viewport": {
-    "width": 1920,
-    "height": 1080,
-    "pageScrollY": 886,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [
-    {
-     "el": "button.button.primary \"Save spending controls\"",
-     "top": 1469,
-     "bottom": 1509
-    }
-   ],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     7,
-     8,
-     9,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     32,
-     44,
-     48
-    ],
-    "offScale": [
-     7,
-     9,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      9
-     ],
-     [
-      9,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ],
-     [
-      20,
-      22
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "52px",
-     "16px",
-     "32px",
-     "18px",
-     "28px",
-     "15px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 6,
-     "11px/500": 14,
-     "52px/600": 1,
-     "16px/400": 1,
-     "32px/500": 6,
-     "13px/400": 32,
-     "20px/700": 2,
-     "18px/600": 3,
-     "28px/700": 1,
-     "15px/400": 1,
-     "12px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1920/settings": {
-  "layout": {
-   "viewport": {
-    "width": 1920,
-    "height": 1080,
-    "pageScrollY": 1598,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     5,
-     7,
-     8,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28,
-     32,
-     40,
-     44
-    ],
-    "offScale": [
-     5,
-     7,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      4,
-      5
-     ],
-     [
-      5,
-      7
-     ],
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "52px",
-     "16px",
-     "24px",
-     "19px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 5,
-     "11px/500": 24,
-     "52px/600": 1,
-     "16px/400": 1,
-     "24px/700": 3,
-     "13px/400": 75,
-     "19px/700": 2,
-     "13px/500": 3,
-     "13px/700": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": [
-     [
-      417,
-      420
-     ]
-    ]
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1920/sign-in": {
-  "layout": {
-   "viewport": {
-    "width": 1920,
-    "height": 1080,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
-     "w": 1920,
-     "h": 1080,
-     "fillPct": 2,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "1920/sign-up": {
-  "layout": {
-   "viewport": {
-    "width": 1920,
-    "height": 1080,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveCreate your work\"",
-     "w": 1920,
-     "h": 1080,
-     "fillPct": 2,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "768/billing": {
-  "layout": {
-   "viewport": {
-    "width": 768,
-    "height": 1024,
-    "pageScrollY": 1972,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [
-    {
-     "el": "button.button.primary \"Save spending controls\"",
-     "top": 2477,
-     "bottom": 2517
-    }
-   ],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     7,
-     8,
-     9,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28,
-     44
-    ],
-    "offScale": [
-     7,
-     9,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      9
-     ],
-     [
-      9,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ],
-     [
-      20,
-      22
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "38px",
-     "16px",
-     "23px",
-     "18px",
-     "32px",
-     "28px",
-     "15px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 6,
-     "11px/500": 14,
-     "38px/600": 1,
-     "16px/400": 1,
-     "23px/500": 3,
-     "13px/400": 32,
-     "20px/700": 2,
-     "18px/600": 3,
-     "32px/500": 3,
-     "28px/700": 1,
-     "15px/400": 1,
-     "12px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "768/settings": {
-  "layout": {
-   "viewport": {
-    "width": 768,
-    "height": 1024,
-    "pageScrollY": 2253,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     4,
-     5,
-     7,
-     8,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28,
-     40,
-     44
-    ],
-    "offScale": [
-     5,
-     7,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      4,
-      5
-     ],
-     [
-      5,
-      7
-     ],
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "13px",
-     "11px",
-     "38px",
-     "16px",
-     "24px",
-     "19px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "13px/600": 5,
-     "11px/500": 32,
-     "38px/600": 1,
-     "16px/400": 1,
-     "24px/700": 3,
-     "13px/400": 107,
-     "19px/700": 2,
-     "13px/500": 3,
-     "13px/700": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": [
-     [
-      49,
-      52
-     ]
-    ]
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "768/sign-in": {
-  "layout": {
-   "viewport": {
-    "width": 768,
-    "height": 1024,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
-     "w": 768,
-     "h": 1024,
-     "fillPct": 5,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "768/sign-up": {
-  "layout": {
-   "viewport": {
-    "width": 768,
-    "height": 1024,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveCreate your work\"",
-     "w": 768,
-     "h": 1024,
-     "fillPct": 5,
-     "pctOfViewport": 100
-    }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "375/billing": {
-  "layout": {
-   "viewport": {
-    "width": 375,
-    "height": 812,
-    "pageScrollY": 2873,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [
-    {
-     "el": "button.button.primary \"Save spending controls\"",
-     "top": 3048,
-     "bottom": 3088
-    }
-   ],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "p.billing-caption \"Storage and observed transfers\"",
-     "w": 293,
-     "h": 129,
-     "fillPct": 0,
-     "pctOfViewport": 12
-    }
-   ],
-   "spacing": {
-    "observed": [
-     4,
-     7,
-     8,
-     9,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28
-    ],
-    "offScale": [
-     7,
-     9,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      9
-     ],
-     [
-      9,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ],
-     [
-      20,
-      22
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "11px",
-     "32px",
-     "16px",
-     "22px",
-     "13px",
-     "18px",
-     "28px",
-     "15px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "12px/600": 1,
-     "11px/500": 14,
-     "32px/600": 1,
-     "16px/400": 1,
-     "22px/500": 3,
-     "13px/400": 32,
-     "20px/700": 2,
-     "18px/600": 3,
-     "32px/500": 3,
-     "13px/600": 5,
-     "28px/700": 1,
-     "15px/400": 1,
-     "12px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
-  },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "375/settings": {
-  "layout": {
-   "viewport": {
-    "width": 375,
-    "height": 812,
-    "pageScrollY": 3070,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "p \"Account deletion also closes b\"",
-     "w": 260,
-     "h": 236,
-     "fillPct": 0,
-     "pctOfViewport": 20
+  "1440/billing": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 1066,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 1469,
+          "bottom": 1509
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 7, 8, 9, 10, 12, 13, 14, 16, 18, 20, 22, 24, 32, 44, 48],
+        "offScale": [7, 9, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [7, 8],
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20],
+          [20, 22]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "20px",
+          "12px",
+          "13px",
+          "11px",
+          "52px",
+          "16px",
+          "32px",
+          "18px",
+          "28px",
+          "15px"
+        ],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 6,
+          "11px/500": 14,
+          "52px/600": 1,
+          "16px/400": 1,
+          "32px/500": 6,
+          "13px/400": 32,
+          "20px/700": 2,
+          "18px/600": 3,
+          "28px/700": 1,
+          "15px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
     },
-    {
-     "el": "p \"New access is disabled when th\"",
-     "w": 260,
-     "h": 214,
-     "fillPct": 0,
-     "pctOfViewport": 18
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
     }
-   ],
-   "spacing": {
-    "observed": [
-     4,
-     5,
-     7,
-     8,
-     10,
-     12,
-     13,
-     14,
-     16,
-     18,
-     20,
-     22,
-     24,
-     28,
-     40
-    ],
-    "offScale": [
-     5,
-     7,
-     10,
-     13,
-     14,
-     18,
-     22
-    ],
-    "nearDupes": [
-     [
-      4,
-      5
-     ],
-     [
-      5,
-      7
-     ],
-     [
-      7,
-      8
-     ],
-     [
-      8,
-      10
-     ],
-     [
-      10,
-      12
-     ],
-     [
-      12,
-      13
-     ],
-     [
-      13,
-      14
-     ],
-     [
-      14,
-      16
-     ],
-     [
-      16,
-      18
-     ],
-     [
-      18,
-      20
-     ]
-    ]
-   },
-   "type": {
-    "distinctFontSizes": [
-     "20px",
-     "12px",
-     "11px",
-     "32px",
-     "16px",
-     "13px",
-     "24px",
-     "19px"
-    ],
-    "sizes": {
-     "20px/600": 1,
-     "12px/500": 1,
-     "12px/600": 1,
-     "11px/500": 32,
-     "32px/600": 1,
-     "16px/400": 1,
-     "13px/600": 5,
-     "24px/700": 3,
-     "13px/400": 107,
-     "19px/700": 2,
-     "13px/500": 3,
-     "13px/700": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": [
-     [
-      37,
-      40
-     ]
-    ]
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
   },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "375/sign-in": {
-  "layout": {
-   "viewport": {
-    "width": 375,
-    "height": 812,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [
-    {
-     "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
-     "w": 375,
-     "h": 812,
-     "fillPct": 12,
-     "pctOfViewport": 100
+  "1440/settings": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 1112,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 40, 44],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "12px", "13px", "11px", "52px", "16px", "24px", "19px"],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 5,
+          "11px/500": 15,
+          "52px/600": 1,
+          "16px/400": 1,
+          "24px/700": 3,
+          "13px/400": 39,
+          "19px/700": 2,
+          "13px/500": 3,
+          "13px/700": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[177, 180]]
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
     }
-   ],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
-    }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
   },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
-  }
- },
- "375/sign-up": {
-  "layout": {
-   "viewport": {
-    "width": 375,
-    "height": 812,
-    "pageScrollY": 0,
-    "pageScrollX": 0
-   },
-   "offscreenPrimary": [],
-   "scrollers": [],
-   "deadSpace": [],
-   "spacing": {
-    "observed": [
-     10,
-     16,
-     28,
-     40
-    ],
-    "offScale": [
-     10
-    ],
-    "nearDupes": []
-   },
-   "type": {
-    "distinctFontSizes": [
-     "17px",
-     "12px",
-     "28px",
-     "14px"
-    ],
-    "sizes": {
-     "17px/600": 1,
-     "12px/500": 1,
-     "28px/700": 1,
-     "14px/400": 1
+  "1440/sign-in": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
+          "w": 1440,
+          "h": 900,
+          "fillPct": 3,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
     }
-   },
-   "alignment": {
-    "nearMissEdges": []
-   },
-   "smallTargets": [],
-   "lowContrast": [],
-   "overlaps": [],
-   "fixedOverlays": []
   },
-  "geometry": {
-   "pageOverflowX": 0,
-   "unevenRows": [],
-   "overflowSpills": [],
-   "wrappedControls": []
+  "1440/sign-up": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveCreate your work\"",
+          "w": 1440,
+          "h": 900,
+          "fillPct": 3,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920/billing": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 886,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 1469,
+          "bottom": 1509
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 7, 8, 9, 10, 12, 13, 14, 16, 18, 20, 22, 24, 32, 44, 48],
+        "offScale": [7, 9, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [7, 8],
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20],
+          [20, 22]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "20px",
+          "12px",
+          "13px",
+          "11px",
+          "52px",
+          "16px",
+          "32px",
+          "18px",
+          "28px",
+          "15px"
+        ],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 6,
+          "11px/500": 14,
+          "52px/600": 1,
+          "16px/400": 1,
+          "32px/500": 6,
+          "13px/400": 32,
+          "20px/700": 2,
+          "18px/600": 3,
+          "28px/700": 1,
+          "15px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920/settings": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 1598,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 40, 44],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "12px", "13px", "11px", "52px", "16px", "24px", "19px"],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 5,
+          "11px/500": 24,
+          "52px/600": 1,
+          "16px/400": 1,
+          "24px/700": 3,
+          "13px/400": 75,
+          "19px/700": 2,
+          "13px/500": 3,
+          "13px/700": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[417, 420]]
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920/sign-in": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
+          "w": 1920,
+          "h": 1080,
+          "fillPct": 2,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920/sign-up": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveCreate your work\"",
+          "w": 1920,
+          "h": 1080,
+          "fillPct": 2,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768/billing": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 1972,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 2477,
+          "bottom": 2517
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 7, 8, 9, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 44],
+        "offScale": [7, 9, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [7, 8],
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20],
+          [20, 22]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "20px",
+          "12px",
+          "13px",
+          "11px",
+          "38px",
+          "16px",
+          "23px",
+          "18px",
+          "32px",
+          "28px",
+          "15px"
+        ],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 6,
+          "11px/500": 14,
+          "38px/600": 1,
+          "16px/400": 1,
+          "23px/500": 3,
+          "13px/400": 32,
+          "20px/700": 2,
+          "18px/600": 3,
+          "32px/500": 3,
+          "28px/700": 1,
+          "15px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768/settings": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 2253,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 40, 44],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "12px", "13px", "11px", "38px", "16px", "24px", "19px"],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "13px/600": 5,
+          "11px/500": 32,
+          "38px/600": 1,
+          "16px/400": 1,
+          "24px/700": 3,
+          "13px/400": 107,
+          "19px/700": 2,
+          "13px/500": 3,
+          "13px/700": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[49, 52]]
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768/sign-in": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
+          "w": 768,
+          "h": 1024,
+          "fillPct": 5,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768/sign-up": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveCreate your work\"",
+          "w": 768,
+          "h": 1024,
+          "fillPct": 5,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375/billing": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 2873,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 3048,
+          "bottom": 3088
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "p.billing-caption \"Storage and observed transfers\"",
+          "w": 293,
+          "h": 129,
+          "fillPct": 0,
+          "pctOfViewport": 12
+        }
+      ],
+      "spacing": {
+        "observed": [4, 7, 8, 9, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28],
+        "offScale": [7, 9, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [7, 8],
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20],
+          [20, 22]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "20px",
+          "12px",
+          "11px",
+          "32px",
+          "16px",
+          "22px",
+          "13px",
+          "18px",
+          "28px",
+          "15px"
+        ],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "12px/600": 1,
+          "11px/500": 14,
+          "32px/600": 1,
+          "16px/400": 1,
+          "22px/500": 3,
+          "13px/400": 32,
+          "20px/700": 2,
+          "18px/600": 3,
+          "32px/500": 3,
+          "13px/600": 5,
+          "28px/700": 1,
+          "15px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375/settings": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 3070,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "p \"Account deletion also closes b\"",
+          "w": 260,
+          "h": 236,
+          "fillPct": 0,
+          "pctOfViewport": 20
+        },
+        {
+          "el": "p \"New access is disabled when th\"",
+          "w": 260,
+          "h": 214,
+          "fillPct": 0,
+          "pctOfViewport": 18
+        }
+      ],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 40],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "12px", "11px", "32px", "16px", "13px", "24px", "19px"],
+        "sizes": {
+          "20px/600": 1,
+          "12px/500": 1,
+          "12px/600": 1,
+          "11px/500": 32,
+          "32px/600": 1,
+          "16px/400": 1,
+          "13px/600": 5,
+          "24px/700": 3,
+          "13px/400": 107,
+          "19px/700": 2,
+          "13px/500": 3,
+          "13px/700": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[37, 40]]
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375/sign-in": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.auth-page \"a/ agent driveSign inSign-in i\"",
+          "w": 375,
+          "h": 812,
+          "fillPct": 12,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375/sign-up": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 16, 28, 40],
+        "offScale": [10],
+        "nearDupes": []
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "12px", "28px", "14px"],
+        "sizes": {
+          "17px/600": 1,
+          "12px/500": 1,
+          "28px/700": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
   }
- }
 }

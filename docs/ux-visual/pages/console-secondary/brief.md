@@ -1,4 +1,5 @@
 # Brief: console secondary tabs
+
 App: Agent Drive, an encrypted file drive that gives each AI agent its own portable drive; the human operator uses a web console to manage drives, agent identities, API keys, usage and trash. Encryption keys stay in the browser.
 Page: /console tabs Agents, API keys, Usage, Trash, plus dialogs (create drive, drive key reveal, create agent, create API key, API key reveal, load drive key, version history).
 Persona: a developer or technical operator setting up their first agent, comfortable with a CLI, new to this product.
