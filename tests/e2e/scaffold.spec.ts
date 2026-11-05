@@ -4,27 +4,32 @@ test.describe('public landing page', () => {
   test('explains the product and links to signup', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByRole('heading', { name: 'Every agent gets a drive.' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Create your workspace' })).toHaveAttribute(
-      'href',
-      '/sign-up',
-    );
+    await expect(
+      page.getByRole('heading', { name: 'Agent files that outlive the sandbox.' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Sign in' }),
+    ).toHaveAttribute('href', '/sign-in');
     await page.goto('/console');
     await expect(page).toHaveURL(/\/sign-in/);
   });
 
   test('shows the agent setup instruction with a copy button', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('Paste into your agent')).toBeVisible();
-    await expect(page.getByText(/^Set up Agent Drive: https?:\/\/.+\/llms\.txt$/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Copy agent instruction' })).toBeVisible();
-    await expect(page.getByText('Claude Code', { exact: true })).toBeVisible();
+    await expect(page.getByText('Give this to your agent').first()).toBeVisible();
+    await expect(page.locator('.l-panel code').first()).toContainText(
+      /Set up Agent Drive: https?:\/\/.+\/llms\.txt$/,
+    );
+    await expect(
+      page.getByRole('button', { name: 'Copy agent instruction', exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.l-works').getByText('Claude Code', { exact: true })).toBeVisible();
   });
 
   test('shows the whole CLI command on a phone', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
-    const fits = await page.locator('.setup-row code >> nth=1').evaluate((el) => {
+    const fits = await page.locator('.l-cli b').evaluate((el) => {
       const box = el.getBoundingClientRect();
       const page = document.scrollingElement ?? document.documentElement;
       return (
