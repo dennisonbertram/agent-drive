@@ -34,6 +34,11 @@ is `null` when access-log measurement is not configured.
 File `list` and `search` accept `agentId`, `machine`, and `user` filters; `list` also accepts a
 literal path `prefix` and optional path query `q`. `%` and `_` in a prefix are treated literally.
 `versions`, `recent`, and `search` use the same bounded pagination envelope as other collections.
+A conditional `put` (`ifVersionId`, or `ifVersionId: null` for create-only) that loses returns 409 `conflict`
+with `state` (`exists`, `changed`, `trashed`, or `absent`) and `currentVersionId` (the current or trashed
+version id; `null` for `absent`). A conditional write never revives a trashed file; an unconditional
+overwrite does.
+
 `recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) in commit
 order (guaranteed for events written after migration 0015; older events are ordered by their timestamps). Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
 cursor the order is exact and `since` is ignored. Without a cursor, the optional exclusive `since`

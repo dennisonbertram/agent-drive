@@ -34,7 +34,12 @@ export class ApiError extends Error {
     readonly code: ErrorCode,
     message: string,
     status = statuses[code],
-    readonly details: { upgradeUrl?: string; retryAfter?: number } = {},
+    readonly details: {
+      upgradeUrl?: string;
+      retryAfter?: number;
+      currentVersionId?: string | null;
+      state?: 'exists' | 'changed' | 'trashed' | 'absent';
+    } = {},
   ) {
     super(message);
     this.name = 'ApiError';
