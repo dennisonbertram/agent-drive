@@ -122,19 +122,33 @@ export type Share = {
   url?: string;
 };
 
+export type ConflictState = 'exists' | 'changed' | 'trashed' | 'absent';
+const conflictStates: unknown[] = ['exists', 'changed', 'trashed', 'absent'];
+// Same pattern as uuid() in apps/web/src/api/validation.ts; keep in sync.
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
 export class AgentDriveApiError extends Error {
   readonly upgradeUrl: string | undefined;
   readonly retryAfter: number | undefined;
+  readonly currentVersionId: string | null | undefined;
+  readonly state: ConflictState | undefined;
 
   constructor(
     readonly code: string,
     readonly status: number,
     message: string,
-    details: { upgradeUrl?: string | undefined; retryAfter?: number | undefined } = {},
+    details: {
+      upgradeUrl?: string | undefined;
+      retryAfter?: number | undefined;
+      currentVersionId?: string | null | undefined;
+      state?: ConflictState | undefined;
+    } = {},
   ) {
     super(message);
     this.upgradeUrl = details.upgradeUrl;
     this.retryAfter = details.retryAfter;
+    this.currentVersionId = details.currentVersionId;
+    this.state = details.state;
     this.name = 'AgentDriveApiError';
   }
 }
@@ -257,6 +271,8 @@ export class AgentDriveClient {
                   message?: string;
                   upgradeUrl?: unknown;
                   retryAfter?: unknown;
+                  currentVersionId?: unknown;
+                  state?: unknown;
                 };
               }
             ).error
@@ -268,6 +284,15 @@ export class AgentDriveClient {
         {
           upgradeUrl: validatedUpgradeUrl(error?.upgradeUrl),
           retryAfter: validatedRetryAfter(error?.retryAfter),
+          currentVersionId:
+            error?.currentVersionId === null ||
+            (typeof error?.currentVersionId === 'string' &&
+              uuidPattern.test(error.currentVersionId))
+              ? error.currentVersionId
+              : undefined,
+          state: conflictStates.includes(error?.state)
+            ? (error?.state as ConflictState)
+            : undefined,
         },
       );
     }

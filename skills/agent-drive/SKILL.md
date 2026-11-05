@@ -78,6 +78,15 @@ All take `--drive ID` unless noted.
 `whoami`, `put` (text or `localPath`), `get` (small text, or `outputPath`), `list`, `move`,
 `copy`, `delete`, `versions`, `restore`, `search`, `recent`, `share`.
 
+## Working with other agents on one drive
+
+- Write shared files with `--if-version <id>` (MCP `ifVersionId`) after reading them. Conflicts are
+  detected only for conditional writes.
+- On a conflict (409), read the current version, merge your change, and retry with the new id. The
+  error says why: `exists`, `changed`, `trashed` (restore the file, or write with `--overwrite`), or
+  `absent` (write without `--if-version`).
+- Never use `--overwrite` to win a race.
+
 ## Handoff template
 
 ```text

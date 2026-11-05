@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
+import { conflictHint } from './check.js';
 import { resolveConnection, driveKeyEnvironmentName, machineName } from './config.js';
 import { reportEnvBackups } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
@@ -49,6 +50,11 @@ function failure(error: unknown) {
               code: error.code,
               message: apiErrors[error.code] ?? 'Agent Drive request failed.',
               ...(error.upgradeUrl ? { upgradeUrl: error.upgradeUrl } : {}),
+              ...(error.state ? { state: error.state } : {}),
+              ...(error.currentVersionId === undefined
+                ? {}
+                : { currentVersionId: error.currentVersionId }),
+              ...(conflictHint(error) ? { hint: conflictHint(error) } : {}),
               ...(error.retryAfter === undefined ? {} : { retryAfter: error.retryAfter }),
             },
           }),

@@ -146,12 +146,8 @@
           "name": "agents_account_id_accounts_id_fk",
           "tableFrom": "agents",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -191,12 +187,8 @@
           "name": "api_key_rate_limits_api_key_id_api_keys_id_fk",
           "tableFrom": "api_key_rate_limits",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -311,12 +303,8 @@
           "name": "api_keys_account_id_accounts_id_fk",
           "tableFrom": "api_keys",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -324,12 +312,8 @@
           "name": "api_keys_agent_id_agents_id_fk",
           "tableFrom": "api_keys",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -440,12 +424,8 @@
           "name": "audit_events_api_key_id_api_keys_id_fk",
           "tableFrom": "audit_events",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -453,12 +433,8 @@
           "name": "audit_events_account_id_accounts_id_fk",
           "tableFrom": "audit_events",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -466,12 +442,8 @@
           "name": "audit_events_agent_id_agents_id_fk",
           "tableFrom": "audit_events",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -609,12 +581,8 @@
           "name": "billing_accounts_account_id_accounts_id_fk",
           "tableFrom": "billing_accounts",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -734,12 +702,8 @@
           "name": "billing_egress_events_account_id_accounts_id_fk",
           "tableFrom": "billing_egress_events",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -747,12 +711,8 @@
           "name": "billing_egress_events_agent_id_agents_id_fk",
           "tableFrom": "billing_egress_events",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -760,12 +720,8 @@
           "name": "billing_egress_events_drive_id_drives_id_fk",
           "tableFrom": "billing_egress_events",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -810,10 +766,7 @@
       "compositePrimaryKeys": {
         "billing_log_objects_pk": {
           "name": "billing_log_objects_pk",
-          "columns": [
-            "object_key",
-            "etag"
-          ]
+          "columns": ["object_key", "etag"]
         }
       },
       "uniqueConstraints": {},
@@ -937,12 +890,8 @@
           "name": "billing_meter_reports_account_id_accounts_id_fk",
           "tableFrom": "billing_meter_reports",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1080,12 +1029,8 @@
           "name": "billing_notifications_account_id_accounts_id_fk",
           "tableFrom": "billing_notifications",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1184,12 +1129,8 @@
           "name": "billing_periods_account_id_accounts_id_fk",
           "tableFrom": "billing_periods",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1197,10 +1138,7 @@
       "compositePrimaryKeys": {
         "billing_periods_pk": {
           "name": "billing_periods_pk",
-          "columns": [
-            "account_id",
-            "period_start"
-          ]
+          "columns": ["account_id", "period_start"]
         }
       },
       "uniqueConstraints": {},
@@ -1314,10 +1252,7 @@
       "compositePrimaryKeys": {
         "deletion_billing_receipts_pk": {
           "name": "deletion_billing_receipts_pk",
-          "columns": [
-            "account_id",
-            "period_start"
-          ]
+          "columns": ["account_id", "period_start"]
         }
       },
       "uniqueConstraints": {},
@@ -1695,12 +1630,8 @@
           "name": "device_authorizations_account_id_accounts_id_fk",
           "tableFrom": "device_authorizations",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1708,12 +1639,8 @@
           "name": "device_authorizations_agent_id_agents_id_fk",
           "tableFrom": "device_authorizations",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1721,12 +1648,8 @@
           "name": "device_authorizations_previous_api_key_id_api_keys_id_fk",
           "tableFrom": "device_authorizations",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "previous_api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["previous_api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1734,12 +1657,8 @@
           "name": "device_authorizations_api_key_id_api_keys_id_fk",
           "tableFrom": "device_authorizations",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1790,12 +1709,8 @@
           "name": "device_console_limits_account_id_accounts_id_fk",
           "tableFrom": "device_console_limits",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1916,12 +1831,8 @@
           "name": "drives_account_id_accounts_id_fk",
           "tableFrom": "drives",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2082,12 +1993,8 @@
           "name": "file_events_drive_id_drives_id_fk",
           "tableFrom": "file_events",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2095,12 +2002,8 @@
           "name": "file_events_file_id_files_id_fk",
           "tableFrom": "file_events",
           "tableTo": "files",
-          "columnsFrom": [
-            "file_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2108,12 +2011,8 @@
           "name": "file_events_version_id_versions_id_fk",
           "tableFrom": "file_events",
           "tableTo": "versions",
-          "columnsFrom": [
-            "version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["version_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2121,12 +2020,8 @@
           "name": "file_events_agent_id_agents_id_fk",
           "tableFrom": "file_events",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -2134,12 +2029,8 @@
           "name": "file_events_machine_id_machines_id_fk",
           "tableFrom": "file_events",
           "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["machine_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2253,12 +2144,8 @@
           "name": "files_drive_id_drives_id_fk",
           "tableFrom": "files",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2367,12 +2254,8 @@
           "name": "machines_account_id_accounts_id_fk",
           "tableFrom": "machines",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2380,12 +2263,8 @@
           "name": "machines_agent_id_agents_id_fk",
           "tableFrom": "machines",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2502,12 +2381,8 @@
           "name": "shares_account_id_accounts_id_fk",
           "tableFrom": "shares",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2515,12 +2390,8 @@
           "name": "shares_drive_id_drives_id_fk",
           "tableFrom": "shares",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2528,12 +2399,8 @@
           "name": "shares_file_id_files_id_fk",
           "tableFrom": "shares",
           "tableTo": "files",
-          "columnsFrom": [
-            "file_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2541,12 +2408,8 @@
           "name": "shares_version_id_versions_id_fk",
           "tableFrom": "shares",
           "tableTo": "versions",
-          "columnsFrom": [
-            "version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["version_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2554,12 +2417,8 @@
           "name": "shares_agent_id_agents_id_fk",
           "tableFrom": "shares",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2567,12 +2426,8 @@
           "name": "shares_api_key_id_api_keys_id_fk",
           "tableFrom": "shares",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2785,12 +2640,8 @@
           "name": "upload_intents_api_key_id_api_keys_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "api_keys",
-          "columnsFrom": [
-            "api_key_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["api_key_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2798,12 +2649,8 @@
           "name": "upload_intents_account_id_accounts_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "accounts",
-          "columnsFrom": [
-            "account_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["account_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2811,12 +2658,8 @@
           "name": "upload_intents_agent_id_agents_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2824,12 +2667,8 @@
           "name": "upload_intents_machine_id_machines_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["machine_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2837,12 +2676,8 @@
           "name": "upload_intents_drive_id_drives_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2850,12 +2685,8 @@
           "name": "upload_intents_committed_version_id_versions_id_fk",
           "tableFrom": "upload_intents",
           "tableTo": "versions",
-          "columnsFrom": [
-            "committed_version_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["committed_version_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3061,12 +2892,8 @@
           "name": "versions_file_id_files_id_fk",
           "tableFrom": "versions",
           "tableTo": "files",
-          "columnsFrom": [
-            "file_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["file_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3074,12 +2901,8 @@
           "name": "versions_drive_id_drives_id_fk",
           "tableFrom": "versions",
           "tableTo": "drives",
-          "columnsFrom": [
-            "drive_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["drive_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3087,12 +2910,8 @@
           "name": "versions_agent_id_agents_id_fk",
           "tableFrom": "versions",
           "tableTo": "agents",
-          "columnsFrom": [
-            "agent_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["agent_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -3100,12 +2919,8 @@
           "name": "versions_machine_id_machines_id_fk",
           "tableFrom": "versions",
           "tableTo": "machines",
-          "columnsFrom": [
-            "machine_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["machine_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
