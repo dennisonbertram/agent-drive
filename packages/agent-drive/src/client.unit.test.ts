@@ -107,6 +107,7 @@ describe('AgentDriveClient transport guards', () => {
       { code: 'conflict', message: 'x', state: 'changed', currentVersionId: id },
       { code: 'conflict', message: 'x', state: 'absent', currentVersionId: null },
       { code: 'conflict', message: 'x', state: 'bogus', currentVersionId: 'not-a-uuid' },
+      { code: 'conflict', message: 'x', currentVersionId: '11111111-1111-ffff-ffff-111111111111' },
     ];
     const fetcher = vi.fn();
     for (const error of bodies)
@@ -121,9 +122,11 @@ describe('AgentDriveClient transport guards', () => {
       state: 'absent',
       currentVersionId: null,
     });
-    const forged = await client.whoami().catch((e) => e);
-    expect(forged.state).toBeUndefined();
-    expect(forged.currentVersionId).toBeUndefined();
+    for (let i = 0; i < 2; i++) {
+      const forged = await client.whoami().catch((e) => e);
+      expect(forged.state).toBeUndefined();
+      expect(forged.currentVersionId).toBeUndefined();
+    }
   });
 
   it('preserves only safe actionable API metadata', async () => {

@@ -123,7 +123,8 @@ export type Share = {
 
 export type ConflictState = 'exists' | 'changed' | 'trashed' | 'absent';
 const conflictStates: unknown[] = ['exists', 'changed', 'trashed', 'absent'];
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Same pattern as uuid() in apps/web/src/api/validation.ts; keep in sync.
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export class AgentDriveApiError extends Error {
   readonly upgradeUrl: string | undefined;
