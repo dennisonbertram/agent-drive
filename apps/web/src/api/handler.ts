@@ -71,7 +71,7 @@ type RequestContext = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
 
-const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage']);
+const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
 const quotaControlledActions = new Set([
   'drives.create',

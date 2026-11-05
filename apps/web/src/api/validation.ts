@@ -144,6 +144,26 @@ export function writePaths(body: Record<string, unknown>): string[] {
   return [...new Set(value.map((item) => canonicalPath(item, 'writePaths')))];
 }
 
+/**
+ * A key may hand out only what it holds. Needs `delegate`; never grants manage or delegate;
+ * a path-restricted caller must name write paths inside its own. Not applied to manage callers.
+ */
+export function assertDelegation(
+  auth: { driveIds: string[]; scopes: string[]; writePaths: string[] },
+  requested: { driveIds: string[]; scopes: string[]; writePaths: string[] },
+) {
+  if (!auth.scopes.includes('delegate'))
+    throw new ApiError('permission_denied', 'The API key needs the delegate scope.');
+  const grantable = ['read', 'write', 'delete', 'share'];
+  const ok =
+    requested.driveIds.every((id) => auth.driveIds.includes(id)) &&
+    requested.scopes.every((s) => grantable.includes(s) && auth.scopes.includes(s)) &&
+    (auth.writePaths.length === 0 ||
+      (requested.writePaths.length > 0 &&
+        requested.writePaths.every((p) => withinWritePaths(auth.writePaths, p))));
+  if (!ok) throw new ApiError('permission_denied', 'A key cannot grant more than it holds.');
+}
+
 /** An empty list means no restriction. A path matches itself and anything beneath it. */
 export function withinWritePaths(paths: string[], path: string) {
   return paths.length === 0 || paths.some((p) => path === p || path.startsWith(`${p}/`));

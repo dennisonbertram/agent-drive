@@ -15,7 +15,7 @@ const PUBLIC_KEY_PATTERN = /^[A-Za-z0-9_-]{87}$/u;
 const BASE64URL = /^[A-Za-z0-9_-]{1,4096}$/u;
 const EXPIRES_IN_SECONDS = 600;
 const STARTS_PER_HOUR = 20;
-const USER_SCOPES = new Set(['read', 'write', 'delete', 'share']);
+const USER_SCOPES = new Set(['read', 'write', 'delete', 'share', 'delegate']);
 const DEFAULT_SCOPES = ['read', 'write', 'delete', 'share'];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const MAX_KNOWN_DRIVES = 20;
@@ -375,8 +375,19 @@ function userCodeFrom(value: string | undefined) {
 
 const pendingRequest = `user_code = $1 AND status = 'pending' AND expires_at > now()`;
 
+const DEFAULTS_KEYS = new Set(['delegate', 'offerRevision']);
+
 function approvalInput(body: Record<string, unknown>) {
-  const isEmpty = Object.keys(body).length === 0;
+  // Defaults body: only these keys, so the one-click page can send them. Anything else is explicit.
+  const isDefaults = Object.keys(body).every((key) => DEFAULTS_KEYS.has(key));
+  if (body.delegate !== undefined && typeof body.delegate !== 'boolean')
+    throw new ApiError('validation_error', 'delegate must be true or false.');
+  if (
+    body.offerRevision !== undefined &&
+    (!Number.isSafeInteger(body.offerRevision) || (body.offerRevision as number) < 0)
+  )
+    throw new ApiError('validation_error', 'offerRevision must be a non-negative integer.');
+  const delegate = isDefaults && body.delegate === true;
   const driveIds = body.driveIds === undefined ? [] : body.driveIds;
   if (!Array.isArray(driveIds) || driveIds.length > 100)
     throw new ApiError('validation_error', 'driveIds must be an array of UUIDs.');
@@ -388,7 +399,7 @@ function approvalInput(body: Record<string, unknown>) {
   const newDriveName =
     body.newDriveName === undefined ? undefined : stringField(body, 'newDriveName', { max: 128 });
   if (
-    (body.scopes !== undefined || !isEmpty) &&
+    (body.scopes !== undefined || !isDefaults) &&
     (!Array.isArray(body.scopes) ||
       body.scopes.length === 0 ||
       body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value)))
@@ -397,7 +408,7 @@ function approvalInput(body: Record<string, unknown>) {
       'validation_error',
       'scopes must be a non-empty list of read, write, delete, or share.',
     );
-  const scopes = isEmpty ? DEFAULT_SCOPES : [...new Set(body.scopes as string[])];
+  const scopes = isDefaults ? DEFAULT_SCOPES : [...new Set(body.scopes as string[])];
   const paths = writePaths(body);
   const agentId =
     body.agentId === undefined
@@ -417,7 +428,17 @@ function approvalInput(body: Record<string, unknown>) {
       }
     }
   }
-  return { drives, newDriveName, scopes, writePaths: paths, agentId, sealed, isEmpty };
+  return {
+    drives,
+    newDriveName,
+    scopes,
+    writePaths: paths,
+    agentId,
+    sealed,
+    isDefaults,
+    delegate,
+    offerRevision: isDefaults ? (body.offerRevision as number | undefined) : undefined,
+  };
 }
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -528,7 +549,7 @@ async function approve(
   let newDriveName = input.newDriveName;
   let scopes = input.scopes;
   let paths = input.writePaths;
-  if (input.isEmpty) {
+  if (input.isDefaults) {
     // Defaults (contract v2.1): reconnect with proof, else create one named for the agent.
     // A reconnect keeps the previous key's scopes and write paths; widening needs an explicit body.
     const known = await reconnectDrives(client, accountId, row);
@@ -536,6 +557,7 @@ async function approve(
     const previous = await previousPermissions(client, accountId, row);
     if (previous) ({ scopes, write_paths: paths } = previous);
     if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
+    if (input.delegate && !scopes.includes('delegate')) scopes = [...scopes, 'delegate'];
   }
   let newDriveId: string | null = null;
   if (newDriveName) {

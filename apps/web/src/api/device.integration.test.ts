@@ -790,6 +790,62 @@ describe('one-click connect (contract v2)', () => {
     expect(token.scope).toBe('read write delete share');
   });
 
+  it('grants delegate only on explicit choice and keeps it out of the defaults', async () => {
+    const chosen = await start({ client_name: `del-${suffix}` }, nextIp());
+    expect(
+      (await consoleCall(user, `/device/${chosen.user_code}/approve`, 'POST', { delegate: true }))
+        .status,
+    ).toBe(200);
+    await allowPoll(chosen.device_code);
+    const first = await json(await poll(chosen.device_code));
+    expect(first.scope).toBe('read write delete share delegate');
+    expect((await json(await whoami(first.access_token))).scopes).toContain('delegate');
+    // Reconnect with an unticked box keeps the previous scopes (S2); ticking adds delegate.
+    const held = first.drive_ids[0];
+    const again = await start(
+      { client_name: `del-${suffix}`, known_drive_ids: [held] },
+      nextIp(),
+      first.access_token,
+    );
+    expect((await approveEmpty(again.user_code)).status).toBe(200);
+    await allowPoll(again.device_code);
+    expect((await json(await poll(again.device_code))).scope).toBe(
+      'read write delete share delegate',
+    );
+    // Reconnect of a read-only key with delegate ticked: previous scopes plus delegate.
+    const ro = await start({ client_name: `ro-${suffix}` }, nextIp());
+    await consoleCall(user, `/device/${ro.user_code}/approve`, 'POST', {
+      newDriveName: `ro-drive-${suffix}`,
+      scopes: ['read'],
+    });
+    await allowPoll(ro.device_code);
+    const roKey = await json(await poll(ro.device_code));
+    const back = await start(
+      { client_name: `ro-${suffix}`, known_drive_ids: roKey.drive_ids },
+      nextIp(),
+      roKey.access_token,
+    );
+    expect(
+      (await consoleCall(user, `/device/${back.user_code}/approve`, 'POST', { delegate: true }))
+        .status,
+    ).toBe(200);
+    await allowPoll(back.device_code);
+    const backKey = await json(await poll(back.device_code));
+    expect(backKey.scope).toBe('read delegate');
+    // delegate next to explicit fields is an explicit body and still needs scopes.
+    const explicit = await start({ client_name: `ex-${suffix}` }, nextIp());
+    const rejected = await consoleCall(user, `/device/${explicit.user_code}/approve`, 'POST', {
+      delegate: true,
+      driveIds: [drive],
+    });
+    expect(rejected.status).toBe(400);
+    // Wrong types and unknown keys are not defaults.
+    const bad = await consoleCall(user, `/device/${explicit.user_code}/approve`, 'POST', {
+      delegate: 'yes',
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('revokes exactly the proven previous key, not same-label or same-name keys', async () => {
     const name = `repeat-${suffix}`;
     await pool.query('DELETE FROM drives WHERE id = $1', [drive]); // free-plan drive quota

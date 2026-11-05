@@ -1,0 +1,2 @@
+ALTER TABLE "api_keys" DROP CONSTRAINT "api_keys_scopes_check";--> statement-breakpoint
+ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_scopes_check" CHECK ("api_keys"."scopes" <@ ARRAY['read', 'write', 'delete', 'share', 'manage', 'delegate']::text[]);

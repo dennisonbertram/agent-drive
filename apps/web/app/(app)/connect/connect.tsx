@@ -72,6 +72,7 @@ export default function Connect({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [formError, setFormError] = useState('');
+  const [delegate, setDelegate] = useState(false);
 
   async function load(raw: string) {
     const code = normalizeCode(raw);
@@ -113,7 +114,11 @@ export default function Connect({
     setFormError('');
     setBusy(true);
     try {
-      await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', {});
+      await api(
+        `device/${encodeURIComponent(request.user_code)}/approve`,
+        'POST',
+        delegate ? { delegate: true } : {},
+      );
       setDone(true);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
@@ -219,6 +224,18 @@ export default function Connect({
           ? ` Keeps its previous permissions (${request.scopes.join(', ')}${request.write_paths?.length ? `; writes under ${request.write_paths.join(', ')}` : ''}).`
           : ''}
       </p>
+      <label className="connect-delegate">
+        <input
+          type="checkbox"
+          checked={delegate}
+          onChange={(event) => setDelegate(event.target.checked)}
+        />{' '}
+        Let this agent add other agents to its drives
+        <small>
+          It can hand another agent the key and permissions it holds itself, never more, and it
+          cannot pass this permission on. You still approve each new agent here.
+        </small>
+      </label>
       {formError && (
         <div role="alert" className="banner error">
           {formError}
