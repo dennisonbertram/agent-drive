@@ -81,6 +81,7 @@ export type ApiKey = {
   drive_ids: string[];
   scopes: string[];
   write_paths?: string[];
+  issued_by_agent_id?: string | null;
   revoked_at?: string | null;
   created_at: string;
   token?: string;
@@ -304,16 +305,18 @@ export class AgentDriveClient {
   }
 
   async createKey(
-    agentId: string,
+    agentId: string | undefined,
     label: string,
     driveIds: string[],
     scopes: string[],
     writePaths?: string[],
+    agentName?: string,
   ) {
     return this.request<ApiKey>('keys', {
       method: 'POST',
       body: JSON.stringify({
         agentId,
+        ...(agentName ? { agentName } : {}),
         label,
         driveIds,
         scopes,

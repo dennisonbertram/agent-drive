@@ -85,6 +85,14 @@ describe('AgentDriveClient transport guards', () => {
     await client.createKey('a', 'l', ['d'], ['read', 'write'], ['/inbox/x']);
     expect(bodies[0]).not.toHaveProperty('writePaths');
     expect(bodies[1]).toMatchObject({ writePaths: ['/inbox/x'] });
+    await client.createKey(undefined, 'l', ['d'], ['read'], ['/outputs'], 'sandbox-b');
+    expect(bodies[2]).toEqual({
+      agentName: 'sandbox-b',
+      label: 'l',
+      driveIds: ['d'],
+      scopes: ['read'],
+      writePaths: ['/outputs'],
+    });
   });
 
   it('maps typed API errors without logging raw responses', async () => {

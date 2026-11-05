@@ -1211,6 +1211,84 @@ describe('Phase 1 core API', () => {
     expect((await request('/whoami', key.token)).status).toBe(401);
   });
 
+  it('lets a delegate key issue a narrower key for a new agent and refuses wider grants, existing names, and agentId', async () => {
+    const agentId = (
+      await json(await request('/agents', manageToken, 'POST', { name: `issuer-${randomUUID()}` }))
+    ).id as string;
+    const drive = (
+      await json(await request('/drives', manageToken, 'POST', { name: `issue-${randomUUID()}` }))
+    ).id as string;
+    const mintKey = async (scopes: string[], writePaths?: string[]) =>
+      (
+        await json(
+          await request('/keys', manageToken, 'POST', {
+            agentId,
+            label: 'issuer',
+            driveIds: [drive],
+            scopes,
+            ...(writePaths ? { writePaths } : {}),
+          }),
+        )
+      ).token as string;
+    const issuer = await mintKey(['read', 'write', 'delete', 'share', 'delegate']);
+    const name = `sandbox-${randomUUID().slice(0, 8)}`;
+    const issue = (token: string, extra: Record<string, unknown> = {}) =>
+      request('/keys', token, 'POST', {
+        agentName: name,
+        label: 'sandbox',
+        driveIds: [drive],
+        scopes: ['read', 'write'],
+        writePaths: ['/outputs'],
+        ...extra,
+      });
+    const issued = await issue(issuer);
+    expect(issued.status).toBe(201);
+    const body = await json(issued);
+    expect(body.token).toMatch(/^adk_/u);
+    expect(body.issued_by_agent_id).toBe(agentId);
+    const created = await pool.query('SELECT id FROM agents WHERE name = $1', [name]);
+    expect(body.agent_id).toBe(created.rows[0].id);
+    const who = await json(await request('/whoami', body.token));
+    expect(who.scopes).toEqual(['read', 'write']);
+    expect(who.writePaths).toEqual(['/outputs']);
+    const listed = await json(await request('/keys?limit=100', manageToken));
+    expect(listed.items.find((k: { id: string }) => k.id === body.id).issued_by_agent_id).toBe(
+      agentId,
+    );
+
+    const again = await issue(issuer);
+    expect(again.status).toBe(409);
+    expect((await json(again)).error.message).toBe(
+      `An agent named "${name}" already exists; choose another name.`,
+    );
+    const next = (extra: Record<string, unknown>) =>
+      issue(issuer, { agentName: `${name}-x-${randomUUID().slice(0, 6)}`, ...extra });
+    for (const wider of [
+      { driveIds: [otherDriveId] },
+      { scopes: ['read', 'manage'] },
+      { scopes: ['read', 'delegate'] },
+    ]) {
+      const refused = await next(wider);
+      expect(refused.status).toBe(403);
+      expect((await json(refused)).error.message).toBe('A key cannot grant more than it holds.');
+    }
+    expect((await next({ agentId })).status).toBe(400);
+    expect((await issue(writeToken)).status).toBe(403);
+    const noDelegate = await issue(await mintKey(['read', 'write']));
+    expect(noDelegate.status).toBe(403);
+    expect((await json(noDelegate)).error.message).toContain('delegate');
+    const pathLimited = await mintKey(['read', 'write', 'delegate'], ['/inbox']);
+    const outside = await issue(pathLimited, { agentName: `${name}-p`, writePaths: ['/outputs'] });
+    expect(outside.status).toBe(403);
+    expect((await json(outside)).error.message).toBe('A key cannot grant more than it holds.');
+    const inside = await issue(pathLimited, { agentName: `${name}-q`, writePaths: ['/inbox/a'] });
+    expect(inside.status).toBe(201);
+    // Revoking the issuer does not revoke what it issued; DELETE /keys/:id revokes one key.
+    expect((await request(`/keys/${body.id}`, manageToken, 'DELETE')).status).toBe(200);
+    expect((await request('/whoami', body.token)).status).toBe(401);
+    expect((await request('/whoami', issuer)).status).toBe(200);
+  });
+
   it('records drive key backup status without accepting key material', async () => {
     const path = `/drives/${driveId}/key-backup`;
     expect((await request(path, readToken, 'POST', { method: 'file' })).status).toBe(403);

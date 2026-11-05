@@ -466,3 +466,18 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   `delegate`); if the caller has write paths, the request must name write paths inside them. A
   violation returns 403 `permission_denied`: `A key cannot grant more than it holds.` Keys without
   `delegate` get 403 naming the scope. `manage` keys are not subject to it.
+
+## 13. Issued credentials
+
+- Handoff for a sandbox set up without a browser: an agent whose key holds `delegate` runs
+  `agent-drive credentials issue --name NAME --write-path P --stdout | <secret store>`. The human
+  stores the printed `AGENT_DRIVE_CREDENTIALS=adcred1.…` line in the sandbox.
+- The bundle is the `adcred1.` format of §9 with the new API key and only the chosen drive's key.
+  The issuer's token never appears in it or in any request body, and the drive key never reaches
+  the service. Whoever holds the line holds the full drive key; write paths limit writes through
+  the API only.
+- Server: `POST /keys` without `manage` needs `delegate` and `assertDelegation` (§11). It takes
+  `agentName`, creates a new agent (409 if the name exists; `agentId` returns 400) and a key with
+  `issued_by_agent_id` set to the caller's agent (migration 0018). The console shows "issued by
+  <agent>" in the Agents and API keys views. Revoking the key leaves the issuer and other keys
+  alone; revoking the issuer does not revoke what it issued.

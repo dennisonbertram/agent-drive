@@ -74,6 +74,14 @@ in the sandbox platform, using the output of \`agent-drive credentials export --
 new sandbox is then already connected and can read earlier files. The human does not need to
 approve again for each run.
 
+## Several agents on one drive
+
+A sandbox, CI job, or anything set up without a browser: if your key has \`delegate\`, run
+\`agent-drive credentials issue --name <agent> --write-path <its folder> --stdout | <secret store>\`
+and tell the human to set \`AGENT_DRIVE_CREDENTIALS\` there. Never copy your own bundle into
+another agent's environment. If you lack \`delegate\`, ask the human to approve you again with
+"Let this agent add other agents" ticked.
+
 ## Hosted assistants
 
 Chat assistants that run in a vendor's cloud and have no shell on your machine are not

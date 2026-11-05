@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +20,49 @@ function cliEnv(baseURL: string, root: string, name: string, machine: string): N
     AGENT_DRIVE_CONFIG: join(root, `${name}.json`),
     AGENT_DRIVE_MACHINE: machine,
     CI: '1',
+  };
+}
+
+/**
+ * A loopback HTTP proxy that records every request (method, path, body) and forwards it to
+ * `target`. Point a CLI at `url` with AGENT_DRIVE_API_URL to assert what it sends. Shared by
+ * the specs that check secrets never leave the machine.
+ */
+async function startCaptureProxy(target: string) {
+  const requests: { method: string; path: string; body: string }[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      void (async () => {
+        const body = Buffer.concat(chunks);
+        requests.push({ method: req.method!, path: req.url!, body: body.toString('utf8') });
+        const headers = { ...req.headers } as Record<string, string>;
+        delete headers.host;
+        delete headers['content-length'];
+        try {
+          const upstream = await fetch(`${target}${req.url}`, {
+            method: req.method!,
+            headers,
+            ...(body.length ? { body } : {}),
+            redirect: 'manual',
+          });
+          res.writeHead(upstream.status, {
+            'content-type': upstream.headers.get('content-type') ?? 'application/json',
+          });
+          res.end(Buffer.from(await upstream.arrayBuffer()));
+        } catch {
+          res.writeHead(502).end();
+        }
+      })();
+    });
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const { port } = server.address() as { port: number };
+  return {
+    url: `http://127.0.0.1:${port}`,
+    requests,
+    close: () => new Promise<void>((done) => server.close(() => done())),
   };
 }
 
@@ -241,6 +285,102 @@ test.describe('agent device login', () => {
     const who = await cli(['whoami'], env);
     expect(who.status, who.stderr).toBe(0);
     expect(who.stdout).toContain('delegate');
+  });
+
+  test('sandbox handoff: credentials issue gives a second agent its own narrower key', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'issuer', `m-${randomBytes(3).toString('hex')}`);
+    const { login, code, path } = await startLogin(envA, 'issuer-bot');
+    await approve(page, path, 'issuer-bot', code, true);
+    expect((await login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    const secret = `FIRST-${randomUUID()}`;
+    const local = join(root, 'x.txt');
+    await writeFile(local, secret);
+    expect((await cli(['put', local, '/notes/x', '--drive', driveId], envA)).status).toBe(0);
+
+    // Issue through a capturing proxy; the issuer's own config is untouched.
+    const proxy = await startCaptureProxy(baseURL!);
+    const issued = await cli(
+      ['credentials', 'issue', '--name', 'sandbox-b', '--write-path', '/outputs', '--stdout'],
+      { ...envA, AGENT_DRIVE_API_URL: `${proxy.url}/api` },
+    );
+    await proxy.close();
+    expect(issued.status, issued.stderr).toBe(0);
+    expect(issued.stdout.trim().split('\n')).toHaveLength(1);
+    const line = issued.stdout.trim();
+    expect(line.startsWith('AGENT_DRIVE_CREDENTIALS=adcred1.')).toBe(true);
+    const bundle = JSON.parse(
+      Buffer.from(line.slice('AGENT_DRIVE_CREDENTIALS=adcred1.'.length), 'base64url').toString(),
+    ) as { v: number; apiKey: string; driveKeys: Record<string, string>; apiUrl: string };
+    expect(bundle.v).toBe(1);
+    expect(bundle.apiUrl).toBe(`${proxy.url}/api`);
+    expect(bundle.apiKey).toMatch(/^adk_/);
+    expect(bundle.apiKey).not.toBe(configA.apiKey);
+    expect(Object.keys(bundle.driveKeys)).toEqual([driveId]);
+    expect(issued.stderr).not.toContain(bundle.apiKey);
+    expect(issued.stderr).not.toContain(driveKey);
+    const keyPost = proxy.requests.find((r) => r.method === 'POST' && r.path.endsWith('/keys'))!;
+    expect(keyPost.body).toContain('"agentName":"sandbox-b"');
+    for (const r of proxy.requests) expect(r.body).not.toContain(driveKey);
+    for (const text of [line, issued.stderr, ...proxy.requests.map((r) => r.body)])
+      expect(text).not.toContain(configA.apiKey);
+    expect(await readConfig(envA)).toEqual(configA);
+
+    // A fresh CLI with only the env line.
+    const envB = {
+      ...cliEnv(baseURL!, root, 'sandbox', 'm-sandbox'),
+      // The issuer ran through the proxy, so the line names the proxy URL; point it at the real
+      // server, as a real issuer's line would already do.
+      AGENT_DRIVE_CREDENTIALS:
+        'adcred1.' +
+        Buffer.from(JSON.stringify({ ...bundle, apiUrl: `${baseURL}/api` })).toString('base64url'),
+    };
+    const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
+      agentId: string;
+      scopes: string[];
+      writePaths: string[];
+    };
+    const whoA = JSON.parse((await cli(['whoami'], envA)).stdout) as { agentId: string };
+    expect(who.agentId).not.toBe(whoA.agentId);
+    expect(who.scopes).toEqual(['read', 'write']);
+    expect(who.writePaths).toEqual(['/outputs']);
+    const out = join(root, 'x.out');
+    const got = await cli(['get', '/notes/x', '--drive', driveId, '--output', out], envB);
+    expect(got.status, got.stderr).toBe(0);
+    expect(await readFile(out, 'utf8')).toBe(secret);
+    expect(
+      (await cli(['put', local, '/notes/x', '--drive', driveId, '--overwrite'], envB)).status,
+    ).not.toBe(0);
+    const forbidden = await cli(['put', local, '/notes/y', '--drive', driveId], envB);
+    expect(forbidden.status).not.toBe(0);
+    expect(forbidden.stderr).toContain('/outputs');
+    expect((await cli(['put', local, '/outputs/x', '--drive', driveId], envB)).status).toBe(0);
+    const check = await cli(['check'], envB);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain(`check ok drive=${driveId}`);
+
+    // The console shows provenance; revoking the issued key cuts only B.
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Agents' }).click();
+    await expect(page.getByText('issued by issuer-bot')).toBeVisible({ timeout: 30_000 });
+    const keys = (await (await page.request.get('/api/console/keys')).json()) as {
+      items: { id: string; agent_id: string; issued_by_agent_id: string | null }[];
+    };
+    const issuedKey = keys.items.find((k) => k.issued_by_agent_id)!;
+    expect(issuedKey.agent_id).toBe(who.agentId);
+    const revoked = await page.request.delete(`/api/console/keys/${issuedKey.id}`, {
+      headers: { origin: baseURL! },
+    });
+    expect(revoked.status()).toBe(200);
+    expect((await cli(['whoami'], envB)).status).not.toBe(0);
+    expect((await cli(['whoami'], envA)).status).toBe(0);
   });
 
   test('reconnect: second login reuses the drive and replaces the old key', async ({

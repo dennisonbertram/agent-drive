@@ -17,6 +17,7 @@ import {
   confirmCredentials,
   exportCredentials,
   importCredentials,
+  issueCredentials,
   loadConfig,
   reportEnvBackups,
   unbackedUp,
@@ -249,6 +250,31 @@ async function run(command: string, raw: string[]) {
       await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
       return;
     }
+    if (sub === 'issue') {
+      if (!args.values.name) throw new Error('--name is required.');
+      const client = await connect(args);
+      const result = await issueCredentials(
+        {
+          name: args.values.name,
+          ...(args.values.drive?.[0] ? { drive: args.values.drive[0] } : {}),
+          ...(args.values.scope ? { scopes: args.values.scope } : {}),
+          ...(args.values['write-path'] ? { writePaths: args.values['write-path'] } : {}),
+          ...(args.values.label ? { label: args.values.label } : {}),
+          machine: machineName(),
+          ...(args.values.to ? { to: args.values.to } : {}),
+          ...(args.values.force ? { force: true } : {}),
+          ...(args.values.stdout ? { stdout: true } : {}),
+        },
+        { isTTY: Boolean(process.stdout.isTTY), write: writeStdout },
+        client.createKey.bind(client),
+      );
+      process.stderr.write(
+        `Created agent "${result.agentName}" with key ${result.keyId}: scopes ${result.scopes.join(' ')}${
+          result.writePaths.length ? `, writes only under ${result.writePaths.join(', ')}` : ''
+        }.\nStore this line as a secret in the sandbox. Revoke it from the console under Agents.\n`,
+      );
+      return;
+    }
     if (sub === 'confirm') {
       const method = args.values.method ?? 'stdout';
       if (method !== 'stdout' && method !== 'file')
@@ -280,7 +306,7 @@ async function run(command: string, raw: string[]) {
       });
     }
     throw new Error(
-      'Usage: credentials export (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
+      'Usage: credentials export (--to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
   const client = await connect(args);
@@ -561,6 +587,8 @@ Commands:
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
   credentials export (--to PATH [--force] | --stdout)   Back up the API key and drive keys (bundle "adcred1.…")
+  credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
+                                        Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
   credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
   credentials status                    Which drive keys are backed up, when, and how

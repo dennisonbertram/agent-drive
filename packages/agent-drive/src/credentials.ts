@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { validateUrl } from './client.js';
+import { stat } from 'node:fs/promises';
+import { validateUrl, type AgentDriveClient } from './client.js';
 import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
 import {
@@ -26,6 +27,28 @@ export const BACKUP_HINT =
 
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
+}
+
+/** A bundle holding only the named drives' keys (all of them when `driveIds` is omitted). */
+export function buildBundle(
+  source: Pick<Bundle, 'apiUrl' | 'apiKey'> &
+    Partial<Pick<Bundle, 'driveKeys' | 'driveKeyOrigins'>>,
+  driveIds?: string[],
+) {
+  const driveKeys = source.driveKeys ?? {};
+  const origins = source.driveKeyOrigins ?? {};
+  const ids = driveIds ?? Object.keys(driveKeys);
+  return encodeBundle({
+    v: 1,
+    apiUrl: source.apiUrl,
+    apiKey: source.apiKey,
+    driveKeys: Object.fromEntries(
+      ids.filter((id) => driveKeys[id]).map((id) => [id, driveKeys[id]!]),
+    ),
+    driveKeyOrigins: Object.fromEntries(
+      ids.filter((id) => origins[id]).map((id) => [id, origins[id]!]),
+    ),
+  });
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -140,6 +163,78 @@ const pendingFor = (apiKey: string, driveIds: string[]) => ({
   driveIds,
 });
 
+async function writeBundleFile(path: string, bundle: string, force?: boolean) {
+  try {
+    await writeFileSafely(path, `${bundle}\n`, { mode: 0o600, overwrite: Boolean(force) });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+      throw new Error(`${path} already exists; pass --force to overwrite it.`);
+    if (error instanceof Error && /symlink/u.test(error.message)) throw error;
+    throw new Error(`Unable to write ${path}.`);
+  }
+}
+
+/**
+ * Mints a new agent's key through a `delegate` key and prints a bundle holding only that key and
+ * the chosen drive's key. The caller's own key and saved config are never part of it or changed.
+ */
+export async function issueCredentials(
+  options: {
+    name: string;
+    drive?: string;
+    scopes?: string[];
+    writePaths?: string[];
+    label?: string;
+    machine?: string;
+    to?: string;
+    force?: boolean;
+    stdout?: boolean;
+  },
+  io: Io,
+  createKey: AgentDriveClient['createKey'],
+) {
+  if (Boolean(options.to) === Boolean(options.stdout))
+    throw new Error('Pass exactly one of --to <path> or --stdout.');
+  if (options.stdout && io.isTTY)
+    throw new Error(
+      'Refusing to print credentials to a terminal. Pipe them to a secret store: `agent-drive credentials issue --name <agent> --stdout | <your secret store>`, or use --to <path>.',
+    );
+  if (
+    options.to &&
+    !options.force &&
+    (await stat(options.to).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
+  const config = await loadConfig();
+  const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
+  const ids = Object.keys(config.driveKeys ?? {});
+  const drive = options.drive ?? (ids.length === 1 ? ids[0] : undefined);
+  if (!drive) throw new Error('Pass --drive <id>; this machine holds no single default drive key.');
+  const driveKey = await resolveDriveKey(drive, undefined, config);
+  if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
+  const scopes = options.scopes?.length ? options.scopes : ['read', 'write'];
+  const writePaths = options.writePaths ?? [];
+  const label = options.label ?? `${options.name} (issued by ${options.machine ?? 'unknown'})`;
+  const key = await createKey(undefined, label, [drive], scopes, writePaths, options.name);
+  if (!key.token) throw new Error('The service did not return a token.');
+  const bundle = buildBundle(
+    {
+      apiUrl,
+      apiKey: key.token,
+      driveKeys: { [drive]: driveKey },
+      driveKeyOrigins: { [drive]: config.driveKeyOrigins?.[drive] ?? new URL(apiUrl).origin },
+    },
+    [drive],
+  );
+  const line = `AGENT_DRIVE_CREDENTIALS=${bundle}`;
+  if (options.to) await writeBundleFile(options.to, line, options.force);
+  else await io.write(`${line}\n`);
+  return { agentName: options.name, keyId: key.id, scopes, writePaths };
+}
+
 /**
  * Writes a bundle to a 0600 file (recorded as a backup) or to a non-TTY stdout. A stdout export
  * is not recorded: pipe it to a secret store, then run `agent-drive credentials confirm`.
@@ -161,25 +256,14 @@ export async function exportCredentials(
   const ids = Object.keys(driveKeys);
   if (!ids.length) throw new Error('There are no drive keys on this machine to back up.');
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
-  const bundle = encodeBundle({
-    v: 1,
+  const bundle = buildBundle({
     apiUrl,
     apiKey,
     driveKeys,
     driveKeyOrigins: config.driveKeyOrigins ?? {},
   });
   if (options.to) {
-    try {
-      await writeFileSafely(options.to, `${bundle}\n`, {
-        mode: 0o600,
-        overwrite: Boolean(options.force),
-      });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST')
-        throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
-      if (error instanceof Error && /symlink/u.test(error.message)) throw error;
-      throw new Error(`Unable to write ${options.to}.`);
-    }
+    await writeBundleFile(options.to, bundle, options.force);
     const at = new Date().toISOString();
     await writeConfig({
       keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method: 'file' }])),

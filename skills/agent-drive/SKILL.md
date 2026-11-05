@@ -50,6 +50,14 @@ read in memory and counts as backed up. `agent-drive credentials import --from <
 it. `agent-drive check` fails with "drive key not backed up" until this is done. Never print or
 paste the bundle into a chat, a file in a drive, or a log.
 
+## Adding another agent
+
+A sandbox, CI job, or anything set up without a browser: if your key has `delegate` (check
+`whoami`), run `agent-drive credentials issue --name <agent> --write-path <its folder> --stdout | <secret store>`
+and tell the human to set `AGENT_DRIVE_CREDENTIALS` there. Never copy your own bundle into another
+agent's environment. If you lack `delegate`, ask the human to approve you again with "Let this
+agent add other agents" ticked.
+
 ## CLI commands
 
 All take `--drive ID` unless noted.
