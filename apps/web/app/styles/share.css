@@ -13,45 +13,6 @@
   margin-left: auto;
   margin-right: auto;
 }
-.share-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-.share-logo {
-  position: relative;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--ink, #121211);
-}
-.share-logo::before {
-  content: '';
-  position: absolute;
-  left: 5px;
-  right: 5px;
-  top: 7px;
-  height: 2px;
-  border-radius: 1px;
-  background: #fff;
-  opacity: 0.85;
-  box-shadow: 0 5px 0 rgba(255, 255, 255, 0.5);
-}
-.share-logo::after {
-  content: '';
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--sig, #ff5a1f);
-  box-shadow: 0 0 6px var(--sig, #ff5a1f);
-}
-
 /* the drive: a chassis holding one sled */
 .share-card {
   --share-alarm: #ff4d3d;
@@ -189,6 +150,38 @@
   margin: 0 0 10px;
   font: 600 clamp(17px, 5vw, 20px) / 1.25 var(--sans, 'Space Grotesk', system-ui, sans-serif);
   color: var(--share-alarm);
+}
+.share-paste {
+  margin-top: 14px;
+}
+.share-paste label {
+  display: block;
+  margin-bottom: 6px;
+  font: 500 12px/1.4 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  color: #d9d6cd;
+}
+.share-paste-row {
+  display: flex;
+  gap: 8px;
+}
+.share-paste-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line, #3a3a36);
+  border-radius: 6px;
+  background: var(--ink, #121211);
+  color: #fff;
+  font: 400 13px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+}
+.share-paste-problem {
+  margin: 6px 0 0;
+  font: 400 12px/1.4 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  color: var(--share-alarm);
+}
+.share-retry {
+  margin-top: 14px;
 }
 .share-card .share-download {
   width: 100%;
