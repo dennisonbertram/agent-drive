@@ -50,7 +50,9 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
    agent-drive check
 
    Setup is complete only when it prints \`check ok\`. It refuses until step 4 is done. If it
-   does not print \`check ok\`, do not tell the human setup is done.
+   does not print \`check ok\`, do not tell the human setup is done. A read-only agent prints
+   \`check ok ... (read-only)\` once the drive holds a file; on an empty drive it prints
+   \`check not verified\`, so run it again after another agent writes a file.
 
 If ${origin} is unreachable (for example, the sandbox blocks network access to it), stop and
 tell the human. Do not try to work around it.
@@ -61,6 +63,8 @@ tell the human. Do not try to work around it.
   for this agent.
 - An error that the API key lacks a scope: run \`agent-drive login\` again. Do not use
   \`agent-drive drive create\`.
+- An error that the API key may only write under some folders is not a login problem: write
+  under those folders instead.
 - The approval link asks the human to sign in: they must sign in first, then click Approve.
 
 ## Sandboxes

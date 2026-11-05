@@ -285,6 +285,57 @@ test.describe('agent device login', () => {
     expect(fresh.status, fresh.stderr).toBe(0);
   });
 
+  test('read-only agent: onboarding ends with check ok (read-only) without writing', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const writerEnv = cliEnv(baseURL!, root, 'writer', 'm-writer');
+    const first = await startLogin(writerEnv, 'writer-bot');
+    await approve(page, first.path, 'writer-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const [driveId, driveKey] = Object.entries((await readConfig(writerEnv)).driveKeys)[0]!;
+    const local = join(root, 'seed.txt');
+    await writeFile(local, 'seed');
+    const put = await cli(['put', local, '/seed.txt', '--drive', driveId], writerEnv);
+    expect(put.status, put.stderr).toBe(0);
+
+    // The second agent is approved read-only on the same drive with an explicit approve body.
+    const env = cliEnv(baseURL!, root, 'reader', 'm-reader');
+    const second = await startLogin(env, 'reader-bot');
+    const approved = await page.request.post(`/api/console/device/${second.code}/approve`, {
+      headers: { origin: baseURL! },
+      data: { driveIds: [driveId], scopes: ['read'] },
+    });
+    expect(approved.status()).toBe(200);
+    // No sealed key was sent, so login saves the API key but reports no usable drive key.
+    await second.login.done;
+    const config = await readConfig(env);
+    await writeFile(
+      env.AGENT_DRIVE_CONFIG!,
+      JSON.stringify({
+        ...config,
+        driveKeys: { [driveId]: driveKey },
+        driveKeyOrigins: { [driveId]: new URL(baseURL!).origin },
+      }),
+    );
+    const exported = await cli(['credentials', 'export', '--to', join(root, 'reader-bundle')], env);
+    expect(exported.status, exported.stderr).toBe(0);
+
+    const events = async () =>
+      (await database.query('SELECT count(*)::int AS n FROM file_events')).rows[0].n as number;
+    const before = await events();
+    const check = await cli(['check'], env);
+    expect(check.status, check.stderr).toBe(0);
+    expect(check.stdout).toContain(`check ok drive=${driveId} (read-only)`);
+    expect(await events()).toBe(before);
+    const denied = await cli(['put', local, '/nope.txt', '--drive', driveId], env);
+    expect(denied.status).not.toBe(0);
+    expect(denied.stderr).toContain('lacks the "write" scope');
+  });
+
   test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
     test.setTimeout(120_000);
     await newUser(context);

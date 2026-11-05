@@ -4,7 +4,7 @@ import { getPool, withTransaction } from '../db/client';
 import { billingOrigin } from '../billing/policy';
 import { enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
 import { ApiError } from './errors';
-import { jsonBody, MAX_BODY_BYTES, objectBody, stringField, uuid } from './validation';
+import { jsonBody, MAX_BODY_BYTES, objectBody, stringField, uuid, writePaths } from './validation';
 
 // RFC 8628 device authorization for agent login. Contract: docs/agent-login.md section 2.
 
@@ -208,9 +208,9 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     }
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const key = await client.query(
-      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
-       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[]) RETURNING id`,
-      [row.account_id, row.agent_id, label, sha256(token), driveIds, row.scopes],
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths)
+       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[]) RETURNING id`,
+      [row.account_id, row.agent_id, label, sha256(token), driveIds, row.scopes, row.write_paths],
     );
     await client.query(
       `UPDATE device_authorizations
@@ -230,6 +230,7 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
         access_token: token,
         token_type: 'Bearer',
         scope: (row.scopes as string[]).join(' '),
+        write_paths: row.write_paths,
         api_url: `${origin}/api`,
         account_id: row.account_id,
         agent_id: row.agent_id,
@@ -397,6 +398,7 @@ function approvalInput(body: Record<string, unknown>) {
       'scopes must be a non-empty list of read, write, delete, or share.',
     );
   const scopes = isEmpty ? DEFAULT_SCOPES : [...new Set(body.scopes as string[])];
+  const paths = writePaths(body);
   const agentId =
     body.agentId === undefined
       ? undefined
@@ -415,7 +417,7 @@ function approvalInput(body: Record<string, unknown>) {
       }
     }
   }
-  return { drives, newDriveName, scopes, agentId, sealed, isEmpty };
+  return { drives, newDriveName, scopes, writePaths: paths, agentId, sealed, isEmpty };
 }
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -429,8 +431,13 @@ async function reconnectDrives(
   row: { client_name: string; previous_api_key_id: string | null; requested_drive_ids: string[] },
 ) {
   if (!row.previous_api_key_id) return [];
-  const { rows } = await db.query<{ id: string; name: string }>(
-    `SELECT d.id, d.name FROM drives d
+  const { rows } = await db.query<{
+    id: string;
+    name: string;
+    scopes: string[];
+    write_paths: string[];
+  }>(
+    `SELECT d.id, d.name, k.scopes, k.write_paths FROM drives d
        JOIN api_keys k ON k.id = $2 AND k.account_id = $1 AND k.revoked_at IS NULL
                       AND d.id = ANY(k.drive_ids)
        JOIN agents g ON g.id = k.agent_id AND g.account_id = $1 AND g.name = $3
@@ -501,9 +508,14 @@ async function approve(
   }
   let drives = input.drives;
   let newDriveName = input.newDriveName;
+  let scopes = input.scopes;
+  let paths = input.writePaths;
   if (input.isEmpty) {
     // Defaults (contract v2.1): reconnect with proof, else create one named for the agent.
-    drives = (await reconnectDrives(client, accountId, row)).map((drive) => drive.id);
+    // A reconnect keeps the previous key's scopes and write paths; widening needs an explicit body.
+    const known = await reconnectDrives(client, accountId, row);
+    drives = known.map((drive) => drive.id);
+    if (known[0]) ({ scopes, write_paths: paths } = known[0]);
     if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
   }
   let newDriveId: string | null = null;
@@ -524,16 +536,18 @@ async function approve(
   await client.query(
     `UPDATE device_authorizations
         SET status = 'approved', account_id = $2, agent_id = $3, drive_ids = $4::uuid[],
-            scopes = $5::text[], new_drive_id = $6, sealed_drive_keys = $7::jsonb, decided_at = now()
+            scopes = $5::text[], new_drive_id = $6, sealed_drive_keys = $7::jsonb,
+            write_paths = $8::text[], decided_at = now()
       WHERE id = $1`,
     [
       row.id,
       accountId,
       agentId,
       newDriveId ? [...drives, newDriveId] : drives,
-      input.scopes,
+      scopes,
       newDriveId,
       Object.keys(input.sealed).length ? JSON.stringify(input.sealed) : null,
+      paths,
     ],
   );
 }
@@ -602,8 +616,10 @@ async function consoleDeviceAction(
     if (!row) throw new ApiError('not_found', 'Device request not found.');
     const known = { rows: await reconnectDrives(getPool(), accountId, row) };
     return reply({
-      drives: known.rows,
+      drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
+      scopes: known.rows[0]?.scopes ?? null,
+      write_paths: known.rows[0]?.write_paths ?? null,
       user_code: row.user_code,
       client_name: row.client_name,
       machine: row.machine,

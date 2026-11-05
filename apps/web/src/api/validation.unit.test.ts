@@ -8,6 +8,8 @@ import {
   jsonBody,
   MAX_BODY_BYTES,
   secureTransportAllowed,
+  withinWritePaths,
+  writePaths,
 } from './validation';
 
 describe('API validation helpers', () => {
@@ -71,5 +73,23 @@ describe('API validation helpers', () => {
     expect(secureTransportAllowed(new URL(insecureRequest.url).protocol, 'production')).toBe(false);
     expect(secureTransportAllowed(new URL(secureRequest.url).protocol, 'production')).toBe(true);
     expect(secureTransportAllowed(new URL(insecureRequest.url).protocol, 'test')).toBe(true);
+  });
+
+  it('validates writePaths', () => {
+    expect(writePaths({})).toEqual([]);
+    expect(writePaths({ writePaths: ['/a', '/a', '/b/c'] })).toEqual(['/a', '/b/c']);
+    const sixteen = Array.from({ length: 16 }, (_, i) => `/p${i}`);
+    expect(writePaths({ writePaths: sixteen })).toHaveLength(16);
+    for (const bad of [['/'], ['inbox'], ['/a/'], '/a', [1], [...sixteen, '/p16']])
+      expect(() => writePaths({ writePaths: bad })).toThrow(ApiError);
+  });
+
+  it('matches write paths on folder boundaries', () => {
+    expect(withinWritePaths([], '/anything')).toBe(true);
+    expect(withinWritePaths(['/inbox/x'], '/inbox/x')).toBe(true);
+    expect(withinWritePaths(['/inbox/x'], '/inbox/x/a.txt')).toBe(true);
+    expect(withinWritePaths(['/inbox/x'], '/inbox/xy/a.txt')).toBe(false);
+    expect(withinWritePaths(['/inbox/x'], '/inbox')).toBe(false);
+    expect(withinWritePaths(['/a', '/b'], '/b/c')).toBe(true);
   });
 });

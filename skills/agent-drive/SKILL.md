@@ -63,6 +63,8 @@ All take `--drive ID` unless noted.
 - `backup LOCAL_DIRECTORY [--prefix P] [--dry-run]`
 - `whoami`, `check`, `credentials ...`, `skill install`
 
+`whoami` shows `writePaths`. If your writes are limited, write only under those folders (pass `--prefix` to `backup`).
+
 ## MCP tools
 
 `whoami`, `put` (text or `localPath`), `get` (small text, or `outputPath`), `list`, `move`,

@@ -146,6 +146,24 @@ describe('deviceLogin', () => {
       expect(printed).not.toContain(secret);
   });
 
+  it('prints the write paths only when the key is limited', async () => {
+    await setup();
+    const token = (write_paths: string[]) => async () =>
+      json(200, {
+        access_token: 'adk_T',
+        scope: 'read write',
+        drive_ids: ['d3'],
+        new_drive_id: 'd3',
+        write_paths,
+      });
+    const limited = run(token(['/inbox/x', '/outputs']));
+    await limited.promise;
+    expect(limited.out).toContain('Writes limited to: /inbox/x, /outputs');
+    const open = run(token([]));
+    await open.promise;
+    expect(open.out.join('\n')).not.toContain('Writes limited');
+  });
+
   it('reports a denied request', async () => {
     await setup();
     const r = run(() => json(400, { error: 'access_denied' }));
@@ -370,6 +388,7 @@ describe('check and key helpers', () => {
       }),
       get: vi.fn(async () => ({ bytes: readBack(sent) }) as never),
       recent: vi.fn(async () => ({ items: [], nextCursor: null }) as never),
+      list: vi.fn(async () => ({ items: [], nextCursor: null }) as never),
     };
   }
 
@@ -397,7 +416,8 @@ describe('check and key helpers', () => {
       ...base,
       recent: async () => ({ items }) as never,
       // list's first page would hold only an older file the key still opens
-      list: async () => ({ items: [{ path: '/a-old', createdAt: '2026-01-01T00:00:00Z' }] }),
+      list: async () =>
+        ({ items: [{ path: '/a-old', createdAt: '2026-01-01T00:00:00Z' }] }) as never,
       get: vi.fn(async (_d: string, path: string) => {
         gets.push(path);
         if (path === '/new') throw new DriveCryptoError('decryption_failed', 'bad');
@@ -432,8 +452,85 @@ describe('check and key helpers', () => {
       },
       get: async () => ({}) as never,
       recent: async () => ({ items: [] }) as never,
+      list: async () => ({ items: [] }) as never,
     };
     await expect(runCheck(c, 'd1')).rejects.toThrow('lacks the "write" scope');
+  });
+
+  it('check writes its file under the first write path', async () => {
+    const c = fake((b) => b);
+    const ok = await runCheck(c, 'd1', { scopes: ['read', 'write'], writePaths: ['/inbox/x'] });
+    expect(ok).toBe('check ok drive=d1');
+    expect(c.put.mock.calls[0]?.[1]).toBe('/inbox/x/.agent-drive/check.txt');
+  });
+
+  describe('read-only check', () => {
+    const readOnly = { scopes: ['read'], writePaths: [] };
+    const gone = () => new AgentDriveApiError('not_found', 404, 'gone');
+    const files = (...paths: string[]) => paths.map((path) => ({ path }));
+    function reader(pages: string[][], get: (path: string) => Promise<unknown>) {
+      return {
+        ...fake((b) => b),
+        list: vi.fn(async (_d: string, _p: unknown, _l: unknown, cursor?: string) => {
+          const index = cursor ? Number(cursor) : 0;
+          return {
+            items: files(...pages[index]!),
+            nextCursor: index + 1 < pages.length ? String(index + 1) : null,
+          } as never;
+        }),
+        get: vi.fn(async (_d: string, path: string) => get(path) as never),
+      };
+    }
+
+    it('skips a candidate deleted since listing and never writes', async () => {
+      const c = reader([['/a', '/b']], async (path) => {
+        if (path === '/a') throw gone();
+        return { bytes: new Uint8Array() };
+      });
+      expect(await runCheck(c, 'd1', readOnly)).toBe('check ok drive=d1 (read-only)');
+      expect(c.put).not.toHaveBeenCalled();
+    });
+
+    it('continues to the next page when page one is all stale, and skips the check file', async () => {
+      const c = reader([['/.agent-drive/check.txt', '/a'], ['/b']], async (path) => {
+        if (path !== '/b') throw gone();
+        return { bytes: new Uint8Array() };
+      });
+      expect(await runCheck(c, 'd1', readOnly)).toBe('check ok drive=d1 (read-only)');
+      expect(c.get.mock.calls.map((call) => call[1])).toEqual(['/a', '/b']);
+    });
+
+    it('is not verified when nothing can be decrypted', async () => {
+      const c = reader([['/a'], []], async () => {
+        throw gone();
+      });
+      await expect(runCheck(c, 'd1', readOnly)).rejects.toThrow(/^check not verified drive=d1:/u);
+      await expect(
+        runCheck(
+          reader([[]], async () => ({})),
+          'd1',
+          readOnly,
+        ),
+      ).rejects.toThrow(/not verified/u);
+    });
+
+    it('reports a key that cannot decrypt', async () => {
+      const c = reader([['/a']], async () => {
+        throw new DriveCryptoError('decryption_failed', 'bad');
+      });
+      await expect(runCheck(c, 'd1', readOnly)).rejects.toThrow(
+        'This drive key cannot decrypt existing files.',
+      );
+    });
+  });
+
+  it('omits the scope hint for a write-path denial', () => {
+    const denied = new AgentDriveApiError(
+      'permission_denied',
+      403,
+      'The API key may only write under /inbox/x.',
+    );
+    expect(apiErrorLines(denied)).toEqual(['The API key may only write under /inbox/x.']);
   });
 
   it('drive create note has no key and names the config path', () => {

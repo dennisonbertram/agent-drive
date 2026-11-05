@@ -136,6 +136,19 @@ export function tags(body: Record<string, unknown>): string[] {
   return [...new Set(value as string[])];
 }
 
+export function writePaths(body: Record<string, unknown>): string[] {
+  const value = body.writePaths;
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16)
+    throw new ApiError('validation_error', 'writePaths must contain at most 16 paths.');
+  return [...new Set(value.map((item) => canonicalPath(item, 'writePaths')))];
+}
+
+/** An empty list means no restriction. A path matches itself and anything beneath it. */
+export function withinWritePaths(paths: string[], path: string) {
+  return paths.length === 0 || paths.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
 export function boundedSize(value: unknown, name: string): number {
   if (
     typeof value !== 'number' ||

@@ -308,10 +308,41 @@ describe('device authorization', () => {
       sealedDriveKeys: { [randomUUID()]: { epk: 'a', iv: 'b', ct: 'c' } },
     });
     expect(strayKeys.status).toBe(400);
+    for (const writePaths of [
+      ['/'],
+      ['inbox'],
+      ['/a/'],
+      'x',
+      Array.from({ length: 17 }, (_, i) => `/p${i}`),
+    ]) {
+      const bad = await consoleCall(ownerUser, path, 'POST', {
+        driveIds: [driveId],
+        scopes: ['read'],
+        writePaths,
+      });
+      expect(bad.status).toBe(400);
+    }
     const row = await pool.query('SELECT status FROM device_authorizations WHERE user_code = $1', [
       started.user_code,
     ]);
     expect(row.rows[0].status).toBe('pending');
+  });
+
+  it('carries writePaths from approval to the issued key', async () => {
+    const started = await start({ client_name: `paths-agent-${suffix}` });
+    const approve = await consoleCall(ownerUser, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [driveId],
+      scopes: ['read', 'write'],
+      writePaths: ['/inbox/x', '/inbox/x'],
+    });
+    expect(approve.status).toBe(200);
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token.write_paths).toEqual(['/inbox/x']);
+    const stored = await pool.query('SELECT write_paths FROM api_keys WHERE token_hash = $1', [
+      createHash('sha256').update(token.access_token).digest('hex'),
+    ]);
+    expect(stored.rows[0].write_paths).toEqual(['/inbox/x']);
   });
 
   it('creates a new drive and returns new_drive_id', async () => {
@@ -577,6 +608,35 @@ describe('one-click connect (contract v2)', () => {
     expect(token.scope).toBe('read write delete share');
     expect((await whoami(first.access_token)).status).toBe(401);
     expect((await whoami(token.access_token)).status).toBe(200);
+  });
+
+  it("an empty-body reconnect keeps the previous key's scopes and write paths", async () => {
+    const name = `limited-${suffix}`;
+    const first = await start({ client_name: name }, nextIp());
+    const explicit = await consoleCall(user, `/device/${first.user_code}/approve`, 'POST', {
+      newDriveName: `limited-drive-${suffix}`,
+      scopes: ['read'],
+      writePaths: ['/inbox/x'],
+    });
+    expect(explicit.status).toBe(200);
+    await allowPoll(first.device_code);
+    const original = await json(await poll(first.device_code));
+    expect(original.write_paths).toEqual(['/inbox/x']);
+    const held = original.drive_ids[0];
+    const again = await start(
+      { client_name: name, known_drive_ids: [held] },
+      nextIp(),
+      original.access_token,
+    );
+    const info = await json(await consoleCall(user, `/device/${again.user_code}`));
+    expect(info).toMatchObject({ scopes: ['read'], write_paths: ['/inbox/x'] });
+    expect((await approveEmpty(again.user_code)).status).toBe(200);
+    await allowPoll(again.device_code);
+    const token = await json(await poll(again.device_code));
+    expect(token).toMatchObject({ drive_ids: [held], scope: 'read', write_paths: ['/inbox/x'] });
+    expect((await whoami(original.access_token)).status).toBe(401);
+    const me = await json(await whoami(token.access_token));
+    expect(me).toMatchObject({ scopes: ['read'], writePaths: ['/inbox/x'] });
   });
 
   it('ignores known_drive_ids without proof, so a known id grants nothing', async () => {

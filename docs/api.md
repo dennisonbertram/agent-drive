@@ -95,5 +95,6 @@ Full contract: `docs/agent-login.md` sections 2, 7, and 8. These endpoints use n
   account gets 30 device calls and 10 `not_found` results per 10 minutes; beyond that, 429
   `rate_limited`. Revoking an agent denies its approved but unredeemed requests.
 - A key missing a scope gets 403 `permission_denied`: `The API key lacks the "<scope>" scope.`
+- A key with `writePaths` (`POST /api/v1/keys` and the approve body accept `writePaths`: at most 16 canonical absolute paths, not `/`; `GET /keys` returns `write_paths`; `whoami` returns `writePaths`) may only put, move, copy, delete and restore at or under those paths, else 403 `permission_denied`: `The API key may only write under <paths>.` An empty list means no limit. Reads are not limited. The console is not affected.
 - Audit actions: `device.authorize`, `device.token`, `console.device.read`,
   `console.device.approve`, `console.device.deny`. Maintenance deletes requests older than 24 hours.

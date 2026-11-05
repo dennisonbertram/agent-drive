@@ -728,6 +728,76 @@ describe('Phase 1 core API', () => {
     expect(scopedDrives.items.map((drive: { id: string }) => drive.id)).toContain(driveId);
   });
 
+  it('limits writes, moves, copies, deletes and restores to write_paths while reads stay drive-wide', async () => {
+    const owner = await fixture('wp', 'wp-agent', 'wp-drive', ['manage']);
+    const create = (writePaths: unknown) =>
+      request('/keys', owner.token, 'POST', {
+        agentId: owner.agentId,
+        label: 'limited',
+        driveIds: [owner.driveId],
+        scopes: ['read', 'write', 'delete'],
+        writePaths,
+      });
+    for (const bad of [['/'], ['inbox'], ['/a/'], Array.from({ length: 17 }, (_, i) => `/p${i}`)])
+      expect((await create(bad)).status).toBe(400);
+    const created = await json(await create(['/inbox/x', '/inbox/x']));
+    expect(created.write_paths).toEqual(['/inbox/x']);
+    const token = created.token as string;
+    expect((await json(await request('/whoami', token))).writePaths).toEqual(['/inbox/x']);
+    const listed = await json(await request('/keys', owner.token));
+    expect(listed.items.find((k: { id: string }) => k.id === created.id).write_paths).toEqual([
+      '/inbox/x',
+    ]);
+
+    const denied = async (response: Response) => {
+      expect(response.status).toBe(403);
+      expect((await json(response)).error.message).toBe(
+        'The API key may only write under /inbox/x.',
+      );
+    };
+    const bytes = Buffer.from('limited');
+    expect(
+      (await uploadCommit(token, owner.driveId, '/inbox/x/a.txt', bytes)).response.status,
+    ).toBe(201);
+    expect((await uploadCommit(token, owner.driveId, '/inbox/x', bytes)).response.status).toBe(201);
+    for (const path of ['/inbox/xy/a.txt', '/outputs/a.txt'])
+      await denied(
+        await request(`/drives/${owner.driveId}/put`, token, 'POST', {
+          path,
+          ciphertextSize: 1,
+          wrappedKey: 'opaque-wrapped-key',
+        }),
+      );
+    const post = (op: string, body: Record<string, unknown>) =>
+      request(`/drives/${owner.driveId}/${op}`, token, 'POST', body);
+    // A file outside the prefix, written by an unrestricted key of the same drive.
+    const wide = key();
+    await pool.query(
+      `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+       VALUES ($1,$2,'wide',$3,$4::uuid[],ARRAY['read','write','delete']::text[])`,
+      [owner.accountId, owner.agentId, tokenHash(wide), [owner.driveId]],
+    );
+    await uploadCommit(wide, owner.driveId, '/outputs/o.txt', bytes);
+    await denied(await post('move', { path: '/inbox/x/a.txt', destinationPath: '/outputs/m.txt' }));
+    await denied(await post('move', { path: '/outputs/o.txt', destinationPath: '/inbox/x/m.txt' }));
+    expect(
+      (await post('move', { path: '/inbox/x/a.txt', destinationPath: '/inbox/x/b.txt' })).status,
+    ).toBe(200);
+    expect(
+      (await post('copy', { path: '/outputs/o.txt', destinationPath: '/inbox/x/c.txt' })).status,
+    ).toBe(201);
+    await denied(await post('copy', { path: '/inbox/x/c.txt', destinationPath: '/outputs/c.txt' }));
+    await denied(await post('delete', { path: '/outputs/o.txt' }));
+    expect((await post('delete', { path: '/inbox/x/c.txt' })).status).toBe(200);
+    await request(`/drives/${owner.driveId}/delete`, wide, 'POST', { path: '/outputs/o.txt' });
+    await denied(await post('restore', { path: '/outputs/o.txt' }));
+    // Reads are not path-limited.
+    await uploadCommit(wide, owner.driveId, '/outputs/r.txt', bytes);
+    expect(
+      (await request(`/drives/${owner.driveId}/get?path=%2Foutputs%2Fr.txt`, token)).status,
+    ).toBe(200);
+  });
+
   it('blocks writes at the spend cap while preserving reads and audits rate-limit responses', async () => {
     await uploadCommit(
       writeToken,
