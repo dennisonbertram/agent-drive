@@ -50,6 +50,12 @@ read in memory and counts as backed up. `agent-drive credentials import --from <
 it. `agent-drive check` fails with "drive key not backed up" until this is done. Never print or
 paste the bundle into a chat, a file in a drive, or a log.
 
+## Adding another agent
+
+Run `agent-drive login` on the new agent's machine. If the human has the drive's recovery file or
+credentials bundle, they choose "Add to an existing drive instead" on the approval page; their
+browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
+
 ## CLI commands
 
 All take `--drive ID` unless noted.

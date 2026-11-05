@@ -3,6 +3,9 @@
 import '../../styles/connect.css';
 
 import { useEffect, useState } from 'react';
+import { decodeDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
+import { driveKeyFromBundle, BUNDLE_PREFIX } from '@/src/console/credentials-bundle';
+import { parseRecoveryFile, sealDriveKey } from '@/src/device/seal';
 
 type Drive = { id: string; name: string };
 type DeviceRequest = {
@@ -13,6 +16,7 @@ type DeviceRequest = {
   expires_at: string;
   drives?: Drive[];
   creates_drive?: boolean;
+  public_key?: string;
   scopes?: string[] | null;
   write_paths?: string[] | null;
 };
@@ -73,6 +77,14 @@ export default function Connect({
   const [done, setDone] = useState(false);
   const [formError, setFormError] = useState('');
   const [delegate, setDelegate] = useState(false);
+  // Add to an existing drive (docs/agent-login.md section 12). The key lives only in this state.
+  const [accountDrives, setAccountDrives] = useState<Drive[]>([]);
+  const [existing, setExisting] = useState(false);
+  const [driveId, setDriveId] = useState('');
+  const [keyText, setKeyText] = useState('');
+  const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
+  const [folder, setFolder] = useState('');
 
   async function load(raw: string) {
     const code = normalizeCode(raw);
@@ -86,6 +98,9 @@ export default function Connect({
     try {
       const found = await api<DeviceRequest>(`device/${encodeURIComponent(code)}`);
       setRequest(found);
+      setExisting(false);
+      setAccountDrives([]);
+      if (found.creates_drive) void loadDrives();
     } catch (error) {
       if (error instanceof HttpError && error.status === 404)
         setProblem({
@@ -102,6 +117,24 @@ export default function Connect({
     }
   }
 
+  async function loadDrives() {
+    try {
+      const items: Drive[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: { items: Drive[]; nextCursor: string | null } = await api(
+          `drives?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        );
+        items.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      setAccountDrives(items);
+      setDriveId(items[0]?.id ?? '');
+    } catch {
+      // The one-click default still works without the drive list.
+    }
+  }
+
   useEffect(() => {
     // Load the prefilled code once on mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -114,11 +147,35 @@ export default function Connect({
     setFormError('');
     setBusy(true);
     try {
-      await api(
-        `device/${encodeURIComponent(request.user_code)}/approve`,
-        'POST',
-        delegate ? { delegate: true } : {},
-      );
+      let body: unknown = delegate ? { delegate: true } : {};
+      if (existing) {
+        // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
+        const pasted = keyText.trim();
+        const text = keyFile ? await keyFile.text() : pasted;
+        if (!text) throw new Error('Paste the drive key or choose a recovery file.');
+        if (keyFile && keyFile.size > 16_384)
+          throw new Error('This is not a valid drive key file.');
+        const key = text.trim().startsWith(BUNDLE_PREFIX)
+          ? driveKeyFromBundle(text, driveId)
+          : keyFile
+            ? parseRecoveryFile(text, driveId)
+            : text.trim();
+        decodeDriveKey(key);
+        if (!request.public_key) throw new Error('This request has no agent key. Start again.');
+        const sealed = await sealDriveKey(request.public_key, driveId, key);
+        body = {
+          driveIds: [driveId],
+          scopes: [
+            ...(readOnly ? ['read'] : ['read', 'write', 'delete', 'share']),
+            ...(delegate ? ['delegate'] : []),
+          ],
+          sealedDriveKeys: { [driveId]: sealed },
+          writePaths: folder.trim() ? [folder.trim()] : [],
+        };
+        setKeyText('');
+        setKeyFile(null);
+      }
+      await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
       setDone(true);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
@@ -216,14 +273,74 @@ export default function Connect({
         <dt>Requested</dt>
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
-      <p className="banner info">
-        {reconnect.length > 0
-          ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
-          : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.'}
-        {request.scopes
-          ? ` Keeps its previous permissions (${request.scopes.join(', ')}${request.write_paths?.length ? `; writes under ${request.write_paths.join(', ')}` : ''}).`
-          : ''}
-      </p>
+      {existing ? (
+        <div className="connect-existing">
+          <p className="banner info">
+            You are giving {request.client_name}
+            {request.machine ? ` on ${request.machine}` : ''} the key to this drive. Your browser
+            seals the key to this agent’s login; Agent Drive never sees it. Approve only if the code
+            above matches the terminal you trust.
+          </p>
+          <label>
+            Drive
+            <select value={driveId} onChange={(event) => setDriveId(event.target.value)}>
+              {accountDrives.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Drive key or credentials bundle (adcred1.…)
+            <input
+              type="password"
+              autoComplete="off"
+              value={keyText}
+              onChange={(event) => setKeyText(event.target.value)}
+            />
+          </label>
+          <label>
+            Or choose a recovery file or credentials bundle
+            <input type="file" onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)} />
+          </label>
+          <label className="connect-check">
+            <input
+              type="checkbox"
+              checked={readOnly}
+              onChange={(event) => setReadOnly(event.target.checked)}
+            />{' '}
+            Read only
+          </label>
+          <label>
+            Only allow writes under (optional)
+            <input
+              value={folder}
+              onChange={(event) => setFolder(event.target.value)}
+              placeholder="/inbox/x"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <button type="button" className="connect-link" onClick={() => setExisting(false)}>
+            Use a new drive instead
+          </button>
+        </div>
+      ) : (
+        <p className="banner info">
+          {reconnect.length > 0
+            ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
+            : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.'}
+          {request.scopes
+            ? ` Keeps its previous permissions (${request.scopes.join(', ')}${request.write_paths?.length ? `; writes under ${request.write_paths.join(', ')}` : ''}).`
+            : ''}
+        </p>
+      )}
+      {!existing && request.creates_drive && accountDrives.length > 0 && (
+        <button type="button" className="connect-link" onClick={() => setExisting(true)}>
+          Add to an existing drive instead
+        </button>
+      )}
       <label className="connect-delegate">
         <input
           type="checkbox"

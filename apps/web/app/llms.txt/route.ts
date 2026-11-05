@@ -74,6 +74,13 @@ in the sandbox platform, using the output of \`agent-drive credentials export --
 new sandbox is then already connected and can read earlier files. The human does not need to
 approve again for each run.
 
+## Adding another agent to your drive
+
+Run \`agent-drive login\` on the new agent's machine. If the human has the drive's recovery file
+or credentials bundle, they choose "Add to an existing drive instead" on the approval page,
+pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
+never sees it. They can make the new agent read-only or limit its writes to one folder.
+
 ## Hosted assistants
 
 Chat assistants that run in a vendor's cloud and have no shell on your machine are not
