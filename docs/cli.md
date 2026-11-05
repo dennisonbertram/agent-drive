@@ -98,7 +98,7 @@ The drive key lives only in the config file, so lose the machine and the files c
 owner approves at <origin>/connect?code=CODE.` It does not approve: the human opens that page and
   clicks Approve once. The drive defaults to the only configured drive key. Scopes default to
   `read write` (`read` with `--read-only`); they must be within the caller's own, else pass
-  `--scope`. Write paths default to the caller's own. It never prints or sends a key in the clear.
+  `--scope`. Write paths default to the caller's own. It never prints or sends a key in the clear. It offers only a drive key saved for the current API origin (as login does); a key from `AGENT_DRIVE_KEY*`, `--key-file`, or saved for another origin is refused, so an endpoint other than the key's own cannot obtain it.
   Which handoff when: `grant` when the new agent has a shell and a human is present; the human's
   "Add to an existing drive instead" on `/connect` when they hold the recovery file; `credentials
 issue` for a sandbox with no browser.

@@ -1249,6 +1249,43 @@ describe('grant by an existing agent (handoff a)', () => {
     expect((await approveWith(k, narrowed.user_code, { offerRevision: 1 })).status).toBe(409);
   });
 
+  it('runs grant and approve in parallel without a deadlock or a 500', async () => {
+    const g = await makeGranter();
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const started = await start({ client_name: `race-${i}` });
+      const [granted, approved] = await Promise.all([
+        offer(g, started.user_code),
+        approveWith(g, started.user_code, { offerRevision: 0 }),
+      ]);
+      seen.push(`${granted.status}/${approved.status}`);
+      // Grant wins: approve sees a newer revision (409). Approve wins: the request is no longer pending (404).
+      expect([200, 404]).toContain(granted.status);
+      expect([200, 409]).toContain(approved.status);
+    }
+    expect(seen.some((pair) => pair.includes('500'))).toBe(false);
+  });
+
+  it('takes the account lock before the request lock, so an approving transaction cannot deadlock with grant', async () => {
+    const g = await makeGranter();
+    const started = await start({ client_name: 'order' });
+    const tx = await pool.connect();
+    try {
+      // What approve does: the account row first, then the request row.
+      await tx.query('BEGIN');
+      await tx.query('SELECT 1 FROM accounts WHERE id = $1 FOR UPDATE', [g.account]);
+      const pendingGrant = offer(g, started.user_code);
+      await new Promise((wake) => setTimeout(wake, 300)); // let grant reach its first lock
+      await tx.query('SELECT 1 FROM device_authorizations WHERE user_code = $1 FOR UPDATE', [
+        started.user_code,
+      ]);
+      await tx.query('COMMIT');
+      expect((await pendingGrant).status).toBe(200);
+    } finally {
+      tx.release();
+    }
+  });
+
   it('fails closed at exchange when the offer or its key row is gone', async () => {
     const g = await makeGranter();
     const started = await start({ client_name: 'orphan' });

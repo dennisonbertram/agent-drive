@@ -796,7 +796,8 @@ export async function bearerDeviceEndpoint(
     }
     assertDelegation(auth, { driveIds: [driveId], scopes, writePaths: paths });
     const revision = await withTransaction(async (client) => {
-      // The request row lock orders this against approve, which also holds it.
+      // Lock order everywhere: account, then request. Approve and exchange take the same order.
+      await lockBillingAccount(client, auth.accountId);
       const pending = await client.query(
         `SELECT id FROM device_authorizations WHERE ${pendingRequest}
           ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,

@@ -775,6 +775,12 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'grantee', 'm-grantee');
     const b = await startLogin(envB, 'grantee-bot');
     const proxy = await startCaptureProxy(baseURL!);
+    // grant offers only a key saved for the API origin in use; record the proxy as that origin.
+    const savedA = JSON.parse(await readFile(envA.AGENT_DRIVE_CONFIG!, 'utf8')) as {
+      driveKeyOrigins: Record<string, string>;
+    };
+    savedA.driveKeyOrigins[driveId!] = proxy.url;
+    await writeFile(envA.AGENT_DRIVE_CONFIG!, JSON.stringify(savedA));
     const granted = await cli(['grant', b.code, '--write-path', '/inbox/b'], {
       ...envA,
       AGENT_DRIVE_API_URL: `${proxy.url}/api`,

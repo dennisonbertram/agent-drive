@@ -616,7 +616,7 @@ describe('grantLogin', () => {
     await grantLogin({
       code: 'bcdf-ghjk',
       client,
-      driveKeys: { d1: K1 },
+      config: { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } },
       log: (line) => out.push(line),
       ...options,
     });
@@ -648,5 +648,43 @@ describe('grantLogin', () => {
     const r = await grant({ readOnly: true });
     expect(JSON.parse(r.bodies[0]!).scopes).toEqual(['read']);
     await expect(grant({}, ['read', 'delegate'])).rejects.toThrow(/pass --scope/);
+  });
+
+  it('refuses a drive key saved for another origin and posts nothing', async () => {
+    const posts: string[] = [];
+    const client = new AgentDriveClient({
+      apiUrl: 'https://evil.test/api',
+      apiKey: GRANTER_TOKEN,
+      fetch: (async (_url: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') posts.push(String(init.body));
+        return json(200, {});
+      }) as typeof fetch,
+    });
+    const config = { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } };
+    await expect(
+      grantLogin({ code: 'BCDF-GHJK', client, config, drive: 'd1', log: () => undefined }),
+    ).rejects.toThrow(/no drive key for d1/);
+    await expect(
+      grantLogin({
+        code: 'BCDF-GHJK',
+        client,
+        config: { driveKeys: { d1: K1 } },
+        log: () => undefined,
+      }),
+    ).rejects.toThrow(/drive key/);
+    expect(posts).toEqual([]);
+  });
+
+  it('summarizes the offer from scopes and paths', async () => {
+    expect((await grant({ readOnly: true })).out[1]).toContain('(read; no writes)');
+    expect((await grant({ readOnly: true, writePaths: ['/x'] })).out[1]).toContain(
+      '(read; no writes)',
+    );
+    expect((await grant({ writePaths: ['/a', '/b'] })).out[1]).toContain(
+      '(read write; writes under /a, /b)',
+    );
+    expect((await grant({}, ['read', 'write', 'delegate'])).out[1]).toContain(
+      '(read write; writes under /inbox)',
+    );
   });
 });

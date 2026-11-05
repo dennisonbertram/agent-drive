@@ -315,11 +315,6 @@ async function run(command: string, raw: string[]) {
     if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
     const connection = await resolveConnection();
     const drive = args.values.drive?.[0];
-    const driveKeys = { ...connection.config.driveKeys };
-    if (drive) {
-      const key = await resolveDriveKey(drive, args.values['key-file'], connection.config);
-      if (key) driveKeys[drive] = key;
-    }
     await grantLogin({
       code,
       ...(drive ? { drive } : {}),
@@ -331,7 +326,7 @@ async function run(command: string, raw: string[]) {
         apiKey: connection.apiKey,
         machine: machineName(),
       }),
-      driveKeys,
+      config: connection.config,
       log: (line) => process.stdout.write(`${line}\n`),
     });
     return;

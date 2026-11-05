@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { validateUrl, type AgentDriveClient } from './client.js';
 import {
+  type AgentDriveConfig,
   configPath,
   isValidDriveKey,
   keysForOrigin,
@@ -254,14 +255,18 @@ export async function grantLogin(options: {
   scopes?: string[];
   writePaths?: string[];
   client: AgentDriveClient;
-  driveKeys: Record<string, string>;
+  config: AgentDriveConfig;
   log: (line: string) => void;
 }) {
   const { client } = options;
-  const ids = Object.keys(options.driveKeys);
+  // Only a key saved for this API origin may be sealed (same rule as login), so an endpoint that
+  // is not the one the key belongs to cannot obtain it. Env and --key-file keys have no recorded
+  // origin and are never offered by grant.
+  const driveKeys = keysForOrigin(options.config, client.apiOrigin);
+  const ids = Object.keys(driveKeys);
   const drive = options.drive ?? (ids.length === 1 ? ids[0] : undefined);
   if (!drive) throw new Error('Pass --drive <id>; this machine holds no single default drive key.');
-  const driveKey = options.driveKeys[drive];
+  const driveKey = driveKeys[drive];
   if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
   const code = options.code.toUpperCase();
   const who = await client.whoami();
@@ -283,7 +288,11 @@ export async function grantLogin(options: {
   await client.grantDevice(code, { driveId: drive, scopes, writePaths, sealedDriveKey });
   options.log(
     `Offered drive ${drive} to ${request.client_name} (${scopes.join(' ')}; ${
-      writePaths.length ? `writes under ${writePaths.join(', ')}` : 'writes anywhere in the drive'
+      !scopes.includes('write')
+        ? 'no writes'
+        : writePaths.length
+          ? `writes under ${writePaths.join(', ')}`
+          : 'writes anywhere in the drive'
     }). The owner approves at ${client.apiOrigin}/connect?code=${code}.`,
   );
 }
