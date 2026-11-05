@@ -110,11 +110,13 @@ dialog .banner.info {
   flex: none;
 }
 .console-content .entity-row .badge.positive,
+.console-content .panel-toolbar .badge.positive,
 .console-content .drive-identity .badge.positive {
   color: var(--ink, #121211);
   background: #fff;
 }
 .console-content .entity-row .badge.positive::before,
+.console-content .panel-toolbar .badge.positive::before,
 .console-content .drive-identity .badge.positive::before {
   background: var(--sig, #ff5a1f);
   box-shadow:
@@ -245,7 +247,19 @@ dialog .banner.info {
 
 /* ---- agent connect panel ---- */
 .agent-panel {
-  padding: 18px 20px;
+  padding: 0 20px;
+}
+.agent-panel > summary {
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  font: 600 15px var(--sans, 'Space Grotesk', system-ui, sans-serif);
+}
+.agent-panel[open] {
+  padding-bottom: 18px;
+}
+.agent-panel[open] > summary {
+  margin-bottom: 8px;
 }
 .agent-panel .agent-give {
   margin: 12px 0;
@@ -473,6 +487,23 @@ dialog input[data-testid='drive-key'] {
   font: 400 13px/1.6 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0;
   text-transform: none;
+}
+dialog textarea {
+  resize: none;
+}
+dialog .copy-button {
+  align-self: flex-start;
+  justify-self: start;
+  width: auto;
+  border-color: var(--ink, #121211);
+  color: var(--ink, #121211);
+}
+dialog .copy-button:hover {
+  background: var(--al2, #d6d4cf);
+}
+dialog select {
+  width: 100%;
+  min-width: 0;
 }
 dialog input[type='password'] {
   min-height: 44px;

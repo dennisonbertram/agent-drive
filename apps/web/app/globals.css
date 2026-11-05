@@ -408,6 +408,94 @@ button {
   position: relative;
   overflow-x: auto;
 }
+/* .primary and .actions are also global button/toolbar classes: neutralise them on cells */
+.table-stack td.primary,
+.table-stack td.primary:hover:not(:disabled) {
+  background: none;
+  box-shadow: none;
+}
+.table-stack td.actions {
+  display: table-cell;
+}
+@media (max-width: 760px) {
+  .table-scroll.table-stack {
+    overflow: visible;
+  }
+  .table-stack table {
+    min-width: 0; /* beats the global 620px table minimum */
+  }
+  .table-stack table,
+  .table-stack tbody,
+  .table-stack tr,
+  .table-stack td {
+    display: block;
+    width: auto;
+  }
+  .table-stack thead {
+    /* keep column names for screen readers */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .table-stack table td {
+    /* (0,1,2) beats .file-panel td and .billing-page td (0,1,1) */
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+    max-width: none;
+    padding: 3px 0;
+    border: 0;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    text-align: right;
+    font: 400 12.5px/1.5 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  }
+  .table-stack table td::before {
+    content: attr(data-label);
+    flex: none;
+    text-align: left;
+    font: 500 10.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted, #5d5b56);
+  }
+  .table-stack table tr {
+    display: block;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  }
+  .table-stack table tr:last-child {
+    border-bottom: 0;
+  }
+  .table-stack table td.primary {
+    /* title: wraps, no label */
+    display: block;
+    padding: 0 0 6px;
+    text-align: left;
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .table-stack table td.primary::before,
+  .table-stack table td.actions::before {
+    content: none;
+  }
+  .table-stack table td.actions {
+    display: block;
+    padding: 8px 0 0;
+    text-align: left;
+  }
+  .table-stack small {
+    display: block;
+    text-align: right;
+  }
+}
 table {
   border-collapse: collapse;
   width: 100%;

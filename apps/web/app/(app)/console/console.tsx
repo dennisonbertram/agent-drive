@@ -17,6 +17,7 @@ import {
   generateDriveKey,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
+import { BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
 import '../../styles/console.css';
 import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
@@ -104,7 +105,7 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return data as T;
 }
 
-function ConnectAgentPanel() {
+function ConnectAgentPanel({ open }: { open: boolean }) {
   const origin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
@@ -123,8 +124,8 @@ function ConnectAgentPanel() {
     ],
   ];
   return (
-    <section className="panel agent-panel" aria-labelledby="connect-agent-title">
-      <h2 id="connect-agent-title">Connect an agent</h2>
+    <details className="panel agent-panel" open={open}>
+      <summary>Connect an agent</summary>
       <p>
         Paste this into your agent. It installs the CLI and gives you a link; open it and click
         Approve. The agent sets up its own encrypted drive.
@@ -145,7 +146,7 @@ function ConnectAgentPanel() {
           <CopyButton text={text!} label={`Copy ${name} setup`} />
         </details>
       ))}
-    </section>
+    </details>
   );
 }
 
@@ -212,6 +213,12 @@ function Dialog({
   useEffect(() => {
     const dialog = ref.current;
     dialog?.showModal();
+    // Land on the first field, or the Copy button of a secret receipt, not on Close.
+    dialog
+      ?.querySelector<HTMLElement>(
+        'input:not([type=checkbox]):not([type=file]):not([readonly]), select, .copy-button, .version-row button',
+      )
+      ?.focus();
     return () => dialog?.close();
   }, []);
   return (
@@ -249,6 +256,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [modal, setModal] = useState<ModalName>(null);
+  const [navOpen, setNavOpen] = useState(false);
   const [driveReceipt, setDriveReceipt] = useState<{ id: string; key: string } | null>(null);
   const [keyReceipt, setKeyReceipt] = useState('');
   const [saved, setSaved] = useState(false);
@@ -276,6 +284,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
+  const loaded = filePage?.scope === fileScope;
+  const backupText = drive?.key_backup_at
+    ? `Key backed up ${new Date(drive.key_backup_at).toLocaleDateString()} (${drive.key_backup_method})`
+    : 'This drive’s key hasn’t been backed up. If the agent’s machine is lost, these files can’t be opened. Ask the agent to run agent-drive credentials export';
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
 
   const refresh = useCallback(async () => {
@@ -315,6 +327,29 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       active = false;
     };
   }, [selected, tab, fileScope]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setNavOpen(false);
+      document.querySelector<HTMLElement>('.nav-toggle')?.focus();
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!(event.target as Element).closest('.sidebar')) setNavOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer);
+    };
+  }, [navOpen]);
+  useEffect(() => {
+    // Keep the selected drive fully visible in the phone bay strip.
+    document
+      .querySelector('.bay[aria-pressed="true"]')
+      ?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [selected, drives.length, ready]);
   useEffect(() => {
     if (!driveReceipt && !keyReceipt) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -468,10 +503,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   );
   return (
     <div className="console-shell">
-      <aside className="sidebar">
-        <Link href="/" className="brand">
-          <span className="brand-mark">a/</span> agent drive
-        </Link>
+      <aside className="sidebar" data-nav-open={navOpen}>
+        <BrandMark />
         <div className="workspace-label">
           <span className="workspace-avatar">P</span>
           <div>
@@ -479,7 +512,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           </div>
         </div>
         <p className="nav-label">WORKSPACE</p>
-        <nav aria-label="Workspace">
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-expanded={navOpen}
+          aria-controls="console-nav"
+          onClick={() => setNavOpen((value) => !value)}
+        >
+          {tab} <span aria-hidden>▾</span>
+        </button>
+        <nav aria-label="Workspace" id="console-nav">
           {(['Files', 'Agents', 'API keys', 'Usage', 'Trash'] as Tab[]).map((item, index) => (
             <button
               key={item}
@@ -488,22 +530,30 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               onClick={() => {
                 setTab(item);
                 setError('');
+                setNotice('');
                 setFilter('');
+                setNavOpen(false);
               }}
             >
               <span className="nav-icon" aria-hidden>
                 {['▤', '⌘', '⚿', '▥', '⌫'][index]}
               </span>
               {item}
-              {item === 'Files' && tab === 'Files' && selected && (
+              {item === 'Files' && tab === 'Files' && selected && filePage?.scope === fileScope && (
                 <span className="nav-count">{fileItems.length}</span>
               )}
             </button>
           ))}
           <Link className="nav-item" href="/console/billing">
-            <span aria-hidden="true">$</span>Billing &amp; limits
+            <span className="nav-icon" aria-hidden>
+              $
+            </span>
+            Billing &amp; limits
           </Link>
           <Link className="nav-item" href="/console/settings">
+            <span className="nav-icon" aria-hidden>
+              ↺
+            </span>
             Activity &amp; deletion
           </Link>
         </nav>
@@ -540,6 +590,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   aria-pressed={item.id === selected}
                   onClick={() => {
                     setSelected(item.id);
+                    setNotice('');
                     setFilter('');
                   }}
                 >
@@ -572,11 +623,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         )}
         <div className="console-content">
           <div className="page-heading">
-            <div>
-              <p className="eyebrow">YOUR AGENTS’ SHARED MEMORY</p>
+            <div className="heading-text">
               <h1>{tab === 'Files' ? 'Drives & files' : tab}</h1>
-              <p>
-                {
+              <p
+                role="status"
+                className={notice ? 'notice-slot' : 'heading-sub'}
+                title={notice || undefined}
+              >
+                {notice ? (
+                  <>
+                    <span className="notice-text">{notice}</span>
+                    <button type="button" className="notice-dismiss" onClick={() => setNotice('')}>
+                      Dismiss
+                    </button>
+                  </>
+                ) : (
                   {
                     Files: 'A home for the work. A starting point for what’s next.',
                     Agents: 'Separate identities. Purpose-built permissions.',
@@ -584,7 +645,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     Usage: 'Understand what your workspace stores and serves.',
                     Trash: 'Recover deleted files without losing their history.',
                   }[tab]
-                }
+                )}
               </p>
             </div>
             <div className="actions">
@@ -621,11 +682,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             </div>
           </div>
           {!modal && errorBanner}
-          {notice && (
-            <div role="status" className="banner success">
-              {notice}
-            </div>
-          )}
           {!ready ? (
             <section className={`panel empty ${error ? '' : 'loading'}`}>
               <h2>{error ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
@@ -664,72 +720,39 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
               {(tab === 'Files' || tab === 'Trash') && drives.length > 0 && (
                 <>
-                  <div className="drive-toolbar">
-                    <div className="drive-identity">
-                      <code data-testid="drive-id">{selected}</code>
-                      <span className={`badge ${hasKey ? 'positive' : ''}`}>
-                        {hasKey ? 'Key loaded' : 'Key required for downloads'}
-                      </span>
-                    </div>
-                    {hasKey ? (
-                      <button
-                        className="button secondary"
-                        onClick={() => {
-                          setDriveKeys((current) => {
-                            const next = { ...current };
-                            delete next[selected];
-                            return next;
-                          });
-                          setNotice('Drive key removed from this browser session.');
-                        }}
-                      >
-                        Forget key
-                      </button>
-                    ) : (
-                      <button className="button secondary" onClick={() => open('unlock')}>
-                        Load drive key
-                      </button>
-                    )}
-                  </div>
-                  {tab === 'Files' && drive && (
+                  {tab === 'Files' && drive && loaded && fileItems.length > 0 && (
                     <div
                       className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
                       data-testid="key-backup-status"
                     >
                       <span className={`led ${drive.key_backup_at ? 'dim' : 'on'}`} aria-hidden />
-                      {drive.key_backup_at ? (
-                        <>
-                          Key backed up {new Date(drive.key_backup_at).toLocaleDateString()} (
-                          {drive.key_backup_method})
-                        </>
-                      ) : (
-                        <>
-                          This drive&rsquo;s key hasn&rsquo;t been backed up. If the agent&rsquo;s
-                          machine is lost, these files can&rsquo;t be opened. Ask the agent to run{' '}
-                          <code>agent-drive credentials export</code>{' '}
+                      <span className="keyline-text" title={backupText}>
+                        {drive.key_backup_at ? (
+                          backupText
+                        ) : (
+                          <>
+                            This drive&rsquo;s key hasn&rsquo;t been backed up. If the agent&rsquo;s
+                            machine is lost, these files can&rsquo;t be opened. Ask the agent to run{' '}
+                            <code>agent-drive credentials export</code>
+                          </>
+                        )}
+                      </span>
+                      <span className="keyline-actions">
+                        {!drive.key_backup_at && (
                           <CopyButton
                             text="agent-drive credentials export"
                             label="Copy credentials export command"
                           />
-                        </>
-                      )}
-                      {hasKey && (
-                        <>
-                          {' '}
+                        )}
+                        {hasKey && (
                           <button
                             className="button secondary"
                             onClick={() => void act(downloadRecoveryFile)}
                           >
                             Download recovery file
                           </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {!hasKey && tab === 'Files' && (
-                    <div className="banner info">
-                      You can browse file names without a key. Load your drive key to decrypt and
-                      download contents. Keys are kept only in this page’s memory.
+                        )}
+                      </span>
                     </div>
                   )}
                   <section className="panel file-panel">
@@ -738,131 +761,167 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         {tab === 'Trash' ? 'Deleted files' : 'All files'}{' '}
                         <span className="muted">/ {drive?.name}</span>
                       </h2>
-                      <input
-                        aria-label="Filter loaded files"
-                        placeholder="Filter loaded files…"
-                        value={filter}
-                        onChange={(event) => setFilter(event.target.value)}
-                      />
+                      <div className="toolbar-tools">
+                        <code className="drive-id" data-testid="drive-id" title={selected}>
+                          {selected}
+                        </code>
+                        <CopyButton text={selected} label="Copy drive ID" />
+                        <span className={`badge ${hasKey ? 'positive' : ''}`}>
+                          {hasKey ? 'Key loaded' : 'Key required for downloads'}
+                        </span>
+                        {hasKey ? (
+                          <button
+                            className="button secondary"
+                            onClick={() => {
+                              setDriveKeys((current) => {
+                                const next = { ...current };
+                                delete next[selected];
+                                return next;
+                              });
+                              setNotice('Drive key removed from this browser session.');
+                            }}
+                          >
+                            Forget key
+                          </button>
+                        ) : (
+                          <button className="button secondary" onClick={() => open('unlock')}>
+                            Load drive key
+                          </button>
+                        )}
+                        <input
+                          aria-label="Filter loaded files"
+                          placeholder="Filter loaded files…"
+                          value={filter}
+                          disabled={!fileItems.length}
+                          onChange={(event) => setFilter(event.target.value)}
+                        />
+                      </div>
                     </div>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>FILE PATH</th>
-                            <th>{tab === 'Trash' ? 'DELETED' : 'ENCRYPTED SIZE'}</th>
-                            <th>{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
-                            <th>MODIFIED</th>
-                            <th>
-                              <span className="sr-only">Actions</span>
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filter && fileItems.length > 0 && !shownFiles.length && (
-                            <tr>
-                              <td colSpan={5}>No loaded files match “{filter}”.</td>
+                    {shownFiles.length > 0 && (
+                      <div className="table-scroll table-stack">
+                        <table role="table">
+                          <thead role="rowgroup">
+                            <tr role="row">
+                              <th role="columnheader">FILE PATH</th>
+                              <th role="columnheader">
+                                {tab === 'Trash' ? 'DELETED' : 'ENCRYPTED SIZE'}
+                              </th>
+                              <th role="columnheader">{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
+                              <th role="columnheader">MODIFIED</th>
+                              <th role="columnheader">
+                                <span className="sr-only">Actions</span>
+                              </th>
                             </tr>
-                          )}
-                          {shownFiles.map((file) => (
-                            <tr key={file.id}>
-                              <td className="file-cell">
-                                <span className="file-path">
-                                  <span className="file-dir">
-                                    {file.path.slice(0, file.path.lastIndexOf('/') + 1)}
+                          </thead>
+                          <tbody role="rowgroup">
+                            {shownFiles.map((file) => (
+                              <tr key={file.id} role="row">
+                                <td className="file-cell primary" role="cell" title={file.path}>
+                                  <span className="file-path">
+                                    <span className="file-dir">
+                                      {file.path.slice(0, file.path.lastIndexOf('/') + 1)}
+                                    </span>
+                                    <span className="file-name">
+                                      {file.path.slice(file.path.lastIndexOf('/') + 1)}
+                                    </span>
                                   </span>
-                                  {file.path.slice(file.path.lastIndexOf('/') + 1)}
-                                </span>
-                              </td>
-                              <td>
-                                {tab === 'Trash'
-                                  ? date(file.deletedAt)
-                                  : size(Number(file.ciphertext_size ?? 0))}
-                              </td>
-                              <td>
-                                {tab === 'Trash' ? (
-                                  'Versions preserved'
-                                ) : (
-                                  <span className="author">
-                                    <span className="led dim" aria-hidden />
-                                    {authorLabel(
-                                      agents.find((agent) => agent.id === file.agent_id)?.name ??
-                                        file.agent_id ??
-                                        '',
-                                    )}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="modified">{modifiedAt(file.created_at)}</td>
-                              <td>
-                                <div className="row-actions">
+                                </td>
+                                <td role="cell" data-label={tab === 'Trash' ? 'Deleted' : 'Size'}>
+                                  {tab === 'Trash'
+                                    ? date(file.deletedAt)
+                                    : size(Number(file.ciphertext_size ?? 0))}
+                                </td>
+                                <td
+                                  role="cell"
+                                  data-label={tab === 'Trash' ? 'Recovery' : 'Author'}
+                                >
                                   {tab === 'Trash' ? (
-                                    <>
-                                      <button
-                                        disabled={busy}
-                                        onClick={() => void act(() => restore(file.path))}
-                                      >
-                                        Restore
-                                      </button>
-                                      <button
-                                        disabled={busy}
-                                        onClick={() => void act(() => showVersions(file.path))}
-                                      >
-                                        Versions
-                                      </button>
-                                    </>
+                                    'Versions preserved'
                                   ) : (
-                                    <>
-                                      <button
-                                        disabled={busy || !hasKey}
-                                        title={
-                                          !hasKey
-                                            ? 'Load your drive key first'
-                                            : 'Decrypt and download'
-                                        }
-                                        onClick={() => void act(() => download(file))}
-                                      >
-                                        Download
-                                      </button>
-                                      <button
-                                        disabled={busy}
-                                        onClick={() => void act(() => showVersions(file.path))}
-                                      >
-                                        Versions
-                                      </button>
-                                      <button
-                                        disabled={busy}
-                                        onClick={() =>
-                                          void act(async () => {
-                                            await api(`drives/${selected}/delete`, 'POST', {
-                                              path: file.path,
-                                            });
-                                            await refresh();
-                                            setNotice(
-                                              `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
-                                            );
-                                          })
-                                        }
-                                      >
-                                        Trash
-                                      </button>
-                                    </>
+                                    <span className="author">
+                                      <span className="led dim" aria-hidden />
+                                      {authorLabel(
+                                        agents.find((agent) => agent.id === file.agent_id)?.name ??
+                                          file.agent_id ??
+                                          '',
+                                      )}
+                                    </span>
                                   )}
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {!fileItems.length && (
-                      <div className={`empty ${filePage?.scope !== fileScope ? 'loading' : ''}`}>
+                                </td>
+                                <td className="modified" role="cell" data-label="Modified">
+                                  {modifiedAt(file.created_at)}
+                                </td>
+                                <td className="actions" role="cell">
+                                  <div className="row-actions">
+                                    {tab === 'Trash' ? (
+                                      <>
+                                        <button
+                                          disabled={busy}
+                                          onClick={() => void act(() => restore(file.path))}
+                                        >
+                                          Restore
+                                        </button>
+                                        <button
+                                          disabled={busy}
+                                          onClick={() => void act(() => showVersions(file.path))}
+                                        >
+                                          Versions
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          disabled={busy || !hasKey}
+                                          title={
+                                            !hasKey
+                                              ? 'Load your drive key first'
+                                              : 'Decrypt and download'
+                                          }
+                                          onClick={() => void act(() => download(file))}
+                                        >
+                                          Download
+                                        </button>
+                                        <button
+                                          disabled={busy}
+                                          onClick={() => void act(() => showVersions(file.path))}
+                                        >
+                                          Versions
+                                        </button>
+                                        <button
+                                          disabled={busy}
+                                          onClick={() =>
+                                            void act(async () => {
+                                              await api(`drives/${selected}/delete`, 'POST', {
+                                                path: file.path,
+                                              });
+                                              await refresh();
+                                              setNotice(
+                                                `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
+                                              );
+                                            })
+                                          }
+                                        >
+                                          Trash
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {!loaded && (
+                      <div className="empty loading">
+                        <h3>Loading files…</h3>
+                      </div>
+                    )}
+                    {loaded && !fileItems.length && (
+                      <div className="empty">
                         <h3>
-                          {filePage?.scope !== fileScope
-                            ? 'Loading files…'
-                            : tab === 'Trash'
-                              ? 'Nothing in the trash.'
-                              : 'Ready for your first file.'}
+                          {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}
                         </h3>
                         <p>
                           {tab === 'Trash'
@@ -874,11 +933,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             className="button secondary"
                             onClick={() => {
                               setTab('API keys');
+                              setNotice('');
                             }}
                           >
                             Connect an agent
                           </button>
                         )}
+                      </div>
+                    )}
+                    {loaded && fileItems.length > 0 && !shownFiles.length && (
+                      <div className="empty">
+                        <h3>No loaded files match “{filter}”.</h3>
                       </div>
                     )}
                     {filePage?.scope === fileScope && filePage.nextCursor && (
@@ -902,7 +967,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </button>
                     )}
                     <div className="panel-footer">
-                      {fileItems.length} loaded{' '}
+                      {loaded
+                        ? filter
+                          ? `${shownFiles.length} of ${fileItems.length}`
+                          : `${fileItems.length} loaded`
+                        : ''}{' '}
                       <span>
                         File contents encrypted · Paths and metadata visible to the service
                       </span>
@@ -916,7 +985,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   <p>Create a drive to start storing files.</p>
                 </section>
               )}
-              {tab === 'Agents' && <ConnectAgentPanel />}
+              {tab === 'Agents' && (
+                <ConnectAgentPanel open={!activeAgents.length && !apiKeys.length} />
+              )}
               {tab === 'Agents' && (
                 <section className="panel">
                   <div className="panel-toolbar">
@@ -969,7 +1040,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
               {tab === 'API keys' && (
                 <>
-                  <ConnectAgentPanel />
+                  <ConnectAgentPanel open={!activeAgents.length && !apiKeys.length} />
                   <section className="panel">
                     <div className="panel-toolbar">
                       <h2>Agent access</h2>
@@ -1114,23 +1185,31 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <h2>Usage by author</h2>
                       <span className="muted">Versions attributed to their author</span>
                     </div>
-                    <div className="table-scroll">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>AGENT</th>
-                            <th>STORAGE</th>
-                            <th>VERSIONS</th>
-                            <th>OPERATIONS</th>
+                    <div className="table-scroll table-stack">
+                      <table role="table">
+                        <thead role="rowgroup">
+                          <tr role="row">
+                            <th role="columnheader">AGENT</th>
+                            <th role="columnheader">STORAGE</th>
+                            <th role="columnheader">VERSIONS</th>
+                            <th role="columnheader">OPERATIONS</th>
                           </tr>
                         </thead>
-                        <tbody>
+                        <tbody role="rowgroup">
                           {usage.agents.map((item) => (
-                            <tr key={item.id}>
-                              <td>{authorLabel(item.name)}</td>
-                              <td>{size(item.storageBytes)}</td>
-                              <td>{item.versions}</td>
-                              <td>{item.operations}</td>
+                            <tr key={item.id} role="row">
+                              <td className="primary" role="cell">
+                                {authorLabel(item.name)}
+                              </td>
+                              <td role="cell" data-label="Storage">
+                                {size(item.storageBytes)}
+                              </td>
+                              <td role="cell" data-label="Versions">
+                                {item.versions}
+                              </td>
+                              <td role="cell" data-label="Operations">
+                                {item.operations}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -1149,6 +1228,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       </main>
       {modal && (
         <Dialog
+          key={modal}
           title={
             {
               drive: 'Create a drive',
@@ -1195,6 +1275,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 Drive key
                 <textarea data-testid="drive-key" readOnly value={driveReceipt.key} />
               </label>
+              <CopyButton text={driveReceipt.key} label="Copy drive key" />
               <button
                 className="button secondary"
                 onClick={() =>
@@ -1255,9 +1336,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   decodeDriveKey(key);
                   setDriveKeys((current) => ({ ...current, [selected]: key }));
                   setModal(null);
-                  setNotice(
-                    'Key loaded into page memory. A download will verify that it matches this drive.',
-                  );
                 })
               }
             >
@@ -1347,7 +1425,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 Agent
                 <select name="agentId" required>
                   {activeAgents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
+                    <option key={agent.id} value={agent.id} title={agent.name}>
                       {agent.name}
                     </option>
                   ))}
@@ -1397,6 +1475,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 API key
                 <textarea data-testid="api-key" readOnly value={keyReceipt} />
               </label>
+              <CopyButton text={keyReceipt} label="Copy API key" />
               <label className="check-label">
                 <input
                   type="checkbox"
