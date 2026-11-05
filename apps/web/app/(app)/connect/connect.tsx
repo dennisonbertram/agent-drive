@@ -53,7 +53,13 @@ function normalizeCode(value: string) {
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
 }
 
-export default function Connect({ initialCode }: { initialCode: string }) {
+export default function Connect({
+  initialCode,
+  account,
+}: {
+  initialCode: string;
+  account: string;
+}) {
   const [codeInput, setCodeInput] = useState(initialCode);
   const [request, setRequest] = useState<DeviceRequest | null>(null);
   const [problem, setProblem] = useState<{ kind: 'missing' | 'error'; message: string } | null>(
@@ -62,7 +68,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
   const loginCommand = <code className="connect-cmd">agent-drive login</code>;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<'approved' | 'denied' | null>(null);
+  const [done, setDone] = useState(false);
   const [formError, setFormError] = useState('');
 
   async function load(raw: string) {
@@ -106,7 +112,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     setBusy(true);
     try {
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', {});
-      setDone('approved');
+      setDone(true);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
@@ -114,36 +120,15 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     }
   }
 
-  async function deny() {
-    if (!request) return;
-    setBusy(true);
-    setFormError('');
-    try {
-      await api(`device/${encodeURIComponent(request.user_code)}/deny`, 'POST', {});
-      setDone('denied');
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Denying failed.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (done)
     return (
-      <section className={`panel connect-card ${done}`} role="status">
+      <section className="panel connect-card approved" role="status">
         <span className="connect-tag">
-          <span
-            className={`connect-led ${done === 'approved' ? 'on' : 'off'}`}
-            aria-hidden="true"
-          />
-          {done === 'approved' ? 'Paired' : 'Refused'}
+          <span className="connect-led on" aria-hidden="true" />
+          Paired
         </span>
-        <h1>{done === 'approved' ? 'Approved' : 'Denied'}</h1>
-        <p>
-          {done === 'approved'
-            ? 'Approved. Return to your agent; it will finish setup on its own.'
-            : 'Denied. The agent was not given access.'}
-        </p>
+        <h1>Approved</h1>
+        <p>Approved. Return to your agent; it will finish setup on its own.</p>
       </section>
     );
 
@@ -205,7 +190,10 @@ export default function Connect({ initialCode }: { initialCode: string }) {
         <span className="connect-code" aria-label={`Code ${request.user_code}`}>
           {request.user_code}
         </span>
-        <p>Check that this matches your agent’s terminal. If it does not, deny.</p>
+        <p>
+          Check that this matches your agent’s terminal. If it does not, close this page; unapproved
+          requests expire on their own.
+        </p>
       </div>
       <dl className="connect-facts">
         <dt>Agent</dt>
@@ -216,6 +204,8 @@ export default function Connect({ initialCode }: { initialCode: string }) {
             <dd>{request.machine}</dd>
           </>
         )}
+        <dt>Account</dt>
+        <dd>{account}</dd>
         <dt>Requested</dt>
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
@@ -236,9 +226,6 @@ export default function Connect({ initialCode }: { initialCode: string }) {
           onClick={() => void approve()}
         >
           {busy ? 'Working…' : 'Approve agent'}
-        </button>
-        <button type="button" className="button secondary" disabled={busy} onClick={deny}>
-          Deny
         </button>
       </div>
       <p className="connect-note">You can revoke access any time in Console, Agents.</p>

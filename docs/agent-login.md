@@ -156,7 +156,7 @@ JSON with `Cache-Control: no-store`.
     file, plus an option to reuse a key already loaded in this tab. It is sealed in the browser
     (§4). Without it, the agent can list names but not decrypt; the page says so.
   - Permissions: read and write checked by default; delete and share optional; no manage.
-- Primary action "Approve agent", secondary "Deny". Success state: "Approved. Return to your
+- Only action "Approve agent" (no Deny button; unapproved requests expire). Success state: "Approved. Return to your
   agent; it will finish setup on its own."
 - Expired or unknown codes show a clear message with how to start again (`agent-drive login`).
 
@@ -232,8 +232,8 @@ recovery-key choices. The agent owns those decisions.
 
 ### Approval has no choices
 
-- `/connect` shows the code, agent name, machine, and request time, then **Approve agent** and
-  **Deny** only. There are no drive, permission, or key fields.
+- `/connect` shows the code, agent name, machine, and request time, the signed-in account, then **Approve agent**
+  only. There are no drive, permission, or key fields.
 - The copy says: "This agent gets its own encrypted drive. Its key is created and kept on that
   machine; Agent Drive never sees it." When reconnecting, it says "Reconnects to: <drive names>".
 - `POST /api/console/device/{code}/approve` with an empty body (`{}`) applies the defaults
