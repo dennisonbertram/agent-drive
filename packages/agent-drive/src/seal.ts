@@ -46,3 +46,45 @@ export async function unsealDriveKey(
   );
   return new TextDecoder().decode(plain);
 }
+
+// Seals a drive key to the device public key in docs/agent-login.md section 4 (the browser recipe).
+export async function sealDriveKey(
+  devicePublicKey: string,
+  driveId: string,
+  secret: string,
+): Promise<SealedDriveKey> {
+  const agent = await subtle.importKey(
+    'raw',
+    Buffer.from(devicePublicKey, 'base64url'),
+    curve,
+    false,
+    [],
+  );
+  const eph = await subtle.generateKey(curve, true, ['deriveBits']);
+  const bits = await subtle.deriveBits({ name: 'ECDH', public: agent }, eph.privateKey, 256);
+  const hkdf = await subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
+  const aes = await subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: text.encode('agent-drive-device-v1'),
+      info: text.encode(driveId),
+    },
+    hkdf,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt'],
+  );
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+  const ct = await subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: text.encode(driveId) },
+    aes,
+    text.encode(secret),
+  );
+  const b64 = (bytes: ArrayBuffer) => Buffer.from(bytes).toString('base64url');
+  return {
+    epk: b64(await subtle.exportKey('raw', eph.publicKey)),
+    iv: b64(iv.buffer),
+    ct: b64(ct),
+  };
+}

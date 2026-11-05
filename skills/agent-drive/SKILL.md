@@ -56,6 +56,15 @@ Run `agent-drive login` on the new agent's machine. If the human has the drive's
 credentials bundle, they choose "Add to an existing drive instead" on the approval page; their
 browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
 
+If the new agent has a shell and a human is present, let it run `agent-drive login`, then (if your
+key has `delegate`) run `agent-drive grant <its code> --write-path /inbox/<its name>` (`--read-only`
+for read only). You seal the drive key to that login; the human clicks Approve once on the page,
+which shows the offer. Nothing secret is printed or sent in the clear.
+
+Which handoff when: `grant` (you hold `delegate`, new agent has a shell, human present); the
+human's "Add to an existing drive instead" on `/connect` (the human holds the recovery file or
+bundle); `credentials issue` (a sandbox with no browser).
+
 A sandbox, CI job, or anything set up without a browser: if your key has `delegate` (check
 `whoami`), run `agent-drive credentials issue --name <agent> --write-path <its folder> --stdout | <secret store>`
 and tell the human to set `AGENT_DRIVE_CREDENTIALS` there. Never copy your own bundle into another

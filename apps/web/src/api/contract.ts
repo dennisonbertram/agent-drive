@@ -4,6 +4,8 @@ export const API_CONTRACT = [
   'GET|POST /api/v1/agents',
   'GET|POST /api/v1/keys',
   'DELETE /api/v1/keys/:id',
+  'GET /api/v1/device/:code',
+  'POST /api/v1/device/:code/grant',
   'POST /api/v1/drives/:id/put',
   'POST /api/v1/drives/:id/commit',
   'GET /api/v1/drives/:id/get',

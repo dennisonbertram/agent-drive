@@ -4,7 +4,15 @@ import { getPool, withTransaction } from '../db/client';
 import { billingOrigin } from '../billing/policy';
 import { enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
 import { ApiError } from './errors';
-import { jsonBody, MAX_BODY_BYTES, objectBody, stringField, uuid, writePaths } from './validation';
+import {
+  assertDelegation,
+  jsonBody,
+  MAX_BODY_BYTES,
+  objectBody,
+  stringField,
+  uuid,
+  writePaths,
+} from './validation';
 
 // RFC 8628 device authorization for agent login. Contract: docs/agent-login.md section 2.
 
@@ -120,6 +128,43 @@ export async function startDeviceAuthorization(
   };
 }
 
+type OfferRow = {
+  id: string;
+  api_key_id: string;
+  account_id: string;
+  drive_id: string;
+  scopes: string[];
+  write_paths: string[];
+  sealed_key: Record<string, unknown>;
+  revision: number;
+};
+
+// The offering key must still be unrevoked, in the same account, and still allow exactly what it
+// offered (delegate, the drive, the scopes, the write paths). Locks the key row; callers hold the
+// account, agent and request locks first.
+async function offeringKeyAllows(client: Queryable, offer: OfferRow) {
+  const { rows } = await client.query<{
+    drive_ids: string[];
+    scopes: string[];
+    write_paths: string[];
+  }>(
+    `SELECT drive_ids, scopes, write_paths FROM api_keys
+      WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL FOR UPDATE`,
+    [offer.api_key_id, offer.account_id],
+  );
+  const key = rows[0];
+  if (!key) return false;
+  try {
+    assertDelegation(
+      { driveIds: key.drive_ids, scopes: key.scopes, writePaths: key.write_paths },
+      { driveIds: [offer.drive_id], scopes: offer.scopes, writePaths: offer.write_paths },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 type Issued = {
   body: Record<string, unknown>;
   accountId: string;
@@ -180,6 +225,25 @@ async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<I
     );
     const driveIds = drives.rows.map((drive) => drive.id as string);
     const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
+    // An approved offer is revalidated against the key that made it, which may have been revoked
+    // or narrowed since approval. Nothing is issued then.
+    if (row.approved_from_offer) {
+      const offered = row.approved_offer_id
+        ? await client.query<OfferRow>('SELECT * FROM device_offers WHERE id = $1', [
+            row.approved_offer_id,
+          ])
+        : { rows: [] };
+      // A missing offer or key row counts as withdrawn.
+      if (!offered.rows[0] || !(await offeringKeyAllows(client, offered.rows[0]))) {
+        await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
+          row.id,
+        ]);
+        return new OAuthError(
+          'access_denied',
+          'The offer was withdrawn; run agent-drive login again.',
+        );
+      }
+    }
     // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's. Lock
     // order: account, agent, request, then this key (handler.ts key revoke locks only the key row).
     // Re-check it here: it may have been revoked, or used by another approved request, since approval.
@@ -437,7 +501,7 @@ function approvalInput(body: Record<string, unknown>) {
     sealed,
     isDefaults,
     delegate,
-    offerRevision: isDefaults ? (body.offerRevision as number | undefined) : undefined,
+    offerRevision: body.offerRevision as number | undefined,
   };
 }
 
@@ -549,7 +613,35 @@ async function approve(
   let newDriveName = input.newDriveName;
   let scopes = input.scopes;
   let paths = input.writePaths;
-  if (input.isDefaults) {
+  let sealed = input.sealed;
+  let offerId: string | null = null;
+  // The page sends the offer revision it showed (0 when it showed none). A change since then,
+  // including an offer that arrived after the page loaded, must be reviewed again.
+  const offer = (
+    await client.query<OfferRow>(
+      'SELECT * FROM device_offers WHERE device_authorization_id = $1 AND account_id = $2',
+      [row.id, accountId],
+    )
+  ).rows[0];
+  if ((input.offerRevision ?? 0) !== (offer?.revision ?? 0))
+    throw new ApiError('conflict', 'The request changed; reload the page.');
+  if (input.isDefaults && offer) {
+    const live = await client.query(
+      'SELECT 1 FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL',
+      [offer.drive_id, accountId],
+    );
+    if (!live.rowCount || !(await offeringKeyAllows(client, offer)))
+      throw new ApiError(
+        'conflict',
+        "The offering agent's key no longer allows this; ask it to grant again, or deny.",
+      );
+    // delegate is never taken from an offer; only the human's tick adds it.
+    drives = [offer.drive_id];
+    scopes = input.delegate ? [...offer.scopes, 'delegate'] : offer.scopes;
+    paths = offer.write_paths;
+    sealed = { [offer.drive_id]: offer.sealed_key };
+    offerId = offer.id;
+  } else if (input.isDefaults) {
     // Defaults (contract v2.1): reconnect with proof, else create one named for the agent.
     // A reconnect keeps the previous key's scopes and write paths; widening needs an explicit body.
     const known = await reconnectDrives(client, accountId, row);
@@ -583,7 +675,8 @@ async function approve(
     `UPDATE device_authorizations
         SET status = 'approved', account_id = $2, agent_id = $3, drive_ids = $4::uuid[],
             scopes = $5::text[], new_drive_id = $6, sealed_drive_keys = $7::jsonb,
-            write_paths = $8::text[], decided_at = now()
+            write_paths = $8::text[], approved_offer_id = $9, approved_from_offer = $10,
+            decided_at = now()
       WHERE id = $1`,
     [
       row.id,
@@ -592,8 +685,10 @@ async function approve(
       newDriveId ? [...drives, newDriveId] : drives,
       scopes,
       newDriveId,
-      Object.keys(input.sealed).length ? JSON.stringify(input.sealed) : null,
+      Object.keys(sealed).length ? JSON.stringify(sealed) : null,
       paths,
+      offerId,
+      offerId !== null,
     ],
   );
 }
@@ -604,7 +699,7 @@ const CONSOLE_MAX_FAILURES = 10;
 
 // Bounds user-code guessing: 30 calls and 10 not-found results per account per 10 minutes.
 // Once either is spent, every device call (even for a real code) returns 429 until the window ends.
-async function takeConsoleAttempt(accountId: string) {
+export async function takeConsoleAttempt(accountId: string) {
   const { rows } = await getPool().query<{ attempts: number; failures: number }>(
     `INSERT INTO device_console_limits (account_id, window_start, attempts, failures)
      VALUES ($1, now(), 1, 0)
@@ -632,9 +727,14 @@ export async function consoleDeviceEndpoint(
   parts: string[],
 ): Promise<Response | undefined> {
   if (parts[0] !== 'device' || parts.length < 2 || parts.length > 3) return undefined;
+  return budgeted(accountId, () => consoleDeviceAction(request, accountId, parts));
+}
+
+// Takes one attempt from the account's budget; a not_found result also counts as a failure.
+async function budgeted<T>(accountId: string, action: () => Promise<T>) {
   await takeConsoleAttempt(accountId);
   try {
-    return await consoleDeviceAction(request, accountId, parts);
+    return await action();
   } catch (error) {
     if (error instanceof ApiError && error.code === 'not_found')
       await getPool().query(
@@ -645,6 +745,98 @@ export async function consoleDeviceEndpoint(
   }
 }
 
+type BearerAuth = {
+  keyId: string | null;
+  accountId: string;
+  agentId: string;
+  scopes: string[];
+  writePaths: string[];
+  driveIds: string[];
+};
+
+// Bearer routes for an existing agent that holds `delegate` (docs/agent-login.md section 14):
+// GET device/:code shows the pending request, POST device/:code/grant records an offer. They share
+// the console's attempt and failure budget per account.
+export async function bearerDeviceEndpoint(
+  request: Request,
+  auth: BearerAuth,
+  parts: string[],
+): Promise<Response | undefined> {
+  const read = parts.length === 2 && request.method === 'GET';
+  const grant = parts.length === 3 && parts[2] === 'grant' && request.method === 'POST';
+  if (parts[0] !== 'device' || !(read || grant) || !auth.keyId) return undefined;
+  if (!auth.scopes.includes('delegate'))
+    throw new ApiError('permission_denied', 'The API key needs the delegate scope.');
+  return budgeted(auth.accountId, async () => {
+    const code = userCodeFrom(parts[1]);
+    if (read) {
+      const found = await getPool().query(
+        `SELECT user_code, client_name, machine, created_at, expires_at, public_key
+           FROM device_authorizations WHERE ${pendingRequest} ORDER BY created_at DESC LIMIT 1`,
+        [code],
+      );
+      if (!found.rows[0]) throw new ApiError('not_found', 'Device request not found.');
+      return reply(found.rows[0]);
+    }
+    const body = await jsonBody(request);
+    const driveId = uuid(typeof body.driveId === 'string' ? body.driveId : undefined, 'driveId');
+    if (
+      !Array.isArray(body.scopes) ||
+      body.scopes.length === 0 ||
+      body.scopes.some((value) => typeof value !== 'string' || !USER_SCOPES.has(value))
+    )
+      throw new ApiError('validation_error', 'scopes must be a non-empty list of valid scopes.');
+    const scopes = [...new Set(body.scopes as string[])];
+    const paths = writePaths(body);
+    const sealedKey = objectBody(body.sealedDriveKey);
+    for (const part of ['epk', 'iv', 'ct']) {
+      const text = sealedKey[part];
+      if (typeof text !== 'string' || !BASE64URL.test(text))
+        throw new ApiError('validation_error', `sealedDriveKey.${part} is invalid.`);
+    }
+    assertDelegation(auth, { driveIds: [driveId], scopes, writePaths: paths });
+    const revision = await withTransaction(async (client) => {
+      // Lock order everywhere: account, then request. Approve and exchange take the same order.
+      await lockBillingAccount(client, auth.accountId);
+      const pending = await client.query(
+        `SELECT id FROM device_authorizations WHERE ${pendingRequest}
+          ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [code],
+      );
+      if (!pending.rows[0]) throw new ApiError('not_found', 'Device request not found.');
+      const drive = await client.query(
+        'SELECT 1 FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL',
+        [driveId, auth.accountId],
+      );
+      if (!drive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      const offer = await client.query<{ revision: number }>(
+        `INSERT INTO device_offers
+           (device_authorization_id, account_id, api_key_id, offered_by_agent_id, drive_id,
+            scopes, write_paths, sealed_key, revision)
+         VALUES ($1, $2, $3, $4, $5, $6::text[], $7::text[], $8::jsonb, 1)
+         ON CONFLICT (device_authorization_id, account_id) DO UPDATE SET
+           api_key_id = EXCLUDED.api_key_id, offered_by_agent_id = EXCLUDED.offered_by_agent_id,
+           drive_id = EXCLUDED.drive_id, scopes = EXCLUDED.scopes,
+           write_paths = EXCLUDED.write_paths, sealed_key = EXCLUDED.sealed_key,
+           revision = device_offers.revision + 1
+         RETURNING revision`,
+        [
+          pending.rows[0].id,
+          auth.accountId,
+          auth.keyId,
+          auth.agentId,
+          driveId,
+          scopes,
+          paths,
+          JSON.stringify(sealedKey),
+        ],
+      );
+      return offer.rows[0]!.revision;
+    });
+    return reply({ status: 'offered', revision });
+  });
+}
+
 async function consoleDeviceAction(
   request: Request,
   accountId: string,
@@ -653,7 +845,7 @@ async function consoleDeviceAction(
   const code = userCodeFrom(parts[1]);
   if (parts.length === 2 && request.method === 'GET') {
     const found = await getPool().query(
-      `SELECT user_code, client_name, machine, created_at, expires_at, public_key,
+      `SELECT id, user_code, client_name, machine, created_at, expires_at, public_key,
               requested_drive_ids, previous_api_key_id
          FROM device_authorizations WHERE ${pendingRequest} ORDER BY created_at DESC LIMIT 1`,
       [code],
@@ -662,7 +854,28 @@ async function consoleDeviceAction(
     if (!row) throw new ApiError('not_found', 'Device request not found.');
     const known = { rows: await reconnectDrives(getPool(), accountId, row) };
     const previous = await previousPermissions(getPool(), accountId, row);
+    const offered = (
+      await getPool().query(
+        `SELECT o.revision, o.scopes, o.write_paths, o.drive_id, d.name AS drive_name,
+                g.name AS agent_name
+           FROM device_offers o
+           JOIN drives d ON d.id = o.drive_id AND d.deleting_at IS NULL
+           JOIN agents g ON g.id = o.offered_by_agent_id
+          WHERE o.device_authorization_id = $1 AND o.account_id = $2`,
+        [row.id, accountId],
+      )
+    ).rows[0];
     return reply({
+      offer: offered
+        ? {
+            agentName: offered.agent_name,
+            drive: { id: offered.drive_id, name: offered.drive_name },
+            scopes: offered.scopes,
+            writePaths: offered.write_paths,
+            revision: offered.revision,
+          }
+        : null,
+      offerRevision: offered?.revision ?? 0,
       drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
       scopes: previous?.scopes.filter((scope) => scope !== 'delegate') ?? null,

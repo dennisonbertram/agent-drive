@@ -1,4 +1,5 @@
 import { decryptFile, encryptFile, unwrapFileKey } from './crypto.js';
+import type { SealedDriveKey } from './seal.js';
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -94,6 +95,15 @@ export type Whoami = {
   scopes: string[];
   writePaths?: string[];
   driveIds: string[] | null;
+};
+
+export type DeviceRequestFacts = {
+  user_code: string;
+  client_name: string;
+  machine: string | null;
+  created_at: string;
+  expires_at: string;
+  public_key: string;
 };
 
 export type RecentEvent = {
@@ -347,6 +357,25 @@ export class AgentDriveClient {
         scopes,
         ...(writePaths ? { writePaths } : {}),
       }),
+    });
+  }
+
+  async deviceRequest(code: string) {
+    return this.request<DeviceRequestFacts>(`device/${encode(code)}`);
+  }
+
+  async grantDevice(
+    code: string,
+    body: {
+      driveId: string;
+      scopes: string[];
+      writePaths: string[];
+      sealedDriveKey: SealedDriveKey;
+    },
+  ) {
+    return this.request<{ status: 'offered'; revision: number }>(`device/${encode(code)}/grant`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   }
 
