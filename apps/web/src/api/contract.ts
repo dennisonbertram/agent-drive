@@ -43,7 +43,10 @@ export type RecentFileEvent = {
   previousPath: string | null;
   versionId: string | null;
   agentId: string;
+  agentName: string | null;
   machineId: string | null;
   userId: string | null;
   createdAt: string;
 };
+
+export type RecentPage = Page<RecentFileEvent> & { latestCursor: string | null };

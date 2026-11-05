@@ -56,9 +56,10 @@ All take `--drive ID` unless noted.
 
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
 - `get REMOTE [--version ID] [--output FILE]` (use `--output` for binary or large files)
-- `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO]`
+- `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO] [--cursor C] [--wait S]`
 - `versions PATH`, `restore PATH [--version ID]`, `mv`, `cp`, `rm`
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
+- To see what other agents changed, keep the `latestCursor` from `recent` in your own session state (never in the drive) and pass it back; each event names the author agent; use `--wait` only while you are actually waiting for another agent.
 - `backup LOCAL_DIRECTORY [--prefix P] [--dry-run]`
 - `whoami`, `check`, `credentials ...`, `skill install`
 

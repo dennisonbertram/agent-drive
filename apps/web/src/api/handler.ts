@@ -1501,28 +1501,39 @@ async function fileEndpoint(
     need(auth, 'read', driveId);
     const sinceValue = queryValue(url, 'since', 128);
     const since = sinceValue ?? new Date(0).toISOString();
-    if (Number.isNaN(Date.parse(since)))
-      throw new ApiError('validation_error', 'since must be an ISO timestamp.');
     const { limit, cursor } = page(url);
-    const decoded = decodeCursor(cursor, 'timestamp');
-    const params: unknown[] = [driveId, since];
-    let cursorClause = '';
+    // since is ignored (and not validated) when a cursor is sent.
+    if (!cursor && Number.isNaN(Date.parse(since)))
+      throw new ApiError('validation_error', 'since must be an ISO timestamp.');
+    const decoded = decodeCursor(cursor, 'seq');
+    // With a cursor, seq is authoritative and since is ignored. Without one, since filters by
+    // created_at (transaction start), which is approximate.
+    const params: unknown[] = [driveId];
+    let where = '';
     if (decoded) {
-      params.push(decoded.value, decoded.id);
-      cursorClause = ` AND (created_at, id) > ($3::timestamptz, $4::uuid)`;
+      params.push(decoded.value);
+      where = `e.seq > $2::bigint`;
+    } else {
+      params.push(since);
+      where = `e.created_at > $2`;
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, operation, path, previous_path, version_id, agent_id, machine_id, user_id,
-              created_at, created_at::text AS cursor_created_at
-         FROM file_events
-        WHERE drive_id = $1 AND created_at > $2${cursorClause}
-        ORDER BY created_at, id LIMIT $${params.length}`,
+      `SELECT e.id, e.operation, e.path, e.previous_path, e.version_id, e.agent_id,
+              e.machine_id, e.user_id, e.created_at, e.seq::text AS seq, g.name AS agent_name
+         FROM file_events e LEFT JOIN agents g ON g.id = e.agent_id
+        WHERE e.drive_id = $1 AND ${where}
+        ORDER BY e.seq LIMIT $${params.length}`,
       params,
     );
-    const output = collection(rows.rows as Row[], limit, (row) => row.cursor_created_at);
+    const output = collection(rows.rows as Row[], limit, (row) => row.seq);
+    const lastItem = output.items[output.items.length - 1];
+    const latestCursor = lastItem
+      ? encodeCursor({ value: lastItem.seq, id: lastItem.id })
+      : (cursor ?? null);
     return response({
       ...output,
+      latestCursor,
       items: output.items.map((row) => ({
         id: row.id,
         operation: row.operation,
@@ -1530,6 +1541,7 @@ async function fileEndpoint(
         previousPath: row.previous_path,
         versionId: row.version_id,
         agentId: row.agent_id,
+        agentName: row.agent_name ?? null,
         machineId: row.machine_id,
         userId: row.user_id,
         createdAt: row.created_at,

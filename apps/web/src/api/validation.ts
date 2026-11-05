@@ -166,7 +166,7 @@ export type CursorPayload = { value: string; id: string };
 
 export function decodeCursor(
   value: string | undefined,
-  kind: 'name' | 'path' | 'timestamp' | 'share',
+  kind: 'name' | 'path' | 'timestamp' | 'share' | 'seq',
 ): CursorPayload | undefined {
   if (!value) return undefined;
   if (value.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
@@ -194,6 +194,11 @@ export function decodeCursor(
     if (kind === 'path') canonicalPath(record.value, 'cursor path');
     if ((kind === 'timestamp' || kind === 'share') && Number.isNaN(Date.parse(record.value)))
       throw new Error('invalid timestamp');
+    if (kind === 'seq') {
+      if (!/^\d{1,19}$/u.test(record.value)) throw new Error('invalid seq');
+      const seq = BigInt(record.value);
+      if (seq < 1n || seq > 9223372036854775807n) throw new Error('seq out of range');
+    }
     return { value: record.value, id: record.id };
   } catch {
     throw new ApiError('validation_error', 'cursor is invalid.');

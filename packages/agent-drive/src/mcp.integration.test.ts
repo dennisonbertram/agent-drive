@@ -383,6 +383,42 @@ describe('MCP product tools over stdio', () => {
         limit: 1,
       });
       expect((recent.value.data as { nextCursor: string | null }).nextCursor).toBeTruthy();
+      type RecentData = {
+        items: { agentName: string | null }[];
+        nextCursor: string | null;
+        latestCursor: string | null;
+      };
+      let tailPage = recent.value.data as RecentData;
+      while (tailPage.nextCursor) {
+        tailPage = (
+          await call(mcp.client, 'recent', { driveId, limit: 100, cursor: tailPage.nextCursor })
+        ).value.data as RecentData;
+      }
+      const tailCursor = tailPage.latestCursor ?? (recent.value.data as RecentData).latestCursor;
+      expect(tailCursor).toBeTruthy();
+      const started = Date.now();
+      const putLater = setTimeout(() => {
+        void call(mcp.client, 'put', { driveId, path: '/mcp/wait.txt', text: 'wait' });
+      }, 1000);
+      const waited = await call(mcp.client, 'recent', {
+        driveId,
+        cursor: tailCursor,
+        waitSeconds: 5,
+      });
+      clearTimeout(putLater);
+      const waitedData = waited.value.data as RecentData;
+      expect(waitedData.items.length).toBeGreaterThan(0);
+      expect(waitedData.items[0]).toHaveProperty('agentName');
+      expect(Date.now() - started).toBeLessThan(4500);
+      const idleStart = Date.now();
+      const idle = await call(mcp.client, 'recent', {
+        driveId,
+        cursor: waitedData.latestCursor,
+        waitSeconds: 1,
+      });
+      expect((idle.value.data as RecentData).items).toEqual([]);
+      expect(Date.now() - idleStart).toBeGreaterThanOrEqual(900);
+      expect(Date.now() - idleStart).toBeLessThan(3000);
     } finally {
       await mcp.client.close();
     }

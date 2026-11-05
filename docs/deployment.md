@@ -51,6 +51,8 @@ out of version control. Review the resulting project ID before deploying.
 Configure a production PostgreSQL connection with TLS/pooling appropriate for serverless traffic,
 then apply the checked-in migrations using `pnpm --filter @agent-drive/web db:migrate` from a
 trusted operator environment. Back up and review migrations first; builds do not run migrations.
+Migration 0015 (`file_events.seq`) takes a brief lock on `file_events` while it numbers existing rows:
+run it in a quiet window. It fails fast after 5 seconds if blocked and is safe to retry.
 
 Add dedicated Clerk publishable/secret keys, storage configuration, and `AGENT_DRIVE_PUBLIC_URL`
 as a trusted HTTPS origin to the Vercel environment. Configure Clerk redirect/origin/provider

@@ -100,10 +100,13 @@ export type RecentEvent = {
   previousPath: string | null;
   versionId: string | null;
   agentId: string;
+  agentName: string | null;
   machineId: string | null;
   userId: string | null;
   createdAt: string;
 };
+
+export type RecentPage = Page<RecentEvent> & { latestCursor: string | null };
 
 export type Share = {
   id: string;
@@ -180,6 +183,26 @@ function driveKeyFor(
   return typeof value === 'function' ? value(driveId) : value;
 }
 
+const RECENT_POLL_MS = 2000;
+
+function isAbort(error: unknown) {
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError');
+}
+
+// response.text() is raced against the signal so a body that stalls after headers cannot hang.
+function readText(response: Response, signal?: AbortSignal | null): Promise<string> {
+  if (!signal) return response.text();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new DOMException('aborted', 'AbortError'));
+    if (signal.aborted) return onAbort();
+    signal.addEventListener('abort', onAbort, { once: true });
+    response
+      .text()
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 export class AgentDriveClient {
   private readonly baseUrl: URL;
   private readonly fetcher: FetchLike;
@@ -212,7 +235,7 @@ export class AgentDriveClient {
       headers,
       redirect: 'error',
     });
-    const text = await response.text();
+    const text = await readText(response, init.signal);
     let body: unknown;
     if (text) {
       try {
@@ -339,15 +362,74 @@ export class AgentDriveClient {
     );
   }
 
-  async recent(driveId: string, since?: string, limit?: number, cursor?: string) {
-    return this.request<Page<RecentEvent>>(
+  async recent(
+    driveId: string,
+    since?: string,
+    limit?: number,
+    cursor?: string,
+    signal?: AbortSignal,
+  ) {
+    return this.request<RecentPage>(
       this.pagePath(
         `drives/${encode(driveId)}/recent`,
         limit,
         cursor,
         since ? { since } : undefined,
       ),
+      signal ? { signal } : {},
     );
+  }
+
+  /**
+   * Polls `recent` until an event appears or `waitMs` passes. Returns within `waitMs` plus the
+   * abort latency of one in-flight request; a stalled server cannot hold it longer. Each poll is
+   * one metered `drive.recent` operation.
+   */
+  async waitForRecent(
+    driveId: string,
+    options: {
+      since?: string;
+      cursor?: string;
+      limit?: number;
+      waitMs: number;
+      signal?: AbortSignal;
+    },
+    sleep: (ms: number) => Promise<void> = (ms) =>
+      new Promise((resolve) => setTimeout(resolve, ms)),
+  ): Promise<RecentPage> {
+    const deadline = Date.now() + options.waitMs;
+    const caller = options.signal;
+    for (;;) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || caller?.aborted) break;
+      try {
+        const page = await this.recent(
+          driveId,
+          options.since,
+          options.limit,
+          options.cursor,
+          caller
+            ? AbortSignal.any([AbortSignal.timeout(remaining), caller])
+            : AbortSignal.timeout(remaining),
+        );
+        if (page.items.length > 0) return page;
+      } catch (error) {
+        if (!isAbort(error)) throw error;
+        break;
+      }
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      const napping = sleep(Math.min(RECENT_POLL_MS, left));
+      if (!caller) await napping;
+      else
+        await Promise.race([
+          napping,
+          new Promise<void>((resolve) =>
+            caller.addEventListener('abort', () => resolve(), { once: true }),
+          ),
+        ]);
+    }
+    return { items: [], nextCursor: null, latestCursor: options.cursor ?? null };
   }
 
   async search(

@@ -49,6 +49,15 @@ describe('API validation helpers', () => {
     );
   });
 
+  it('accepts only positive bigint seq cursors with a UUID id', () => {
+    const id = '00000000-0000-4000-8000-000000000000';
+    const ok = '9223372036854775807';
+    expect(decodeCursor(encodeCursor({ value: ok, id }), 'seq')).toEqual({ value: ok, id });
+    for (const value of ['9223372036854775808', '0', '2025-01-02T03:04:05.000Z', '-1', '1.5'])
+      expect(() => decodeCursor(encodeCursor({ value, id }), 'seq')).toThrow(ApiError);
+    expect(() => decodeCursor(encodeCursor({ value: '1', id: 'nope' }), 'seq')).toThrow(ApiError);
+  });
+
   it('escapes SQL LIKE wildcard characters and rejects noncanonical paths', () => {
     expect(escapeLikeLiteral('/a%_b\\c')).toBe('/a\\%\\_b\\\\c');
     expect(() => canonicalPath('/a/../b')).toThrow(ApiError);

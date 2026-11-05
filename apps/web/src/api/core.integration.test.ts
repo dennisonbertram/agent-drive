@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PLANS } from '../billing/policy';
 import { getPool } from '../db/client';
@@ -437,6 +438,141 @@ describe('Phase 1 core API', () => {
     );
     expect(next.items).toHaveLength(1);
     expect(next.nextCursor).toBeNull();
+  });
+
+  it('resumes recent from latestCursor with author names; the seq cursor is authoritative and never skips a late-committing event', async () => {
+    type Tail = {
+      items: (RecentFileEvent & { agentName: string | null })[];
+      nextCursor: string | null;
+      latestCursor: string | null;
+    };
+    const tail = async (query: string) =>
+      (await json(await request(`/drives/${driveId}/recent?${query}`, writeToken))) as Tail;
+    const paths = (page: Tail) => page.items.map((event) => event.path);
+    let latest: Tail = await tail('limit=100');
+    while (latest.nextCursor) {
+      latest = await tail(`limit=100&cursor=${encodeURIComponent(latest.nextCursor)}`);
+    }
+    const cursor0 = latest.latestCursor ?? '';
+    expect(cursor0).not.toBe('');
+    const since = new Date().toISOString();
+    for (const name of ['a', 'b', 'c'])
+      await uploadCommit(writeToken, driveId, `/tail/${name}.bin`, Buffer.from(name));
+    const agentName = (await pool.query('SELECT name FROM agents WHERE id = $1', [writeAgentId]))
+      .rows[0].name as string;
+    const first = await tail(`limit=1&cursor=${encodeURIComponent(cursor0)}`);
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]).toMatchObject({ agentId: writeAgentId, agentName, path: '/tail/a.bin' });
+    expect(first.nextCursor).toEqual(expect.any(String));
+    expect(first.latestCursor).toBe(first.nextCursor);
+    // the cursor wins over a since that is later than every event
+    const future = encodeURIComponent(new Date(Date.now() + 60_000).toISOString());
+    const rest = await tail(
+      `cursor=${encodeURIComponent(first.latestCursor ?? '')}&since=${future}`,
+    );
+    expect(paths(rest)).toEqual(['/tail/b.bin', '/tail/c.bin']);
+    expect(rest.nextCursor).toBeNull();
+    const end = rest.latestCursor ?? '';
+    expect(await tail(`cursor=${encodeURIComponent(end)}`)).toEqual({
+      items: [],
+      nextCursor: null,
+      latestCursor: end,
+    });
+    await uploadCommit(writeToken, driveId, '/tail/d.bin', Buffer.from('d'));
+    const afterPut = await tail(`cursor=${encodeURIComponent(end)}`);
+    expect(paths(afterPut)).toEqual(['/tail/d.bin']);
+    // without a cursor, since still filters by created_at
+    expect(paths(await tail(`since=${encodeURIComponent(since)}&limit=100`))).toContain(
+      '/tail/a.bin',
+    );
+
+    // late commit: an older transaction takes the drive lock after a newer one committed
+    const fileId = (
+      await pool.query('SELECT id FROM files WHERE drive_id = $1 AND path = $2', [
+        driveId,
+        '/tail/a.bin',
+      ])
+    ).rows[0].id as string;
+    const insert = (client: PoolClient, path: string) =>
+      client.query(
+        `INSERT INTO file_events (drive_id, file_id, operation, path, agent_id)
+         VALUES ($1, $2, 'put', $3, $4)`,
+        [driveId, fileId, path, writeAgentId],
+      );
+    const tx1 = await pool.connect();
+    const tx2 = await pool.connect();
+    let seen: Tail;
+    try {
+      await tx1.query('BEGIN');
+      await tx1.query('SELECT now()'); // tx1 starts first (older created_at) but does not lock
+      await tx2.query('BEGIN');
+      await tx2.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [driveId]);
+      await insert(tx2, '/tail/newer-tx.bin');
+      await tx2.query('COMMIT');
+      seen = await tail(`cursor=${encodeURIComponent(afterPut.latestCursor ?? '')}`);
+      expect(paths(seen)).toEqual(['/tail/newer-tx.bin']);
+      await tx1.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [driveId]);
+      await insert(tx1, '/tail/older-tx.bin');
+      await tx1.query('COMMIT');
+    } finally {
+      tx1.release();
+      tx2.release();
+    }
+    expect(paths(await tail(`cursor=${encodeURIComponent(seen.latestCursor ?? '')}`))).toEqual([
+      '/tail/older-tx.bin',
+    ]);
+  });
+
+  it('migration 0015 numbers existing events by (created_at, id) and continues the sequence', async () => {
+    const sqlText = readFileSync(
+      resolve(__dirname, '../../drizzle/0015_typical_doctor_spectrum.sql'),
+      'utf8',
+    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('CREATE SCHEMA mig0015');
+      await client.query('SET LOCAL search_path = mig0015');
+      await client.query(
+        'CREATE TABLE file_events (id uuid PRIMARY KEY, drive_id uuid NOT NULL, created_at timestamptz NOT NULL)',
+      );
+      const drive = randomUUID();
+      // inserted out of (created_at, id) order
+      const rows: [string, string][] = [
+        ['00000000-0000-4000-8000-000000000003', '2025-01-02T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000002', '2025-01-01T00:00:00Z'],
+        ['00000000-0000-4000-8000-000000000001', '2025-01-01T00:00:00Z'],
+      ];
+      for (const [id, at] of rows)
+        await client.query('INSERT INTO file_events VALUES ($1, $2, $3)', [id, drive, at]);
+      for (const statement of sqlText.split('--> statement-breakpoint'))
+        await client.query(statement);
+      const ordered = await client.query('SELECT id FROM file_events ORDER BY seq');
+      expect(ordered.rows.map((row) => row.id.slice(-1))).toEqual(['1', '2', '3']);
+      await client.query(
+        'INSERT INTO file_events (id, drive_id, created_at) VALUES ($1, $2, now())',
+        [randomUUID(), drive],
+      );
+      const max = await client.query('SELECT seq::int AS seq FROM file_events ORDER BY seq DESC');
+      expect(max.rows.map((row) => row.seq)).toEqual([4, 3, 2, 1]);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
+  it('ignores since when a cursor is sent, even if since is invalid', async () => {
+    const first = (await json(await request(`/drives/${driveId}/recent?limit=1`, writeToken))) as {
+      latestCursor: string | null;
+    };
+    const cursor = encodeURIComponent(first.latestCursor ?? '');
+    const ok = await request(
+      `/drives/${driveId}/recent?cursor=${cursor}&since=not-a-date`,
+      writeToken,
+    );
+    expect(ok.status).toBe(200);
+    const bad = await request(`/drives/${driveId}/recent?since=not-a-date`, writeToken);
+    expect(bad.status).toBe(400);
   });
 
   it('creates, scopes, expires, revokes, and audits encrypted shares without storing file keys', async () => {
