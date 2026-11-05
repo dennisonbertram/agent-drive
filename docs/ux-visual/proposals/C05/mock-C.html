@@ -1,0 +1,18 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=375"><title>C05 C</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel=stylesheet>
+<style>@import url(base.css);
+.menu{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;border:1px solid var(--ink);border-radius:8px;background:transparent;font:500 14px var(--sans)}
+.menu small{font:400 11px var(--mono);color:var(--muted)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.panel{position:absolute;left:8px;right:8px;top:62px;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.28);padding:6px}
+.panel a{display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;border-radius:7px;font-size:15px}
+.panel a.active{background:var(--ink);color:#fff}.panel a i{width:16px;font-style:normal;opacity:.75}.panel hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+.panel .n{margin-left:auto;font:500 11px var(--mono);opacity:.7}
+.strip{opacity:1;-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(90deg,transparent 0,#000 14px,#000 calc(100% - 40px),transparent);scroll-snap-type:x proximity}
+.strip .bay{scroll-snap-align:start}
+</style>
+<div class=side><div class=top><span class=brand><span class=mark>a/</span></span><button class=menu aria-expanded=true aria-haspopup=true>Usage ▾</button><span class=avatar>T</span></div></div>
+<div class=panel role=menu><a><i>▤</i>Files<span class=n>3</span></a><a><i>⌘</i>Agents</a><a><i>⚿</i>API keys</a><a class=active><i>▥</i>Usage</a><a><i>⌫</i>Trash</a><hr><a><i>$</i>Billing &amp; limits</a><a><i>↺</i>Activity &amp; deletion</a></div>
+<div class=strip id=s><button class=bay><i class=led></i><span><b>Billing agent</b><small>0 B · 0 files</small></span></button><button class=bay><i class=led></i><span><b>Data pipeline</b><small>2.4 KB · 2 files</small></span></button><button class="bay sel"><i class=led></i><span><b>Research workspace</b><small>5.1 KB · 3 files</small></span></button><button class="bay add">+ YOUR NEXT AGENT</button></div>
+<div class=content><p class=eyebrow>YOUR AGENTS’ SHARED MEMORY</p><h1>Usage</h1><p class=lede>Understand what your workspace stores and serves.</p><div class=card>ENCRYPTED STORAGE<strong>5.1 KB</strong></div></div>
+<script>document.getElementById('s').scrollLeft=document.querySelector('.bay.sel').offsetLeft-16;</script>

@@ -1,0 +1,67 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>C09 C toast and inline</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap"><style>
+:root{--bg:#e9e8e4;--panel:#f3f2ee;--al2:#d6d4cf;--al3:#bdbab4;--ink:#121211;--muted:#5d5b56;--line:rgba(18,18,17,.16);--line-soft:rgba(18,18,17,.09);--sig:#ff5a1f;--sans:'Space Grotesk',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+*{box-sizing:border-box;margin:0}html,body{height:100%}
+body{font:14px/1.4 var(--sans);color:var(--ink);background:var(--bg) radial-gradient(rgba(18,18,17,.13) 1px,transparent 1.2px) 0 0/24px 24px;overflow:hidden}
+code,.mono{font-family:var(--mono)}button{font:inherit;cursor:pointer}
+.led{display:inline-block;width:9px;height:9px;border-radius:50%;background:#8d8a83;box-shadow:inset 0 1px 1px rgba(0,0,0,.35);flex:none}
+.led.on{background:var(--sig);box-shadow:0 0 0 2px rgba(255,90,31,.2),0 0 9px rgba(255,90,31,.8)}
+.led.ok{background:#6f8f4e}
+.shell{display:grid;grid-template-columns:224px 1fr;height:100dvh}
+.side{background:#dcdad5;border-right:1px solid var(--line);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.brand{font:600 17px var(--sans);padding:4px 8px 16px}.side a{display:block;padding:8px 10px;border-radius:7px;font-size:14px;color:var(--muted)}
+.side a.cur{background:var(--ink);color:#fff}
+.main{display:flex;flex-direction:column;min-height:0;min-width:0}
+.top{height:51px;display:flex;align-items:center;padding:0 28px;font:12px var(--mono);color:var(--muted);flex:none;border-bottom:1px solid var(--line-soft);background:var(--panel)}
+.bay{height:72px;flex:none;background:linear-gradient(#d6d4cf,#c6c3bd);display:flex;gap:10px;align-items:center;padding:0 28px}
+.bay i{font:11px var(--mono);font-style:normal;background:#17160f;color:#ddd;border-radius:8px;padding:9px 14px;width:240px;display:block}
+.bay i.sel{background:var(--panel);color:var(--ink);box-shadow:0 0 0 2px var(--sig)}
+.bay i b{display:block;font-weight:500;font-size:12px}
+.bay i.add{background:transparent;border:1px dashed var(--muted);color:var(--muted);width:160px}
+.content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 28px 0;gap:10px;position:relative}
+.ph{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex:none}
+.ph h1{font:600 28px/1.15 var(--sans);letter-spacing:-.02em;display:inline}.ph .sub{display:inline;margin-left:12px;color:var(--muted);font-size:13px}
+.btn{border:1px solid var(--ink);background:transparent;border-radius:8px;padding:7px 13px;font:500 13px var(--sans);color:var(--ink);white-space:nowrap}
+.btn.sig{background:var(--sig);border-color:var(--sig);font-weight:600}.btn.sm{padding:3px 9px;font-size:12px;border-radius:6px}
+.actions{display:flex;gap:8px}
+.row{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13px;flex:none;min-width:0}
+.row.warn{border-left:4px solid var(--sig)}.row.ok{border-left:4px solid var(--sig)}
+.row .grow{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row code{font-size:12px}.chip{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--line);border-radius:5px;padding:2px 6px;background:#fff;white-space:nowrap}
+.x{border:0;background:none;font-size:16px;color:var(--muted);padding:0 4px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.pt{display:flex;align-items:center;gap:12px;padding:0 14px;height:48px;border-bottom:1px solid var(--line);flex:none;font-size:14px}
+.pt .m{color:var(--muted);font-size:12px;font-family:var(--mono)}.pt .sp{flex:1}
+.pt input{border:1px solid var(--line);border-radius:7px;padding:6px 10px;font:13px var(--sans);width:200px}
+.scroll{overflow:auto;min-height:0;flex:1}
+table{border-collapse:collapse;width:100%;font-size:13px}th{position:sticky;top:0;background:#e6e4df;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-align:left;padding:0 14px;height:30px}
+td{padding:0 14px;height:42px;border-top:1px solid var(--line-soft);white-space:nowrap}td.p{font-family:var(--mono);font-size:12.5px}
+td a{text-decoration:underline;margin-left:12px;font-size:12.5px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px 18px;flex:none}
+.card h2{font:600 15px var(--sans)}.card p{color:var(--muted);font-size:13px;margin:4px 0 10px}
+.term{background:#17160f;color:#eee;border-radius:8px;padding:12px 14px;font:12.5px var(--mono);display:flex;justify-content:space-between;gap:12px;max-width:640px}
+details.d{border:1px solid var(--line);border-radius:8px;background:#fff;flex:none}details.d summary{height:38px;display:flex;align-items:center;gap:10px;padding:0 14px;font-weight:500;font-size:13.5px;cursor:pointer;list-style:none}
+details.d summary:before{content:"▸";font-size:11px}details.d summary .m{margin-left:auto;font:12px var(--mono);color:var(--muted);font-weight:400}
+.ent{display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid var(--line-soft)}.ent .av{width:36px;height:36px;border-radius:8px;background:#17160f;flex:none}
+.ent .nm{flex:1;min-width:0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ent code{font-size:11px;color:var(--muted)}
+.toast{position:absolute;right:28px;bottom:22px;background:#17160f;color:#f3f2ee;border-radius:10px;padding:11px 14px;font-size:13px;display:flex;gap:10px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.28);max-width:380px;z-index:5}
+.toast .x{color:#bbb}
+.tray{height:38px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);font-size:13px;min-width:0}
+.tray .sep{width:1px;height:18px;background:var(--line);flex:none}.tray .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tray .slot{display:flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--ink);border-radius:6px;padding:3px 8px;font-size:12px;max-width:330px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pop{position:absolute;z-index:4;background:#fff;border:1px solid var(--ink);border-radius:8px;padding:14px;width:420px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+.m375{display:none}.more{display:none;margin-left:auto;font:500 12px var(--mono);border:1px solid var(--ink);border-radius:6px;padding:2px 7px}
+@media(max-width:760px){
+ .shell{grid-template-columns:1fr}.side{display:none}.m375{display:flex}
+ .mnav{height:44px;background:var(--panel);align-items:center;padding:0 14px;font:600 15px var(--sans);flex:none;gap:14px}.mnav span{font:500 12px var(--mono);color:var(--muted)}
+ .top{display:none}.bay{height:54px;padding:0 14px;overflow:hidden}.bay i{width:180px;padding:6px 10px}
+ .content{padding:8px 14px 0;gap:8px}.ph h1{font-size:22px}.ph .sub,.ph .actions .hide,.pt .m,.pt input,.col-s,.col-a,.col-m{display:none}
+ .row,.tray{font-size:12.5px}.pop{width:auto;left:14px;right:14px}.toast{right:14px;left:14px;bottom:12px;max-width:none}
+ td a.h{display:none}
+ .more{display:inline-block}.tray .btn,.tray .slot,.tray .sep,.tray code{display:none}.tray b{white-space:nowrap}
+}
+</style><body>
+<div class="shell"><aside class="side"><div class="brand">agent drive</div><div id="nv"></div></aside><div class="main"><div class="m375 mnav">agent drive <span id="mt">Files</span></div><div class="top">Workspace / <span id="tt" style="color:#121211;margin-left:6px">Files</span></div><div class="bay"><i><b>Billing agent</b>0 B · 0 files</i><i class="sel"><b>● Research workspace</b>4.4 MB · 10 files</i><i class="add">+ YOUR NEXT AGENT</i></div>
+<div class="content" id="c"></div></div></div>
+<template id="files"><header class="ph"><div><h1>Drives & files</h1><span class="sub">A home for the work.</span></div><div class="actions"><button class="btn hide">Refresh</button><button class="btn sig">+ New drive</button></div></header><div class="row warn"><span class="led on"></span><span class="grow">Key not backed up. Run <code>agent-drive credentials export</code></span><button class="btn sm">Copy</button><button class="btn sm">Download recovery file</button></div><div class="panel" style="flex:1"><div class="pt"><b>All files</b><span class="m">/ Research workspace</span><span class="chip"><span class="led on" style="width:7px;height:7px;margin-right:4px"></span>Key loaded</span><button class="btn sm">Forget key</button><span class="sp"></span><input placeholder="Filter loaded files…"></div><div class="scroll"><table><thead><tr><th>File path</th><th class="col-s">Encrypted size</th><th class="col-a">Author</th><th class="col-m">Modified</th><th></th></tr></thead><tbody><tr><td class="p">/config/prompts/<b>system.md</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/datasets/customers/…/q3/<b>customer-i….csv</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/logs/2026-11-04/<b>agent-run-0001.log</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/logs/2026-11-04/<b>agent-run-0002.log</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/notes/<b>summary.md</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/notes/<b>日本語のメモ-🚀.md</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/outputs/charts/<b>revenue-by-region.png</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr><tr><td class="p">/outputs/<b>report-q3.pdf</b></td><td class="col-s">1.2 KB</td><td class="col-a">Research assistant</td><td class="col-m">Nov 4, 4:59 PM</td><td style="text-align:right"><a>Download</a><a class="h">Versions</a><a class="h">Trash</a></td></tr></tbody></table></div></div><div class="toast"><span class="led ok"></span>File decrypted. Download started.<button class="x">×</button></div></template><template id="agents"><header class="ph"><div><h1>Agents</h1><span class="sub">Separate identities. Purpose-built permissions.</span></div><div class="actions"><button class="btn hide">Refresh</button><button class="btn sig">+ New agent</button></div></header><div class="panel" style="flex:1"><div class="pt"><b>Agent identities</b><span class="sp"></span><span class="chip">1 agent</span><button class="btn sm">Connect another agent ▾</button></div><div class="ent"><div class="av"></div><div class="nm">Ünïcode agent 🤖 with a deliberately long identity name to test wrapping in tables<br><code>182d60df-023e-43e8-bfe3-df5d42f42673</code></div><span class="chip">0 active keys</span><button class="btn sm">Revoke access</button></div></div><div class="toast"><span class="led ok"></span>Agent created. Create an API key to connect it.<button class="x">×</button></div></template>
+<script>const v=location.hash==='#agents'?'agents':'files';document.getElementById('c').append(document.getElementById(v).content.cloneNode(true));const t=v==='agents'?'Agents':'Files';document.getElementById('tt').textContent=t;document.getElementById('mt').textContent=t;document.getElementById('nv').innerHTML="<a class=\"cur\">Files</a><a class=\"\">Agents</a><a class=\"\">API keys</a><a class=\"\">Usage</a><a class=\"\">Trash</a>".replace('cur','').replace('>Files<','>Files<');document.querySelectorAll('#nv a').forEach(a=>a.className=a.textContent===t?'cur':'');
+document.fonts&&document.fonts.ready;</script></body></html>

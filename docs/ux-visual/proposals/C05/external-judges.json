@@ -1,0 +1,84 @@
+{
+  "mode": "judge",
+  "images": [
+    "mock-A.png",
+    "mock-B.png",
+    "mock-C.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 32,
+      "costUsd": 0.085712,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 2,
+            "simplicity": 4,
+            "consistency": 5,
+            "usability": 2,
+            "visual": 3,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 5,
+            "simplicity": 3,
+            "consistency": 2,
+            "usability": 4,
+            "visual": 4,
+            "effort": 1
+          },
+          "C": {
+            "criteria": 4,
+            "simplicity": 4,
+            "consistency": 4,
+            "usability": 4,
+            "visual": 4,
+            "effort": 3
+          }
+        },
+        "winner": "C",
+        "graft": "From B, replace C's retained scrolling drive strip with the single full-width drive switcher showing 'Research workspace · 5.1 KB · 3 files · drive 3 of 3 · SWITCH', eliminating the ellipsized drive name seen in A.",
+        "defense": "C is the best weighted balance: it removes the 576px-wide scrolling section strip entirely, so at rest only the unclipped 'Usage' menu button shows and one tap reveals all 7 sections fully labelled vertically (Files through Activity & deletion, with Usage as the dark selected bay), and content starts at y=159, well under 260. A fails the hard acceptance gate despite being cheapest: its screenshot still shows 'Activ...' cut at rest and 'Research worksp...' ellipsized, so labels are clipped and Activity & deletion requires swipe-hunting with only a fade as cue. B measurably meets every criterion best (content y=134, full-width drive switcher, 5 bottom tabs plus More sheet for Billing & limits and Activity & deletion), but it invents a global fixed bottom bar that departs from the Rack top-nav system, must be rolled out to billing/settings pages to stay consistent, and buries two sections under More — a large, risky restructure to gain only 25px over C, which already passes y<=260 comfortably. C keeps the light-grey top chassis and familiar drive strip logic at medium effort, follows proven Vercel/GitHub/Linear mobile convention, and its one residual weakness — possible drive-name truncation from the retained strip — is fixed by the single B graft without importing B's bottom-bar overhaul."
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 37,
+      "costUsd": 0.03131,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 3,
+            "simplicity": 3,
+            "consistency": 4,
+            "usability": 2,
+            "visual": 3,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 4,
+            "simplicity": 3,
+            "consistency": 3,
+            "usability": 4,
+            "visual": 3,
+            "effort": 2
+          },
+          "C": {
+            "criteria": 5,
+            "simplicity": 5,
+            "consistency": 5,
+            "usability": 4,
+            "visual": 4,
+            "effort": 4
+          }
+        },
+        "winner": "C",
+        "graft": "Graft B's full-width single-bay drive switcher ('Research workspace · 5.1 KB · 3 files · drive 3 of 3 · SWITCH ▾') into C to replace the horizontally scrolling drive strip, eliminating the truncated 'Research worksp...' label and muddy edge-fade masks.",
+        "defense": "Proposal C wins because collapsing the section navigation into a top-bar dropdown button ('Usage ▾') alongside the compact 'a/' mark and user avatar reclaims over 160px of vertical space (content at y=159 vs y=260 target) while presenting all 7 sections vertically with full labels, icons, badge counts, and a logical divider above Billing and Activity. Against Proposal A, C eliminates the mobile anti-pattern of stacking two horizontal scroll strips on top of each other; in A, off-screen sections ('Files', 'Agents') remain hidden to the left, 'Activity & deletion' is still visibly clipped to 'Activ...' at rest, and the dual edge-fade masks look muddy. Against Proposal B, C avoids an overcrowded 6-item bottom tab bar (exceeding the 5-tab mobile ergonomics limit), avoids hiding two sections behind an extra 'More' sheet tap, preserves the T1 'Rack' developer console aesthetic instead of introducing a consumer-style white bottom sheet, and requires only localized header changes rather than high-risk cross-page layout restructuring."
+      }
+    }
+  ]
+}
