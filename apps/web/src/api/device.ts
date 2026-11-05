@@ -448,6 +448,24 @@ async function reconnectDrives(
   return rows;
 }
 
+// The previous key's permissions, when it is valid proof (unrevoked, same account, and the agent
+// named client_name). An empty-body approve grants exactly these, whether or not any drive is
+// reconnected; only an explicit body can widen them.
+async function previousPermissions(
+  db: Queryable,
+  accountId: string,
+  row: { client_name: string; previous_api_key_id: string | null },
+) {
+  if (!row.previous_api_key_id) return null;
+  const { rows } = await db.query<{ scopes: string[]; write_paths: string[] }>(
+    `SELECT k.scopes, k.write_paths FROM api_keys k
+       JOIN agents g ON g.id = k.agent_id AND g.account_id = $1 AND g.name = $3
+      WHERE k.id = $2 AND k.account_id = $1 AND k.revoked_at IS NULL`,
+    [accountId, row.previous_api_key_id, row.client_name],
+  );
+  return rows[0] ?? null;
+}
+
 // client_name, then "client_name (machine)", then "client_name 2", "client_name 3", ...
 async function freeDriveName(
   client: PoolClient,
@@ -515,7 +533,8 @@ async function approve(
     // A reconnect keeps the previous key's scopes and write paths; widening needs an explicit body.
     const known = await reconnectDrives(client, accountId, row);
     drives = known.map((drive) => drive.id);
-    if (known[0]) ({ scopes, write_paths: paths } = known[0]);
+    const previous = await previousPermissions(client, accountId, row);
+    if (previous) ({ scopes, write_paths: paths } = previous);
     if (!drives.length) newDriveName = await freeDriveName(client, accountId, row);
   }
   let newDriveId: string | null = null;
@@ -615,11 +634,12 @@ async function consoleDeviceAction(
     const row = found.rows[0];
     if (!row) throw new ApiError('not_found', 'Device request not found.');
     const known = { rows: await reconnectDrives(getPool(), accountId, row) };
+    const previous = await previousPermissions(getPool(), accountId, row);
     return reply({
       drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
-      scopes: known.rows[0]?.scopes ?? null,
-      write_paths: known.rows[0]?.write_paths ?? null,
+      scopes: previous?.scopes ?? null,
+      write_paths: previous?.write_paths ?? null,
       user_code: row.user_code,
       client_name: row.client_name,
       machine: row.machine,

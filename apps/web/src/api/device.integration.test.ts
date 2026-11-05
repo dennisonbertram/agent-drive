@@ -639,6 +639,38 @@ describe('one-click connect (contract v2)', () => {
     expect(me).toMatchObject({ scopes: ['read'], writePaths: ['/inbox/x'] });
   });
 
+  it('a restricted key that reconnects with no known drives keeps its scopes and write paths', async () => {
+    const name = `lost-${suffix}`;
+    const first = await start({ client_name: name }, nextIp());
+    expect(
+      (
+        await consoleCall(user, `/device/${first.user_code}/approve`, 'POST', {
+          newDriveName: `lost-drive-${suffix}`,
+          scopes: ['read'],
+          writePaths: ['/inbox/x'],
+        })
+      ).status,
+    ).toBe(200);
+    await allowPoll(first.device_code);
+    const original = await json(await poll(first.device_code));
+    const again = await start(
+      { client_name: name, known_drive_ids: [] },
+      nextIp(),
+      original.access_token,
+    );
+    const info = await json(await consoleCall(user, `/device/${again.user_code}`));
+    expect(info).toMatchObject({
+      creates_drive: true,
+      scopes: ['read'],
+      write_paths: ['/inbox/x'],
+    });
+    expect((await approveEmpty(again.user_code)).status).toBe(200);
+    await allowPoll(again.device_code);
+    const token = await json(await poll(again.device_code));
+    expect(token.new_drive_id).toBeTruthy();
+    expect(token).toMatchObject({ scope: 'read', write_paths: ['/inbox/x'] });
+  });
+
   it('ignores known_drive_ids without proof, so a known id grants nothing', async () => {
     const started = await start({ client_name: `attack-${suffix}`, known_drive_ids: [drive] });
     const info = await json(await consoleCall(user, `/device/${started.user_code}`));

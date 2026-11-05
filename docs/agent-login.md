@@ -442,7 +442,7 @@ that the human's browser already holds, but it cannot recover an agent's key.
   and the CLI prints `Writes limited to: <paths>`. An empty first login gives default scopes and no
   paths. This is a limit on writes, not access control on reading.
 - A reconnect with an empty approve body reuses the previous key's `scopes` and `write_paths`
-  instead of the defaults. Widening needs a new login with an explicit body. The console GET
+  instead of the defaults, whether or not any drive is reconnected (a valid previous key that reconnects no drives and gets a new drive keeps them too). Widening needs a new login with an explicit body. The console GET
   returns `scopes` and `write_paths` for a reconnect, and the page says "Reconnects to: <drives>
   (<scopes>; writes under <paths>)".
 - `check` on a key without `write` is read-only: it decrypts one existing live file and prints
