@@ -209,7 +209,6 @@ export default function Connect({
         <dt>Requested</dt>
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
-      <p className="connect-can">Read, write, delete and share files in this drive</p>
       <p className="banner info">
         {reconnect.length > 0
           ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
