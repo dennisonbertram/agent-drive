@@ -1,69 +1,64 @@
-/* T1 Rack: /connect device-pairing card */
+/* Spec sheet: /connect approval card */
 .connect-shell {
   max-width: 480px;
   margin: 0 auto;
-  padding: 40px 20px 40px;
+  padding: 40px 20px 48px;
 }
 .connect-shell .panel.connect-card {
-  position: relative;
   margin-top: 24px;
-  padding: 24px 22px 20px;
-  border: 0;
-  border-radius: 22px;
-  overflow: hidden;
-  background: linear-gradient(180deg, #f7f6f3, #d9d7d2);
-  color: var(--ink, #121211);
-  box-shadow:
-    0 1px 0 #fff inset,
-    0 -2px 0 rgba(0, 0, 0, 0.12) inset,
-    0 40px 50px -34px rgba(40, 30, 20, 0.5),
-    0 3px 8px rgba(40, 30, 20, 0.12);
+  padding: 22px 24px 24px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 14px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  box-shadow: 0 3px 0 var(--line-strong, #111);
 }
 .connect-shell h1 {
-  margin: 4px 0 14px;
-  font: 600 1.5rem/1.2 var(--sans, 'Space Grotesk', system-ui, sans-serif);
-  letter-spacing: -0.03em;
+  margin: 14px 0 4px;
+  font: 500 1.25rem/1.2 var(--sans, 'Inter Tight', system-ui, sans-serif);
+  letter-spacing: -0.01em;
 }
-.connect-shell .panel > p:not(.banner):not(.connect-note) {
+.connect-shell .panel > p:not(.banner):not(.connect-note):not(.connect-can) {
   margin: 0 0 14px;
   font-size: 0.875rem;
-  color: var(--muted, #5d5b56);
+  color: var(--ink-2, #3b3a37);
 }
 .connect-cmd {
-  font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   font-size: 0.92em;
   white-space: nowrap;
 }
 .connect-tag {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-direction: row-reverse;
   gap: 8px;
-  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.08em;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .connect-led {
   flex: none;
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #8d8a83;
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.35);
+  background: var(--paper-2, #f6f5f2);
+  box-shadow:
+    0 0 0 2px var(--bg, #fff),
+    0 0 0 3px var(--line-strong, #111);
 }
 .connect-led.on {
-  background: var(--sig, #ff5a1f);
+  background: var(--sig, #ff4a1c);
   box-shadow:
-    0 0 0 2px rgba(255, 90, 31, 0.2),
-    0 0 9px rgba(255, 90, 31, 0.8);
+    0 0 0 2px var(--bg, #fff),
+    0 0 0 3px var(--line-strong, #111),
+    0 0 12px var(--sig, #ff4a1c);
   animation: connect-wait 1.6s ease-in-out infinite;
 }
 .connect-led.dim {
-  background: #c9663b;
-  box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.25);
-}
-.connect-led.off {
-  background: #8d8a83;
+  background: var(--muted, #6b6963);
 }
 @keyframes connect-wait {
   50% {
@@ -76,161 +71,126 @@
   }
 }
 
-/* smoked LCD */
+/* the code */
 .connect-code-box {
-  position: relative;
-  overflow: hidden;
-  margin: 0 0 18px;
-  padding: 18px 16px 20px;
-  border-radius: 14px;
-  text-align: center;
-  background: linear-gradient(160deg, #2c2a22, var(--smoke, #17160f));
-  box-shadow:
-    inset 0 2px 10px rgba(0, 0, 0, 0.8),
-    0 1px 0 rgba(255, 255, 255, 0.8);
-}
-.connect-code-box::after {
-  content: '';
-  position: absolute;
-  left: -10%;
-  top: -40%;
-  width: 120%;
-  height: 70%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent);
-  transform: rotate(-6deg);
-  pointer-events: none;
-}
-.connect-code-box .connect-tag {
-  justify-content: center;
-  color: #a7a49b;
+  margin: 0;
 }
 .connect-code {
   display: block;
-  margin: 16px 0 10px;
-  font: 500 clamp(1.9rem, 10.5vw, 2.75rem) / 1
-    var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.06em;
-  color: var(--sig-text, #ff7a45);
+  margin: 16px 0 4px;
+  font: 500 clamp(1.7rem, 9.5vw, 2.125rem) / 1
+    var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  color: var(--ink, #111);
 }
 .connect-shell .connect-code-box p {
-  margin: 0;
+  margin: 10px 0 0;
   font-size: 0.8125rem;
-  color: #b9b6ad;
-  text-wrap: balance;
+  color: var(--muted, #6b6963);
 }
 
-/* facts */
+/* key / value list */
 .connect-facts {
   display: block;
-  margin: 0 0 16px;
-  border-top: 1px solid var(--ink, #121211);
+  margin: 16px 0;
+  border-top: 1px solid var(--line-strong, #111);
 }
 .connect-facts dt {
   float: left;
   clear: left;
-  padding: 10px 14px 10px 0;
-  font-size: 0.875rem;
-  color: var(--muted, #5d5b56);
+  padding: 9px 14px 9px 0;
+  font: 500 10.5px/1.9 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
 }
 .connect-facts dd {
   margin: 0;
-  padding: 10px 0;
-  min-height: 2.6em;
+  padding: 9px 0;
+  min-height: 2.7em;
   text-align: right;
   font-size: 0.875rem;
   font-weight: 500;
   overflow-wrap: anywhere;
-  border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+}
+.connect-can {
+  margin: 0 0 14px;
+  font-size: 0.875rem;
+  color: var(--ink-2, #3b3a37);
 }
 
-/* banners inside the card: solid surfaces, no green */
 .connect-shell .banner {
   margin: 0 0 16px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 0.8125rem;
-  color: var(--ink, #121211);
-  background: var(--al1, #f4f3f0);
-  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  color: var(--ink, #111);
+  background: var(--paper-2, #f6f5f2);
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
 .connect-shell .banner.error {
-  border-color: var(--ink, #121211);
-  border-left: 4px solid var(--sig, #ff5a1f);
+  border-color: var(--line-strong, #111);
+  border-left: 4px solid var(--sig, #ff4a1c);
 }
 
-/* actions */
+/* one primary action */
 .connect-actions {
   display: grid;
-  gap: 10px;
-}
-.connect-shell .button {
-  min-height: 44px;
-  border-radius: 8px;
-  font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
-  font-weight: 600;
 }
 .connect-shell .button.primary {
   width: 100%;
-  background: var(--sig, #ff5a1f);
-  color: var(--ink, #121211);
-  border: 0;
-  font-size: 1rem;
-  min-height: 52px;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.4) inset,
-    0 -2px 0 rgba(0, 0, 0, 0.18) inset;
+  min-height: 48px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  background: var(--sig, #ff4a1c);
+  color: var(--ink, #111);
+  font: 600 1rem var(--sans, 'Inter Tight', system-ui, sans-serif);
+  box-shadow: 0 2px 0 var(--line-strong, #111);
 }
 .connect-shell .button.primary:hover:not(:disabled) {
-  background: #ff6d38;
+  background: var(--sig, #ff4a1c);
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 var(--line-strong, #111);
 }
-.connect-shell .button.secondary {
-  width: 100%;
-  background: transparent;
-  color: var(--ink, #121211);
-  border: 1px solid var(--ink, #121211);
-  font-size: 1rem;
-}
-.connect-shell .button.secondary:hover:not(:disabled) {
-  background: var(--al1, #f4f3f0);
+.connect-shell .button.primary:disabled {
+  opacity: 0.6;
 }
 .connect-shell :focus-visible {
-  outline: 2px solid var(--ink, #121211);
-  outline-offset: 2px;
+  outline: 2px solid var(--ink, #111);
+  outline-offset: 3px;
 }
 .connect-note {
   margin: 16px 0 0;
   text-align: center;
   font-size: 0.8125rem;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 
-/* code entry form */
+/* code entry */
 .connect-shell form label {
   display: grid;
   gap: 8px;
   margin-bottom: 14px;
-  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.08em;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--muted, #5d5b56);
+  color: var(--muted, #6b6963);
 }
 .connect-shell input {
   min-height: 52px;
   padding: 0 14px;
-  border: 0;
-  border-radius: 12px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
   text-align: center;
-  font: 500 1.5rem var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.1em;
-  color: var(--sig-text, #ff7a45);
-  background: linear-gradient(160deg, #2c2a22, var(--smoke, #17160f));
-  box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.8);
+  font: 500 1.5rem var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  color: var(--ink, #111);
+  background: var(--bg, #fff);
 }
 .connect-shell input::placeholder {
-  color: #77746b;
-}
-.connect-shell input:focus-visible {
-  outline: 2px solid var(--sig, #ff5a1f);
+  color: var(--muted, #6b6963);
+  opacity: 0.6;
 }
 
 @media (max-width: 640px) {
@@ -238,6 +198,6 @@
     padding: 24px 16px 48px;
   }
   .connect-shell .panel.connect-card {
-    padding: 18px 14px 16px;
+    padding: 18px 16px 20px;
   }
 }

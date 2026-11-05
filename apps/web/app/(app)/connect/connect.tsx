@@ -181,7 +181,6 @@ export default function Connect({
   const reconnect = request.drives ?? [];
   return (
     <section className="panel connect-card">
-      <h1>Connect {request.client_name}?</h1>
       <div className="connect-code-box">
         <span className="connect-tag">
           <span className="connect-led on" aria-hidden="true" />
@@ -195,6 +194,7 @@ export default function Connect({
           requests expire on their own.
         </p>
       </div>
+      <h1>Connect {request.client_name}?</h1>
       <dl className="connect-facts">
         <dt>Agent</dt>
         <dd>{request.client_name}</dd>
@@ -209,6 +209,7 @@ export default function Connect({
         <dt>Requested</dt>
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
+      <p className="connect-can">Read, write, delete and share files in this drive</p>
       <p className="banner info">
         {reconnect.length > 0
           ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
