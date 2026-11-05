@@ -1,0 +1,225 @@
+/* Spec sheet: /s/[id] encrypted share page */
+.share-shell {
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+  font-family: var(--sans, 'Inter Tight', system-ui, sans-serif);
+  color: var(--ink, #111);
+  background: var(--bg, #fff);
+}
+.share-shell > * {
+  max-width: 512px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.share-shell > .brand {
+  display: flex;
+}
+
+.share-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 48px;
+  margin-bottom: 24px;
+  padding: 22px 24px 24px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 14px;
+  background: var(--panel, #fff);
+  box-shadow: 0 3px 0 var(--line-strong, #111);
+}
+.share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-direction: row-reverse;
+  gap: 12px;
+}
+.share-tag {
+  margin: 0;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
+}
+.share-vent {
+  display: none;
+}
+.share-led {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--paper-2, #f6f5f2);
+  box-shadow:
+    0 0 0 2px var(--bg, #fff),
+    0 0 0 3px var(--line-strong, #111);
+}
+.share-card[data-state='ready'] .share-led {
+  background: var(--sig, #ff4a1c);
+  box-shadow:
+    0 0 0 2px var(--bg, #fff),
+    0 0 0 3px var(--line-strong, #111),
+    0 0 12px var(--sig, #ff4a1c);
+}
+.share-card[data-state='loading'] .share-led {
+  background: var(--muted, #6b6963);
+  animation: share-blink 1.2s ease-in-out infinite;
+}
+@keyframes share-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+.share-card[data-state='error'] .share-led {
+  background: var(--ink, #111);
+}
+.share-sled {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.share-label {
+  margin: 0;
+  font: 500 clamp(18px, 5.5vw, 22px) / 1.25
+    var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: -0.01em;
+  color: var(--ink, #111);
+  overflow-wrap: anywhere;
+}
+.share-window {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-height: 96px;
+  border-top: 1px solid var(--line-strong, #111);
+}
+.share-details {
+  display: block;
+  width: 100%;
+}
+.share-details > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+}
+.share-details span {
+  font: 500 10.5px/1.9 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  color: var(--muted, #6b6963);
+}
+.share-details strong {
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.share-msg {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--ink-2, #3b3a37);
+}
+.share-card[data-state='error'] .share-window {
+  padding-top: 14px;
+  align-items: flex-start;
+}
+.share-fault {
+  width: 100%;
+}
+.share-fault h1 {
+  margin: 0 0 8px;
+  font: 500 1.25rem/1.25 var(--sans, 'Inter Tight', system-ui, sans-serif);
+  letter-spacing: -0.01em;
+  color: var(--ink, #111);
+}
+.share-paste {
+  margin-top: 16px;
+}
+.share-paste label {
+  display: block;
+  margin-bottom: 8px;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
+}
+.share-paste-row {
+  display: flex;
+  gap: 8px;
+}
+.share-paste-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  background: var(--bg, #fff);
+  color: var(--ink, #111);
+  font: 400 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+}
+.share-card .button {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  font: 500 14px var(--sans, 'Inter Tight', system-ui, sans-serif);
+  box-shadow: 0 2px 0 var(--line-strong, #111);
+  cursor: pointer;
+}
+.share-card .button:hover:not(:disabled) {
+  box-shadow: 0 1px 0 var(--line-strong, #111);
+}
+.share-card .button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.share-paste-problem {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--ink, #111);
+  padding-left: 8px;
+  border-left: 3px solid var(--sig, #ff4a1c);
+}
+.share-retry {
+  margin-top: 14px;
+}
+.share-card .share-download {
+  width: 100%;
+  min-height: 48px;
+  background: var(--sig, #ff4a1c);
+  color: var(--ink, #111);
+  font: 600 1rem var(--sans, 'Inter Tight', system-ui, sans-serif);
+}
+.share-card :focus-visible {
+  outline: 2px solid var(--ink, #111);
+  outline-offset: 3px;
+}
+.share-footer {
+  text-align: center;
+  text-wrap: balance;
+  font: 400 12px/1.5 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #6b6963);
+}
+@media (max-width: 480px) {
+  .share-shell {
+    padding: 20px 16px 32px;
+  }
+  .share-card {
+    margin-top: 32px;
+    padding: 18px 16px 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .share-led {
+    animation: none !important;
+  }
+}

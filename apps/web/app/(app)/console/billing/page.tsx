@@ -1,8 +1,11 @@
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { consoleUserId } from '@/src/console/auth';
 import { PLANS } from '@/src/billing/policy';
 import BillingClient from './billing-client';
-import './billing.css';
+import '../../../styles/account.css';
+
+export const metadata: Metadata = { title: 'Billing & limits | Agent Drive' };
 
 export const dynamic = 'force-dynamic';
 

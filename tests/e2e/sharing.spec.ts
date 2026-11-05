@@ -156,6 +156,35 @@ test('CLI share links download, expire, revoke, and never send fragment keys', a
     expect(downloadedPathB).not.toBeNull();
     expect((await readFile(downloadedPathB!)).equals(fileB)).toBe(true);
 
+    // Recovery: key removed from the link -> paste field -> full link works.
+    await page.goto(`${baseURL}/s/${shareB.id}`);
+    await expect(page.getByTestId('share-error-missing-key')).toBeVisible();
+    const paste = page.getByLabel('Paste the full share link');
+    // A malformed percent-escape is a validation error, not a thrown URIError.
+    await paste.fill('https://example.test/s/%ZZ#k=abc');
+    await page.getByRole('button', { name: 'Use link' }).click();
+    await expect(page.getByText('different share')).toBeVisible();
+    await paste.fill(shareA.url);
+    await page.getByRole('button', { name: 'Use link' }).click();
+    await expect(page.getByText('different share')).toBeVisible();
+    await paste.fill(shareB.url);
+    await page.getByRole('button', { name: 'Use link' }).click();
+    await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+    expect(page.url()).toContain(`#k=${fileKeyB}`);
+    // A failed object download keeps the card and offers Try again.
+    const s3Origin = new URL(process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000').origin;
+    let aborted = false;
+    await page.route(`${s3Origin}/**`, (route) => {
+      if (aborted) return route.continue();
+      aborted = true;
+      return route.abort();
+    });
+    await page.getByRole('button', { name: 'Download' }).click();
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    const retried = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Try again' }).click();
+    expect((await readFile((await (await retried).path())!)).equals(fileB)).toBe(true);
+
     const origins = new Set(
       requestRecords.map((item) => new URL((JSON.parse(item) as { url: string }).url).origin),
     );

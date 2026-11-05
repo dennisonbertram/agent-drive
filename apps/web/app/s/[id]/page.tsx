@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import '../../styles/share.css';
 import ShareClient from './share-client';
 
 export const metadata: Metadata = {

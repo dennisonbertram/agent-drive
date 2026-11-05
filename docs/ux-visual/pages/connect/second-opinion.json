@@ -1,0 +1,284 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-entry.png",
+    "1440x900-waiting-new-drive.png",
+    "1440x900-reconnect.png",
+    "1440x900-approve-error.png",
+    "1440x900-approved.png",
+    "1440x900-denied.png",
+    "375x812-waiting-new-drive-full.png",
+    "375x812-not-found.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 61,
+      "costUsd": 0.159888,
+      "result": {
+        "verdict": "Nearly excellent visual focus, but not yet a trustworthy 30-second pairing flow: the code display is exceptionally legible, yet account identity, code expiry, reconnect permissions, and terminal next steps are missing or under-specified.",
+        "findings": [
+          {
+            "level": "page",
+            "element": "Signed-in account identity (absent from every state)",
+            "problem": "No screenshot shows which human account is approving the agent. A user with personal/work accounts, or opening the link in the wrong browser profile, can confidently approve into the wrong account; neither confirmation nor Approved identifies the destination.",
+            "norm": "Device-authorization flows (OAuth device flow, GitHub/Google/Microsoft pairing) always show the signed-in account on the consent screen and offer Switch account.",
+            "severity": "P0",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Add an account row/avatar + email above Approve ('Approving as name@… — Switch'), and repeat the agent + account in Approved."
+          },
+          {
+            "level": "component",
+            "element": "'Requested 11/4/2026, 4:55:49 PM' row",
+            "problem": "Freshness is shown as an absolute, locale-ambiguous timestamp (11/4 = 4 Nov or 11 Apr) with no relative age and no expiry/countdown, although codes expire. The user cannot judge 'is this my just-run request or a stale/phished one?'",
+            "norm": "Time-sensitive consent shows relative time ('requested 1 min ago') plus explicit expiry ('expires in 9:42').",
+            "severity": "P1",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Use 'Requested 1 min ago · Code expires in 09:42' with a live countdown; on expiry replace Approve with a disabled/expired state and recovery action."
+          },
+          {
+            "level": "group",
+            "element": "'Reconnects to: reconnect-drive' info box vs new-drive explainer",
+            "problem": "The higher-risk reconnect case gets the weakest copy: one bare line naming the drive. It does not say approving re-grants read/write access to that existing drive's existing contents, whether the old key/session is replaced, or what happens to data. The new-drive state, by contrast, explains drive + key custody in three lines.",
+            "norm": "Consent screens scale disclosure with privilege: reconnecting to existing data warrants equal or stronger scope disclosure than creating an empty drive.",
+            "severity": "P1",
+            "screenshot": "1440x900-reconnect.png",
+            "fix": "Replace with explicit scope: 'This reconnects claude-code to your existing drive reconnect-drive. It can read and write everything in that drive. No other drives or your account are shared.' Add drive created/last-used context."
+          },
+          {
+            "level": "component",
+            "element": "'Continue' button on empty code field",
+            "problem": "With the field still showing the XXXX-XXXX placeholder the orange Continue renders fully active. First-time users will click it and hit an avoidable error; there is no disabled-until-valid affordance.",
+            "norm": "Primary actions stay disabled (visibly) until minimum format is met, or validate inline before submission is possible.",
+            "severity": "P1",
+            "screenshot": "1440x900-entry.png",
+            "fix": "Disable Continue until 8 valid characters are present, auto-insert the hyphen, auto-uppercase, accept paste, and validate format inline before submit."
+          },
+          {
+            "level": "page",
+            "element": "'Approved' terminal card",
+            "problem": "Dead end: the card repeats 'Approved' in both heading and body, names neither the agent nor its drive, and offers no CTA — no 'Open Console', 'View agent', or 'Connect another agent'. The user is left to find their own way back and cannot verify which of several tabs/agents was approved.",
+            "norm": "Success states confirm the specific actor/object and provide the single obvious next action.",
+            "severity": "P1",
+            "screenshot": "1440x900-approved.png",
+            "fix": "Head it 'claude-code is connected', summarise 'New drive created · as account@…', and add a primary 'Open in Console' plus secondary 'Connect another agent'."
+          },
+          {
+            "level": "page",
+            "element": "'Denied' terminal card",
+            "problem": "Also a dead end: 'Denied. The agent was not given access.' is tautological and offers no recovery — no 'Enter a different code', 'Connect an agent', or 'Go to Console', and no reassurance about what the terminal agent will see.",
+            "norm": "Refusal states close the loop for both parties and offer a restart path.",
+            "severity": "P2",
+            "screenshot": "1440x900-denied.png",
+            "fix": "Add 'The agent will see that this was denied. If this was a mistake, run agent-drive login again' with buttons 'Enter a new code' and 'Go to Console'."
+          },
+          {
+            "level": "component",
+            "element": "'Approval failed. Try again, or run agent-drive login for a new code.' error box",
+            "problem": "Low-salience error: a plain white box distinguished only by a thin orange left bar, no icon or 'Approval failed' heading, inserted between the trust copy and the actions. It also leaves the presumably dead code and identical 'Approve agent' button in place, inviting a futile retry loop if the code expired.",
+            "norm": "Errors use unambiguous error semantics (icon + heading, aria-live) and either change the available action or explain which of the offered remedies applies.",
+            "severity": "P1",
+            "screenshot": "1440x900-approve-error.png",
+            "fix": "Make it a headed alert ('Couldn't approve — the code may have expired'), keep one labelled 'Try again' only when retryable, otherwise swap the primary to 'Enter a new code'."
+          },
+          {
+            "level": "component",
+            "element": "'This code is wrong, expired, or already used.' error + 'BBBB-CCCC' field",
+            "problem": "Three distinct causes are merged with no way to tell which, and the field still uses the same signal orange for typed text and focus ring that branding/primary/LED use, so nothing visually reads as 'error' except re-reading the box above. Error text is separated from the field it describes by the 'CODE FROM YOUR AGENT' label.",
+            "norm": "Inline field errors sit adjacent to the field, use a distinct error treatment/icon, and are programmatically tied to the input (aria-describedby).",
+            "severity": "P2",
+            "screenshot": "375x812-not-found.png",
+            "fix": "Put the message directly under the input with an error icon and error-specific border/label, keep the useful recovery line, and offer a one-tap Clear while preserving the entered code for editing."
+          },
+          {
+            "level": "component",
+            "element": "'CODE FROM YOUR AGENT' smoked-glass input",
+            "problem": "Beyond the XXXX-XXXX placeholder the field gives no format contract: allowed characters, case-insensitivity, or whether the hyphen is typed are unstated, and the grey-on-black placeholder is the lowest-contrast text on the card. Non-experts pasting 'gvntlxvf' cannot predict acceptance.",
+            "norm": "Code entry states its alphabet/length, auto-formats, normalises case, and meets placeholder contrast guidance.",
+            "severity": "P2",
+            "screenshot": "1440x900-entry.png",
+            "fix": "Add hint '8 letters, not case-sensitive — hyphen added for you', raise placeholder contrast, support paste/autofill (autocomplete=one-time-code style semantics) and strip spaces on paste."
+          },
+          {
+            "level": "group",
+            "element": "'This agent gets its own encrypted drive…' grant explainer",
+            "problem": "It explains key custody beautifully but never states the permission boundary the persona actually needs before approving: own drive only, read/write, no access to other drives, account settings, or billing. 'What approving grants' is therefore half-answered.",
+            "norm": "Consent copy enumerates scope granted and scope excluded in plain language before the affirmative action.",
+            "severity": "P2",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Add one scope line: 'It can read and write only its own drive — not your other drives or account.' Keep the key-custody sentence."
+          },
+          {
+            "level": "group",
+            "element": "'Agent claude-code / Machine laptop' metadata rows",
+            "problem": "'Connect claude-code?' already names the agent, so the Agent row duplicates it, while the genuinely discriminating field, Machine, offers only the generic 'laptop' — useless if the user has two laptops or a stale request from another machine. Screen space is spent on redundancy instead of disambiguation.",
+            "norm": "Pairing screens maximise attacker/stale-request discrimination: machine name plus OS, rough location or request origin where available.",
+            "severity": "P2",
+            "screenshot": "1440x900-reconnect.png",
+            "fix": "Drop the duplicate Agent row; enrich Machine to 'laptop · macOS' (and IP/region if available server-side) and keep Requested relative."
+          },
+          {
+            "level": "group",
+            "element": "'Connect claude-code?' heading + right-aligned Agent/Machine/Requested values",
+            "problem": "Only short values are shown. The heading is a single fixed line and values are right-aligned in a ~440px card, so the brief's long agent/machine-name state has no visible wrap, truncation-with-full-value, or layout fallback — a long name will collide with its label or push the timestamp.",
+            "norm": "Identity strings in fixed cards wrap or truncate with the full value accessible, and labels never get squeezed out.",
+            "severity": "P2",
+            "screenshot": "375x812-waiting-new-drive-full.png",
+            "fix": "Allow the heading to wrap to two lines, let value columns truncate with ellipsis + title/tooltip, and test the long-name state at 375px before shipping."
+          },
+          {
+            "level": "layout",
+            "element": "Card placement and dot-grid background on desktop",
+            "problem": "Short states (entry, Approved, Denied) occupy only the top ~35% of 1440×900, marooned above a large empty aluminium field where the dot grid also fades out halfway down. The focused card reads as unfinished rather than centred and intentional.",
+            "norm": "Single-card focused flows are optically centred in the viewport (or the top-anchoring is clearly systematic) with a consistent ground treatment.",
+            "severity": "P2",
+            "screenshot": "1440x900-approved.png",
+            "fix": "Vertically centre logo+card as one unit across all states (which also stops height-change jump) or commit to top alignment with the dot grid carried consistently through the full viewport."
+          },
+          {
+            "level": "group",
+            "element": "Status eyebrow ('AWAITING CODE' / 'NO PAIRING' / 'PAIRED' / 'REFUSED') vs confirmation screens",
+            "problem": "The LED + mono status eyebrow present on entry, error, Approved and Denied vanishes entirely on the three confirmation screens, which jump straight to 'Connect claude-code?'. The state system that orients the user disappears at the exact moment of decision.",
+            "norm": "A persistent status/location indicator is kept across every step of a multi-step flow.",
+            "severity": "P3",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Add a consistent eyebrow on confirmation too, e.g. '● PAIRING REQUEST' above the heading, matching entry/terminal states."
+          },
+          {
+            "level": "component",
+            "element": "'You can revoke access any time in Console, Agents.' footnote",
+            "problem": "The key risk-reducing reassurance is the smallest, lowest-contrast grey text on the card, centred directly under Deny, and 'Console, Agents' is not a link. Users deciding whether to approve are least likely to read or act on it.",
+            "norm": "Reversibility information supporting a consent decision is legible body text, with the management destination linked where possible.",
+            "severity": "P3",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Raise size/contrast, left-align with the actions, and link 'Console → Agents' (opening in a new tab) so revocation is one click discoverable."
+          },
+          {
+            "level": "component",
+            "element": "'Enter the code your agent printed after running agent-drive login.' helper text",
+            "problem": "The command is set in proportional text and breaks as 'agent-' / 'drive login.' across lines, visually corrupting the exact string a non-expert may copy or compare against their terminal. For a CLI-driven persona the command should be unmistakable.",
+            "norm": "Commands and code literals are set in mono, non-breaking, and visually distinct from prose.",
+            "severity": "P3",
+            "screenshot": "1440x900-entry.png",
+            "fix": "Set `agent-drive login` in IBM Plex Mono with white-space: nowrap so the command never hyphen-breaks."
+          }
+        ],
+        "excellent": [
+          "Smoked-glass pairing-code display (1440x900-waiting-new-drive.png, 'GVNT-LXVF'): huge IBM Plex Mono orange readout with 'Check that this matches your agent's terminal. If it does not, deny.' — character-by-character comparison is effortless and the deny-if-mismatch instruction is exactly right for a security check.",
+          "Action hierarchy (1440x900-waiting-new-drive.png, 'Approve agent' / 'Deny'): one full-width signal-orange primary and a clearly secondary but generously sized Deny — no ambiguous competing buttons, and Deny is not hidden despite being the safe-negative path.",
+          "Key-custody plain language (1440x900-waiting-new-drive.png, 'Its key is created and kept on that machine; Agent Drive never sees it.'): the client-side-encryption promise is explained in one non-expert sentence at the moment of consent.",
+          "Mobile integrity (375x812-waiting-new-drive-full.png): the full decision — code, metadata, explainer, Approve, Deny, revoke note — fits one 375×812 screen without horizontal squeeze or truncated actions.",
+          "Error recovery on not-found (375x812-not-found.png): the entered code 'BBBB-CCCC' is preserved with cursor in place for correction, and the message gives the concrete recovery ('Run agent-drive login…to get a new one') instead of a bare failure.",
+          "Systematic card language across all screenshots: consistent aluminium card, logo lockup left-aligned to the card edge, LED + mono eyebrow vocabulary, and restrained single-orange palette keep all eight states feeling like one instrument."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 97,
+      "costUsd": 0.07902,
+      "result": {
+        "verdict": "Strong industrial 'Rack' aesthetic with an unmistakable smoked-glass pairing readout, but held back by a broken background dot-grid cutoff on shorter states, missing signed-in account context for security verification, dead-end terminal screens, weak differentiation between new-drive and reconnect flows, and inconsistent error/border treatments.",
+        "findings": [
+          {
+            "level": "layout",
+            "element": "Page background dot grid container",
+            "problem": "On shorter states, the radial dot-grid pattern terminates abruptly right below the card shadow (~360px from the top on desktop, ~620px on mobile), leaving the lower 40–60% of the viewport as a flat, ungridded beige void with a visible horizontal seam.",
+            "norm": "Full-bleed canvas backgrounds and surface textures must span 100% of the viewport height (min-height: 100dvh) regardless of content height.",
+            "severity": "P1",
+            "screenshot": "1440x900-approved.png",
+            "fix": "Apply min-height: 100dvh (or apply the dot-grid radial-gradient directly to html/body) so the grid texture covers the entire viewport in all states including entry, approved, denied, and mobile not-found."
+          },
+          {
+            "level": "page",
+            "element": "Header / signed-in user context",
+            "problem": "Although /connect is an authenticated device-approval surface where a human grants an agent access to their account and drives, there is zero indication of which user account or workspace is currently signed in.",
+            "norm": "Device authorization flows (OAuth 2.0 RFC 8628, GitHub, Vercel, Tailscale) always display the active account identity (e.g., email/handle + switch account action) so users with multiple accounts do not accidentally bind an agent to the wrong workspace.",
+            "severity": "P1",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Display a compact identity indicator in the top bar opposite the brand mark or at the bottom of the card (e.g., 'Signed in as user@domain.com · Switch')."
+          },
+          {
+            "level": "page",
+            "element": "Approved and Denied terminal state cards",
+            "problem": "Both terminal states ('Approved' and 'Denied') are complete dead ends with no navigation actions, and both repeat their heading word immediately in the body copy ('Approved' -> 'Approved. Return to your agent...'; 'Denied' -> 'Denied. The agent was not given access.'). If a user denies a mismatched code, they cannot even click to enter a new code.",
+            "norm": "Confirmation and cancellation screens should avoid redundant heading/body echoes and always provide clear next-step affordances (e.g., viewing the newly connected agent in the Console, or retrying with another code after denying).",
+            "severity": "P1",
+            "screenshot": "1440x900-denied.png",
+            "fix": "Remove the duplicated leading word in the body copy, add a secondary 'Open Console → Agents' action on the Approved card, and add 'Enter another code' / 'Back to Console' actions on the Denied card."
+          },
+          {
+            "level": "group",
+            "element": "Drive scope callout box ('Reconnects to: reconnect-drive')",
+            "problem": "Granting access to an existing drive looks nearly identical to creating a new empty drive: the card title ('Connect claude-code?') is unchanged, and the scope box shrinks to a single muted grey line ('Reconnects to: reconnect-drive') without monospace styling on the drive identifier or explanation that the agent will gain access to existing drive contents.",
+            "norm": "Security confirmation prompts must visually differentiate connecting to an existing resource from provisioning a new blank resource, highlighting the target resource identifier clearly.",
+            "severity": "P1",
+            "screenshot": "1440x900-reconnect.png",
+            "fix": "Style the target drive name ('reconnect-drive') in bold IBM Plex Mono, add an explicit status eyebrow or sub-label indicating an existing drive reconnection, and clarify the permission scope ('This agent will reconnect to existing drive reconnect-drive using the key on that machine.')."
+          },
+          {
+            "level": "component",
+            "element": "Error banners in not-found vs. approve-error states",
+            "problem": "Error banners are styled inconsistently across states and clash with neighboring controls: in 375x812-not-found.png, the error box looks like a neutral info callout (faint grey border, no orange/red accent bar) and sits above the input label disconnected from the red-outlined input; in 1440x900-approve-error.png, the error box uses a dark 1px charcoal border that matches the 'Deny' button right below it, making the alert resemble an interactive button.",
+            "norm": "Error callouts should share one unified semantic style (distinct from both neutral info callouts and secondary outline buttons) and sit adjacent to the control or action that triggered them.",
+            "severity": "P2",
+            "screenshot": "1440x900-approve-error.png",
+            "fix": "Unify error callouts with a subtle tinted background, the left signal-orange accent bar, and a softer outer border that does not match the 'Deny' button border; in the code-entry error state, keep the error message directly associated with the code input."
+          },
+          {
+            "level": "component",
+            "element": "CLI command references in body and error text ('agent-drive login')",
+            "problem": "The terminal command 'agent-drive login' is rendered in plain proportional body font instead of monospace, causing 'agent-drive' to hyphen-wrap across two lines ('agent- / drive login.') in 1440x900-entry.png.",
+            "norm": "Developer interfaces must style inline CLI commands in monospace with a subtle code pill or nowrap treatment so commands never break across lines with typographic ambiguity.",
+            "severity": "P2",
+            "screenshot": "1440x900-entry.png",
+            "fix": "Wrap 'agent-drive login' in an inline <code> element using IBM Plex Mono, white-space: nowrap, and a subtle warm-grey background pill."
+          },
+          {
+            "level": "group",
+            "element": "Metadata key-value table ('Agent', 'Machine', 'Requested')",
+            "problem": "The top border above the 'Agent' row is a stark 1px black/charcoal rule while the internal and bottom dividers are faint light grey, creating an unbalanced visual seam right below the dark pairing display. Additionally, 'Requested' outputs a raw locale string ('11/4/2026, 4:55:49 PM') that is ambiguous between MM/DD and DD/MM and lacks relative recency for a 30-second pairing flow.",
+            "norm": "Key-value lists should use uniform divider weights, and time-sensitive security prompts should lead with relative time ('Just now · 4:55 PM' or an expiry countdown) plus an unambiguous date format.",
+            "severity": "P2",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Match the top divider color to the subtle grey row dividers (#dfddd7) and format the timestamp as relative time with explicit short month ('Just now · Nov 4, 4:55 PM')."
+          },
+          {
+            "level": "layout",
+            "element": "Mobile card vertical density on 375x812",
+            "problem": "In 375x812-waiting-new-drive-full.png, the rendered surface extends past 812px vertically (~850px tall), pushing the 'Deny' button and revocation notice right to or below the fold on a standard 375x812 viewport.",
+            "norm": "Single-purpose utility cards should fit comfortably within a single 375x812 mobile viewport without vertical scrolling.",
+            "severity": "P2",
+            "screenshot": "375x812-waiting-new-drive-full.png",
+            "fix": "Reduce mobile top margin above the brand header by 12px, tighten the smoked-glass code box vertical padding by 12px, and compact metadata row padding from ~12px to 8px on viewports under 480px."
+          },
+          {
+            "level": "component",
+            "element": "Revocation helper footer ('You can revoke access any time in Console, Agents.')",
+            "problem": "The caption sits only ~6px below the 'Deny' button border, visually crowding the button, and uses comma-separated prose ('in Console, Agents.') instead of standard path notation.",
+            "norm": "Helper captions below button groups need at least 12–16px of top margin to separate from interactive hit targets, and navigation paths should use clear hierarchy markers (e.g., 'Console → Agents').",
+            "severity": "P3",
+            "screenshot": "1440x900-waiting-new-drive.png",
+            "fix": "Increase top margin on the footer caption to 14px and update the copy to 'You can revoke access any time in Console → Agents.'"
+          },
+          {
+            "level": "component",
+            "element": "Primary 'Continue' button in empty code entry state",
+            "problem": "In 1440x900-entry.png, the 'Continue' button appears fully active in high-saturation signal orange while the code input is still empty (placeholder 'XXXX-XXXX').",
+            "norm": "When a single required fixed-length code input is empty or incomplete, the submit action should visually reflect a disabled/inactive state until a valid character count is entered, or clearly indicate readiness only when actionable.",
+            "severity": "P3",
+            "screenshot": "1440x900-entry.png",
+            "fix": "Render 'Continue' in a muted/disabled state until 8 characters are entered, and auto-format the hyphen as the user types or pastes."
+          }
+        ],
+        "excellent": [
+          "The smoked-glass 'PAIRING CODE' readout panel in 1440x900-waiting-new-drive.png is outstanding: the glowing LED dot, crisp IBM Plex Mono letterforms in signal orange, and embedded verification microcopy ('Check that this matches your agent's terminal. If it does not, deny.') make the primary security check effortless.",
+          "The zero-knowledge encryption explanation ('This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.') communicates complex client-side key architecture in plain, reassuring language.",
+          "The hardware-inspired T1 'Rack' palette—warm anodized aluminium card surface, tactile elevation shadow, and disciplined restraint to a single signal-orange accent—gives the utility a distinctive, high-trust industrial identity."
+        ]
+      }
+    }
+  ]
+}

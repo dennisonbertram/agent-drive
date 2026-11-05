@@ -1,0 +1,39 @@
+{
+  "ready": {
+    "id": "WtEbDm2pcsiXjSL7U7YTQQ",
+    "path": "/uxv/quarterly-report-final.pdf",
+    "versionId": "6b6a0247-b453-43dc-87e4-fe32638bc5e3",
+    "expiresAt": "2026-11-11T21:55:49.278Z",
+    "url": "http://localhost:3230/s/WtEbDm2pcsiXjSL7U7YTQQ#k=REDACTED"
+  },
+  "long": {
+    "id": "hHD0ULK0_vnx0VTXgHBUHA",
+    "path": "/uxv/a-very-long-synthetic-file-name-for-wrapping-checks-2026-board-meeting-minutes-final-v7-reviewed-by-everyone.txt",
+    "versionId": "85abd700-fa2f-496e-86c4-2044f3a5b306",
+    "expiresAt": "2026-11-11T21:55:50.242Z",
+    "url": "http://localhost:3230/s/hHD0ULK0_vnx0VTXgHBUHA#k=REDACTED"
+  },
+  "wrong": {
+    "id": "PKBOLZbY3QGilnjBDAgW3Q",
+    "path": "/uxv/wrong-key.bin",
+    "versionId": "ce396211-c4d2-4d13-85c9-528f5bb5627f",
+    "expiresAt": "2026-11-11T21:55:50.793Z",
+    "url": "http://localhost:3230/s/PKBOLZbY3QGilnjBDAgW3Q#k=REDACTED"
+  },
+  "expired": {
+    "id": "RzQBETcAd6kfusbNRMdj-g",
+    "path": "/uxv/expired.bin",
+    "versionId": "609c324a-db58-4ccb-91e8-327e07094de5",
+    "expiresAt": "2026-11-11T21:55:51.262Z",
+    "url": "http://localhost:3230/s/RzQBETcAd6kfusbNRMdj-g#k=REDACTED"
+  },
+  "revoked": {
+    "id": "XZAsbrjtu9PJ8qWpqL7n2A",
+    "path": "/uxv/revoked.bin",
+    "versionId": "4eb8be3b-39ca-46fd-a395-f1e11357c76d",
+    "expiresAt": "2026-11-11T21:55:51.723Z",
+    "url": "http://localhost:3230/s/XZAsbrjtu9PJ8qWpqL7n2A#k=REDACTED"
+  },
+  "acc": "00ad8dc8-a7a0-46b2-9bea-094806a054d5",
+  "drive": "a07f3a11-f424-49c8-8d8d-77fd862a5d8f"
+}

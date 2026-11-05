@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Drive spec reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Inter Tight: Inter's tighter-spaced sibling, reads like stamped manual headings at large sizes and stays neutral in tables. JetBrains Mono for part numbers, paths and labels. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fff;--paper:#fff;--ink:#111;--ink-2:#3b3a37;--muted:#6b6963;--hair:rgba(17,17,17,.16);--line:#111;--signal:#ff4a1c;
+--sans:'Inter Tight',-apple-system,'Helvetica Neue',sans-serif;--mono:'JetBrains Mono',ui-monospace,Menlo,monospace}
+*{box-sizing:border-box;margin:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{background:#fff;color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;cursor:pointer;color:inherit}a{color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.wrap{max-width:1160px;margin:0 auto;padding:0 32px}
+.tag{font:500 11px/1.2 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--ink);border-radius:6px;padding:10px 18px;font-weight:500;font-size:14px;background:#fff;color:var(--ink);text-decoration:none;box-shadow:0 2px 0 var(--ink)}
+.btn:hover{transform:translateY(1px);box-shadow:0 1px 0 var(--ink)}
+.btn.signal{background:var(--signal)}
+.led{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--signal);box-shadow:0 0 0 2px #fff,0 0 0 3px var(--ink),0 0 12px var(--signal)}
+.nav{border-bottom:1px solid var(--line);background:#fff}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+.brand{font-weight:600;letter-spacing:-.01em;display:flex;align-items:center;gap:10px;text-decoration:none}
+.brand i{width:16px;height:16px;border:1.5px solid var(--ink);border-radius:3px;position:relative;background:#fff}
+.brand i::after{content:"";position:absolute;left:2px;right:2px;bottom:2px;height:3px;background:var(--ink)}
+.links{display:flex;gap:28px;font-size:14px;color:var(--ink-2)}.links a{text-decoration:none}.links a:hover{color:var(--ink)}
+section{padding:120px 0 0}
+h1{font-weight:500;font-size:80px;line-height:.98;letter-spacing:-.035em}
+h2{font-weight:500;font-size:48px;line-height:1.03;letter-spacing:-.03em;max-width:15em;margin-top:18px}
+.lede{font-size:19px;line-height:1.45;color:var(--ink-2);max-width:27em;margin-top:20px}
+code,.m{font-family:var(--mono)}
+/* hero */
+.hero{padding-top:72px}
+.hero .g{display:grid;grid-template-columns:minmax(0,1fr) 460px;gap:40px;align-items:center}
+.hero h1{margin-top:20px}
+.panel{margin-top:36px;background:#111;color:#fff;border-radius:10px;padding:18px 18px 18px 20px;max-width:560px}
+.panel .tag{color:#a8a69f;margin-bottom:12px}
+.panel .row{display:flex;align-items:center;gap:14px}
+.panel code{flex:1;min-width:0;font-size:13.5px;line-height:1.5;word-break:break-word}
+.panel .p{color:#a8a69f}
+.panel .btn{border-color:#fff;box-shadow:none;flex:none}
+.cli{margin-top:18px;font:400 13px var(--mono);color:var(--muted)}
+.cli b{font-weight:400;color:var(--ink)}
+.fig svg{display:block;width:100%;height:auto}
+.fig svg.mob{display:none}
+svg .kp{fill:none;stroke:#111;stroke-width:1;stroke-dasharray:5 4}
+svg .ka{fill:#fff;stroke:#111;stroke-width:1}
+svg .kt{font:500 11px 'JetBrains Mono',monospace;letter-spacing:.1em;fill:#6b6963}
+svg .kn{font:500 13.5px 'JetBrains Mono',monospace;fill:#111}
+svg .kf{font:400 13px 'JetBrains Mono',monospace;fill:#111}
+svg .kl{fill:none;stroke:#111;stroke-width:1}
+svg .kled{fill:#ff4a1c;stroke:#111}
+/* 2 problem */
+.ba{margin-top:56px;display:grid;grid-template-columns:1fr 1fr;gap:48px}
+.spec.s3{grid-template-columns:repeat(3,1fr)}.spec.s3 code{font-size:18px}
+.relay>div{display:flex;flex-direction:column;gap:14px}.relay>div p{margin-top:0}
+.say{border:1px solid var(--ink);border-radius:10px 10px 10px 2px;padding:14px 16px;font-size:15px;line-height:1.45}
+.log{margin-top:40px;border-top:1px solid var(--ink);padding-top:16px;font:400 13px var(--mono)}
+.log .tag{margin-bottom:10px}
+.lr{display:grid;grid-template-columns:minmax(0,1.6fr) 1fr 1fr;gap:16px;padding:9px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
+.lr.h{color:var(--muted);font-size:11px;letter-spacing:.12em}
+@media (max-width:760px){.spec.s3{grid-template-columns:1fr}.spec.s3 div,.spec.s3 div+div{padding:22px 0 8px;border-left:0}.spec.s3 div+div{border-top:1px solid var(--hair)}.lr{grid-template-columns:1fr;gap:2px}.lr.h{display:none}}
+.ba.three{grid-template-columns:1fr;gap:28px;max-width:860px}
+.ba.three>div{display:grid;grid-template-columns:200px 1fr;align-items:center;gap:24px}
+.ba.three h3{margin:0}
+@media (max-width:760px){.ba.three>div{grid-template-columns:1fr;gap:12px}}
+.ba h3{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:16px}
+.strip{display:flex;align-items:stretch;gap:0}
+.cell{flex:1;min-width:0;border:1px solid var(--ink);border-radius:6px;padding:14px;font-size:14px}
+.cell small{display:block;font:400 12px var(--mono);color:var(--muted);margin-top:4px;overflow-wrap:anywhere}
+.cell.gone{border-style:dashed;border-color:var(--hair);color:var(--muted)}
+.cell.gone b{text-decoration:line-through;font-weight:500}
+.arr{flex:none;width:28px;align-self:center;border-top:1px solid var(--ink);position:relative}
+.arr::after{content:"";position:absolute;right:0;top:-4px;width:7px;height:7px;border-top:1px solid var(--ink);border-right:1px solid var(--ink);transform:rotate(45deg)}
+.cell b{font-weight:500}
+/* 3 folders */
+.spec{margin-top:56px;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--ink)}
+.spec div{padding:28px 28px 8px 0}
+.spec div+div{padding-left:28px;border-left:1px solid var(--hair)}
+.spec code{font-size:22px;font-weight:500;letter-spacing:-.01em}
+.spec p{margin-top:12px;color:var(--ink-2);font-size:16px}
+/* 4 connect */
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,420px);gap:72px;align-items:start}
+.steps{margin-top:40px;list-style:none;padding:0;display:grid;gap:22px}
+.steps li{display:grid;grid-template-columns:28px 1fr;gap:6px 0}
+.steps li>i{font:500 12px var(--mono);font-style:normal;color:var(--muted);padding-top:3px}
+.steps b{font-weight:500;font-size:17px}
+.steps .t{grid-column:2;font:400 13px var(--mono);color:var(--ink-2);background:#f6f5f2;border-radius:6px;padding:10px 12px;margin-top:6px;overflow-wrap:anywhere}
+.pair{border:1px solid var(--ink);border-radius:14px;padding:22px 24px 24px;box-shadow:0 3px 0 var(--ink);background:#fff}
+.pair .top{display:flex;justify-content:space-between;align-items:center}
+.pair .c{margin:16px 0 4px;font:500 34px/1 var(--mono);letter-spacing:.12em}
+.pair h3{font-weight:500;font-size:20px;letter-spacing:-.01em;margin:14px 0 4px}
+.rows{margin:16px 0;border-top:1px solid var(--ink)}
+.rows div{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--hair);font-size:14px}
+.rows span{font:500 10.5px/1.9 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.rows b{font-weight:500;text-align:right}
+.pair .can{font-size:14px;color:var(--ink-2);margin-bottom:18px}
+.pair .btn{width:100%;justify-content:center;padding:13px;font-size:16px;font-weight:600}
+.nokey{margin-top:28px;font-size:15px;color:var(--ink-2)}
+/* 5 machines */
+.line3{margin-top:56px;display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--ink)}
+.line3>div{padding:24px 28px 0 0}.line3>div+div{padding-left:28px;border-left:1px solid var(--hair)}
+.line3 .tag{margin-bottom:10px}.line3 p{font-size:16px;color:var(--ink-2);margin-top:14px}
+.line3 code{display:block;background:#f6f5f2;border-radius:6px;padding:12px 14px;font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.line3 code span{color:var(--muted)}
+/* 6 see */
+.see{margin-top:56px;display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--ink)}
+.see>div{padding:26px 40px 0 0}.see>div+div{padding-left:40px;border-left:1px solid var(--hair)}
+.see ul{list-style:none;padding:0;margin-top:16px;display:grid;gap:12px;font-size:17px}
+.see li{display:flex;gap:12px;align-items:baseline}
+.see li::before{content:"";flex:none;width:5px;height:5px;margin-top:2px;background:var(--ink);border-radius:1px;transform:translateY(-3px)}
+.see .no li::before{background:none;border:1px solid var(--ink)}
+.see li small{color:var(--muted);font-size:14px}
+/* 7 works with */
+.works{margin-top:48px;display:flex;flex-wrap:wrap;gap:12px}
+.works span{border:1px solid var(--ink);border-radius:6px;padding:10px 16px;font:500 14px var(--mono)}
+.works span.q{border-style:dashed}
+.llms{margin-top:36px;font-size:16px;color:var(--ink-2);max-width:36em}
+.llms a{font-family:var(--mono);font-size:14px}
+/* 8 pricing */
+.plans{margin-top:56px;display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--ink)}
+.plan{padding:26px 32px 0 0}.plan+.plan{padding-left:32px;border-left:1px solid var(--hair)}
+.plan h3{font:500 12px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.plan .pr{font-size:44px;font-weight:500;letter-spacing:-.03em;margin:8px 0 14px}.plan .pr small{font-size:15px;color:var(--muted);letter-spacing:0;font-weight:400}
+.plan ul{list-style:none;padding:0;display:grid;gap:6px;font-size:15px;color:var(--ink-2)}
+.soon{display:inline-block;margin-top:20px;font:500 11px var(--mono);letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--hair);color:var(--muted);border-radius:6px;padding:7px 12px}
+.pnote{margin-top:36px;font-size:15px;color:var(--ink-2)}
+.pnote a{font-weight:500}
+/* 9 final */
+.final{padding-bottom:120px}
+.final h2{font-size:64px;max-width:none}
+footer{border-top:1px solid var(--line);padding:22px 0;font:400 12px var(--mono);color:var(--muted)}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;color:var(--ink-2)}footer a:hover{color:var(--ink)}
+@media (max-width:1000px){
+ .hero .g{grid-template-columns:1fr;gap:48px}.fig{max-width:460px}
+ .two{grid-template-columns:1fr;gap:48px}.pair{max-width:460px}
+ h1{font-size:64px}h2{font-size:40px}
+ .spec{grid-template-columns:1fr 1fr}.spec div:nth-child(3){padding-left:0;border-left:0}.spec div:nth-child(n+3){border-top:1px solid var(--hair);margin-top:20px;padding-top:28px}
+}
+@media (max-width:760px){
+ .wrap{padding:0 20px}.links{display:none}
+ section{padding-top:84px}.hero{padding-top:44px}
+ h1{font-size:46px}h2{font-size:34px}.lede{font-size:17px}
+ .panel{margin-top:26px}.panel .row{flex-wrap:wrap}.panel code{flex-basis:100%}
+ .fig{margin-top:8px}.fig svg.dsk{display:none}.fig svg.mob{display:block}
+ .ba,.ba.three,.see{grid-template-columns:1fr;gap:36px}
+ .see>div{padding:26px 0 0}.see>div+div{padding-left:0;border-left:0;border-top:1px solid var(--hair);margin-top:26px}
+ .spec{grid-template-columns:1fr}.spec div,.spec div+div{padding:22px 0 20px;border-left:0;margin-top:0}.spec div+div{border-top:1px solid var(--hair)}
+ .line3,.plans{grid-template-columns:1fr}
+ .line3>div,.line3>div+div,.plan,.plan+.plan{padding:24px 0 24px;border-left:0}.line3>div+div,.plan+.plan{border-top:1px solid var(--hair)}
+ .strip{flex-direction:column}.arr{width:0;height:22px;border-top:0;border-left:1px solid var(--ink);align-self:center}.arr::after{right:auto;top:auto;bottom:0;left:-4px;transform:rotate(135deg)}
+ .final h2{font-size:42px}.pair .c{font-size:28px}
+}
+</style>
+
+</head>
+<body>
+<nav class="nav"><div class="wrap">
+ <a class="brand" href="#top"><i></i>Agent Drive</a>
+ <div class="links"><a href="/llms.txt">Docs</a><a href="#pricing">Pricing</a><a href="/llms.txt">llms.txt</a><a href="/console">Console</a></div>
+</div></nav>
+
+<!-- 1 HERO -->
+<section class="hero" id="top"><div class="wrap"><div class="g">
+ <div>
+  <div class="tag">Portable storage for agents</div>
+  <h1>Agent files that outlive the sandbox.</h1>
+  <p class="lede">Agents save to their drive as they work. When the sandbox ends, the machine changes, or the work moves from Claude Code to Codex, the files are still there.</p>
+  <div class="panel">
+   <div class="tag">Give this to your agent</div>
+   <div class="row"><code><span class="p">&gt;</span> Set up Agent Drive: https://agentdrive.xyz/llms.txt</code><button class="btn signal" data-copy="Set up Agent Drive: https://agentdrive.xyz/llms.txt">Copy</button></div>
+  </div>
+  <p class="cli">or in a terminal: <b>npm install -g https://agentdrive.xyz/cli/agent-drive.tgz</b></p>
+ </div>
+ <figure class="fig">
+  <svg class="dsk" viewBox="0 0 560 350" role="img" aria-label="One Agent Drive with four folders. Codex and Gemini CLI run in a cloud sandbox, Claude Code and Cursor run on a laptop, trace-bot runs in a CI runner. All connect to the same drive."><g id="sceneD"></g></svg>
+  <svg class="mob" viewBox="0 0 340 330" role="img" aria-label="One Agent Drive with four folders. Codex and Gemini CLI in a cloud sandbox and Claude Code on a laptop connect to it."><g id="sceneM"></g></svg>
+ </figure>
+</div></div></section>
+
+<!-- 2 PROBLEM -->
+<section id="problem"><div class="wrap">
+ <div class="tag">The problem</div>
+ <h2>Sandboxes end. Machines change. Platforms switch.</h2>
+ <p class="lede">Each one wipes whatever the agent saved locally, and the next run starts from zero. With a drive, the agent picks up where it stopped.</p>
+ <div class="ba three">
+  <div><h3>The sandbox ends</h3><div class="strip">
+   <div class="cell"><b>Codex cloud task</b><small>saves /memory/project-notes.md</small></div><span class="arr"></span>
+   <div class="cell gone"><b>Sandbox</b><small>deleted</small></div><span class="arr"></span>
+   <div class="cell"><b>Next task</b><small>reads the notes back</small></div></div></div>
+  <div><h3>The machine changes</h3><div class="strip">
+   <div class="cell"><b>Laptop</b><small>saves /outputs/report.pdf</small></div><span class="arr"></span>
+   <div class="cell gone"><b>Laptop</b><small>closed</small></div><span class="arr"></span>
+   <div class="cell"><b>CI runner</b><small>gets the report</small></div></div></div>
+  <div><h3>The platform switches</h3><div class="strip">
+   <div class="cell"><b>Claude Code</b><small>writes /handoff/next.md</small></div><span class="arr"></span>
+   <div class="cell gone"><b>Session</b><small>ended</small></div><span class="arr"></span>
+   <div class="cell"><b>Codex</b><small>reads the handoff</small></div></div></div>
+ </div>
+</div></section>
+
+<!-- 3 UNBLOCKS -->
+<section id="unblocks"><div class="wrap">
+ <div class="tag">What it unblocks</div>
+ <h2>Work that is bigger than one session.</h2>
+ <div class="spec s3">
+  <div><code>Research</code><p>An agent gathers sources and notes over days. Each run starts from what the last one found, not from an empty sandbox.</p></div>
+  <div><code>Long-running goals</code><p>A goal that takes weeks survives restarts, new machines and new models. The plan and the progress live in the drive.</p></div>
+  <div><code>Many agents, one drive</code><p>Agents in separate sandboxes read and write the same files. Every version records which agent wrote it, and a write that would replace newer work fails instead.</p></div>
+ </div>
+</div></section>
+
+<!-- 4 FEATURES -->
+<section id="features"><div class="wrap">
+ <div class="tag">Features</div>
+ <h2>Encrypted. Sharable. Works anywhere.</h2>
+ <div class="line3">
+  <div><div class="tag">Encrypted</div><p>Files are encrypted on the agent's machine with AES-256-GCM. We store only ciphertext and never see your drive keys.</p></div>
+  <div><div class="tag">Sharable</div><code><span>$</span> agent-drive share --drive "$DRIVE_ID" /outputs/report.pdf --expires-in 7d</code><p>An expiring link that decrypts in the recipient's browser. No account needed, and you can revoke it.</p></div>
+  <div><div class="tag">Works anywhere</div><code><span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…</code><p>A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or CI runner and the agent has its drive.</p></div>
+ </div>
+</div></section>
+
+<!-- 5 RELAY -->
+<section id="relay"><div class="wrap">
+ <div class="tag">Example</div>
+ <h2>A bot, a coder and an assistant on the same data.</h2>
+ <p class="lede">Three agents on three platforms. None of them shares a machine. They meet in the drive.</p>
+ <div class="line3 relay">
+  <div><div class="tag">1 / Grok bot &middot; cloud worker</div><p>Pulls today's posts about your app from X.</p><code><span>$</span> agent-drive put --drive "$DRIVE_ID" posts.jsonl /inbox/x/2026-11-05.jsonl</code></div>
+  <div><div class="tag">2 / Devin &middot; Devin sandbox</div><p>Reads the posts, builds the feature people asked for most, and writes up what changed.</p><code><span>$</span> agent-drive get --drive "$DRIVE_ID" /inbox/x/2026-11-05.jsonl<br><span>$</span> agent-drive put --drive "$DRIVE_ID" notes.md /outputs/csv-export.md</code></div>
+  <div><div class="tag">3 / Claude &middot; Claude desktop</div><p>Checks what changed through the MCP server and tells you.</p><div class="say">Devin shipped CSV export today. It was the most requested feature in this morning's posts from X. Notes are in /outputs/csv-export.md.</div></div>
+ </div>
+ <div class="log" role="img" aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox.">
+  <div class="tag">Drive activity</div>
+  <div class="lr h"><span>PATH</span><span>AGENT</span><span>MACHINE</span></div>
+  <div class="lr"><span>/inbox/x/2026-11-05.jsonl</span><span>grok-bot</span><span>cloud-worker</span></div>
+  <div class="lr"><span>/outputs/csv-export.md</span><span>devin</span><span>devin-sandbox</span></div>
+ </div>
+</div></section>
+
+<!-- 6 CONNECT -->
+<section id="connect"><div class="wrap"><div class="two">
+ <div>
+  <div class="tag">Connecting</div>
+  <h2>One line to the agent. One click from you.</h2>
+  <ol class="steps">
+   <li><i>1</i><b>Paste one line into your agent.</b><div class="t">Set up Agent Drive: https://agentdrive.xyz/llms.txt</div></li>
+   <li><i>2</i><b>The agent shows a pairing code.</b><div class="t">CXRH-TZJT</div></li>
+   <li><i>3</i><b>You approve it once.</b></li>
+  </ol>
+  <p class="nokey">No API key to copy.</p>
+ </div>
+ <div class="pair" aria-label="Approval page">
+  <div class="top"><span class="tag">Approve agent</span><span class="led"></span></div>
+  <div class="c">CXRH-TZJT</div>
+  <h3>Connect trace-bot?</h3>
+  <div class="rows">
+   <div><span>Agent</span><b>trace-bot</b></div>
+   <div><span>Machine</span><b>MacBook</b></div>
+   <div><span>Account</span><b>sam@northwind.dev</b></div>
+  </div>
+  <p class="can">Read, write, delete and share files in this drive</p>
+  <button class="btn signal" type="button">Approve</button>
+ </div>
+</div></div></section>
+
+<!-- 8 PRICING -->
+<section id="pricing"><div class="wrap">
+ <div class="tag">Pricing</div>
+ <h2>Start free.</h2>
+ <p class="lede">Encryption on the agent's machine is on every plan.</p>
+ <div class="plans">
+  <div class="plan"><h3>Free</h3><div class="pr">$0<small> / month</small></div><ul><li>3 drives</li><li>5 GiB stored</li><li>5 GiB downloads a month</li><li>1,000,000 API operations a month</li></ul></div>
+  <div class="plan"><h3>Developer</h3><div class="pr">$20<small> / month</small></div><ul><li>25 drives</li><li>100 GiB stored</li><li>100 GiB downloads a month</li><li>10,000,000 API operations a month</li></ul><span class="soon">Coming soon</span></div>
+  <div class="plan"><h3>Team</h3><div class="pr">$200<small> / month</small></div><ul><li>250 drives</li><li>1 TiB stored</li><li>1 TiB downloads a month</li><li>100,000,000 API operations a month</li></ul><span class="soon">Coming soon</span></div>
+ </div>
+ <p class="pnote">Paid checkout is not enabled yet. <a href="/pricing">See full pricing</a></p>
+</div></section>
+
+<!-- 9 FINAL -->
+<section class="final"><div class="wrap">
+ <h2>Give your agent a drive.</h2>
+ <div class="panel">
+  <div class="tag">Give this to your agent</div>
+  <div class="row"><code><span class="p">&gt;</span> Set up Agent Drive: https://agentdrive.xyz/llms.txt</code><button class="btn signal" data-copy="Set up Agent Drive: https://agentdrive.xyz/llms.txt">Copy</button></div>
+ </div>
+</div></section>
+<footer><div class="wrap"><nav><a href="/pricing">Pricing</a><a href="/llms.txt">llms.txt</a><a href="/llms.txt">Docs</a><a href="/sign-in">Sign in</a><a href="/console">Console</a></nav><span>agentdrive.xyz</span></div></footer>
+
+
+<script>
+const FOLD=['/memory','/outputs','/work','/handoff'];
+function mk(g,spec){
+ let o='';
+ const place=(x,y,w,h,n)=>o+=`<rect class="kp" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/><text class="kt" x="${x+12}" y="${y+20}">${n}</text>`;
+ const agent=(x,y,w,h,n)=>o+=`<rect class="ka" x="${x}" y="${y}" width="${w}" height="${h}" rx="3"/><text class="kn" x="${x+w/2}" y="${y+h/2+4.5}" text-anchor="middle">${n}</text>`;
+ const drive=(x,y,w)=>{const h=48+FOLD.length*32;o+=`<rect class="ka" x="${x}" y="${y}" width="${w}" height="${h}" rx="5" stroke-width="1.5"/><text class="kn" x="${x+14}" y="${y+26}" style="font-size:15px">Agent Drive</text><circle class="kled" cx="${x+w-18}" cy="${y+21}" r="5"/>`;
+  FOLD.forEach((f,i)=>o+=`<rect class="ka" x="${x+14}" y="${y+42+i*32}" width="${w-28}" height="26" rx="2"/><text class="kf" x="${x+24}" y="${y+60+i*32}">${f}</text>`);
+  return i=>y+55+i*32};
+ const link=(...p)=>o+=`<polyline class="kl" points="${p.map(q=>q.join(',')).join(' ')}"/>`;
+ spec({place,agent,drive,link});
+ document.getElementById(g).innerHTML=o;
+}
+mk('sceneD',s=>{
+ s.place(0,6,200,142,'CLOUD SANDBOX');s.agent(16,34,168,40,'Codex');s.agent(16,86,168,40,'Gemini CLI');
+ s.place(0,200,200,142,'LAPTOP');s.agent(16,228,168,40,'Claude Code');s.agent(16,280,168,40,'Cursor');
+ s.place(380,128,180,100,'CI RUNNER');s.agent(396,160,148,40,'trace-bot');
+ const f=s.drive(222,87,136);
+ s.link([184,54],[222,f(0)]);s.link([184,106],[222,f(1)]);s.link([184,248],[222,f(2)]);s.link([184,300],[222,f(3)]);s.link([396,180],[358,f(1)]);
+});
+mk('sceneM',s=>{
+ s.place(0,0,340,84,'CLOUD SANDBOX');s.agent(14,32,150,40,'Codex');s.agent(176,32,150,40,'Gemini CLI');
+ const f=s.drive(100,118,140);
+ s.place(0,284,340,46,'LAPTOP');s.agent(176,288,150,38,'Claude Code');
+ s.link([89,72],[89,f(0)],[100,f(0)]);s.link([251,72],[251,f(1)],[240,f(1)]);s.link([251,288],[251,f(3)],[240,f(3)]);
+});
+document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
+ navigator.clipboard&&navigator.clipboard.writeText(b.dataset.copy).catch(()=>{});
+ const t=b.textContent;b.textContent='Copied';setTimeout(()=>b.textContent=t,1400);
+}));
+</script>
+</body></html>

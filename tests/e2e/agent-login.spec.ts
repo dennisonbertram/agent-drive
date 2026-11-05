@@ -285,18 +285,49 @@ test.describe('agent device login', () => {
     expect(fresh.status, fresh.stderr).toBe(0);
   });
 
-  test('deny: the agent stops with a denial message', async ({ page, context, baseURL }) => {
+  test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
     test.setTimeout(120_000);
     await newUser(context);
     const env = cliEnv(baseURL!, root, 'denied', 'deny-box');
-    const { login, path } = await startLogin(env, 'denied-bot');
+    const { login, path, code } = await startLogin(env, 'denied-bot');
     await page.goto(path);
-    await page.getByRole('button', { name: 'Deny', exact: true }).click();
-    await expect(page.getByText('Denied. The agent was not given access.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Approve agent' })).toBeVisible();
+    // The server-side deny endpoint still works for other clients.
+    const denied = await page.request.post(`/api/console/device/${encodeURIComponent(code)}/deny`, {
+      data: {},
+      headers: { Origin: new URL(baseURL!).origin },
+    });
+    expect(denied.status(), await denied.text()).toBe(200);
     const result = await login.done;
     expect(result.status).not.toBe(0);
     expect(result.stderr).toMatch(/denied/i);
     await expect(readFile(env.AGENT_DRIVE_CONFIG!)).rejects.toThrow();
+  });
+
+  test('connect card presentation: banner, note, account, login command', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    await page.goto('/connect?code=BCDF-GHJK');
+    const missing = page.locator('.banner.info');
+    await expect(missing).toBeVisible();
+    const login = missing.locator('code', { hasText: 'agent-drive login' });
+    await expect(login).toHaveCSS('white-space', 'nowrap');
+    await expect(missing).toHaveCSS('font-size', '13px');
+    const env = cliEnv(baseURL!, root, 'style', 'style-box');
+    const { login: cliLogin, path } = await startLogin(env, 'style-bot');
+    await page.goto(path);
+    await expect(page.locator('p.banner.info')).toHaveCSS('font-size', '13px');
+    await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '16px');
+    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('Local test session');
+    // Nothing approves it, so the request stays pending; stop the CLI.
+    cliLogin.child.kill();
   });
 
   test('signed out visitors are sent to sign-in', async ({ page }) => {

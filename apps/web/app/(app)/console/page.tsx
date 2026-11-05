@@ -1,3 +1,4 @@
+import '../../styles/console-panels.css';
 import { redirect } from 'next/navigation';
 import { clerkConfigured, consoleUserId } from '@/src/console/auth';
 import Console from './console';

@@ -1,0 +1,274 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-landing.png",
+    "1440x900-landing-full.png",
+    "375x812-landing-full.png",
+    "768x1024-landing-full.png",
+    "1440x900-pricing-full.png",
+    "375x812-pricing-full.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 59,
+      "costUsd": 0.15494,
+      "result": {
+        "verdict": "Visually distinctive and understandable in five seconds, but not yet trustworthy or conversion-ready: production CTAs point to localhost, the two pages use different headers/branding, and pricing simultaneously says checkout is disabled while presenting enabled plan CTAs. Fix those trust/navigation contradictions before launch.",
+        "findings": [
+          {
+            "level": "component",
+            "element": "'Set up Agent Drive: http://localhost:3230/llms.txt' and '$ npm install -g http://localhost:3230/cli/agent-drive.tgz'",
+            "problem": "Both start paths expose localhost URLs a first-time developer cannot use off this machine. This directly breaks the 'start in under a minute' promise and reads as an unfinished deployment, undermining trust in an encryption product.",
+            "norm": "Marketing install/LLM instructions must be copy-pasteable production URLs (Stripe/Linear/Vercel convention); placeholders never ship on a public landing page.",
+            "severity": "P0",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Ship real https production URLs for llms.txt and the CLI tarball/package (prefer a registry install, e.g. npm i -g agent-drive), and add a deploy-time check that fails the build if 'localhost' appears in copyable strings."
+          },
+          {
+            "level": "group",
+            "element": "'01 PASTE INTO YOUR AGENT' / '02 OR INSTALL THE CLI' setup rows",
+            "problem": "Sequential numbers 01/02 imply two steps to complete in order, but row 02 is an alternative ('OR INSTALL'). A new user cannot tell whether to paste, install, or do both, and neither row says a workspace/key must exist first.",
+            "norm": "Numbered sequences mean ordered steps; alternatives are presented as tabs or an explicit 'Either / Or' choice (segmented control).",
+            "severity": "P1",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Rename to 'Option A — Paste into your agent' / 'Option B — Install the CLI' with no sequence numbers, and add a one-line prerequisite above: 'No account needed to try locally' or 'Create a workspace first', whichever is true."
+          },
+          {
+            "level": "component",
+            "element": "'Copy for your agent' (solid orange) and 'Copy' (outline) buttons above white code boxes",
+            "problem": "The two copy actions have deliberately unequal weight for equivalent actions, so the CLI path reads as secondary/deprecated. Separately, the white rounded boxes look like editable text inputs rather than read-only code, inviting typing; there is no visible copied/success state in the default UI pattern.",
+            "norm": "Equivalent actions get equivalent styling; code snippets are visually read-only with the copy affordance attached to the snippet and a 'Copied' confirmation (GitHub/docs convention).",
+            "severity": "P2",
+            "screenshot": "1440x900-landing-full.png",
+            "fix": "Make both buttons the same style/size, place them inside/right of each code block, style blocks as code (mono, subtle inset, non-editable affordance), and swap label to 'Copied ✓' for ~2s on click."
+          },
+          {
+            "level": "page",
+            "element": "Primary actions: header 'Open console' (solid black), hero 'Create your workspace ↗' (outline), 'Pricing' (outline)",
+            "problem": "Three competing entry points with inverted emphasis: the strongest button (Open console) is for returning users, while the first-time user's action (Create your workspace) is a weak outline button placed after the setup rows. The persona's primary job has the lowest visual priority.",
+            "norm": "One dominant primary CTA per viewport matched to the page's main audience; secondary/returning-user actions are subordinate.",
+            "severity": "P1",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Make 'Create your workspace' the solid black/orange primary in hero and header for logged-out visitors, demote 'Open console'/'Sign in' to text links, and keep only one primary per section."
+          },
+          {
+            "level": "component",
+            "element": "Rack illustration numbered badges 1–4 and legend '1 / DRIVE, 2 / LED, 3 / BAY, 4 / PORTABLE'",
+            "problem": "Badge-to-legend mapping does not match what the badges touch: 3 sits on the empty bay's corner while 'BAY' is legend #3 but 4 (PORTABLE) is pinned to the bottom of a filled drive, and 1 floats on a drive edge for 'One per agent'. Users must guess the correspondence; the metaphor explains itself poorly despite dominating the hero.",
+            "norm": "Annotated diagrams place numbered markers unambiguously on the named part, in reading order, adjacent to their callouts.",
+            "severity": "P2",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Move markers onto the exact features (LED dot for 2, empty bay for 3, whole rack/rails for 4 PORTABLE), align legend columns under the parts they name, or drop numbers and label parts directly."
+          },
+          {
+            "level": "component",
+            "element": "Rack drive microcopy: 'MEM OUT WRK HND', '/memory /outputs', '2 files', bar meters",
+            "problem": "At desktop the labels are tiny; at 375px the reflowed 2×2 rack makes paths/file counts and meter labels effectively illegible, yet they carry the only concrete evidence of what a 'drive' contains. The hero's proof becomes decoration on mobile.",
+            "norm": "Informative text stays ≥11–12px and legible at the smallest supported viewport; decorative detail must not be the sole carrier of meaning.",
+            "severity": "P2",
+            "screenshot": "375x812-landing-full.png",
+            "fix": "Simplify the mobile rack (fewer bars, larger name + size + path, hide MEM/OUT/WRK/HND), or stack drives 1-per-row on ≤480px with a minimum 12px label size."
+          },
+          {
+            "level": "layout",
+            "element": "Header system: landing 'Agent Drive + Pricing / llms.txt / Sign in / Open console' vs pricing 'a/ agent drive + Quickstart / Sign in'",
+            "problem": "Pricing uses a different logo mark ('a/' vs the drive icon), different wordmark casing, and a completely different nav/CTA set — no Pricing, llms.txt, or Open console. The pages look like two products, and from pricing there is no visible path to the console or back except guessing the logo is home.",
+            "norm": "One global header/logo/nav across marketing pages; only the current-page state changes (universal SaaS convention).",
+            "severity": "P1",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Use the identical header on /pricing (same logo, Pricing marked current, llms.txt, Sign in, Open console/Create workspace), and delete the 'a/ agent drive' variant."
+          },
+          {
+            "level": "page",
+            "element": "Notice 'Paid checkout is not enabled on this deployment…' above 'Choose Developer' / 'Choose Team' buttons",
+            "problem": "The notice says paid checkout is disabled, yet both paid cards present normal, enabled-looking 'Choose…' CTAs. Users will click expecting checkout and hit a dead end; 'The Free plan is available when sign-in and storage are configured' further hedges whether even Free works.",
+            "norm": "Disabled functionality is shown disabled with the reason at the point of action; never pair an unavailable transaction with an active CTA (honest-states / WCAG operable principle).",
+            "severity": "P0",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Disable 'Choose Developer/Team' (greyed, aria-disabled) with microcopy 'Checkout not enabled on this deployment — join waitlist/notify me', keep 'Start with Free' as the only active CTA, and state plainly whether Free sign-up works here."
+          },
+          {
+            "level": "component",
+            "element": "Plan card hierarchy: 'UNIT 02 ● SELECTED' Developer card vs orange 'Start with Free' button",
+            "problem": "Developer is labelled SELECTED with the black header and heavy border, but its CTA is a plain outline while Free gets the only signal-orange filled button. 'Selected' by whom — it is not the user's selection and no radio/selection behaviour is shown — so the recommended plan and the eye's primary action contradict each other.",
+            "norm": "One recommended plan gets both the badge ('Most popular') and the primary button; 'Selected' is reserved for a state the user actually chose.",
+            "severity": "P1",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Rename badge to 'MOST POPULAR' (or remove it), give Developer the filled primary CTA and Free/Team outline CTAs, and if cards are selectable, implement real radio behaviour with aria-checked."
+          },
+          {
+            "level": "group",
+            "element": "Three plan cards FREE $0.00 / DEVELOPER $20.00 / TEAM $200.00",
+            "problem": "Cards differ only in quota numbers (drives/GiB/operations) with an identical feature row 'CLI, MCP, web console, and encrypted sharing'; a 10× price jump ($20→$200) has no stated differentiator (support, SSO, retention, seats) and there is no monthly/annual toggle or 'who is this for' guidance. A developer cannot self-select a plan confidently.",
+            "norm": "Pricing tiers explain audience and meaningful differences, not only limits; billing-period toggle is category standard.",
+            "severity": "P2",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Add a 'For solo agents / For teams shipping daily' line per card, differentiate at least support/retention/collaboration rows, and add a monthly–annual toggle or explicitly state 'monthly only, USD, before taxes' near the prices."
+          },
+          {
+            "level": "component",
+            "element": "'How usage works' panel body text",
+            "problem": "Two dense columns of legalistic caveats — 'monthly high-water allocation', 'observed storage logs, not just issued links', 'not guaranteed invoice or network-traffic ceilings', 'retryable background purge, not an instant erasure claim' — with no summary, examples, or numbers (overage rates explicitly 'have not been published'). It reads as risk-transfer rather than explanation and will suppress sign-up.",
+            "norm": "Usage pricing is explained with plain-language summaries, worked examples and published overage rates; fine print supports rather than replaces the explanation.",
+            "severity": "P2",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Lead with 3 plain bullets ('You pay for peak GiB stored; downloads counted once per link expiry…'), add one worked example, publish overage rates or state 'no overages — writes stop at cap', and move legal caveats to a linked terms footnote."
+          },
+          {
+            "level": "component",
+            "element": "Small grey mono text: 'WORKS WITH Claude Code · Codex · Cursor', 'Encrypted on the agent's machine.', rack legend descriptions, footer lines",
+            "problem": "Multiple 11–13px grey-on-warm-grey labels sit on a dotted background and fall below comfortable contrast for small text; the encryption reassurance — a key trust message — is one of the faintest elements on the page.",
+            "norm": "WCAG AA: ≥4.5:1 contrast for small text; trust/security claims get emphasis, not the weakest treatment.",
+            "severity": "P2",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Darken secondary text to meet 4.5:1 against the dotted ground (test over the dot grid, not flat fill), raise microcopy to ≥12px, and give 'Encrypted on the agent's machine' ink-black weight with a lock/key glyph."
+          },
+          {
+            "level": "layout",
+            "element": "Tablet header nav and 3-column feature row at 768px",
+            "problem": "At 768px 'llms.txt' silently disappears from the nav (present at 1440px, absent at 768px and 375px) with no menu replacement, and the three feature columns are retained but squeezed so headings like 'A clear view of the work.' wrap awkwardly beside narrow body text. Content vanishes by breakpoint rather than reflowing by design.",
+            "norm": "Responsive nav either fits, or collapses behind a labelled menu; multi-column text stacks before column width harms readability (~45–75ch).",
+            "severity": "P2",
+            "screenshot": "768x1024-landing-full.png",
+            "fix": "Keep llms.txt visible or add an explicit overflow/menu control at ≤900px, and stack the feature columns (or 2+1) below ~900px instead of compressing them."
+          },
+          {
+            "level": "layout",
+            "element": "Mobile header: logo + 'Sign in' text link + 'Open console' black pill; setup 'Copy for your agent' button alignment",
+            "problem": "At 375px Pricing/llms.txt are gone with no menu, 'Sign in' is a small low-target text link beside a dominant pill, and the orange copy button jumps to left-aligned under its label (right-aligned on desktop), breaking the setup-row pattern. First-time mobile developers lose both navigation and pattern consistency.",
+            "norm": "44×44px minimum touch targets (Apple HIG/WCAG 2.5.8), persistent navigation, and consistent component alignment across breakpoints.",
+            "severity": "P2",
+            "screenshot": "375x812-landing-full.png",
+            "fix": "Give Sign in a ≥44px hit area, add a compact menu for Pricing/llms.txt, and keep label-left/button-right row layout (or consistently stacked) for both setup rows at all widths."
+          },
+          {
+            "level": "page",
+            "element": "Footer: 'AGENT DRIVE' + 'Persistent storage. Independent agents.' only",
+            "problem": "Neither page footer offers Docs/llms.txt, Pricing (from landing), security/encryption details, status, contact, terms or privacy. For a product asking developers to trust it with agent memory, the absence of any security/legal/support links is a trust and wayfinding dead end.",
+            "norm": "Developer-tool footers link docs, security, legal, status and support; trust artefacts are one click from every marketing page.",
+            "severity": "P1",
+            "screenshot": "1440x900-landing-full.png",
+            "fix": "Add a footer link row: Docs, llms.txt, Pricing, Security/encryption, Status, Terms, Privacy, Contact — on both pages, identically."
+          },
+          {
+            "level": "group",
+            "element": "Encryption claims: hero 'Encrypted on the agent's machine' / 'You hold the keys' vs feature text 'File names, sizes, tags, and activity stay visible to the service'",
+            "problem": "The headline promise implies end-to-end privacy, while the material exception (all metadata visible, used 'to list and bill') is buried in small body copy at the page bottom and repeated more candidly only on pricing ('Save your recovery keys: we cannot recover lost keys'). Developers who discover the caveat late will feel misled; the lost-key risk is never surfaced near sign-up.",
+            "norm": "Security claims state scope at the point of claim ('contents encrypted; metadata visible'); irreversible risks are disclosed before account creation.",
+            "severity": "P1",
+            "screenshot": "1440x900-landing-full.png",
+            "fix": "Qualify the hero line in place: 'File contents encrypted on the agent's machine — never your drive key', link 'What we can and can't see' to the detail, and repeat the recovery-key warning at workspace creation."
+          }
+        ],
+        "excellent": [
+          "Headline system on 1440x900-landing.png: 'Every agent gets a drive.' plus 'The same files follow it to any machine, sandbox or new session.' answers what/why in under five seconds for the target persona.",
+          "Rack illustration concept on 1440x900-landing.png: the AD-4 bay metaphor with named drives (trace-bot, nightly-evals, research-agent), live sizes and an empty 'YOUR NEXT AGENT' bay makes an abstract storage product instantly graspable and ownable.",
+          "Checkout-disabled notice placement on 1440x900-pricing-full.png: disclosed above the plan cards rather than at checkout — the right instinct, even though the card CTAs contradict it.",
+          "Pricing quota rows on 1440x900-pricing-full.png: mono, divider-separated, identically ordered across all three cards, making limits genuinely scannable side-by-side.",
+          "Responsive pricing on 375x812-pricing-full.png: cards stack full-width with CTAs intact and the 'How usage works' panel reflows to one column without truncation.",
+          "Security candour in pricing feature columns on 1440x900-pricing-full.png: explicitly stating metadata remains visible and lost keys are unrecoverable is more trustworthy than typical marketing copy."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 100,
+      "costUsd": 0.079718,
+      "result": {
+        "verdict": "A distinctive, high-craft developer marketing experience whose industrial 'Rack' aesthetic and zero-friction agent onboarding (`llms.txt` + CLI) are undermined by jarring design-system inconsistencies between the Landing and Pricing pages, contradictory pricing card states, and tablet/mobile layout alignment flaws.",
+        "findings": [
+          {
+            "level": "layout",
+            "element": "Top Header & Page Container (`/` vs `/pricing`)",
+            "problem": "The Landing page and Pricing page look like they were built from two different header templates and grid containers. On `1440x900-landing.png`, the brand mark is a drive-bay icon with Title Case 'Agent Drive', a wider container max-width, no bottom border, and nav links (`Pricing`, `llms.txt`, `Sign in`, solid `Open console` button). On `1440x900-pricing-full.png`, the brand mark changes to a monospace `a/` icon with lowercase 'agent drive', a narrower container max-width, a solid black bottom divider, and completely different nav buttons (outlined `Quickstart` and `Sign in` buttons, dropping `llms.txt` and `Open console`).",
+            "norm": "Global navigation, brand lockup, and page container widths must remain strictly consistent across all marketing routes so users know they are on the same product site.",
+            "severity": "P1",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Unify both pages on the Landing page header component (drive-bay logo + 'Agent Drive', consistent container max-width, `Pricing`, `llms.txt`, `Sign in`, and primary `Open console` CTA) with an active state indicator on `Pricing` when on `/pricing`."
+          },
+          {
+            "level": "group",
+            "element": "Pricing Plan Cards & Disabled Checkout Banner (`UNIT 01`, `UNIT 02 • SELECTED`, `UNIT 03`)",
+            "problem": "Two visual and functional contradictions exist in the pricing cards: (1) The banner states 'Paid checkout is not enabled on this deployment', yet the paid `DEVELOPER` ($20) and `TEAM` ($200) cards display active, enabled-looking `Choose Developer` and `Choose Team` buttons. (2) `UNIT 02` is styled with a heavy black border and `UNIT 02 • SELECTED` header badge, implying it is already selected, while `UNIT 01` (`FREE`) holds the high-emphasis solid signal-orange primary button (`Start with Free`), splitting visual hierarchy.",
+            "norm": "UI affordances must reflect actual system state, and a single recommended/available tier should own the primary visual hierarchy without misusing selection state terminology ('SELECTED') on static plan cards.",
+            "severity": "P1",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "When paid checkout is disabled on the deployment, render the paid tier CTAs in a clearly disabled state (e.g., muted label `Checkout unavailable` or `Coming soon`) and replace `UNIT 02 • SELECTED` with `UNIT 02 • RECOMMENDED` (or remove the active selection styling when only Free is actionable)."
+          },
+          {
+            "level": "layout",
+            "element": "Rack Illustration (`AGENT DRIVE · AD-4`) on Tablet Viewport",
+            "problem": "On the 768x1024 tablet layout, the rack illustration container is pushed toward the right margin while the hero copy above it and the 4-item legend grid (`1 / DRIVE`, `2 / LED`, etc.) directly below it are aligned to the left page margin, creating a severe horizontal misalignment.",
+            "norm": "Stacked full-bleed or column-spanning visual modules must align cleanly with the left and right edges of their parent grid column and adjacent legend blocks.",
+            "severity": "P1",
+            "screenshot": "768x1024-landing-full.png",
+            "fix": "Left-align or stretch the rack container across the full content grid width at the 768px breakpoint so its left and right edges align with the 2x2 legend grid directly beneath it."
+          },
+          {
+            "level": "component",
+            "element": "Top Navigation Bar on Mobile and Tablet Viewports",
+            "problem": "Responsive navigation silently drops links without providing a menu or alternative access: `llms.txt` disappears at `768x1024-landing-full.png`, and both `Pricing` and `llms.txt` disappear from the header at `375x812-landing-full.png`. Because the footer also contains zero navigation links, mobile users have no link to `llms.txt` anywhere on the page.",
+            "norm": "Essential top-level navigation items must remain accessible across all viewports via either a compact header row, a mobile menu drawer, or persistent footer links.",
+            "severity": "P2",
+            "screenshot": "375x812-landing-full.png",
+            "fix": "Retain `Pricing` and `llms.txt` in a mobile navigation menu or add a persistent navigation row in the footer across all breakpoints."
+          },
+          {
+            "level": "group",
+            "element": "Setup Rows (`01 PASTE INTO YOUR AGENT` vs `02 OR INSTALL THE CLI`) on Mobile",
+            "problem": "On mobile (`375x812-landing-full.png`), Row 01 wraps its orange `Copy for your agent` button onto a new line left-aligned under the step label, whereas Row 02 keeps its `Copy` button right-aligned inline with the `02 OR INSTALL THE CLI` label. Additionally, both copy buttons have a vertical height around 30px, below mobile touch target standards.",
+            "norm": "Sibling step rows should follow a consistent header/action layout pattern, and interactive mobile touch targets should be at least 44px tall.",
+            "severity": "P2",
+            "screenshot": "375x812-landing-full.png",
+            "fix": "Keep both step headers consistent on mobile (either inline right-aligned with a concise label `Copy prompt` or full-width buttons below the code block) and increase button vertical padding to meet a minimum 40-44px tap target."
+          },
+          {
+            "level": "group",
+            "element": "Bottom Three-Column Value Props (`01`, `02`, `03`) across `/` and `/pricing`",
+            "problem": "The 3-column feature section at the bottom of both pages uses the same structural pattern but inconsistent styling: `1440x900-pricing-full.png` includes vertical hairline dividers between columns and smaller `01 / ...` eyebrow labels, whereas `1440x900-landing-full.png` omits the vertical dividers and uses larger eyebrow labels. On `1440x900-pricing-full.png` (column 02), the body copy also ends with a two-letter orphan (`in.`) on its final line, and on `768x1024-landing-full.png` (column 02), both the heading (`Less setup. More / doing.`) and body copy (`work.`) wrap with single-word widows.",
+            "norm": "Shared marketing section templates should use identical spacing, dividers, and typographic scales across pages, with balanced line lengths (`text-wrap: balance` / `pretty`) to prevent orphans.",
+            "severity": "P2",
+            "screenshot": "1440x900-pricing-full.png",
+            "fix": "Extract a single shared 3-column feature component with vertical dividers and consistent eyebrow typography, and apply `text-wrap: balance` to headings and `text-wrap: pretty` to body paragraphs."
+          },
+          {
+            "level": "component",
+            "element": "Rack Callout Badges (`2`, `3`, `4`) on `AGENT DRIVE · AD-4`",
+            "problem": "Callout badge `3` (`3 / BAY — New agent, new drive.`) is positioned on the top-right corner of bay 4 directly beneath the rack's orange status LED (`4 BAYS •`), making it ambiguous whether `3` points to the rack LED or the empty bay. Meanwhile, badges `2` and `4` sit on the very bottom border of the bays, partially overlapping the lower rack bezel edge.",
+            "norm": "Annotated hardware callouts should point unambiguously to their target element without colliding with adjacent indicators or container borders.",
+            "severity": "P3",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Move badge `3` onto the center-right border or near the `+ YOUR NEXT AGENT` indicator inside bay 4, and nudge badges `2` and `4` slightly inward so they sit cleanly on their target elements."
+          },
+          {
+            "level": "component",
+            "element": "Drive Bay Screen Secondary Text (`/memory /outputs`, `MEM OUT WRK HND`)",
+            "problem": "Inside the dark `#1c1c1a` drive modules in the rack illustration, the dark grey monospace path text (`/memory /outputs`, `2 files`) and slot labels (`MEM OUT WRK HND`) have very low luminance contrast, making the concrete file-system examples difficult to read.",
+            "norm": "Informational text inside hero product illustrations should maintain at least a 4.5:1 contrast ratio against its dark background so users can effortlessly read the domain details.",
+            "severity": "P3",
+            "screenshot": "1440x900-landing.png",
+            "fix": "Lighten the muted monospace text inside the dark drive cards from dark grey to a warmer mid-light grey (e.g., `#9e9d97`)."
+          },
+          {
+            "level": "group",
+            "element": "Hero Secondary Actions (`Create your workspace ↗`, `Pricing`) & Footer",
+            "problem": "In the hero left column (`1440x900-landing.png`), `Create your workspace ↗` uses an external-link diagonal arrow even though it navigates to the app's own console, and `Pricing` duplicates the top nav link right next to it. Meanwhile, the page footer (`1440x900-landing-full.png`) contains only static text with zero links to documentation, security architecture, `llms.txt`, or terms.",
+            "norm": "Internal app routes should not use external-link arrows (`↗`), and developer product footers should provide functional links to key technical resources (`llms.txt`, CLI docs, Pricing, Sign in).",
+            "severity": "P3",
+            "screenshot": "1440x900-landing-full.png",
+            "fix": "Replace the `↗` icon on `Create your workspace` with a standard forward arrow (`→`), and populate the footer with links to `Pricing`, `llms.txt`, and `Console`."
+          }
+        ],
+        "excellent": [
+          "Cohesive 'T1 Rack' industrial design language on the Landing page: the warm aluminium dot-grid background, high-contrast Space Grotesk + IBM Plex Mono typography, and tactile 4-bay server rack illustration immediately convey the product mental model ('Every agent gets a drive').",
+          "Zero-friction developer onboarding right in the hero: surfacing both the agent prompt (`llms.txt`) and the CLI install command with dedicated copy buttons lets a developer start in under 30 seconds.",
+          "Thoughtful responsive reflow of the `AD-4` rack illustration: transitioning from a 1x4 horizontal bay layout on desktop (`1440x900-landing.png`) to a 2x2 bay enclosure on tablet and mobile (`768x1024-landing-full.png`, `375x812-landing-full.png`) keeps the graphic legible at 375px width.",
+          "Transparent, high-trust technical copywriting: both the security explanation ('File contents encrypt on your device. The storage service receives ciphertext, never your drive key. File names, sizes, tags, and activity stay visible...') and the 'How usage works' billing breakdown speak directly to skeptical engineers without marketing fluff."
+        ]
+      }
+    }
+  ]
+}

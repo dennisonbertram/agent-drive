@@ -36,14 +36,7 @@ function cli(
   });
 }
 
-test('new human workspace → encrypted CLI upload → browser download, restore, and revocation', async ({
-  page,
-  context,
-  baseURL,
-}) => {
-  test.setTimeout(180_000);
-  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
-  const root = await mkdtemp(join(tmpdir(), 'agent-drive-browser-'));
+async function cleanupUser(userId: string) {
   const database = new Pool({ connectionString: process.env.DATABASE_URL });
   const storage = new S3Client({
     endpoint: process.env.S3_ENDPOINT!,
@@ -54,6 +47,55 @@ test('new human workspace → encrypted CLI upload → browser download, restore
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY!,
     },
   });
+  try {
+    const result = await database.query<{ id: string }>(
+      'SELECT id FROM accounts WHERE external_clerk_user_id=$1',
+      [userId],
+    );
+    for (const { id } of result.rows) {
+      for (const prefix of [`objects/${id}/`, `staging/${id}/`]) {
+        let continuation: string | undefined;
+        do {
+          const objects = await storage.send(
+            new ListObjectsV2Command({
+              Bucket: process.env.S3_BUCKET,
+              Prefix: prefix,
+              ContinuationToken: continuation,
+            }),
+          );
+          for (const object of objects.Contents ?? [])
+            await storage.send(
+              new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key: object.Key }),
+            );
+          continuation = objects.NextContinuationToken;
+        } while (continuation);
+      }
+      await database.query('DELETE FROM audit_events WHERE account_id=$1', [id]);
+      await database.query(
+        'DELETE FROM file_events WHERE drive_id IN (SELECT id FROM drives WHERE account_id=$1)',
+        [id],
+      );
+      await database.query('DELETE FROM upload_intents WHERE account_id=$1', [id]);
+      await database.query(
+        'DELETE FROM versions WHERE drive_id IN (SELECT id FROM drives WHERE account_id=$1)',
+        [id],
+      );
+      await database.query('DELETE FROM accounts WHERE id=$1', [id]);
+    }
+  } finally {
+    storage.destroy();
+    await database.end();
+  }
+}
+
+test('new human workspace → encrypted CLI upload → browser download, restore, and revocation', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(180_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-browser-'));
   const networkBodies: string[] = [];
   page.on('request', (request) => {
     if (request.url().startsWith(`${baseURL}/api/`)) networkBodies.push(request.postData() ?? '');
@@ -66,6 +108,16 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     });
     expect(login.status()).toBe(200);
     await page.goto('/console');
+    // Onboarding has exactly one primary action.
+    await expect(page.getByRole('button', { name: 'Create your first drive' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.locator('.button.primary:visible')).toHaveCount(1);
+    // Closing a dialog returns focus to the button that opened it.
+    const opener = page.getByRole('button', { name: '+ New drive' });
+    await opener.click();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(opener).toBeFocused();
     await page.getByRole('button', { name: 'Create your first drive' }).click();
     await page.getByLabel('Drive name').fill('Browser acceptance');
     await page.getByRole('button', { name: 'Create drive', exact: true }).click();
@@ -198,42 +250,210 @@ test('new human workspace → encrypted CLI upload → browser download, restore
       ),
     ).toBe(false);
   } finally {
-    const result = await database.query<{ id: string }>(
-      'SELECT id FROM accounts WHERE external_clerk_user_id=$1',
-      [userId],
-    );
-    for (const { id } of result.rows) {
-      for (const prefix of [`objects/${id}/`, `staging/${id}/`]) {
-        let continuation: string | undefined;
-        do {
-          const objects = await storage.send(
-            new ListObjectsV2Command({
-              Bucket: process.env.S3_BUCKET,
-              Prefix: prefix,
-              ContinuationToken: continuation,
-            }),
-          );
-          for (const object of objects.Contents ?? [])
-            await storage.send(
-              new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key: object.Key }),
-            );
-          continuation = objects.NextContinuationToken;
-        } while (continuation);
-      }
-      await database.query('DELETE FROM audit_events WHERE account_id=$1', [id]);
-      await database.query(
-        'DELETE FROM file_events WHERE drive_id IN (SELECT id FROM drives WHERE account_id=$1)',
-        [id],
-      );
-      await database.query('DELETE FROM upload_intents WHERE account_id=$1', [id]);
-      await database.query(
-        'DELETE FROM versions WHERE drive_id IN (SELECT id FROM drives WHERE account_id=$1)',
-        [id],
-      );
-      await database.query('DELETE FROM accounts WHERE id=$1', [id]);
-    }
-    storage.destroy();
-    await database.end();
+    await cleanupUser(userId);
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('console layout: tablet path column, desktop one-screen, phone rows and section menu', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-layout-'));
+  const driveKey = randomBytes(32).toString('base64url');
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'Layout drive' });
+    const agent = await post<{ id: string }>('agents', { name: 'Layout agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Layout key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: driveKey,
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+    const localFile = join(root, 'note.txt');
+    await writeFile(localFile, 'layout fixture', { mode: 0o600 });
+    for (let index = 0; index < 14; index += 1) {
+      const upload = await cli(
+        [
+          'put',
+          localFile,
+          `/notes/2026-q3-roadmap-and-planning-draft-${index}.md`,
+          '--drive',
+          drive.id,
+        ],
+        environment,
+      );
+      expect(upload.status, `CLI upload failed: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    }
+
+    const firstRow = page.locator('.file-panel tbody tr').first();
+    const openFiles = async () => {
+      await page.goto('/console');
+      await expect(firstRow).toBeVisible();
+    };
+
+    // Tablet: the file path column keeps room for the file name.
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await openFiles();
+    const pathHeader = await page.locator('.file-panel th').first().boundingBox();
+    expect(pathHeader!.width).toBeGreaterThanOrEqual(240);
+
+    // Desktop: the page does not scroll; the table scrolls inside its panel.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openFiles();
+    const desktop = await page.evaluate(() => ({
+      page: document.scrollingElement!.scrollHeight - window.innerHeight,
+      table: (() => {
+        const box = document.querySelector('.file-panel .table-scroll')!;
+        return box.scrollHeight - box.clientHeight;
+      })(),
+    }));
+    expect(desktop.page).toBeLessThanOrEqual(0);
+    expect(desktop.table).toBeGreaterThan(0);
+
+    // Phone: row actions are reachable without sideways scrolling.
+    await page.setViewportSize({ width: 375, height: 812 });
+    await openFiles();
+    const download = await firstRow.getByRole('button', { name: 'Download' }).boundingBox();
+    expect(download!.x).toBeGreaterThanOrEqual(0);
+    expect(download!.x + download!.width).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      375,
+    );
+
+    // Phone: a short tab (Trash) still fills the viewport height.
+    await page.locator('.nav-toggle').click();
+    await page.locator('#console-nav .nav-item').filter({ hasText: 'Trash' }).click();
+    await expect(page.getByRole('heading', { name: 'Nothing in the trash.' })).toBeVisible();
+    const mainBottom = await page.evaluate(
+      () => document.querySelector('.console-main')!.getBoundingClientRect().bottom,
+    );
+    expect(mainBottom).toBeGreaterThanOrEqual(812);
+    await openFiles();
+
+    // Phone: all seven sections are reachable from the section menu.
+    const toggle = page.locator('.nav-toggle');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const items = page.locator('#console-nav .nav-item');
+    await expect(items).toHaveCount(7);
+    for (const name of [
+      'Files',
+      'Agents',
+      'API keys',
+      'Usage',
+      'Trash',
+      'Billing & limits',
+      'Activity & deletion',
+    ]) {
+      const item = items.filter({ hasText: name });
+      await expect(item).toBeVisible();
+      expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    await items.filter({ hasText: 'Usage' }).click();
+    await expect(page.getByRole('heading', { name: 'Usage', exact: true })).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toContainText('Usage');
+  } finally {
+    await cleanupUser(userId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('console trash: a failed load shows an error with Retry instead of loading forever', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await context.request.post('/api/console/drives', {
+      data: { name: 'Trash drive' },
+      headers: { Origin: baseURL! },
+    });
+    let failing = true;
+    await page.route('**/api/console/drives/*/trash*', (route) =>
+      failing
+        ? route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: { message: 'Trash is unavailable.' } }),
+          })
+        : route.continue(),
+    );
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Trash', exact: true }).first().click();
+    await expect(page.getByText('Could not load files.')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText('Loading files…')).toHaveCount(0);
+    failing = false;
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Nothing in the trash.' })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: recovery download stays on an empty drive, and a failed reload shows Retry over cached files', async ({
+  page,
+  context,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Create your first drive' }).click({ timeout: 30_000 });
+    await page.getByLabel('Drive name').fill('Empty drive');
+    await page.getByRole('button', { name: 'Create drive', exact: true }).click();
+    await page.getByLabel('I saved my drive key securely').check();
+    await page.getByRole('button', { name: 'Continue to drive' }).click();
+    // No files, key loaded: the backup warning and recovery download remain available.
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    await expect(page.getByTestId('key-backup-status')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download recovery file' })).toBeVisible();
+
+    // The files list loaded once; a later reload of the cached scope fails.
+    await page.route('**/api/console/drives/*/list*', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'Listing is unavailable.' } }),
+      }),
+    );
+    await page.getByRole('button', { name: 'Agents', exact: true }).first().click();
+    await page.getByRole('button', { name: 'Files', exact: true }).first().click();
+    await expect(page.getByText('Could not load files.')).toHaveCount(1);
+    await expect(page.getByText('Listing is unavailable.')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
   }
 });

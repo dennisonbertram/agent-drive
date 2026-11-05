@@ -1,106 +1,388 @@
 import Link from 'next/link';
 import { headers } from 'next/headers';
+import { BrandMark } from '../brand-mark';
+import { billingRates, GIB, PLANS } from '@/src/billing/policy';
+import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
-
-const command = 'agent-drive put ./handoff.md /memory/handoff.md';
+import { LandingFigure } from './landing-figure';
+import '../styles/landing.css';
 
 export const dynamic = 'force-dynamic';
+
+const allowance = (bytes: bigint) =>
+  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
+const count = (n: bigint) => new Intl.NumberFormat('en-US').format(n);
+
+function paidAvailable() {
+  try {
+    return billingRates() !== null && checkoutConfigured();
+  } catch {
+    return false;
+  }
+}
+
+const problems = [
+  [
+    'The sandbox ends',
+    'Codex cloud task',
+    'saves /memory/project-notes.md',
+    'Sandbox',
+    'deleted',
+    'Next task',
+    'reads the notes back',
+  ],
+  [
+    'The machine changes',
+    'Laptop',
+    'saves /outputs/report.pdf',
+    'Laptop',
+    'closed',
+    'CI runner',
+    'gets the report',
+  ],
+  [
+    'The platform switches',
+    'Claude Code',
+    'writes /handoff/next.md',
+    'Session',
+    'ended',
+    'Codex',
+    'reads the handoff',
+  ],
+];
+
+function SetupPanel({ instruction, label }: { instruction: string; label: string }) {
+  return (
+    <div className="l-panel">
+      <div className="l-tag">Give this to your agent</div>
+      <div className="l-row">
+        <code>
+          <span className="l-p">&gt;</span> {instruction}
+        </code>
+        <CopyButton text={instruction} label={label} caption="Copy" className="l-btn signal" />
+      </div>
+    </div>
+  );
+}
 
 export default async function Home() {
   const h = await headers();
   const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
+  const install = `npm install -g ${proto}://${host}/cli/agent-drive.tgz`;
+  const paid = paidAvailable();
+  const plans = [
+    ['Free', PLANS.free],
+    ['Developer', PLANS.developer],
+    ['Team', PLANS.team],
+  ] as const;
   return (
-    <main className="landing">
-      <header className="landing-nav">
-        <Link href="/" className="brand">
-          <span className="brand-mark">a/</span> agent drive
-        </Link>
-        <nav className="actions" aria-label="Main">
-          <Link className="button secondary" href="/pricing">
-            Pricing
-          </Link>
-          <Link className="button secondary" href="/sign-in">
-            Sign in
-          </Link>
-        </nav>
+    <main className="landing" id="top">
+      <header className="l-nav">
+        <div className="l-wrap">
+          <BrandMark />
+          <nav className="l-links" aria-label="Main">
+            <a href="/llms.txt">Docs</a>
+            <Link href="/pricing">Pricing</Link>
+            <a href="/llms.txt">llms.txt</a>
+            <Link href="/sign-in">Sign in</Link>
+            <Link href="/console">Console</Link>
+          </nav>
+        </div>
       </header>
-      <section className="hero">
-        <p className="eyebrow">A WORKSPACE THAT OUTLIVES THE SESSION</p>
-        <h1>
-          Your agents.
-          <br />
-          Their own drive.
-        </h1>
-        <p className="hero-copy">
-          Give your agents a place to keep their memory, share their work, and pick up where they
-          left off. Encrypted before it leaves their machine.
-        </p>
-        <div className="agent-give">
-          <p className="agent-give-label">Give this to your agent</p>
-          <div className="terminal-command">
-            <code>{instruction}</code>
-            <CopyButton text={instruction} label="Copy agent instruction" />
+
+      <section className="l-hero">
+        <div className="l-wrap l-g">
+          <div>
+            <div className="l-tag">Portable storage for agents</div>
+            <h1>Agent files that outlive the sandbox.</h1>
+            <p className="l-lede">
+              Agents save to their drive as they work. When the sandbox ends, the machine changes,
+              or the work moves from Claude Code to Codex, the files are still there.
+            </p>
+            <SetupPanel instruction={instruction} label="Copy agent instruction" />
+            <p className="l-cli">
+              <span>or in a terminal:</span>{' '}
+              <span className="l-cmd">
+                <b>{install}</b> <CopyButton text={install} className="l-copy" />
+              </span>
+            </p>
           </div>
-        </div>
-        <p className="agent-works">Works with Claude Code, Codex, Cursor, and any MCP client.</p>
-        <h2 className="agent-steps-title">How connecting works</h2>
-        <ol className="agent-steps">
-          <li>
-            <span>1</span> Your agent installs the CLI and asks to connect.
-          </li>
-          <li>
-            <span>2</span> You approve it in your browser.
-          </li>
-          <li>
-            <span>3</span> It gets its own scoped key and can save, share, and back up files.
-          </li>
-        </ol>
-        <div className="actions">
-          <Link className="button secondary" href="/sign-up">
-            Create your workspace <span aria-hidden>↗</span>
-          </Link>
-          <Link className="button secondary" href="/console">
-            Open console
-          </Link>
-        </div>
-        <div className="terminal-preview">
-          <div className="terminal-label">
-            <span className="status-dot" /> FROM A SESSION TO SOMETHING LASTING
-          </div>
-          <div className="terminal-command">
-            <code>
-              <span>$</span> {command}
-            </code>
-            <CopyButton text={command} />
-          </div>
-          <p>A fresh session. The same context.</p>
+          <LandingFigure />
         </div>
       </section>
-      <section className="feature-grid" aria-label="Features">
-        <article>
-          <span className="feature-number">01 / PRIVATE BY DESIGN</span>
-          <h2>You hold the keys.</h2>
-          <p>
-            File contents encrypt on your device. The storage service receives ciphertext, never
-            your drive key. File names, sizes, tags, and activity stay visible to the service so it
-            can list and bill them.
+
+      <section id="problem">
+        <div className="l-wrap">
+          <div className="l-tag">The problem</div>
+          <h2>Sandboxes end. Machines change. Platforms switch.</h2>
+          <p className="l-lede">
+            Each one wipes whatever the agent saved locally, and the next run starts from zero. With
+            a drive, the agent picks up where it stopped.
           </p>
-        </article>
-        <article>
-          <span className="feature-number">02 / BUILT FOR AGENTS</span>
-          <h2>Less setup. More doing.</h2>
-          <p>A CLI, typed client, and MCP tools fit the way your agents already work.</p>
-        </article>
-        <article>
-          <span className="feature-number">03 / HUMAN OVERSIGHT</span>
-          <h2>A clear view of the work.</h2>
-          <p>Browse files, recover versions, and decide which agents can access each drive.</p>
-        </article>
+          <div className="l-three">
+            {problems.map(([title, a, as, b, bs, c, cs]) => (
+              <div key={title}>
+                <h3>{title}</h3>
+                <div className="l-strip">
+                  <div className="l-cell">
+                    <b>{a}</b>
+                    <small>{as}</small>
+                  </div>
+                  <span className="l-arr" aria-hidden />
+                  <div className="l-cell gone">
+                    <b>{b}</b>
+                    <small>{bs}</small>
+                  </div>
+                  <span className="l-arr" aria-hidden />
+                  <div className="l-cell">
+                    <b>{c}</b>
+                    <small>{cs}</small>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
-      <footer className="landing-footer">
-        AGENT DRIVE <span>Persistent storage. Independent agents.</span>
+
+      <section id="unblocks">
+        <div className="l-wrap">
+          <div className="l-tag">What it unblocks</div>
+          <h2>Work that is bigger than one session.</h2>
+          <div className="l-spec s3">
+            <div>
+              <code>Research</code>
+              <p>
+                An agent gathers sources and notes over days. Each run starts from what the last one
+                found, not from an empty sandbox.
+              </p>
+            </div>
+            <div>
+              <code>Long-running goals</code>
+              <p>
+                A goal that takes weeks survives restarts, new machines and new models. The plan and
+                the progress live in the drive.
+              </p>
+            </div>
+            <div>
+              <code>Many agents, one drive</code>
+              <p>
+                Agents in separate sandboxes read and write the same files. Every version records
+                which agent wrote it, and a write that would replace newer work fails instead.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div className="l-wrap">
+          <div className="l-tag">Features</div>
+          <h2>Encrypted. Sharable. Works anywhere.</h2>
+          <div className="l-line3">
+            <div>
+              <div className="l-tag">Encrypted</div>
+              <p>
+                Files are encrypted on the agent&apos;s machine with AES-256-GCM. We store only
+                ciphertext and never see your drive keys.
+              </p>
+            </div>
+            <div>
+              <div className="l-tag">Sharable</div>
+              <code>
+                <span>$</span> agent-drive share --drive &quot;$DRIVE_ID&quot; /outputs/report.pdf
+                --expires-in 7d
+              </code>
+              <p>
+                An expiring link that decrypts in the recipient&apos;s browser. No account needed,
+                and you can revoke it.
+              </p>
+            </div>
+            <div>
+              <div className="l-tag">Works anywhere</div>
+              <code>
+                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
+              </code>
+              <p>
+                A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or
+                CI runner and the agent has its drive.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="relay">
+        <div className="l-wrap">
+          <div className="l-tag">Example</div>
+          <h2>A bot, a coder and an assistant on the same data.</h2>
+          <p className="l-lede">
+            Three agents on three platforms. None of them shares a machine. They meet in the drive.
+          </p>
+          <div className="l-line3 relay">
+            <div>
+              <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
+              <p>Pulls today&apos;s posts about your app from X.</p>
+              <code>
+                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; posts.jsonl
+                /inbox/x/2026-11-05.jsonl
+              </code>
+            </div>
+            <div>
+              <div className="l-tag">2 / Devin &middot; Devin sandbox</div>
+              <p>
+                Reads the posts, builds the feature people asked for most, and writes up what
+                changed.
+              </p>
+              <code>
+                <span>$</span> agent-drive get --drive &quot;$DRIVE_ID&quot;
+                /inbox/x/2026-11-05.jsonl
+                <br />
+                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; notes.md
+                /outputs/csv-export.md
+              </code>
+            </div>
+            <div>
+              <div className="l-tag">3 / Claude &middot; Claude desktop</div>
+              <p>Checks what changed through the MCP server and tells you.</p>
+              <div className="l-say">
+                Devin shipped CSV export today. It was the most requested feature in this
+                morning&apos;s posts from X. Notes are in /outputs/csv-export.md.
+              </div>
+            </div>
+          </div>
+          <div
+            className="l-log"
+            role="img"
+            aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox."
+          >
+            <div className="l-tag">Drive activity</div>
+            <div className="lr h">
+              <span>PATH</span>
+              <span>AGENT</span>
+              <span>MACHINE</span>
+            </div>
+            <div className="lr">
+              <span>/inbox/x/2026-11-05.jsonl</span>
+              <span>grok-bot</span>
+              <span>cloud-worker</span>
+            </div>
+            <div className="lr">
+              <span>/outputs/csv-export.md</span>
+              <span>devin</span>
+              <span>devin-sandbox</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="connect">
+        <div className="l-wrap l-two">
+          <div>
+            <div className="l-tag">Connecting</div>
+            <h2>One line to the agent. One click from you.</h2>
+            <ol className="l-steps">
+              <li>
+                <i>1</i>
+                <b>Paste one line into your agent.</b>
+                <div className="t">{instruction}</div>
+              </li>
+              <li>
+                <i>2</i>
+                <b>The agent shows a pairing code.</b>
+                <div className="t">CXRH-TZJT</div>
+              </li>
+              <li>
+                <i>3</i>
+                <b>You approve it once.</b>
+              </li>
+            </ol>
+            <p className="l-nokey">No API key to copy.</p>
+          </div>
+          <div className="l-pair" role="img" aria-label="Example approval page">
+            <div className="top">
+              <span className="l-tag">Approve agent</span>
+              <span className="l-led" />
+            </div>
+            <div className="c">CXRH-TZJT</div>
+            <h3>Connect trace-bot?</h3>
+            <div className="rows">
+              <div>
+                <span>Agent</span>
+                <b>trace-bot</b>
+              </div>
+              <div>
+                <span>Machine</span>
+                <b>MacBook</b>
+              </div>
+              <div>
+                <span>Account</span>
+                <b>sam@northwind.dev</b>
+              </div>
+            </div>
+            <p className="can">Read, write, delete and share files in this drive</p>
+            <span className="l-btn signal">Approve</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="pricing">
+        <div className="l-wrap">
+          <div className="l-tag">Pricing</div>
+          <h2>Start free.</h2>
+          <p className="l-lede">Encryption on the agent&apos;s machine is on every plan.</p>
+          <div className="l-plans">
+            {plans.map(([name, p]) => (
+              <div className="l-plan" key={name}>
+                <h3>{name}</h3>
+                <div className="pr">
+                  ${p.baseCents / 100}
+                  <small> / month</small>
+                </div>
+                <ul>
+                  <li>{String(p.drives)} drives</li>
+                  <li>{allowance(p.storageBytes)} stored</li>
+                  <li>{allowance(p.egressBytes)} downloads a month</li>
+                  <li>{count(p.operations)} API operations a month</li>
+                </ul>
+                {p.baseCents > 0 &&
+                  (paid ? (
+                    <Link className="l-btn" href="/pricing">
+                      Choose plan
+                    </Link>
+                  ) : (
+                    <span className="soon">Coming soon</span>
+                  ))}
+              </div>
+            ))}
+          </div>
+          <p className="l-pnote">
+            {paid ? '' : 'Paid checkout is not enabled yet. '}
+            <Link href="/pricing">See full pricing</Link>
+          </p>
+        </div>
+      </section>
+
+      <section className="l-final">
+        <div className="l-wrap">
+          <h2>Give your agent a drive.</h2>
+          <SetupPanel instruction={instruction} label="Copy agent instruction again" />
+        </div>
+      </section>
+
+      <footer className="l-footer">
+        <div className="l-wrap">
+          <nav aria-label="Footer">
+            <Link href="/pricing">Pricing</Link>
+            <a href="/llms.txt">llms.txt</a>
+            <a href="/llms.txt">Docs</a>
+            <Link href="/sign-in">Sign in</Link>
+            <Link href="/console">Console</Link>
+          </nav>
+          <span>{host}</span>
+        </div>
       </footer>
     </main>
   );

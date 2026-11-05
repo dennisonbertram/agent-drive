@@ -1,0 +1,89 @@
+{
+  "mode": "judge",
+  "images": [
+    "mock-A-1440-files.png",
+    "mock-A-1440-agents.png",
+    "mock-A-375-files.png",
+    "mock-B-1440-files.png",
+    "mock-B-1440-agents.png",
+    "mock-B-375-files.png",
+    "mock-C-1440-files.png",
+    "mock-C-1440-agents.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 26,
+      "costUsd": 0.095844,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 5,
+            "simplicity": 5,
+            "consistency": 5,
+            "usability": 4,
+            "visual": 4,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 3,
+            "simplicity": 3,
+            "consistency": 3,
+            "usability": 3,
+            "visual": 3,
+            "effort": 2
+          },
+          "C": {
+            "criteria": 4,
+            "simplicity": 3,
+            "consistency": 3,
+            "usability": 4,
+            "visual": 5,
+            "effort": 3
+          }
+        },
+        "winner": "A",
+        "graft": "From C: move the key state into the files-panel toolbar as a KEY LOADED badge + Forget key, eliminating one of A's two 34px rows while keeping the full-width backup row intact.",
+        "defense": "A passes all measured thresholds (Files y=345, Agents y=277, 375 y=310, 0 shift) with the least invention: existing rows, heading-line notice, and a native closed details for Connect. The full backup instruction and both Copy/Download actions stay visible, and key state appears once. Against B: B is similarly compact (305/275) but its single 38px tray truncates the backup text to 'credentials exp...', drops the Copy action at 1440, degrades to an opaque '3' chip at 375, and adds an always-on 'All clear' tray plus a dialog at M-L effort. Against C: C is visually cleanest and highest (301/227), but introduces two new primitives (Toast, Popover) against the presentation-only/T1 constraint; its 8s auto-dismiss toast can be missed, and Connect instructions hide behind a popover, whereas A's notice persists until dismissed and its Connect row is visibly labelled. A's extra ~44px over C still sits comfortably under y=380, so it is not worth C's risk."
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 64,
+      "costUsd": 0.065794,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 4,
+            "simplicity": 5,
+            "consistency": 4,
+            "usability": 3,
+            "visual": 4,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 3,
+            "simplicity": 2,
+            "consistency": 3,
+            "usability": 2,
+            "visual": 3,
+            "effort": 2
+          },
+          "C": {
+            "criteria": 5,
+            "simplicity": 4,
+            "consistency": 5,
+            "usability": 5,
+            "visual": 5,
+            "effort": 4
+          }
+        },
+        "winner": "C",
+        "graft": "From A, use a native <details> inline disclosure (or inline panel expansion beneath the card header) instead of a floating Popover for 'Connect another agent', avoiding a new positioning primitive that is cramped for multi-line CLI snippets at 375px.",
+        "defense": "Proposal C best solves the core problem of stacked chrome by scoping each element to its natural hierarchy rather than merely shrinking the stack. By moving the 'KEY LOADED' badge and 'Forget key' action into the workspace table toolbar ('All files / Research workspace'), C eliminates an entire full-width status bar while keeping key state stated once and contextually tied to the decrypted files. Transient notices become bottom-right T1 toasts with zero layout shift, and the Agents table starts at y=227 (and y=301 on Files, y=268 on 375px)—the highest of all three options.\n\nAgainst A: While A is low-effort, it still stacks two full-width status bars above the Files table and another bar above Agents. Worse, at 375px (mock-A-375-files), A truncates the critical backup warning to an unreadable 'Key not ba...' to fit the two buttons, and its H1-subtitle notice slot disappears on mobile and overwrites the page subtitle on desktop.\n\nAgainst B: Packing key state, backup warnings, and transient notices into a single 38px horizontal tray causes severe horizontal cramping. Even at 1440px (mock-B-1440-files), B drops the 'Copy' button entirely and truncates the CLI command ('agent-drive credentials exp...'). At 375px, B hides critical status and actions behind an opaque '3 ▾' chip, failing discoverability, while on Agents it leaves permanent 'All clear' chrome above the work even when nothing needs attention."
+      }
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 'use client';
 
+import '../../styles/connect.css';
+
 import { useEffect, useState } from 'react';
 
 type Drive = { id: string; name: string };
@@ -51,15 +53,22 @@ function normalizeCode(value: string) {
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
 }
 
-export default function Connect({ initialCode }: { initialCode: string }) {
+export default function Connect({
+  initialCode,
+  account,
+}: {
+  initialCode: string;
+  account: string;
+}) {
   const [codeInput, setCodeInput] = useState(initialCode);
   const [request, setRequest] = useState<DeviceRequest | null>(null);
   const [problem, setProblem] = useState<{ kind: 'missing' | 'error'; message: string } | null>(
     null,
   );
+  const loginCommand = <code className="connect-cmd">agent-drive login</code>;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<'approved' | 'denied' | null>(null);
+  const [done, setDone] = useState(false);
   const [formError, setFormError] = useState('');
 
   async function load(raw: string) {
@@ -78,8 +87,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
       if (error instanceof HttpError && error.status === 404)
         setProblem({
           kind: 'missing',
-          message:
-            'This code is wrong, expired, or already used. Run agent-drive login in your agent to get a new one.',
+          message: '',
         });
       else
         setProblem({
@@ -104,7 +112,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     setBusy(true);
     try {
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', {});
-      setDone('approved');
+      setDone(true);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
@@ -112,40 +120,37 @@ export default function Connect({ initialCode }: { initialCode: string }) {
     }
   }
 
-  async function deny() {
-    if (!request) return;
-    setBusy(true);
-    setFormError('');
-    try {
-      await api(`device/${encodeURIComponent(request.user_code)}/deny`, 'POST', {});
-      setDone('denied');
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Denying failed.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (done)
     return (
-      <section className="panel" role="status">
-        <h1>{done === 'approved' ? 'Approved' : 'Denied'}</h1>
-        <p>
-          {done === 'approved'
-            ? 'Approved. Return to your agent; it will finish setup on its own.'
-            : 'Denied. The agent was not given access.'}
-        </p>
+      <section className="panel connect-card approved" role="status">
+        <span className="connect-tag">
+          <span className="connect-led on" aria-hidden="true" />
+          Paired
+        </span>
+        <h1>Approved</h1>
+        <p>Approved. Return to your agent; it will finish setup on its own.</p>
       </section>
     );
 
   if (!request)
     return (
-      <section className="panel">
+      <section className="panel connect-card">
+        <span className="connect-tag">
+          <span className={`connect-led ${loading ? 'on' : 'dim'}`} aria-hidden="true" />
+          {loading ? 'Looking up' : problem ? 'No pairing' : 'Awaiting code'}
+        </span>
         <h1>Connect an agent</h1>
-        <p>Enter the code your agent printed after running agent-drive login.</p>
+        <p>Enter the code your agent printed after running {loginCommand}.</p>
         {problem && (
           <div role="alert" className={`banner ${problem.kind === 'missing' ? 'info' : 'error'}`}>
-            {problem.message}
+            {problem.kind === 'missing' ? (
+              <>
+                This code is wrong, expired, or already used. Run {loginCommand} in your agent to
+                get a new one.
+              </>
+            ) : (
+              problem.message
+            )}
           </div>
         )}
         <form
@@ -166,7 +171,7 @@ export default function Connect({ initialCode }: { initialCode: string }) {
               required
             />
           </label>
-          <button className="button primary" disabled={loading}>
+          <button className="button primary connect-approve" disabled={loading}>
             {loading ? 'Looking up…' : 'Continue'}
           </button>
         </form>
@@ -175,14 +180,21 @@ export default function Connect({ initialCode }: { initialCode: string }) {
 
   const reconnect = request.drives ?? [];
   return (
-    <section className="panel">
-      <h1>Connect {request.client_name}?</h1>
+    <section className="panel connect-card">
       <div className="connect-code-box">
+        <span className="connect-tag">
+          <span className="connect-led on" aria-hidden="true" />
+          Pairing code
+        </span>
         <span className="connect-code" aria-label={`Code ${request.user_code}`}>
           {request.user_code}
         </span>
-        <p>Check that this matches your agent’s terminal. If it does not, deny.</p>
+        <p>
+          Check that this matches your agent’s terminal. If it does not, close this page; unapproved
+          requests expire on their own.
+        </p>
       </div>
+      <h1>Connect {request.client_name}?</h1>
       <dl className="connect-facts">
         <dt>Agent</dt>
         <dd>{request.client_name}</dd>
@@ -192,6 +204,8 @@ export default function Connect({ initialCode }: { initialCode: string }) {
             <dd>{request.machine}</dd>
           </>
         )}
+        <dt>Account</dt>
+        <dd>{account}</dd>
         <dt>Requested</dt>
         <dd>{new Date(request.created_at).toLocaleString()}</dd>
       </dl>
@@ -206,13 +220,15 @@ export default function Connect({ initialCode }: { initialCode: string }) {
         </div>
       )}
       <div className="connect-actions">
-        <button className="button primary" disabled={busy} onClick={() => void approve()}>
+        <button
+          className="button primary connect-approve"
+          disabled={busy}
+          onClick={() => void approve()}
+        >
           {busy ? 'Working…' : 'Approve agent'}
         </button>
-        <button type="button" className="button secondary" disabled={busy} onClick={deny}>
-          Deny
-        </button>
       </div>
+      <p className="connect-note">You can revoke access any time in Console, Agents.</p>
     </section>
   );
 }

@@ -1,0 +1,80 @@
+{
+  "mode": "judge",
+  "images": ["mock-A.png", "mock-B.png", "mock-C.png"],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 23,
+      "costUsd": 0.068292,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 2,
+            "simplicity": 5,
+            "consistency": 2,
+            "usability": 2,
+            "visual": 2,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 5,
+            "simplicity": 4,
+            "consistency": 5,
+            "usability": 4,
+            "visual": 4,
+            "effort": 3
+          },
+          "C": {
+            "criteria": 4,
+            "simplicity": 3,
+            "consistency": 2,
+            "usability": 3,
+            "visual": 4,
+            "effort": 2
+          }
+        },
+        "winner": "B",
+        "graft": "Graft C's compact flat divided-row treatment for the three read-only tables (usage, billing, audit) — title plus dotted meta and a right-aligned chip inside the existing panel — to reduce B's 2701px page height, while retaining B's full labelled cards and visible actions for Files and Trash.",
+        "defense": "B is the only option meeting all three criteria without data loss: no horizontal scroller, Download/Restore visible, full paths wrap instead of truncating, and no mid-word breaks. It also exactly follows the T1 reference at 390px, uses one shared .table-stack pattern, preserves every field and all actions at 40px targets, and confines the change to under 760px so desktop density is untouched; its screen-reader and height risks are mitigable and known. A is cheapest but fails criterion 3 in spirit and in the mock: billing/audit show RETA/INED, SUCCES/S and broken agent/action words, file paths — the primary identifier — are ellipsized, and size/author/modified become unreachable on phones, contradicting the T1 reference. C is attractively compact (1622px) and meets the named primary-action test, but hides frequent Versions and destructive Trash behind a ⋯ menu, its screenshot shows that menu overlapping/clipping the next row, meta lines wrap with orphaned dots, it invents a new pattern contrary to the T1 card reference, and it carries L effort with parallel render paths and <details> menu behaviour to fix and test."
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 74,
+      "costUsd": 0.060486,
+      "result": {
+        "scores": {
+          "A": {
+            "criteria": 2,
+            "simplicity": 4,
+            "consistency": 2,
+            "usability": 2,
+            "visual": 1,
+            "effort": 5
+          },
+          "B": {
+            "criteria": 5,
+            "simplicity": 4,
+            "consistency": 5,
+            "usability": 4,
+            "visual": 5,
+            "effort": 4
+          },
+          "C": {
+            "criteria": 4,
+            "simplicity": 2,
+            "consistency": 3,
+            "usability": 3,
+            "visual": 3,
+            "effort": 2
+          }
+        },
+        "winner": "B",
+        "graft": "From C, graft the flat edge-to-edge divided row container treatment (1px horizontal border-bottom dividers directly inside the parent panel instead of nested bordered cards with gaps) onto B's .table-stack layout to cut vertical height and remove card-in-card visual clutter without changing B's markup.",
+        "defense": "Option B is the clear winner because it is the only proposal that preserves 100% of table data and legibility at 375px while honoring the T1 rack reference pattern and maintaining a single semantic <table> DOM. Option A fails usability and visual quality: hiding size, author, and modified dates strips critical context on mobile, ellipsis truncation hides the actual filename at the end of file paths, and forcing 4 columns into 341px causes severe mid-word breaks in headers, identifiers, and status pills ('RETA/INED', 'O/P/S', 'SUCCES/S', 'FAILUR/E'). Option C is more compact vertically, but fails on interaction and engineering cost: hiding 'Versions' and 'Trash' inside a native <details> overflow menu adds tap friction, causes open popovers to overlap the next row's primary button, fails to close on outside tap without extra JS, and forces file paths into cramped 3-line wraps alongside orphaned leading dots ('· Yesterday', '· HTTP 403'). Challenging the internal team's proposed graft: do not graft C's inline dotted row templates onto the read-only tables—doing so requires dual mobile/desktop DOM markup, breaks visual consistency across the five tables, and imports C's orphaned-dot wrapping bugs. Instead, keep B's pure-CSS data-label key-value rows across all five tables, graft C's flat divided-row treatment (eliminating the nested card borders and vertical margins inside the panel), and tone down row-level Download/Restore buttons from solid black fills to high-contrast outlined buttons so a column of cards does not violate T1's 'one high-emphasis button per region' rule."
+      }
+    }
+  ]
+}

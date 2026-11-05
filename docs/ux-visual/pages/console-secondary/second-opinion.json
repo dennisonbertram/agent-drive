@@ -1,0 +1,375 @@
+{
+  "mode": "inspect",
+  "images": [
+    "1440x900-apikeys-list.png",
+    "375x812-usage-populated.png",
+    "375x812-trash-item.png",
+    "1440x900-dlg-apikeyreveal.png",
+    "1920x1080-agents-list2.png",
+    "1440x900-trash-item.png",
+    "375x812-dlg-newapikey.png",
+    "1440x900-usage-populated.png"
+  ],
+  "results": [
+    {
+      "model": "meta/muse-wonder",
+      "ok": true,
+      "seconds": 60,
+      "costUsd": 0.16234,
+      "result": {
+        "verdict": "Not ready to ship: the Rack visual system and long-string wrapping are strong, but the secondary tabs invert task hierarchy, hide critical actions on mobile, and omit the identification, copy, quota and lifecycle information a first-time operator needs to manage agents, keys, usage and trash safely.",
+        "findings": [
+          {
+            "level": "page",
+            "element": "Connect an agent card above Agent access",
+            "problem": "An onboarding/setup card with the llms.txt prompt, llms.txt link and three collapsed MCP sections occupies roughly half the viewport and pushes the actual key list and a third 'Connect without sharing your identity' card below the fold, even though the user already has 2 active keys. Returning users must scroll past setup instructions to do the page's primary job.",
+            "norm": "Task pages lead with the user's objects; onboarding prompts collapse or dismiss once setup is complete.",
+            "severity": "P1",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Collapse 'Connect an agent' to a slim, dismissible banner when >=1 active key exists, or move it to Agents/empty states; lead with Agent access."
+          },
+          {
+            "level": "page",
+            "element": "Connect an agent card above Agent identities",
+            "problem": "Same setup card dominates Agents and pushes the single identity halfway down the page. At 1920x1080 the rest of the page is then ~50% empty aluminium/white space with the footer stranded mid-screen, so density is simultaneously too high at the top and wasted below.",
+            "norm": "Primary content should fill the viewport purposefully; repeated help content should not displace the list on every visit.",
+            "severity": "P1",
+            "screenshot": "1920x1080-agents-list2.png",
+            "fix": "Show the connect card only in the no-agent state; on populated Agents, replace it with a compact 'Copy agent setup prompt' action in the header."
+          },
+          {
+            "level": "component",
+            "element": "Agent access rows: 'Laptop key' and 'Seed key'",
+            "problem": "Rows show only label, agent name, 'read, write, delete' and drive name. There is no key prefix/fingerprint, created date, last used, expiry or machine, so two keys for the same agent/drive are indistinguishable except by an arbitrary label and cannot be audited before revoking.",
+            "norm": "API-key lists (GitHub, Stripe, OpenAI conventions) always show a non-secret identifier plus created/last-used so the right key can be revoked safely.",
+            "severity": "P0",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Add key prefix (e.g. adk_c20b…567b), created and last-used columns, and the agent/drive as secondary metadata; keep Revoke aligned to that identifier."
+          },
+          {
+            "level": "component",
+            "element": "Revoke / Revoke access buttons",
+            "problem": "'Revoke' on each key and 'Revoke access' on the agent use identical outline-button styling with no explanation, scope or implied confirmation. A first-time user cannot tell whether agent revocation revokes its 2 active keys, deletes the identity, or removes drive access, and a misclick target sits permanently next to status pills.",
+            "norm": "Destructive credential actions state their blast radius and require confirmation naming the affected label/keys.",
+            "severity": "P1",
+            "screenshot": "1920x1080-agents-list2.png",
+            "fix": "On click, open a confirmation naming the agent/key, stating 'this immediately revokes N keys and cannot be undone', with a dangerous-action button; differentiate agent-level wording."
+          },
+          {
+            "level": "component",
+            "element": "Set up Agent Drive: http://localhost:3230/llms.txt black code block with Copy",
+            "problem": "The paste-into-your-agent instruction exposes a localhost:3230 URL as the production onboarding path. A first-time operator's agent on another machine cannot reach localhost, and the block reads as a dev artifact, undermining the CLIENT-SIDE ENCRYPTED trust claim.",
+            "norm": "Shipped onboarding snippets contain a resolvable production URL and environment-appropriate host.",
+            "severity": "P1",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Render the configured public base URL; if genuinely local/test, label the card as a local test session and explain where the agent must run."
+          },
+          {
+            "level": "component",
+            "element": "API KEY secret field in SAVE YOUR API KEY dialog",
+            "problem": "The one-time secret is shown in a resizable black textarea with no Copy button and no download option. The user must manually drag-select a wrapping 64-character orange string, risking a missed character, despite the page elsewhere having a Copy pattern for the setup prompt.",
+            "norm": "Show-once secrets always provide one-click Copy (with copied feedback) and optionally download; manual selection is an error-prone fallback.",
+            "severity": "P0",
+            "screenshot": "1440x900-dlg-apikeyreveal.png",
+            "fix": "Add a prominent Copy button with 'Copied' feedback (and Download .txt), make the field read-only/non-resizable, and keep the 'I saved my API key' gate."
+          },
+          {
+            "level": "component",
+            "element": "SAVE YOUR API KEY dialog header and Done button",
+            "problem": "There is no close/cancel affordance in the dialog header, and the gated 'Done' is disabled peach-on-peach with very low contrast, reading as a washed-out primary rather than a disabled state. The dialog also never names which agent, label or drives the secret belongs to, so after copying there is no context tying it to 'Laptop key'.",
+            "norm": "Secret-reveal dialogs summarise label/agent/scopes, meet disabled-state contrast, and make the sole exit path explicit.",
+            "severity": "P1",
+            "screenshot": "1440x900-dlg-apikeyreveal.png",
+            "fix": "Add 'For <label> · <agent> · read, write on <drive>' under the title, raise disabled contrast with an explanatory hint ('Save the key, then tick the box'), and keep Done as the only, clearly labelled exit."
+          },
+          {
+            "level": "component",
+            "element": "AGENT native select in CREATE API KEY dialog",
+            "problem": "On mobile the agent select truncates to 'Unicode agent with a deliberately lo…' so the operator cannot verify which identity they are issuing a key for, and ALLOWED DRIVES shows a single pre-checked drive with no drive identifier beyond its 3-line wrapped name, vertically centre-aligning the checkbox against the paragraph.",
+            "norm": "Issuance forms keep the selected principal fully identifiable (wrapping or two-line options) and align checkboxes to the first line of their label.",
+            "severity": "P1",
+            "screenshot": "375x812-dlg-newapikey.png",
+            "fix": "Allow the select/option text to wrap or show agent name + short ID on two lines; top-align drive/permission checkboxes and add a short drive ID."
+          },
+          {
+            "level": "group",
+            "element": "PERMISSIONS checkboxes: read, write, delete, share, manage",
+            "problem": "Permissions are a flat checkbox list with only 'manage — account-wide administration; use sparingly' annotated. Nothing warns that the default read+write already lets an agent overwrite files, that delete enables trash, or how permissions interact with ALLOWED DRIVES, despite the page headline promising 'exactly what it needs'. No expiry is offered anywhere in the form.",
+            "norm": "Credential creation follows least-privilege: risky scopes (delete, share, manage) carry inline consequences and keys support expiry.",
+            "severity": "P2",
+            "screenshot": "375x812-dlg-newapikey.png",
+            "fix": "Add one-line consequences per risky scope, visually separate 'manage' as account-wide danger, and add an optional expiry control."
+          },
+          {
+            "level": "layout",
+            "element": "Top tab bar: Files, Agents, API keys, Usage, Trash, $…",
+            "problem": "On 375px the nav overflows horizontally and 'Billing & limits' is clipped to a bare '$' glyph at the right edge with a stray bracket, with no fade, scroll hint or overflow menu. A first-time mobile user cannot discover Billing or Activity & deletion, which exist in the desktop sidebar.",
+            "norm": "Mobile primary nav must either fit, scroll with a visible affordance, or collapse into a menu; labels must never clip to an icon fragment.",
+            "severity": "P1",
+            "screenshot": "375x812-usage-populated.png",
+            "fix": "Use a horizontally scrollable tab strip with edge fade and snap, or a 'More' overflow; keep the active tab (Usage/Trash) fully in view on load."
+          },
+          {
+            "level": "component",
+            "element": "Deleted files table row '/scratch/old.md  11/4/2026, 5:02:04 PM'",
+            "problem": "On mobile the table keeps desktop columns, so only FILE PATH and DELETED fit; the Restore and Versions actions visible on desktop are pushed off-screen entirely. The one job of the Trash tab — restoring the file — is unreachable in this viewport.",
+            "norm": "Responsive tables collapse to cards or prioritise the primary row action; critical actions are never horizontally clipped.",
+            "severity": "P0",
+            "screenshot": "375x812-trash-item.png",
+            "fix": "Below ~640px, render each deleted file as a stacked card: path, deleted time, recovery note, and full-width Restore / Versions buttons."
+          },
+          {
+            "level": "component",
+            "element": "Deleted files table columns DELETED and RECOVERY",
+            "problem": "Even at 1440px the values truncate to '11/4/2026…' and 'Versions preser…' while the FILE PATH column takes most of the width and Restore/Versions sit as small plain text links far right under no column header. Column allocation does not match content, and the primary actions have weaker affordance than the Refresh outline button.",
+            "norm": "Tables size columns to content, never truncate dates/status at desktop widths, and give row actions button affordance with a labelled actions column.",
+            "severity": "P1",
+            "screenshot": "1440x900-trash-item.png",
+            "fix": "Give FILE PATH a max-width with ellipsis, widen DELETED/RECOVERY to fit full strings, and render Restore as an outline button with Versions beside it under an 'Actions' header."
+          },
+          {
+            "level": "group",
+            "element": "Banner 'Moved /scratch/old.md to Trash. Restore it from the Trash tab.' plus UUID 'df9203d1-1056-4e04-8e83-8e596e8c0977' with KEY LOADED / Forget key",
+            "problem": "The toast-style banner persists as a static page block telling users to go to the tab they are already on, and an unlabelled raw drive UUID is printed in mono above the table. First-time users get no idea what the UUID is, whether to save it, or how KEY LOADED relates to it, while 'Forget key' competes visually with Refresh.",
+            "norm": "Transient confirmations dismiss; opaque identifiers are labelled ('Drive ID') and encryption state is explained in place, not exposed as raw chrome.",
+            "severity": "P2",
+            "screenshot": "1440x900-trash-item.png",
+            "fix": "Make the banner a dismissible toast with a direct 'Restore now' action, label the UUID as Drive ID with a copy affordance or hide it behind details, and group KEY LOADED + Forget key as one labelled encryption chip."
+          },
+          {
+            "level": "page",
+            "element": "Trash page as a whole: Deleted files card and page actions",
+            "problem": "There is no retention period, no permanent-delete/empty-trash path and no size or auto-purge information. Users cannot tell if '/scratch/old.md' lives forever, counts against the 5.1 KB usage (Usage says storage includes trash), or how to actually destroy it — a core expectation of any trash surface.",
+            "norm": "Trash conventions (Drive, Finder, Dropbox) state retention ('deleted after 30 days') and offer permanent deletion with confirmation.",
+            "severity": "P1",
+            "screenshot": "1440x900-trash-item.png",
+            "fix": "Add retention copy in the header, a per-item 'Delete permanently' in a danger menu, and 'Empty trash' when >1 item, both confirming irreversibility."
+          },
+          {
+            "level": "group",
+            "element": "Three readout cards: ENCRYPTED STORAGE 5.1 KB, API OPERATIONS 60, EGRESS & COST",
+            "problem": "Two cards are orange numeric readouts but the third contains no number at all, just a 'Billing & limits' button duplicating the sidebar item. The grid implies three comparable metrics; instead the cost question the card title raises is unanswered and navigation is duplicated inside a data card.",
+            "norm": "KPI card groups keep a consistent data contract; navigation belongs in nav, not disguised as a metric.",
+            "severity": "P1",
+            "screenshot": "1440x900-usage-populated.png",
+            "fix": "Show the actual egress figure and estimated cost in orange readout type, with a small text link 'Manage limits' below; remove the duplicated button treatment."
+          },
+          {
+            "level": "page",
+            "element": "Usage page: Storage by drive, Usage by author, and header actions",
+            "problem": "There is no date-range control, trend, quota bar or limit value anywhere: 'account limits apply' is the only limit information next to 5.1 KB, so the user cannot judge headroom. 'Usage by author' shows Console with 0 B / 0 versions but 52 of the 60 operations, an apparent contradiction the UI never explains, and neither table offers sorting or export.",
+            "norm": "Usage surfaces answer 'how much, of what limit, over what period, trending how' with explicit ranges and visual quota.",
+            "severity": "P2",
+            "screenshot": "1440x900-usage-populated.png",
+            "fix": "Add a period selector, show '5.1 KB of X GB' with a quota bar per drive, and footnote what counts as an operation so Console's 52 reads make sense."
+          },
+          {
+            "level": "layout",
+            "element": "Drive bay strip: 'Research workspace for agen…' card and '+ YOUR NEXT AGENT' dashed card",
+            "problem": "The selected drive's name truncates with an ellipsis at both 1440 and 375 despite the strip's prominence, and on mobile the two cards squeeze to 'Research workspac…' at a size where the 5.1 KB · 3 files subline is barely legible. 'YOUR NEXT AGENT' is ambiguous — it reads as creating an agent, a drive, or an upsell — next to separate '+ New agent' / '+ New API key' primaries.",
+            "norm": "The current-context selector must show its full name or wrap, and creation affordances use one unambiguous verb per object.",
+            "severity": "P2",
+            "screenshot": "375x812-usage-populated.png",
+            "fix": "Let the active bay wrap to two lines or widen it at the dashed card's expense, clarify the dashed card to '+ New drive' (if that is its action), and keep a single orange creation verb per page."
+          },
+          {
+            "level": "component",
+            "element": "MCP setup disclosure rows 'MCP setup: Claude Code / Codex / Cursor or any MCP client'",
+            "problem": "Three collapsed triangle rows repeat identically on Agents and API keys with no summary of what expanding yields, no recommended path, and no indication which one a first-time Claude Code user should pick. The more important 'Read what your agent will see (llms.txt)' is an underlined orange text link competing with them.",
+            "norm": "Progressive disclosure rows preview their contents and the recommended option is marked; duplicate setup blocks live in one canonical place.",
+            "severity": "P2",
+            "screenshot": "1920x1080-agents-list2.png",
+            "fix": "Keep setup on Agents only, badge 'Recommended' per detected client where possible, and add a one-line preview under each disclosure title."
+          },
+          {
+            "level": "component",
+            "element": "Small mono status type: ACTIVE pills, '2 ACTIVE KEYS', 'CLIENT-SIDE ENCRYPTED', 'KEY LOADED'",
+            "problem": "Status is carried by ~10px uppercase mono with an orange dot that is also used for the selected drive LED and the 'Keys stay with you' dot. Orange simultaneously means primary action, LED/readout and active status, so colour alone cannot distinguish 'healthy', 'selected' and 'click me', and the tiny grey ACTIVE text on white is low contrast.",
+            "norm": "A single signal colour needs a reserved meaning; status should pair icon + readable text at >=12px with AA contrast.",
+            "severity": "P2",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Reserve orange for primary actions and readouts; use a distinct neutral/green treatment with 12px text for ACTIVE/LOADED, and stop using the same dot for selection."
+          },
+          {
+            "level": "group",
+            "element": "Refresh button placement and page header actions across tabs",
+            "problem": "Refresh appears top-right beside the primary on desktop API keys, alone top-left under the title on mobile Usage/Trash, and top-right alone on desktop Trash/Usage. There is no last-updated timestamp, so Refresh's purpose (stale server data? key state?) is guesswork, and its wandering position breaks muscle memory across sibling tabs.",
+            "norm": "Sibling tabs keep identical header action placement and pair manual refresh with freshness information or auto-refresh.",
+            "severity": "P3",
+            "screenshot": "375x812-trash-item.png",
+            "fix": "Fix Refresh in the top-right of every tab header at all breakpoints and add 'Updated 5:02 PM' text; consider live updates and removing the button."
+          }
+        ],
+        "excellent": [
+          "1440x900-dlg-apikeyreveal.png — 'I saved my API key securely' checkbox gating Done, plus 'This secret is shown only once. The service keeps only a hash', is exactly the right show-once secret pattern.",
+          "375x812-dlg-newapikey.png — CREATE API KEY cleanly separates KEY LABEL, AGENT, ALLOWED DRIVES and PERMISSIONS with a single full-width orange Create action that fits the mobile sheet well.",
+          "1440x900-usage-populated.png — the three smoked-glass readout cards (5.1 KB, 60) in Space Grotesk/IBM Plex Mono with orange numerals are legible, on-brand and scannable at a glance.",
+          "1920x1080-agents-list2.png — the long Unicode agent identity wraps gracefully on one row with avatar, truncating ID pill, '2 ACTIVE KEYS' badge and Revoke access all staying aligned.",
+          "1440x900-trash-item.png — the table footer 'File contents encrypted · Paths and metadata visible to the service' is an honest, precise encryption disclosure most drives omit.",
+          "1440x900-apikeys-list.png — the sidebar footer 'Keys stay with you. Only encrypted file contents reach our storage.' with the persistent CLIENT-SIDE ENCRYPTED indicator reinforces the product's core promise on every tab."
+        ]
+      }
+    },
+    {
+      "model": "google/gemini-4-argon",
+      "ok": true,
+      "seconds": 132,
+      "costUsd": 0.113486,
+      "result": {
+        "verdict": "Strong industrial 'Rack' visual direction with crisp typography and clear encryption trust signals, but undermined by critical usability flaws in core flows: the one-time API key reveal modal lacks a Copy button and renders the token in a resizable textarea, mobile Trash hides file restore actions off-screen, desktop Trash truncates dates and recovery text despite vast empty whitespace, and non-dismissible onboarding blocks plus redundant navigation chrome push core content below the fold.",
+        "findings": [
+          {
+            "level": "component",
+            "element": "API key secret box in 'SAVE YOUR API KEY' dialog",
+            "problem": "The one-time API key secret ('adk_c20b43e0...') is rendered inside a multi-line, user-resizable <textarea> (visible resize grabber handle in the bottom-right corner) that wraps the token mid-string across two lines and provides no 'Copy' button.",
+            "norm": "One-time secret reveal dialogs in developer consoles (Stripe, OpenAI, GitHub) must provide a single-click 'Copy' button with clipboard feedback and display the token in a non-resizable, read-only code block.",
+            "severity": "P0",
+            "screenshot": "1440x900-dlg-apikeyreveal.png",
+            "fix": "Replace the resizable <textarea> with a read-only monospace code field and add an inline 'Copy' button (matching the 'Copy' button used in the 'Connect an agent' command block)."
+          },
+          {
+            "level": "component",
+            "element": "Deleted files table in mobile Trash view",
+            "problem": "On mobile (375x812), the '/scratch/old.md' row only displays 'FILE PATH' and 'DELETED' ('11/4/2026, 5:02:04 PM'); the 'Restore' and 'Versions' actions are clipped off-screen with no horizontal scroll indicator or responsive card layout, leaving mobile users unable to restore deleted files.",
+            "norm": "Primary row actions ('Restore' in a Trash view) must always be visible and accessible on mobile viewports without hidden horizontal scrolling.",
+            "severity": "P0",
+            "screenshot": "375x812-trash-item.png",
+            "fix": "Convert table rows on viewports under 768px into stacked cards or include an explicit action row with 'Restore' and 'Versions' buttons directly beneath the file path and timestamp."
+          },
+          {
+            "level": "component",
+            "element": "Deleted files table columns ('DELETED' and 'RECOVERY')",
+            "problem": "On a 1440px desktop viewport, the 'DELETED' timestamp is truncated to '11/4/2026...' and 'RECOVERY' is truncated to 'Versions preser...', even though the 'FILE PATH' column and right-hand action column contain over 600px of unused horizontal whitespace.",
+            "norm": "Data tables on wide desktop viewports must allocate column widths proportionally to their content so short dates and status labels are never truncated while adjacent columns sit empty.",
+            "severity": "P1",
+            "screenshot": "1440x900-trash-item.png",
+            "fix": "Set 'DELETED', 'RECOVERY', and 'MODIFIED' columns to 'white-space: nowrap' with auto/min-content sizing (e.g., 160px–180px each) and let 'FILE PATH' flex to absorb the remaining width."
+          },
+          {
+            "level": "component",
+            "element": "Active 'Trash' tab pill in mobile top navigation bar",
+            "problem": "The active 'Trash' tab button exhibits a broken double-bracket border artifact on its left and right edges, and the adjacent '$ Billing & limits' tab is clipped mid-character ('$ ]') at the right viewport edge with no scroll fade or overflow affordance.",
+            "norm": "Active tab states must render clean pill borders without overlapping outline artifacts, and horizontally scrollable tab strips must indicate overflow properly.",
+            "severity": "P1",
+            "screenshot": "375x812-trash-item.png",
+            "fix": "Fix the CSS outline/border-radius mismatch on the active mobile nav pill and add a subtle right-edge gradient mask or padding to signal horizontal scrollability."
+          },
+          {
+            "level": "group",
+            "element": "Trash notification banner ('Moved /scratch/old.md to Trash. Restore it from the Trash tab.')",
+            "problem": "The banner instructs the user to 'Restore it from the Trash tab' while the user is already on the Trash tab, and lacks both a dismiss ('×') button and an inline 'Restore' / 'Undo' action.",
+            "norm": "Contextual notifications should adapt to the current route (or offer a direct 'Restore now' action) and allow manual dismissal.",
+            "severity": "P1",
+            "screenshot": "1440x900-trash-item.png",
+            "fix": "Omit the 'Restore it from the Trash tab' instruction when already viewing '/console/trash', or replace it with an inline 'Undo' button and a close ('×') control."
+          },
+          {
+            "level": "group",
+            "element": "Unlabelled UUID and 'KEY LOADED' bar above Deleted files",
+            "problem": "A raw 36-character UUID ('df9203d1-1056-4e04-8e83-8e596e8c0977') floats directly on the canvas with no label explaining whether it is a Drive ID or Key ID. On mobile (375x812-trash-item.png), the UUID, 'KEY LOADED' pill, and 'Forget key' button stack into three separate rows consuming ~110px of vertical height.",
+            "norm": "Cryptographic or resource identifiers should be clearly labelled (e.g., 'Drive ID') and grouped inside the header of the drive panel they govern rather than floating loose in the page flow.",
+            "severity": "P1",
+            "screenshot": "375x812-trash-item.png",
+            "fix": "Move the 'KEY LOADED' badge and 'Forget key' button into the 'Deleted files' card header (or a compact single-row toolbar) and prefix or truncate the raw UUID with a clear 'DRIVE ID' label."
+          },
+          {
+            "level": "page",
+            "element": "'Connect an agent' onboarding card on API keys and Agents tabs",
+            "problem": "The large 'Connect an agent' onboarding block is duplicated identically at the top of both the 'Agents' and 'API keys' tabs and cannot be collapsed or dismissed even when agents and keys are already active. On 1440x900, this pushes the 'Agent access' list down and clips the 'FROM YOUR TERMINAL / Connect without sharing your identity.' card at the bottom of the screen.",
+            "norm": "First-run setup guides should be collapsible or auto-collapse once the user has active agents/keys so operational tables and secondary tools fit above the fold.",
+            "severity": "P1",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Make 'Connect an agent' a collapsible accordion (collapsed by default once >=1 agent or key exists) or keep the full guide on 'Agents' and replace it on 'API keys' with a compact link."
+          },
+          {
+            "level": "component",
+            "element": "'Agent access' API key rows",
+            "problem": "API key rows display the key label, agent name, permissions, and drive name, but omit essential security metadata: key prefix/token hint (e.g., 'adk_c20b...'), creation date, and last-used timestamp. Additionally, permissions ('read, write, delete') are appended inline after a long wrapping agent name, and the emoji in 'Laptop key 🔑with' lacks a trailing space.",
+            "norm": "Developer API key tables must display a non-secret token prefix/ID, created date, and last-used timestamp so operators can audit and identify which key to revoke safely.",
+            "severity": "P1",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Add the key prefix/ID badge, created timestamp, and last-used status to each key row, and render permissions ('read', 'write', 'delete') as distinct monospace pills."
+          },
+          {
+            "level": "layout",
+            "element": "Top drive bay strip and breadcrumb vs. centered main content on 1920x1080",
+            "problem": "At 1920x1080, the breadcrumb ('Workspace / Agents') and drive bay strip ('Research workspace for...') are pinned to the far left of the main pane while 'CLIENT-SIDE ENCRYPTED' is pinned to the far right, whereas the page title ('Agents') and cards below are centered within a narrower max-width container (~220px inset from both edges), breaking vertical left- and right-edge alignment.",
+            "norm": "Page headers, breadcrumbs, and content containers within the same workspace pane should share consistent left/right alignment rails across large desktop viewports.",
+            "severity": "P2",
+            "screenshot": "1920x1080-agents-list2.png",
+            "fix": "Align the inner content container of the breadcrumb and drive bay strip to the same max-width and horizontal margins as the page body, or left-align the page body container."
+          },
+          {
+            "level": "layout",
+            "element": "Stacked mobile chrome (Top bar + Nav tabs + Breadcrumb + Drive bay strip + Page header)",
+            "problem": "On mobile (375x812), five stacked header bars consume ~330px (over 40% of the viewport height) before any content appears, repeating the current view name ('Usage') three times in 150px (in the nav pill, the breadcrumb below it, and the H1 below that). As a result, the third summary card ('EGRESS & COST') is cut off at the bottom of the screen.",
+            "norm": "Mobile layouts should consolidate redundant breadcrumbs and headers so primary dashboard cards fit comfortably within the initial viewport.",
+            "severity": "P2",
+            "screenshot": "375x812-usage-populated.png",
+            "fix": "Hide the redundant 'Workspace / Usage' breadcrumb row on mobile (moving the 'CLIENT-SIDE ENCRYPTED' badge to the top header or footer) and place the 'Refresh' button inline to the right of the 'Usage' H1 heading."
+          },
+          {
+            "level": "group",
+            "element": "Top drive bay strip ('Research workspace for... / + YOUR NEXT AGENT') and 'YOUR AGENTS' SHARED MEMORY' eyebrow",
+            "problem": "1) The dashed button next to the active drive in the drive bay strip is labelled '+ YOUR NEXT AGENT' instead of '+ New drive', conflating Drives (storage volumes) with Agents (identities). 2) The drive bay strip shows an active orange selection state on workspace-wide tabs ('API keys', 'Agents', 'Usage') that are not filtered by the selected drive. 3) Every tab repeats the identical static eyebrow 'YOUR AGENTS' SHARED MEMORY' above 'API keys', 'Agents', 'Usage', and 'Trash'.",
+            "norm": "Global context selectors should accurately label the entity they create ('+ New drive') and only display an active filter state on views that are actually scoped to that selection ('Files', 'Trash').",
+            "severity": "P2",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Rename '+ YOUR NEXT AGENT' in the drive bay strip to '+ New drive' (or clarify the 1:1 agent-drive creation flow), hide or de-emphasize drive selection on workspace-global tabs, and replace the static 'YOUR AGENTS' SHARED MEMORY' eyebrow with tab-specific context or remove it."
+          },
+          {
+            "level": "component",
+            "element": "'EGRESS & COST' card in Usage telemetry row",
+            "problem": "The first two dark hardware cards ('ENCRYPTED STORAGE' and 'API OPERATIONS') display prominent orange numeric readouts ('5.1 KB' and '60'), whereas the third identical dark card ('EGRESS & COST') contains no metric at all—placing a 'Billing & limits' navigation button in the readout slot.",
+            "norm": "KPI summary cards in the same telemetry row should maintain consistent visual structure (showing a primary metric value such as '$0.00' or '0 B' alongside a secondary action link).",
+            "severity": "P2",
+            "screenshot": "1440x900-usage-populated.png",
+            "fix": "Display an actual egress or estimated cost readout (e.g., '0 B' or '$0.00') in orange monospace type inside the 'EGRESS & COST' card and move the 'Billing & limits' link to the card header or footer."
+          },
+          {
+            "level": "component",
+            "element": "Right column of 'Storage by drive' card ('5.1 KB · account limits apply')",
+            "problem": "The column header 'Encrypted bytes' is right-aligned to the card edge, but the value below it ('5.1 KB · account limits / apply') is left-aligned within a narrow column and wraps awkwardly across two lines, misaligning with the header above.",
+            "norm": "Numeric values beneath a right-aligned table/card header must also be right-aligned to form a clean vertical scan line.",
+            "severity": "P2",
+            "screenshot": "1440x900-usage-populated.png",
+            "fix": "Right-align the storage value ('5.1 KB') directly beneath 'Encrypted bytes' and place 'account limits apply' on a muted secondary line or in the left subtitle."
+          },
+          {
+            "level": "component",
+            "element": "Controls inside 'CREATE API KEY' modal (Close button, Agent select, and multi-line checkboxes)",
+            "problem": "1) The top-right '×' close button has a dark border box on a near-black header that lacks contrast and nearly touches the header edges. 2) The 'AGENT' dropdown text ('Ünïcode agent 🤖 with a deliberately lo') clips mid-word without an ellipsis ('...'). 3) Multi-line checkbox labels in 'ALLOWED DRIVES' and 'PERMISSIONS' ('manage — account-wide...') vertically center the checkbox beside the multi-line text block instead of top-aligning with the first line.",
+            "norm": "Select inputs must truncate overflowing labels with 'text-overflow: ellipsis', multi-line checkboxes should align to the top line of text ('align-items: flex-start'), and modal close buttons should have clean spacing and contrast.",
+            "severity": "P2",
+            "screenshot": "375x812-dlg-newapikey.png",
+            "fix": "Apply 'text-overflow: ellipsis' and right padding to the Agent <select>, set checkbox rows to 'align-items: flex-start', style permission descriptions in muted secondary text, and refine the modal header close button border/padding."
+          },
+          {
+            "level": "component",
+            "element": "Command box in 'Connect an agent' card",
+            "problem": "The dark command block ('Set up Agent Drive: http://localhost:3230/llms.txt') stops at roughly 55% of the card width, leaving a large empty gap on the right while the parent card and MCP accordion dividers below span 100% width.",
+            "norm": "Block-level CLI snippet containers inside full-width cards should either span the full content width of the card or align intentionally with adjacent controls.",
+            "severity": "P3",
+            "screenshot": "1440x900-apikeys-list.png",
+            "fix": "Allow the dark command snippet container to span 100% of the card's inner width with the 'Copy' button pinned to the right edge."
+          },
+          {
+            "level": "component",
+            "element": "'Revoke' and 'Revoke access' buttons on API keys and Agents lists",
+            "problem": "Destructive security actions ('Revoke' on API keys and 'Revoke access' on Agent identities) use the exact same black-bordered neutral button style as safe actions like 'Refresh'.",
+            "norm": "Destructive or irreversible actions should be visually differentiated (e.g., danger/red hover or subtle destructive border/text token) from neutral utility actions like 'Refresh'.",
+            "severity": "P3",
+            "screenshot": "1920x1080-agents-list2.png",
+            "fix": "Give 'Revoke' and 'Revoke access' a distinct destructive secondary treatment (or confirm via a destructive confirmation prompt) to prevent accidental clicks."
+          }
+        ],
+        "excellent": [
+          "Cohesive 'T1 Rack' industrial aesthetic: warm aluminium canvas, smoked-glass dark telemetry panels, signal-orange LED indicators, and crisp Space Grotesk + IBM Plex Mono typography feel purpose-built for technical operators.",
+          "Clear zero-knowledge encryption trust signals: persistent 'CLIENT-SIDE ENCRYPTED' header status, sidebar 'Keys stay with you' explainer, and Trash footer metadata disclosure build immediate operator confidence.",
+          "Thoughtful safety gate in 'SAVE YOUR API KEY' ('1440x900-dlg-apikeyreveal.png'): requiring the 'I saved my API key securely' checkbox before enabling the 'Done' button prevents accidental dismissal of one-time credentials.",
+          "Clean wrapping of stress-tested long Unicode strings and emojis in the 'Agent identities' and 'Agent access' cards without breaking card borders or overlapping right-aligned action buttons."
+        ]
+      }
+    }
+  ]
+}

@@ -1,15 +1,16 @@
 import { SignUp } from '@clerk/nextjs';
-import Link from 'next/link';
+import { BrandMark } from '../../../brand-mark';
 import { clerkConfigured } from '@/src/console/auth';
+import { t1Appearance } from '../../sign-in/appearance';
+import '../../../styles/account.css';
 
 export default function SignUpPage() {
   return (
     <main className="auth-page">
-      <Link href="/" className="brand">
-        <span className="brand-mark">a/</span> agent drive
-      </Link>
+      <BrandMark />
       {clerkConfigured() ? (
         <SignUp
+          appearance={t1Appearance}
           routing="path"
           path="/sign-up"
           signInUrl="/sign-in"
