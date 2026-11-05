@@ -7,10 +7,23 @@ import { AgentDriveApiError, type AgentDriveClient } from './client.js';
 export const SCOPE_HINT =
   'Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.';
 
+/** What a conflict loser should do next; shared by the CLI and the MCP `hint`. */
+export function conflictHint(error: AgentDriveApiError) {
+  if (error.code !== 'conflict') return undefined;
+  if (error.state === 'trashed')
+    return 'The file is in the trash: restore it with "restore <path>" or write with --overwrite.';
+  if (error.state === 'absent')
+    return 'There is no file at this path now; write it without --if-version.';
+  if ((error.state === 'exists' || error.state === 'changed') && error.currentVersionId)
+    return `Current version: ${error.currentVersionId}. Read the file again, merge your change, then retry with --if-version ${error.currentVersionId}.`;
+  return undefined;
+}
+
 /** Lines to print on stderr for an API error. */
 export function apiErrorLines(error: AgentDriveApiError) {
   return [
     error.message,
+    conflictHint(error) ?? '',
     error.code === 'permission_denied' && /scope/iu.test(error.message) ? SCOPE_HINT : '',
     error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
     error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,

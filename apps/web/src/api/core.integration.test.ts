@@ -1088,6 +1088,90 @@ describe('Phase 1 core API', () => {
       ),
     );
     expect(commits.map((item) => item.status).sort()).toEqual([201, 409]);
+    const loser = commits.find((item) => item.status === 409)!;
+    const winnerId = (await json(commits.find((item) => item.status === 201)!)).version.id;
+    expect((await json(loser)).error).toMatchObject({
+      code: 'conflict',
+      state: 'changed',
+      currentVersionId: winnerId,
+    });
+  });
+
+  it('a conditional write cannot revive a trashed file, and conflicts say exists, changed, trashed, or absent', async () => {
+    const prepareCommit = async (path: string, extra: Record<string, unknown>) => {
+      const intent = await json(
+        await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+          path,
+          ciphertextSize: 3,
+          wrappedKey: 'opaque',
+          ...extra,
+        }),
+      );
+      const upload = await fetch(intent.uploadUrl, { method: 'PUT', body: Buffer.from('abc') });
+      expect(upload.ok).toBe(true);
+      const response = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+        intentId: intent.intentId,
+      });
+      return { status: response.status, body: await json(response) };
+    };
+    const path = '/state-conflicts.bin';
+    const first = await uploadCommit(writeToken, driveId, path, Buffer.from('one'));
+    const v1 = first.body.version.id as string;
+    const exists = await prepareCommit(path, { ifVersionId: null });
+    expect(exists.status).toBe(409);
+    expect(exists.body.error).toMatchObject({
+      state: 'exists',
+      message: 'The file already exists.',
+      currentVersionId: v1,
+    });
+    const absent = await prepareCommit('/state-absent.bin', { ifVersionId: v1 });
+    expect(absent.status).toBe(409);
+    expect(absent.body.error).toMatchObject({ state: 'absent', currentVersionId: null });
+    const stale = await json(
+      await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+        path,
+        ciphertextSize: 3,
+        wrappedKey: 'opaque',
+        ifVersionId: v1,
+      }),
+    );
+    await fetch(stale.uploadUrl, { method: 'PUT', body: Buffer.from('abc') });
+    const create = await json(
+      await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+        path,
+        ciphertextSize: 3,
+        wrappedKey: 'opaque',
+        ifVersionId: null,
+      }),
+    );
+    await fetch(create.uploadUrl, { method: 'PUT', body: Buffer.from('abc') });
+    expect((await request(`/drives/${driveId}/delete`, writeToken, 'POST', { path })).status).toBe(
+      200,
+    );
+    const commit = (intentId: string) =>
+      request(`/drives/${driveId}/commit`, writeToken, 'POST', { intentId });
+    const trashedVersion = await commit(stale.intentId);
+    expect(trashedVersion.status).toBe(409);
+    expect((await json(trashedVersion)).error).toMatchObject({
+      state: 'trashed',
+      currentVersionId: v1,
+    });
+    const trashedCreate = await commit(create.intentId);
+    expect(trashedCreate.status).toBe(409);
+    expect((await json(trashedCreate)).error).toMatchObject({
+      state: 'trashed',
+      currentVersionId: v1,
+    });
+    const versions = await pool.query(
+      'SELECT count(*)::int AS n FROM versions v JOIN files f ON f.id = v.file_id WHERE f.drive_id = $1 AND f.path = $2',
+      [driveId, path],
+    );
+    expect(versions.rows[0].n).toBe(1);
+    const files = await pool.query(
+      'SELECT deleted_at FROM files WHERE drive_id = $1 AND path = $2',
+      [driveId, path],
+    );
+    expect(files.rows[0].deleted_at).not.toBeNull();
   });
 
   it('rejects an upload intent that would exceed an explicit drive quota', async () => {

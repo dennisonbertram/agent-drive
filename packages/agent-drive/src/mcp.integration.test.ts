@@ -257,7 +257,15 @@ describe('MCP product tools over stdio', () => {
         path: '/mcp/marker.txt',
         text: 'create-only conflict',
       });
-      expect(duplicate.value).toMatchObject({ error: { code: 'conflict' } });
+      expect(duplicate.result.isError).toBe(true);
+      expect(duplicate.value).toMatchObject({
+        error: {
+          code: 'conflict',
+          state: 'exists',
+          currentVersionId: firstVersion,
+          hint: expect.stringContaining('--if-version'),
+        },
+      });
       const fetched = await call(mcp.client, 'get', { driveId, path: '/mcp/marker.txt' });
       expect((fetched.value.data as { text: string }).text).toBe(marker);
       expect(fetched.value.untrusted).toBe(true);

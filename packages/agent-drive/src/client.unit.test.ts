@@ -101,6 +101,31 @@ describe('AgentDriveClient transport guards', () => {
     );
   });
 
+  it('keeps conflict state and a UUID current version, and drops forged values', async () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const bodies = [
+      { code: 'conflict', message: 'x', state: 'changed', currentVersionId: id },
+      { code: 'conflict', message: 'x', state: 'absent', currentVersionId: null },
+      { code: 'conflict', message: 'x', state: 'bogus', currentVersionId: 'not-a-uuid' },
+    ];
+    const fetcher = vi.fn();
+    for (const error of bodies)
+      fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ error }), { status: 409 }));
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      fetch: fetcher,
+    });
+    await expect(client.whoami()).rejects.toMatchObject({ state: 'changed', currentVersionId: id });
+    await expect(client.whoami()).rejects.toMatchObject({
+      state: 'absent',
+      currentVersionId: null,
+    });
+    const forged = await client.whoami().catch((e) => e);
+    expect(forged.state).toBeUndefined();
+    expect(forged.currentVersionId).toBeUndefined();
+  });
+
   it('preserves only safe actionable API metadata', async () => {
     const responses = [
       {

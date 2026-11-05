@@ -307,7 +307,11 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     });
     await expect(
       client.put(createdDrive.id, '/acceptance/marker.txt', markerBytes),
-    ).rejects.toMatchObject({ code: 'conflict' });
+    ).rejects.toMatchObject({
+      code: 'conflict',
+      state: 'exists',
+      currentVersionId: first.id,
+    });
     const read = await client.get(createdDrive.id, '/acceptance/marker.txt');
     expect(read.bytes).toEqual(markerBytes);
     const replacement = new TextEncoder().encode('replacement encrypted bytes');

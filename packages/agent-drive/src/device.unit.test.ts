@@ -550,4 +550,25 @@ describe('check and key helpers', () => {
     ]);
     expect(apiErrorLines(new AgentDriveApiError('not_found', 404, 'nope'))).toEqual(['nope']);
   });
+
+  it('tells the conflict loser what to do for each state', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const lines = (
+      state: 'exists' | 'changed' | 'trashed' | 'absent',
+      currentVersionId?: string | null,
+    ) => apiErrorLines(new AgentDriveApiError('conflict', 409, 'msg', { state, currentVersionId }));
+    for (const state of ['exists', 'changed'] as const)
+      expect(lines(state, id)).toEqual([
+        'msg',
+        `Current version: ${id}. Read the file again, merge your change, then retry with --if-version ${id}.`,
+      ]);
+    expect(lines('trashed', id)).toEqual([
+      'msg',
+      'The file is in the trash: restore it with "restore <path>" or write with --overwrite.',
+    ]);
+    expect(lines('absent', null)).toEqual([
+      'msg',
+      'There is no file at this path now; write it without --if-version.',
+    ]);
+  });
 });
