@@ -265,3 +265,7 @@
 .connect-shell .connect-existing label.connect-check {
   margin: 0 0 14px;
 }
+.connect-shell .connect-existing p.connect-note {
+  margin: 0 0 14px;
+  text-align: left;
+}

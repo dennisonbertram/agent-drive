@@ -83,6 +83,7 @@ export default function Connect({
   const [driveId, setDriveId] = useState('');
   const [keyText, setKeyText] = useState('');
   const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [readOnly, setReadOnly] = useState(false);
   const [folder, setFolder] = useState('');
 
@@ -115,6 +116,13 @@ export default function Connect({
     } finally {
       setLoading(false);
     }
+  }
+
+  // Forget any key material, including the browser's file input.
+  function clearKey() {
+    setKeyText('');
+    setKeyFile(null);
+    setFileInputKey((n) => n + 1);
   }
 
   async function loadDrives() {
@@ -172,10 +180,9 @@ export default function Connect({
           sealedDriveKeys: { [driveId]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
         };
-        setKeyText('');
-        setKeyFile(null);
       }
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
+      clearKey();
       setDone(true);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Approval failed.');
@@ -283,7 +290,13 @@ export default function Connect({
           </p>
           <label>
             Drive
-            <select value={driveId} onChange={(event) => setDriveId(event.target.value)}>
+            <select
+              value={driveId}
+              onChange={(event) => {
+                setDriveId(event.target.value);
+                clearKey();
+              }}
+            >
               {accountDrives.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
@@ -302,8 +315,16 @@ export default function Connect({
           </label>
           <label>
             Or choose a recovery file or credentials bundle
-            <input type="file" onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)} />
+            <input
+              key={fileInputKey}
+              type="file"
+              onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)}
+            />
           </label>
+          <p className="connect-note">
+            A recovery file or bundle is checked against the selected drive. A pasted raw key cannot
+            be checked here; a wrong key gives the agent a drive it cannot read.
+          </p>
           <label className="connect-check">
             <input
               type="checkbox"
@@ -322,7 +343,14 @@ export default function Connect({
               spellCheck={false}
             />
           </label>
-          <button type="button" className="connect-link" onClick={() => setExisting(false)}>
+          <button
+            type="button"
+            className="connect-link"
+            onClick={() => {
+              setExisting(false);
+              clearKey();
+            }}
+          >
             Use a new drive instead
           </button>
         </div>
@@ -336,7 +364,7 @@ export default function Connect({
             : ''}
         </p>
       )}
-      {!existing && request.creates_drive && accountDrives.length > 0 && (
+      {!existing && request.creates_drive && !request.scopes && accountDrives.length > 0 && (
         <button type="button" className="connect-link" onClick={() => setExisting(true)}>
           Add to an existing drive instead
         </button>
