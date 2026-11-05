@@ -21,7 +21,7 @@ Message: every agent gets its own portable drive. Encryption is small print only
 - [x] 4 (acfbeef; Deny kept: existing product behaviour) Connect / approval (`connect.tsx`): device-pairing card, code on smoked display, one Approve button, revoke note; all its states (waiting, approved, expired, error)
 - [x] 5 (746596b) Share page (`app/s/[id]`)
 - [x] 6 (551a30a; Clerk widgets unseen locally) Pricing, billing, settings, sign-in/up (Clerk appearance variables)
-- [ ] 7 /ux-visual audit across all surfaces and viewports; fix findings
+- [x] 7 (audit, 10 fix packages, verification; residuals R1–R6 fixed on feat/town-design) /ux-visual audit across all surfaces and viewports; fix findings
 
 Waves 1–6 run in parallel on branches t1/landing, t1/console-shell, t1/console-panels, t1/connect, t1/share, t1/account (see parallel-brief.md); the lead merges them here.
 
