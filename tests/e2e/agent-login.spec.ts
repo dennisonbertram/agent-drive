@@ -454,6 +454,56 @@ test.describe('agent device login', () => {
     expect(Number(count.rows[0]!.n)).toBe(1);
   });
 
+  test('second agent: credentials bundle file and Read only give a read-only key; the bundle token never reaches the service', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'bfirst', 'm-bfirst');
+    const first = await startLogin(envA, 'bfirst-bot');
+    await approve(page, first.path, 'bfirst-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    const bundle = join(root, 'bundle-file');
+    const exported = await cli(['credentials', 'export', '--to', bundle], envA);
+    expect(exported.status, exported.stderr).toBe(0);
+
+    const envB = cliEnv(baseURL!, root, 'bsecond', 'm-bsecond');
+    const second = await startLogin(envB, 'bsecond-bot');
+    await page.goto(second.path);
+    await page.getByRole('button', { name: 'Add to an existing drive instead' }).click();
+    await page.locator('select').selectOption(driveId);
+    await page.locator('input[type="file"]').setInputFiles(bundle);
+    await page.getByLabel('Read only').check();
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = (await approveRequest).postData() ?? '';
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    expect(sent).toContain('sealedDriveKeys');
+    expect(sent).not.toContain(driveKey);
+    expect(sent).not.toContain(configA.apiKey);
+    expect(JSON.parse(sent).scopes).toEqual(['read']);
+    const result = await second.login.done;
+    expect(result.status, result.stderr).toBe(0);
+    const configB = await readConfig(envB);
+    expect(configB.driveKeys[driveId]).toBe(driveKey);
+    const who = await cli(['whoami'], envB);
+    expect(who.status, who.stderr).toBe(0);
+    expect(JSON.parse(who.stdout).scopes).toEqual(['read']);
+    const local = join(root, 'x.txt');
+    await writeFile(local, 'x');
+    const denied = await cli(['put', local, '/x.txt', '--drive', driveId], envB);
+    expect(denied.status).not.toBe(0);
+    expect(denied.stderr).toContain('lacks the "write" scope');
+  });
+
   test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
     test.setTimeout(120_000);
     await newUser(context);
