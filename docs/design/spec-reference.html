@@ -211,7 +211,7 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
  <div class="spec s3">
   <div><code>Research</code><p>An agent gathers sources and notes over days. Each run starts from what the last one found, not from an empty sandbox.</p></div>
   <div><code>Long-running goals</code><p>A goal that takes weeks survives restarts, new machines and new models. The plan and the progress live in the drive.</p></div>
-  <div><code>Many agents, one drive</code><p>Agents in separate sandboxes read and write the same files. Every version records which agent wrote it. Each agent has its own key, and its writes can be limited to folders. A conditional write to a file another agent just changed fails with a conflict. Agents catch up on changes with <b>recent --wait</b>.</p></div>
+  <div><code>Many agents, one drive</code><p>Agents in separate sandboxes read and write the same files. Every version records which agent wrote it. Each agent has its own key, and its writes can be limited to folders. A conditional write to a file another agent just changed fails with a conflict. Agents catch up on changes with <b>recent --wait 60 --drive "$DRIVE_ID"</b>.</p></div>
  </div>
 </div></section>
 
@@ -251,16 +251,16 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
   <h2>One line to the agent. One click from you.</h2>
   <ol class="steps">
    <li><i>1</i><b>Paste one line into your agent.</b><div class="t">Set up Agent Drive: https://agentdrive.xyz/llms.txt</div></li>
-   <li><i>2</i><b>The agent shows a pairing code.</b><div class="t">CXRH-TZJT</div></li>
+   <li><i>&bull;</i><b>The agent shows a pairing code.</b><div class="t">CXRH-TZJT</div></li>
    <li><i>3</i><b>You approve it once.</b></li>
   </ol>
   <p class="nokey">No API key to copy.</p>
-  <h3>Add a second agent to a drive</h3>
-  <ol class="steps">
-   <li><i>1</i><b>Approve it in the browser.</b><div class="t">Paste the same line into it, then choose the drive on /connect.</div></li>
-   <li><i>2</i><b>Give a sandbox a .env line.</b><div class="t">agent-drive credentials issue --name devin --drive "$DRIVE_ID" --stdout</div></li>
-   <li><i>3</i><b>Hand it over from an agent that has the drive.</b><div class="t">agent-drive grant CXRH-TZJT</div></li>
-  </ol>
+  <h3>Three ways to add a second agent to a drive</h3>
+  <ul class="steps">
+   <li><i>&bull;</i><b>Approve it in the browser.</b><div class="t">Paste the same line into it, then on /connect choose the drive and supply its key (credentials bundle or recovery file).</div></li>
+   <li><i>&bull;</i><b>Give a sandbox a .env line.</b><div class="t">agent-drive credentials issue --name devin --drive "$DRIVE_ID" --to sandbox.env</div></li>
+   <li><i>&bull;</i><b>Hand it over from an agent that has the drive.</b><div class="t">agent-drive grant CXRH-TZJT</div><div class="t">The granting agent needs the delegate permission. You approve once at /connect.</div></li>
+  </ul>
  </div>
  <div class="pair" aria-label="Approval page">
   <div class="top"><span class="tag">Approve agent</span><span class="led"></span></div>

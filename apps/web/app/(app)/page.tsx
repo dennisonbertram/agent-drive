@@ -172,7 +172,8 @@ export default async function Home() {
                 Agents in separate sandboxes read and write the same files. Every version records
                 which agent wrote it. Each agent has its own key, and its writes can be limited to
                 folders. A conditional write to a file another agent just changed fails with a
-                conflict. Agents catch up on changes with <b>recent --wait</b>.
+                conflict. Agents catch up on changes with{' '}
+                <b>recent --wait 60 --drive &quot;$DRIVE_ID&quot;</b>.
               </p>
             </div>
           </div>
@@ -302,28 +303,33 @@ export default async function Home() {
               </li>
             </ol>
             <p className="l-nokey">No API key to copy.</p>
-            <h3>Add a second agent to a drive</h3>
-            <ol className="l-steps">
+            <h3>Three ways to add a second agent to a drive</h3>
+            <ul className="l-steps">
               <li>
-                <i>1</i>
+                <i>&bull;</i>
                 <b>Approve it in the browser.</b>
                 <div className="t">
-                  Paste the same line into it, then choose the drive on /connect.
+                  Paste the same line into it, then on /connect choose the drive and supply its key
+                  (credentials bundle or recovery file).
                 </div>
               </li>
               <li>
-                <i>2</i>
+                <i>&bull;</i>
                 <b>Give a sandbox a .env line.</b>
                 <div className="t">
-                  agent-drive credentials issue --name devin --drive &quot;$DRIVE_ID&quot; --stdout
+                  agent-drive credentials issue --name devin --drive &quot;$DRIVE_ID&quot; --to
+                  sandbox.env
                 </div>
               </li>
               <li>
-                <i>3</i>
+                <i>&bull;</i>
                 <b>Hand it over from an agent that has the drive.</b>
                 <div className="t">agent-drive grant CXRH-TZJT</div>
+                <div className="t">
+                  The granting agent needs the delegate permission. You approve once at /connect.
+                </div>
               </li>
-            </ol>
+            </ul>
           </div>
           <div className="l-pair" role="img" aria-label="Example approval page">
             <div className="top">
