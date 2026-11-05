@@ -13,6 +13,10 @@
   margin-left: auto;
   margin-right: auto;
 }
+.share-shell > .brand {
+  display: flex;
+}
+
 /* the drive: a chassis holding one sled */
 .share-card {
   --share-alarm: #ff4d3d;
@@ -169,7 +173,7 @@
   min-width: 0;
   min-height: 40px;
   padding: 0 10px;
-  border: 1px solid var(--line, #3a3a36);
+  border: 1px solid #6b6962;
   border-radius: 6px;
   background: var(--ink, #121211);
   color: #fff;
