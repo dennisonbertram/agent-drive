@@ -23,7 +23,7 @@ test.describe('public landing page', () => {
     await expect(
       page.getByRole('button', { name: 'Copy agent instruction', exact: true }),
     ).toBeVisible();
-    await expect(page.locator('.l-works').getByText('Claude Code', { exact: true })).toBeVisible();
+    await expect(page.getByText('Claude Code').first()).toBeVisible();
   });
 
   test('shows the whole CLI command on a phone', async ({ page }) => {

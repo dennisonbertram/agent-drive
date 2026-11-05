@@ -50,12 +50,6 @@ const problems = [
     'reads the handoff',
   ],
 ];
-const folders = [
-  ['/memory', 'What the agent should remember.'],
-  ['/outputs', 'Finished files.'],
-  ['/work', 'Files still in progress.'],
-  ['/handoff', 'Notes for the next session.'],
-];
 
 function SetupPanel({ instruction, label }: { instruction: string; label: string }) {
   return (
@@ -150,17 +144,129 @@ export default async function Home() {
         </div>
       </section>
 
-      <section id="folders">
+      <section id="unblocks">
         <div className="l-wrap">
-          <div className="l-tag">Every drive has</div>
-          <h2>Four folders, ready for the agent to use.</h2>
-          <div className="l-spec">
-            {folders.map(([name, text]) => (
-              <div key={name}>
-                <code>{name}</code>
-                <p>{text}</p>
+          <div className="l-tag">What it unblocks</div>
+          <h2>Work that is bigger than one session.</h2>
+          <div className="l-spec s3">
+            <div>
+              <code>Research</code>
+              <p>
+                An agent gathers sources and notes over days. Each run starts from what the last one
+                found, not from an empty sandbox.
+              </p>
+            </div>
+            <div>
+              <code>Long-running goals</code>
+              <p>
+                A goal that takes weeks survives restarts, new machines and new models. The plan and
+                the progress live in the drive.
+              </p>
+            </div>
+            <div>
+              <code>Many agents, one drive</code>
+              <p>
+                Agents in separate sandboxes read and write the same files. Every version records
+                which agent wrote it, and a write that would replace newer work fails instead.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features">
+        <div className="l-wrap">
+          <div className="l-tag">Features</div>
+          <h2>Encrypted. Sharable. Works anywhere.</h2>
+          <div className="l-line3">
+            <div>
+              <div className="l-tag">Encrypted</div>
+              <p>
+                Files are encrypted on the agent&apos;s machine with AES-256-GCM. We store only
+                ciphertext and never see your drive keys.
+              </p>
+            </div>
+            <div>
+              <div className="l-tag">Sharable</div>
+              <code>
+                <span>$</span> agent-drive share /outputs/report.pdf --expires-in 7d
+              </code>
+              <p>
+                An expiring link that decrypts in the recipient&apos;s browser. No account needed,
+                and you can revoke it.
+              </p>
+            </div>
+            <div>
+              <div className="l-tag">Works anywhere</div>
+              <code>
+                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
+              </code>
+              <p>
+                A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or
+                CI runner and the agent has its drive.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="relay">
+        <div className="l-wrap">
+          <div className="l-tag">Example</div>
+          <h2>A bot, a coder and an assistant on the same data.</h2>
+          <p className="l-lede">
+            Three agents on three platforms. None of them shares a machine. They meet in the drive.
+          </p>
+          <div className="l-line3 relay">
+            <div>
+              <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
+              <p>Pulls today&apos;s posts about your app from X.</p>
+              <code>
+                <span>$</span> agent-drive put posts.jsonl /inbox/x/2026-11-05.jsonl
+              </code>
+            </div>
+            <div>
+              <div className="l-tag">2 / Devin &middot; Devin sandbox</div>
+              <p>
+                Reads the posts, builds the feature people asked for most, and writes up what
+                changed.
+              </p>
+              <code>
+                <span>$</span> agent-drive get /inbox/x/2026-11-05.jsonl
+                <br />
+                <span>$</span> agent-drive put notes.md /outputs/csv-export.md
+              </code>
+            </div>
+            <div>
+              <div className="l-tag">3 / Claude &middot; Claude desktop</div>
+              <p>Checks what changed through the MCP server and tells you.</p>
+              <div className="l-say">
+                Devin shipped CSV export today. It was the most requested feature in this
+                morning&apos;s posts from X. Notes are in /outputs/csv-export.md.
               </div>
-            ))}
+            </div>
+          </div>
+          <div
+            className="l-log"
+            role="img"
+            aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox."
+          >
+            <div className="l-tag">Drive activity</div>
+            <div className="lr h">
+              <span>PATH</span>
+              <span>AGENT</span>
+              <span>MACHINE</span>
+            </div>
+            <div className="lr">
+              <span>/inbox/x/2026-11-05.jsonl</span>
+              <span>grok-bot</span>
+              <span>cloud-worker</span>
+            </div>
+            <div className="lr">
+              <span>/outputs/csv-export.md</span>
+              <span>devin</span>
+              <span>devin-sandbox</span>
+            </div>
           </div>
         </div>
       </section>
@@ -212,92 +318,6 @@ export default async function Home() {
             <p className="can">Read, write, delete and share files in this drive</p>
             <span className="l-btn signal">Approve</span>
           </div>
-        </div>
-      </section>
-
-      <section id="machines">
-        <div className="l-wrap">
-          <div className="l-tag">How it moves</div>
-          <h2>Take the key along, and the files follow.</h2>
-          <p className="l-lede">
-            The drive holds the files. The agent&apos;s credentials bundle holds the key. Wherever
-            the bundle goes, the agent can read its drive.
-          </p>
-          <div className="l-line3">
-            <div>
-              <div className="l-tag">1 / Save as you work</div>
-              <code>
-                <span>$</span> agent-drive put notes.md /memory/project-notes.md
-                <br />
-                <span>$</span> agent-drive backup ./work
-              </code>
-              <p>Ordinary commands, or the same actions as MCP tools.</p>
-            </div>
-            <div>
-              <div className="l-tag">2 / Keep the key safe</div>
-              <code>
-                <span>$</span> agent-drive credentials export --stdout
-              </code>
-              <p>Put the bundle in your secret store once.</p>
-            </div>
-            <div>
-              <div className="l-tag">3 / Anywhere next</div>
-              <code>
-                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
-                <br />
-                <span>$</span> agent-drive get /memory/project-notes.md
-              </code>
-              <p>Set it as a sandbox secret. The key is never written to disk.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="keys">
-        <div className="l-wrap">
-          <div className="l-tag">Privacy</div>
-          <h2>Your keys stay with the agent.</h2>
-          <p className="l-lede">
-            Files are encrypted on the agent&apos;s machine with AES-256-GCM. The service stores
-            only ciphertext.
-          </p>
-          <div className="l-see">
-            <div>
-              <div className="l-tag">We see</div>
-              <ul>
-                <li>File paths</li>
-                <li>File sizes</li>
-                <li>
-                  Versions <small>so we can list files and bill usage</small>
-                </li>
-              </ul>
-            </div>
-            <div className="no">
-              <div className="l-tag">We do not see</div>
-              <ul>
-                <li>File contents</li>
-                <li>Your drive keys</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="works">
-        <div className="l-wrap">
-          <div className="l-tag">Works with</div>
-          <h2>The agents you already use.</h2>
-          <div className="l-works">
-            <span>Claude Code</span>
-            <span>Codex</span>
-            <span>Cursor</span>
-            <span>Gemini CLI</span>
-            <span className="q">Any MCP client</span>
-          </div>
-          <p className="l-llms">
-            Agents can read the setup themselves. Point one at{' '}
-            <a href="/llms.txt">{host}/llms.txt</a> and it installs the CLI and connects.
-          </p>
         </div>
       </section>
 
