@@ -175,8 +175,7 @@ export default async function Home() {
                       <div className="rk-ghost">
                         <span className="plus">+</span>
                         <span className="landing-tag">
-                          your next
-                          <br />
+                          your next <br />
                           agent
                         </span>
                       </div>
@@ -191,16 +190,28 @@ export default async function Home() {
             </div>
             <ol className="rk-notes">
               <li>
-                <b>1 / DRIVE</b>One per agent.
+                <b>
+                  <span className="rk-n">1 / </span>DRIVE
+                </b>
+                One per agent.
               </li>
               <li>
-                <b>2 / LED</b>Blinks on every write.
+                <b>
+                  <span className="rk-n">2 / </span>LED
+                </b>
+                Blinks on every write.
               </li>
               <li>
-                <b>3 / BAY</b>New agent, new drive.
+                <b>
+                  <span className="rk-n">3 / </span>BAY
+                </b>
+                New agent, new drive.
               </li>
               <li>
-                <b>4 / PORTABLE</b>Slot it into a laptop, CI or sandbox.
+                <b>
+                  <span className="rk-n">4 / </span>PORTABLE
+                </b>
+                Slot it into a laptop, CI or sandbox.
               </li>
             </ol>
           </div>

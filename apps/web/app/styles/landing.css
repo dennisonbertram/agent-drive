@@ -653,22 +653,81 @@
   .rk-face {
     padding: 12px 10px 14px;
   }
+  /* one wide rack: bays become slim full-width drive slots */
   .rk-bays {
-    grid-template-columns: 1fr 1fr;
-    row-gap: 32px;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
   .rk-bay {
-    height: 206px;
+    height: 48px;
+    padding: 4px;
+  }
+  .rk-mk,
+  .rk-n,
+  .rk-notes li:nth-child(2),
+  .rk-notes li:nth-child(3) {
+    display: none;
+  }
+  .rk-sled {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 0 10px;
+  }
+  .rk-lab {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 5px 8px;
+    text-overflow: ellipsis;
+  }
+  .rk-win {
+    display: contents;
+  }
+  .rk-win:after,
+  .rk-win > :not(:last-child),
+  .rk-parts,
+  .rk-ghost .plus,
+  .rk-ghost br {
+    display: none;
   }
   .rk-rd {
-    font-size: 20px;
+    font-size: 16px;
+    white-space: nowrap;
+  }
+  .rk-sf {
+    flex: 0 0 76px;
+  }
+  .rk-pull {
+    flex: 1;
+  }
+  .rk-sled.empty {
+    padding: 0 6px;
+  }
+  .rk-ghost {
+    width: 100%;
+    height: calc(100% - 8px);
+    flex-direction: row;
   }
   .rk-notes {
-    grid-template-columns: 1fr 1fr;
-    gap: 16px 14px;
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 480px) {
+  .rk-sled {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .rk-lab {
+    font-size: 11px;
+    padding: 5px 6px;
+  }
+  .rk-rd {
+    font-size: 14px;
+  }
+  .rk-sf {
+    flex-basis: 52px;
+  }
   .landing-links {
     gap: 12px;
   }
