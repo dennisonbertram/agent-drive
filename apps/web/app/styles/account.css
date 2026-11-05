@@ -4,18 +4,38 @@
 /* Same ground as the shared body (dot grid); scoped so it is harmless once :root owns it. */
 /* ---------- page frame ---------- */
 .billing-page {
-  max-width: 1200px;
+  max-width: 1272px;
   margin: 0 auto;
   padding: 0 32px;
   font-family: var(--sans, 'Space Grotesk', system-ui, sans-serif);
 }
 .billing-header {
-  min-height: 84px;
+  padding: 16px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+}
+/* same link row as the landing nav */
+.billing-links {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  font-size: 14px;
+  color: var(--muted, #5d5b56);
+}
+.billing-links a:hover {
+  color: var(--ink, #121211);
+}
+.billing-links a[aria-current='page'] {
+  color: var(--ink, #121211);
+  font-weight: 600;
+}
+.billing-links a.billing-links-cta {
+  color: #fff;
+  background: var(--ink, #121211);
+  border-radius: 6px;
+  padding: 8px 14px;
 }
 .billing-page .brand,
 .auth-page .brand {
@@ -26,18 +46,6 @@
   letter-spacing: -0.01em;
   text-decoration: none;
   color: var(--ink, #121211);
-}
-.billing-page .brand-mark,
-.auth-page .brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--ink, #121211);
-  color: #fff;
-  font: 500 12px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.2) inset;
 }
 .billing-heading {
   display: flex;
@@ -548,6 +556,7 @@
 .settings-delete-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 40px;
   margin-top: 28px;
 }
@@ -641,7 +650,26 @@
     0 24px 40px -28px rgba(40, 30, 20, 0.45);
 }
 
+.settings-hint {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--muted, #5d5b56);
+}
+.billing-form .billing-banner {
+  margin: 4px 0 0;
+}
+
 /* ---------- responsive ---------- */
+@media (max-width: 760px) {
+  /* stacked records: shared .table-stack rules live in globals.css */
+  .settings-audit time,
+  .settings-audit code {
+    white-space: normal;
+  }
+  .billing-page .table-stack td {
+    max-width: none;
+  }
+}
 @media (max-width: 850px) {
   .billing-page {
     padding: 0 24px;
@@ -672,9 +700,6 @@
   .settings-delete-grid {
     grid-template-columns: 1fr;
     gap: 28px;
-  }
-  .settings-audit {
-    min-width: 630px;
   }
   .settings-section-heading {
     flex-wrap: wrap;
@@ -708,8 +733,28 @@
     align-items: flex-start;
     flex-direction: column;
   }
-  .billing-header .button {
-    font-size: 0.75rem;
-    padding: 8px 10px;
+  .billing-links {
+    gap: 16px;
+    font-size: 13px;
   }
+  .billing-links a[href='/llms.txt'] {
+    display: none;
+  }
+}
+
+/* Global .primary is the button fill; table title cells must not inherit it. */
+.billing-page td.primary {
+  background: none;
+  border-color: var(--line-soft, rgba(18, 18, 17, 0.09));
+  color: inherit;
+  box-shadow: none;
+}
+/* One disabled style wins over .button.primary and the red delete button. */
+.billing-page .button:disabled,
+.billing-page .button.primary:disabled,
+.billing-page .button.settings-delete-button:disabled {
+  background: var(--al2, #ebeae6);
+  border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+  color: var(--muted, #5d5b56);
+  box-shadow: none;
 }

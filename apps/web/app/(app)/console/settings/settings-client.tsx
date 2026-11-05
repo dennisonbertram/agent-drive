@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BrandMark } from '../../../brand-mark';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Page<T> = { items: T[]; nextCursor: string | null };
@@ -202,12 +203,13 @@ export default function SettingsClient() {
   return (
     <div className="billing-page settings-page">
       <header className="billing-header">
-        <Link href="/console" className="brand">
-          <span className="brand-mark">a/</span> agent drive
-        </Link>
-        <Link href="/console" className="button secondary">
-          Back to files
-        </Link>
+        <BrandMark href="/console" />
+        <nav className="billing-links" aria-label="Account">
+          <Link href="/console/billing">Billing</Link>
+          <Link className="billing-links-cta" href="/console">
+            Back to files
+          </Link>
+        </nav>
       </header>
       <main>
         <div className="billing-heading">
@@ -239,37 +241,37 @@ export default function SettingsClient() {
             <span className="pill">OWNER ONLY</span>
           </div>
           <div
-            className="table-scroll"
+            className="table-scroll table-stack"
             ref={auditTable}
             tabIndex={0}
             role="region"
             aria-label="Audit events"
           >
-            <table className="settings-audit">
+            <table className="settings-audit" role="table">
               <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Action</th>
-                  <th>Actor</th>
-                  <th>Result</th>
+                <tr role="row">
+                  <th role="columnheader">When</th>
+                  <th role="columnheader">Action</th>
+                  <th role="columnheader">Actor</th>
+                  <th role="columnheader">Result</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {audit.items.map((event) => (
-                  <tr key={event.id}>
-                    <td>
+                  <tr key={event.id} role="row">
+                    <td role="cell" className="primary">
                       <time dateTime={event.createdAt}>{date(event.createdAt)}</time>
                     </td>
-                    <td>
+                    <td role="cell" data-label="Action">
                       <code>{event.action}</code>
                     </td>
-                    <td>
+                    <td role="cell" data-label="Actor">
                       {event.userId
                         ? 'Console user'
                         : (event.agentName ?? 'Public / unauthenticated')}
                       {event.keyLabel && <small>{event.keyLabel}</small>}
                     </td>
-                    <td>
+                    <td role="cell" data-label="Result">
                       <span className={`settings-outcome ${event.outcome}`}>
                         {event.outcome === 'pending' ? 'In progress' : event.outcome}
                       </span>
@@ -368,6 +370,11 @@ export default function SettingsClient() {
               >
                 {busy === 'drive' ? 'Requesting deletion…' : 'Permanently delete drive'}
               </button>
+              {!!selected && driveConfirmation !== selected.name && (
+                <small className="settings-hint">
+                  Type the exact drive name above to enable this.
+                </small>
+              )}
             </form>
             <form
               onSubmit={(event) => {
@@ -405,6 +412,11 @@ export default function SettingsClient() {
                     ? 'Requesting deletion…'
                     : 'Permanently delete account'}
               </button>
+              {!accountDeleting && accountConfirmation !== 'DELETE MY ACCOUNT' && (
+                <small className="settings-hint">
+                  Type DELETE MY ACCOUNT above to enable this.
+                </small>
+              )}
             </form>
           </div>
         </section>
@@ -452,6 +464,10 @@ export default function SettingsClient() {
           )}
         </section>
       </main>
+      <footer className="landing-footer">
+        <Link href="/">AGENT DRIVE</Link>
+        <span>Persistent storage. Independent agents.</span>
+      </footer>
     </div>
   );
 }

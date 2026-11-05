@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BrandMark } from '../../../brand-mark';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 type Plan = {
@@ -161,6 +162,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   const [threshold, setThreshold] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
+  const [formError, setFormError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState('');
@@ -186,6 +188,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
     event.preventDefault();
     setBusy(true);
     setError('');
+    setFormError('');
     setNotice('');
     try {
       await api('/settings', 'PATCH', {
@@ -196,7 +199,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
       await load();
       setNotice('Spending controls saved.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Settings could not be saved.');
+      setFormError(reason instanceof Error ? reason.message : 'Settings could not be saved.');
     } finally {
       setBusy(false);
     }
@@ -249,12 +252,13 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   return (
     <div className="billing-page">
       <header className="billing-header">
-        <Link href="/console" className="brand">
-          <span className="brand-mark">a/</span> agent drive
-        </Link>
-        <Link className="button secondary" href="/console">
-          Back to workspace
-        </Link>
+        <BrandMark href="/console" />
+        <nav className="billing-links" aria-label="Account">
+          <Link href="/console/settings">Settings</Link>
+          <Link className="billing-links-cta" href="/console">
+            Back to files
+          </Link>
+        </nav>
       </header>
       <main>
         <div className="billing-heading">
@@ -392,6 +396,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   </article>
                 ))}
               </div>
+              {!billing.checkoutConfigured && (
+                <p className="billing-caption">
+                  Paid plan buttons are disabled because checkout is not enabled on this deployment.
+                </p>
+              )}
               <p className="billing-caption">
                 All plans include client-side encryption. 5 GiB maximum encrypted file size. Need a
                 custom enterprise plan? Contact your workspace operator.
@@ -442,7 +451,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                 </label>
                 <small>Leave blank for no cap. A zero cap blocks new writes immediately.</small>
                 <label htmlFor="alert-threshold">
-                  Email me at (USD)
+                  Alert when spend reaches (USD)
                   <input
                     id="alert-threshold"
                     inputMode="decimal"
@@ -469,6 +478,11 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                     Email delivery is not configured. You can save a threshold, but alerts will
                     remain queued until delivery is enabled.
                   </p>
+                )}
+                {formError && (
+                  <div className="billing-banner error" role="alert">
+                    {formError}
+                  </div>
                 )}
                 <button className="button primary" disabled={busy} type="submit">
                   {busy ? 'Working…' : 'Save spending controls'}
@@ -507,29 +521,35 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   </button>
                 </div>
               </div>
-              <div className="table-scroll">
-                <table>
+              <div className="table-scroll table-stack">
+                <table role="table">
                   <thead>
-                    <tr>
-                      <th>AGENT</th>
-                      <th>RETAINED STORAGE</th>
-                      <th>OBSERVED DOWNLOADS</th>
-                      <th>OPERATIONS</th>
+                    <tr role="row">
+                      <th role="columnheader">AGENT</th>
+                      <th role="columnheader">RETAINED STORAGE</th>
+                      <th role="columnheader">OBSERVED DOWNLOADS</th>
+                      <th role="columnheader">OPERATIONS</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody role="rowgroup">
                     {billing.agents.map((agent) => (
-                      <tr key={agent.id}>
-                        <td>{agent.name === '__console__' ? 'Console' : agent.name}</td>
-                        <td>{bytes(agent.storage_bytes)}</td>
-                        <td>
+                      <tr key={agent.id} role="row">
+                        <td role="cell" className="primary">
+                          {agent.name === '__console__' ? 'Console' : agent.name}
+                        </td>
+                        <td role="cell" data-label="Retained storage">
+                          {bytes(agent.storage_bytes)}
+                        </td>
+                        <td role="cell" data-label="Observed downloads">
                           {billing.egressNotMetered
                             ? 'Not metered — provider does not charge egress'
                             : billing.egressMeteringConfigured
                               ? bytes(agent.egress_bytes)
                               : 'Not connected'}
                         </td>
-                        <td>{BigInt(agent.operations).toLocaleString()}</td>
+                        <td role="cell" data-label="Operations">
+                          {BigInt(agent.operations).toLocaleString()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -550,7 +570,10 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
           </>
         )}
       </main>
-      <footer className="billing-footer">Client-side encrypted. Account-level control.</footer>
+      <footer className="landing-footer">
+        <Link href="/">AGENT DRIVE</Link>
+        <span>Persistent storage. Independent agents.</span>
+      </footer>
     </div>
   );
 }
