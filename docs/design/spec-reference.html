@@ -56,6 +56,14 @@ svg .kl{fill:none;stroke:#111;stroke-width:1}
 svg .kled{fill:#ff4a1c;stroke:#111}
 /* 2 problem */
 .ba{margin-top:56px;display:grid;grid-template-columns:1fr 1fr;gap:48px}
+.spec.s3{grid-template-columns:repeat(3,1fr)}.spec.s3 code{font-size:18px}
+.relay>div{display:flex;flex-direction:column;gap:14px}.relay>div p{margin-top:0}
+.say{border:1px solid var(--ink);border-radius:10px 10px 10px 2px;padding:14px 16px;font-size:15px;line-height:1.45}
+.log{margin-top:40px;border-top:1px solid var(--ink);padding-top:16px;font:400 13px var(--mono)}
+.log .tag{margin-bottom:10px}
+.lr{display:grid;grid-template-columns:minmax(0,1.6fr) 1fr 1fr;gap:16px;padding:9px 0;border-bottom:1px solid var(--hair);overflow-wrap:anywhere}
+.lr.h{color:var(--muted);font-size:11px;letter-spacing:.12em}
+@media (max-width:760px){.spec.s3{grid-template-columns:1fr}.spec.s3 div,.spec.s3 div+div{padding:22px 0 8px;border-left:0}.spec.s3 div+div{border-top:1px solid var(--hair)}.lr{grid-template-columns:1fr;gap:2px}.lr.h{display:none}}
 .ba.three{grid-template-columns:1fr;gap:28px;max-width:860px}
 .ba.three>div{display:grid;grid-template-columns:200px 1fr;align-items:center;gap:24px}
 .ba.three h3{margin:0}
@@ -196,19 +204,47 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
  </div>
 </div></section>
 
-<!-- 3 FOLDERS -->
-<section id="folders"><div class="wrap">
- <div class="tag">Every drive has</div>
- <h2>Four folders, ready for the agent to use.</h2>
- <div class="spec">
-  <div><code>/memory</code><p>What the agent should remember.</p></div>
-  <div><code>/outputs</code><p>Finished files.</p></div>
-  <div><code>/work</code><p>Files still in progress.</p></div>
-  <div><code>/handoff</code><p>Notes for the next session.</p></div>
+<!-- 3 UNBLOCKS -->
+<section id="unblocks"><div class="wrap">
+ <div class="tag">What it unblocks</div>
+ <h2>Work that is bigger than one session.</h2>
+ <div class="spec s3">
+  <div><code>Research</code><p>An agent gathers sources and notes over days. Each run starts from what the last one found, not from an empty sandbox.</p></div>
+  <div><code>Long-running goals</code><p>A goal that takes weeks survives restarts, new machines and new models. The plan and the progress live in the drive.</p></div>
+  <div><code>Many agents, one drive</code><p>Agents in separate sandboxes read and write the same files. Every version records which agent wrote it, and a write that would replace newer work fails instead.</p></div>
  </div>
 </div></section>
 
-<!-- 4 CONNECT -->
+<!-- 4 FEATURES -->
+<section id="features"><div class="wrap">
+ <div class="tag">Features</div>
+ <h2>Encrypted. Sharable. Works anywhere.</h2>
+ <div class="line3">
+  <div><div class="tag">Encrypted</div><p>Files are encrypted on the agent's machine with AES-256-GCM. We store only ciphertext and never see your drive keys.</p></div>
+  <div><div class="tag">Sharable</div><code><span>$</span> agent-drive share /outputs/report.pdf --expires-in 7d</code><p>An expiring link that decrypts in the recipient's browser. No account needed, and you can revoke it.</p></div>
+  <div><div class="tag">Works anywhere</div><code><span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…</code><p>A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or CI runner and the agent has its drive.</p></div>
+ </div>
+</div></section>
+
+<!-- 5 RELAY -->
+<section id="relay"><div class="wrap">
+ <div class="tag">Example</div>
+ <h2>A bot, a coder and an assistant on the same data.</h2>
+ <p class="lede">Three agents on three platforms. None of them shares a machine. They meet in the drive.</p>
+ <div class="line3 relay">
+  <div><div class="tag">1 / Grok bot &middot; cloud worker</div><p>Pulls today's posts about your app from X.</p><code><span>$</span> agent-drive put posts.jsonl /inbox/x/2026-11-05.jsonl</code></div>
+  <div><div class="tag">2 / Devin &middot; Devin sandbox</div><p>Reads the posts, builds the feature people asked for most, and writes up what changed.</p><code><span>$</span> agent-drive get /inbox/x/2026-11-05.jsonl<br><span>$</span> agent-drive put notes.md /outputs/csv-export.md</code></div>
+  <div><div class="tag">3 / Claude &middot; Claude desktop</div><p>Checks what changed through the MCP server and tells you.</p><div class="say">Devin shipped CSV export today. It was the most requested feature in this morning's posts from X. Notes are in /outputs/csv-export.md.</div></div>
+ </div>
+ <div class="log" role="img" aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox.">
+  <div class="tag">Drive activity</div>
+  <div class="lr h"><span>PATH</span><span>AGENT</span><span>MACHINE</span></div>
+  <div class="lr"><span>/inbox/x/2026-11-05.jsonl</span><span>grok-bot</span><span>cloud-worker</span></div>
+  <div class="lr"><span>/outputs/csv-export.md</span><span>devin</span><span>devin-sandbox</span></div>
+ </div>
+</div></section>
+
+<!-- 6 CONNECT -->
 <section id="connect"><div class="wrap"><div class="two">
  <div>
   <div class="tag">Connecting</div>
@@ -233,37 +269,6 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
   <button class="btn signal" type="button">Approve</button>
  </div>
 </div></div></section>
-
-<!-- 5 MACHINES -->
-<section id="machines"><div class="wrap">
- <div class="tag">How it moves</div>
- <h2>Take the key along, and the files follow.</h2>
- <p class="lede">The drive holds the files. The agent's credentials bundle holds the key. Wherever the bundle goes, the agent can read its drive.</p>
- <div class="line3">
-  <div><div class="tag">1 / Save as you work</div><code><span>$</span> agent-drive put notes.md /memory/project-notes.md<br><span>$</span> agent-drive backup ./work</code><p>Ordinary commands, or the same actions as MCP tools.</p></div>
-  <div><div class="tag">2 / Keep the key safe</div><code><span>$</span> agent-drive credentials export --stdout</code><p>Put the bundle in your secret store once.</p></div>
-  <div><div class="tag">3 / Anywhere next</div><code><span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…<br><span>$</span> agent-drive get /memory/project-notes.md</code><p>Set it as a sandbox secret. The key is never written to disk.</p></div>
- </div>
-</div></section>
-
-<!-- 6 KEYS -->
-<section id="keys"><div class="wrap">
- <div class="tag">Privacy</div>
- <h2>Your keys stay with the agent.</h2>
- <p class="lede">Files are encrypted on the agent's machine with AES-256-GCM. The service stores only ciphertext.</p>
- <div class="see">
-  <div><div class="tag">We see</div><ul><li>File paths</li><li>File sizes</li><li>Versions<small>so we can list files and bill usage</small></li></ul></div>
-  <div class="no"><div class="tag">We do not see</div><ul><li>File contents</li><li>Your drive keys</li></ul></div>
- </div>
-</div></section>
-
-<!-- 7 WORKS WITH -->
-<section id="works"><div class="wrap">
- <div class="tag">Works with</div>
- <h2>The agents you already use.</h2>
- <div class="works"><span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Gemini CLI</span><span class="q">Any MCP client</span></div>
- <p class="llms">Agents can read the setup themselves. Point one at <a href="/llms.txt">agentdrive.xyz/llms.txt</a> and it installs the CLI and connects.</p>
-</div></section>
 
 <!-- 8 PRICING -->
 <section id="pricing"><div class="wrap">
