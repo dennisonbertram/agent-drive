@@ -164,6 +164,23 @@ test.describe('agent device login', () => {
     ).toBeVisible();
   }
 
+  // Records every browser request (URL, headers, body) so tests can prove secrets never left it.
+  function recordRequests(page: Page) {
+    const seen: string[] = [];
+    page.on('request', (r) => {
+      seen.push(`${r.method()} ${r.url()}\n${JSON.stringify(r.headers())}\n${r.postData() ?? ''}`);
+    });
+    return async (secrets: string[]) => {
+      const storage = await page.evaluate(() =>
+        JSON.stringify([{ ...localStorage }, { ...sessionStorage }]),
+      );
+      expect(seen.length).toBeGreaterThan(0);
+      for (const secret of secrets) {
+        for (const text of [...seen, storage]) expect(text).not.toContain(secret);
+      }
+    };
+  }
+
   type Config = { apiKey: string; driveKeys: Record<string, string> };
   const readConfig = async (env: NodeJS.ProcessEnv) =>
     JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as Config;
@@ -353,6 +370,248 @@ test.describe('agent device login', () => {
     const denied = await cli(['put', local, '/nope.txt', '--drive', driveId], env);
     expect(denied.status).not.toBe(0);
     expect(denied.stderr).toContain('lacks the "write" scope');
+  });
+
+  test('second agent: add to an existing drive with a recovery file and a write folder; plaintext key never reaches the service', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'first', 'm-first');
+    const first = await startLogin(envA, 'first-bot');
+    await approve(page, first.path, 'first-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    const original = Buffer.from(`FIRST-${randomUUID()}\n`);
+    const seed = join(root, 'seed.txt');
+    await writeFile(seed, original);
+    const put = await cli(['put', seed, '/notes/seed.txt', '--drive', driveId], envA);
+    expect(put.status, put.stderr).toBe(0);
+
+    const recovery = join(root, 'recovery.json');
+    await writeFile(
+      recovery,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key: driveKey }),
+    );
+    const wrong = join(root, 'wrong.json');
+    await writeFile(wrong, JSON.stringify({ driveId: randomUUID(), key: driveKey }));
+
+    const envB = cliEnv(baseURL!, root, 'second', 'm-second');
+    const second = await startLogin(envB, 'second-bot');
+    const assertPrivate = recordRequests(page);
+    await page.goto(second.path);
+    await expect(page.locator('select')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Add to an existing drive instead' }).click();
+    await expect(page.getByText('Agent Drive never sees it.')).toBeVisible();
+    await page.locator('select').selectOption(driveId);
+    const posts: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/approve')) posts.push(r.postData() ?? '');
+    });
+
+    // A recovery file for another drive is rejected in the browser and nothing is posted.
+    await page.locator('input[type="file"]').setInputFiles(wrong);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(
+      page.getByText('This recovery file does not belong to the selected drive.'),
+    ).toBeVisible();
+    expect(posts).toHaveLength(0);
+
+    await page.locator('input[type="file"]').setInputFiles(recovery);
+    await page.getByPlaceholder('/inbox/x').fill('/inbox/b');
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = (await approveRequest).postData() ?? '';
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    expect(sent).toContain('sealedDriveKeys');
+    expect(sent).not.toContain(driveKey);
+    expect(sent).not.toContain(configA.apiKey);
+    expect(JSON.parse(sent).writePaths).toEqual(['/inbox/b']);
+
+    const result = await second.login.done;
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain('Writes limited to: /inbox/b');
+    const configB = await readConfig(envB);
+    const output = (r: Result) => r.stdout + r.stderr;
+    const secrets = [driveKey, configA.apiKey, configB.apiKey];
+    const noSecrets = (text: string) => secrets.forEach((s) => expect(text).not.toContain(s));
+    noSecrets(output(result));
+    await assertPrivate(secrets);
+
+    const back = join(root, 'seed.out');
+    const get = await cli(['get', '/notes/seed.txt', '--drive', driveId, '--output', back], envB);
+    expect(get.status, get.stderr).toBe(0);
+    expect((await readFile(back)).equals(original)).toBe(true);
+    const denied = await cli(['put', seed, '/notes/x.md', '--drive', driveId], envB);
+    expect(denied.status).not.toBe(0);
+    expect(output(denied)).toMatch(/403|only write under/);
+    const allowed = await cli(['put', seed, '/inbox/b/hello.md', '--drive', driveId], envB);
+    expect(allowed.status, allowed.stderr).toBe(0);
+    const exported = await cli(['credentials', 'export', '--to', join(root, 'b-bundle')], envB);
+    expect(exported.status, exported.stderr).toBe(0);
+    const check = await cli(['check'], envB);
+    expect(check.status, check.stderr).toBe(0);
+    for (const r of [get, denied, allowed, exported, check]) noSecrets(output(r));
+
+    const rows = await database.query(
+      'SELECT row_to_json(d)::text AS t FROM device_authorizations d WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
+      [driveId],
+    );
+    expect(rows.rows.length).toBeGreaterThan(0);
+    for (const row of rows.rows) noSecrets(row.t as string);
+    const count = await database.query<{ n: string }>(
+      'SELECT count(*) AS n FROM drives WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
+      [driveId],
+    );
+    expect(Number(count.rows[0]!.n)).toBe(1);
+  });
+
+  test('second agent: credentials bundle file and Read only give a read-only key; the bundle token never reaches the service', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'bfirst', 'm-bfirst');
+    const first = await startLogin(envA, 'bfirst-bot');
+    await approve(page, first.path, 'bfirst-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    const bundle = join(root, 'bundle-file');
+    const exported = await cli(['credentials', 'export', '--to', bundle], envA);
+    expect(exported.status, exported.stderr).toBe(0);
+
+    const envB = cliEnv(baseURL!, root, 'bsecond', 'm-bsecond');
+    const second = await startLogin(envB, 'bsecond-bot');
+    const assertPrivate = recordRequests(page);
+    await page.goto(second.path);
+    await page.getByRole('button', { name: 'Add to an existing drive instead' }).click();
+    await page.locator('select').selectOption(driveId);
+    await page.locator('input[type="file"]').setInputFiles(bundle);
+    await page.getByLabel('Read only').check();
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = (await approveRequest).postData() ?? '';
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    expect(sent).toContain('sealedDriveKeys');
+    expect(sent).not.toContain(driveKey);
+    expect(sent).not.toContain(configA.apiKey);
+    expect(JSON.parse(sent).scopes).toEqual(['read']);
+    const result = await second.login.done;
+    expect(result.status, result.stderr).toBe(0);
+    const configB = await readConfig(envB);
+    expect(configB.driveKeys[driveId]).toBe(driveKey);
+    const bundleText = (await readFile(bundle, 'utf8')).trim();
+    await assertPrivate([
+      driveKey,
+      configA.apiKey,
+      configB.apiKey,
+      bundleText,
+      bundleText.slice('adcred1.'.length),
+    ]);
+    const who = await cli(['whoami'], envB);
+    expect(who.status, who.stderr).toBe(0);
+    expect(JSON.parse(who.stdout).scopes).toEqual(['read']);
+    const local = join(root, 'x.txt');
+    await writeFile(local, 'x');
+    const denied = await cli(['put', local, '/x.txt', '--drive', driveId], envB);
+    expect(denied.status).not.toBe(0);
+    expect(denied.stderr).toContain('lacks the "write" scope');
+  });
+
+  test('second agent form: switching drives or leaving clears the key; a rejected approve keeps the file; reconnects get no form', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const keys: { id: string; key: string }[] = [];
+    for (const name of ['one', 'two']) {
+      const env = cliEnv(baseURL!, root, `h-${name}`, `m-h-${name}`);
+      const login = await startLogin(env, `h-${name}-bot`);
+      await approve(page, login.path, `h-${name}-bot`, login.code);
+      expect((await login.login.done).status).toBe(0);
+      const [id, key] = Object.entries((await readConfig(env)).driveKeys)[0]!;
+      keys.push({ id, key });
+    }
+    const [one, two] = keys as [(typeof keys)[0], (typeof keys)[0]];
+    const recovery = join(root, 'h-recovery.json');
+    await writeFile(recovery, JSON.stringify({ driveId: one.id, key: one.key }));
+
+    const env = cliEnv(baseURL!, root, 'h-third', 'm-h-third');
+    const third = await startLogin(env, 'h-third-bot');
+    await page.goto(third.path);
+    const open = page.getByRole('button', { name: 'Add to an existing drive instead' });
+    await open.click();
+    const password = page.locator('input[type="password"]');
+    const file = page.locator('input[type="file"]');
+    const fileCount = () => file.evaluate((el: HTMLInputElement) => el.files!.length);
+
+    // Switching the drive forgets a pasted key and a chosen file.
+    await page.locator('select').selectOption(one.id);
+    await password.fill(one.key);
+    await file.setInputFiles(recovery);
+    await page.locator('select').selectOption(two.id);
+    await expect(password).toHaveValue('');
+    expect(await fileCount()).toBe(0);
+
+    // Leaving the form forgets them too.
+    await password.fill(one.key);
+    await page.getByRole('button', { name: 'Use a new drive instead' }).click();
+    await open.click();
+    await expect(password).toHaveValue('');
+
+    // A server rejection keeps the chosen file, so a corrected retry works.
+    await page.locator('select').selectOption(one.id);
+    await file.setInputFiles(recovery);
+    await page.getByPlaceholder('/inbox/x').fill('/inbox/b/');
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    expect(await fileCount()).toBe(1);
+    await page.getByPlaceholder('/inbox/x').fill('/inbox/b');
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(
+      page.getByText('Approved. Return to your agent; it will finish setup'),
+    ).toBeVisible();
+    expect((await third.login.done).status).toBe(0);
+  });
+
+  test('reconnect with no known drives shows no add-to-existing-drive option', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'lost', 'm-lost');
+    const first = await startLogin(env, 'lost-bot');
+    await approve(page, first.path, 'lost-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    // The agent lost its drive key but still has its API key: a reconnect with no known drives.
+    const config = await readConfig(env);
+    await writeFile(env.AGENT_DRIVE_CONFIG!, JSON.stringify({ ...config, driveKeys: {} }));
+    const again = await startLogin(env, 'lost-bot');
+    await page.goto(again.path);
+    await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
+    await expect(page.getByText(/Keeps its previous permissions/)).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Add to an existing drive instead' }),
+    ).toHaveCount(0);
+    again.login.child.kill();
   });
 
   test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
