@@ -1,9 +1,13 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import { BrandMark } from '../../brand-mark';
 import { billingRates, downloadsLabel, GIB, PLANS } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
 import '../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Pricing | Agent Drive' };
 
 const allowance = (bytes: bigint) =>
   bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
@@ -28,18 +32,15 @@ export default function PricingPage() {
   return (
     <div className="billing-page pricing-page">
       <header className="billing-header">
-        <Link href="/" className="brand">
-          <span className="brand-mark">a/</span> agent drive
-        </Link>
-        <nav className="actions" aria-label="Main">
-          <a
-            className="button secondary"
-            href="https://github.com/dennisonbertram/agent-drive/blob/main/docs/quickstart.md"
-          >
-            Quickstart
-          </a>
-          <Link className="button secondary" href="/sign-in">
-            Sign in
+        <BrandMark />
+        <nav className="billing-links" aria-label="Main">
+          <Link href="/pricing" aria-current="page">
+            Pricing
+          </Link>
+          <a href="/llms.txt">llms.txt</a>
+          <Link href="/sign-in">Sign in</Link>
+          <Link className="billing-links-cta" href="/console">
+            Open console
           </Link>
         </nav>
       </header>
@@ -52,17 +53,14 @@ export default function PricingPage() {
           </div>
         </section>
         {!paidAvailable && (
-          <p className="pricing-availability" role="status">
+          <p className="pricing-availability" id="pricing-availability" role="status">
             Paid checkout is not enabled on this deployment. The Free plan is available when sign-in
             and storage are configured; the paid prices below describe the supported plans.
           </p>
         )}
         <section className="billing-plans" aria-label="Plans">
           {Object.entries(PLANS).map(([name, plan]) => (
-            <article
-              key={name}
-              className={`billing-card billing-plan ${name === 'developer' ? 'selected' : ''}`}
-            >
+            <article key={name} className="billing-card billing-plan">
               <h2>{name}</h2>
               <p>
                 <span className="billing-price">{money(plan.baseCents)}</span> / month
@@ -74,15 +72,23 @@ export default function PricingPage() {
                 <li>{Number(plan.operations).toLocaleString('en-US')} API operations / month</li>
                 <li>CLI, MCP, web console, and encrypted sharing</li>
               </ul>
-              <Link
-                className={`button ${name === 'free' ? 'primary' : 'secondary'}`}
-                href={name === 'free' ? '/sign-up' : '/console/billing'}
-                prefetch={name === 'free' ? null : false}
-              >
-                {name === 'free'
-                  ? 'Start with Free'
-                  : `Choose ${name === 'developer' ? 'Developer' : 'Team'}`}
-              </Link>
+              {name === 'free' ? (
+                <Link className="button primary" href="/sign-up">
+                  Start with Free
+                </Link>
+              ) : paidAvailable ? (
+                <Link className="button secondary" href="/console/billing" prefetch={false}>
+                  Choose {name === 'developer' ? 'Developer' : 'Team'}
+                </Link>
+              ) : (
+                <button
+                  className="button secondary"
+                  disabled
+                  aria-describedby="pricing-availability"
+                >
+                  Coming soon
+                </button>
+              )}
             </article>
           ))}
         </section>
