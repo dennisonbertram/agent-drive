@@ -2,7 +2,8 @@
 
 /* frame */
 .console-shell {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);
   background: var(--panel, #f3f2ee);
@@ -11,7 +12,8 @@
   min-width: 0;
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100%;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 18px 12px 14px;
@@ -21,18 +23,9 @@
 }
 .sidebar .brand {
   margin: 0 8px 22px;
-  font: 600 17px var(--sans, 'Space Grotesk', system-ui, sans-serif);
-  letter-spacing: -0.01em;
 }
-.sidebar .brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--ink, #121211);
-  color: #fff;
-  font-size: 12px;
-  letter-spacing: -0.1em;
-  padding-right: 2px;
+.nav-toggle {
+  display: none;
 }
 .workspace-label {
   display: flex;
@@ -141,7 +134,14 @@
 }
 .console-main {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #fbfaf8;
+}
+.console-main > .topbar,
+.console-main > .bay-strip {
+  flex: none;
 }
 .topbar {
   display: flex;
@@ -169,12 +169,23 @@
   letter-spacing: 0.08em;
 }
 .console-content {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px 28px 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 18px 28px 12px;
+}
+.console-content > * {
+  flex: none;
+}
+.console-content > .file-panel {
+  flex: 0 1 auto;
+  min-height: 240px;
 }
 .console-footer {
-  padding-top: 24px;
+  margin-top: auto;
+  padding-top: 14px;
   font-family: var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
   font-size: 11px;
 }
@@ -278,31 +289,66 @@
   cursor: not-allowed;
 }
 
-/* page heading */
+/* page heading: title and subtitle share one line; a notice replaces the subtitle in place */
 .page-heading {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
-.page-heading .eyebrow {
-  font: 500 11px/1 var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
-  letter-spacing: 0.08em;
+.heading-text {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 14px;
+  flex: 1;
+  min-width: 0;
 }
 .page-heading h1 {
-  margin: 8px 0 4px;
-  font: 600 26px var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  flex: none;
+  margin: 0;
+  font: 600 26px/1.2 var(--sans, 'Space Grotesk', system-ui, sans-serif);
   letter-spacing: -0.03em;
 }
-.page-heading p:not(.eyebrow) {
+.page-heading .heading-sub,
+.page-heading .notice-slot {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
+  line-height: 20px;
   color: var(--muted, #5d5b56);
+}
+.page-heading .notice-slot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--ink, #121211);
+}
+.notice-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notice-dismiss {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--ink, #121211);
+  font: 500 12.5px var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
 }
 .page-heading .actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
   flex-wrap: wrap;
 }
 
@@ -332,8 +378,13 @@
 .console-main .banner.keyline {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px 10px;
+  min-height: 34px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.4;
   background: var(--panel, #f3f2ee);
   color: var(--ink, #121211);
   border-color: var(--line, rgba(18, 18, 17, 0.16));
@@ -362,8 +413,23 @@
   padding: 1px 6px;
   border-radius: 4px;
 }
+.keyline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.keyline-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
 .keyline .button {
-  margin-left: auto;
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
 }
 .keyline .copy-button {
   border-color: var(--ink, #121211);
@@ -373,27 +439,38 @@
   background: var(--al2, #d6d4cf);
 }
 
-/* drive identity row */
-.drive-toolbar {
+/* drive id and key controls live in the file panel toolbar */
+.toolbar-tools {
   display: flex;
   align-items: center;
-  gap: 10px 16px;
-  margin-bottom: 14px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  min-width: 0;
 }
-.drive-identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.drive-identity code {
+.drive-id {
+  max-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 12px;
   color: var(--muted, #5d5b56);
-  word-break: break-all;
 }
-.drive-toolbar > button {
-  margin-left: auto;
+.toolbar-tools input {
+  flex: none;
+  width: 200px;
+}
+.toolbar-tools .copy-button {
+  border-color: var(--ink, #121211);
+  color: var(--ink, #121211);
+}
+.toolbar-tools .copy-button:hover {
+  background: var(--al2, #d6d4cf);
+}
+.panel-toolbar .button {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
 }
 
 /* panels and files table */
@@ -433,9 +510,34 @@
   font: 400 11.5px var(--mono, 'IBM Plex Mono', ui-monospace, Menlo, monospace);
   color: var(--muted, #5d5b56);
 }
+.file-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.file-panel > * {
+  flex: none;
+}
+.file-panel > .table-scroll {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.file-panel > .empty.loading {
+  min-height: 320px;
+}
 .file-panel table {
   table-layout: fixed;
   width: 100%;
+}
+.file-panel thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.file-panel tbody tr:hover,
+.file-panel tbody tr:focus-within {
+  background: rgba(18, 18, 17, 0.04);
 }
 .file-panel th {
   padding: 10px 14px;
@@ -475,9 +577,24 @@
 .file-path {
   font-weight: 500;
 }
+.file-cell .file-path {
+  display: flex;
+  min-width: 0;
+}
+/* the directory truncates first so the file name stays readable */
 .file-dir {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted, #5d5b56);
   font-weight: 400;
+}
+.file-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .author {
   display: inline-flex;
@@ -499,10 +616,12 @@
 }
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 14px;
+  gap: 2px 14px;
 }
 .row-actions button {
+  min-height: 28px;
   padding: 3px 0;
   border: 0;
   background: none;
@@ -617,30 +736,66 @@
 /* responsive */
 @media (max-width: 1100px) {
   .console-shell {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: 184px minmax(0, 1fr);
   }
   .console-content,
   .bay-strip {
-    padding-left: 20px;
-    padding-right: 20px;
+    padding-left: 16px;
+    padding-right: 16px;
   }
   .topbar {
     padding: 0 20px;
   }
 }
+/* tablet: drop Author and tighten columns so the file path keeps at least 240px */
+@media (min-width: 761px) and (max-width: 1030px) {
+  .file-panel th,
+  .file-panel td {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .file-panel th:nth-child(2) {
+    width: 72px;
+  }
+  .file-panel td:nth-child(2) {
+    white-space: normal;
+  }
+  .file-panel th:nth-child(3),
+  .file-panel td:nth-child(3) {
+    display: none;
+  }
+  .file-panel th:nth-child(4) {
+    width: 92px;
+  }
+  .file-panel td.modified {
+    white-space: normal;
+  }
+  .file-panel th:nth-child(5) {
+    width: 130px;
+  }
+}
 @media (max-width: 760px) {
   .console-shell {
-    grid-template-columns: minmax(0, 1fr);
+    display: block;
+    height: auto;
+    min-height: 100dvh;
   }
   .sidebar {
     position: relative;
+    z-index: 30;
     height: auto;
-    padding: 12px 16px;
+    overflow: visible;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line, rgba(18, 18, 17, 0.16));
   }
   .sidebar .brand {
-    margin: 0 0 12px;
+    margin: 0;
+    font-size: 0;
+    gap: 0;
   }
   .workspace-label,
   .nav-label,
@@ -648,67 +803,177 @@
     display: none;
   }
   .sidebar-bottom {
-    margin: 0;
+    margin: 0 0 0 auto;
     padding: 0;
   }
   .profile-row {
-    position: absolute;
-    top: 14px;
-    right: 16px;
     padding: 0;
     border: 0;
   }
   .profile-row > span:last-child {
     display: none;
   }
+  .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid var(--ink, #121211);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink, #121211);
+    font: 500 14px var(--sans, 'Space Grotesk', system-ui, sans-serif);
+  }
   .sidebar nav {
-    flex-direction: row;
-    gap: 4px;
-    overflow-x: auto;
+    display: none;
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: 60px;
+    z-index: 20;
+    flex-direction: column;
+    gap: 0;
+    padding: 6px;
+    background: var(--panel, #f3f2ee);
+    border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+    border-radius: 12px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  }
+  .sidebar[data-nav-open='true'] nav {
+    display: flex;
   }
   .nav-item {
-    flex-shrink: 0;
-    padding: 8px 10px;
-    font-size: 13px;
-    gap: 6px;
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 15px;
+    gap: 12px;
   }
-  .nav-icon,
-  .nav-count {
-    display: none;
+  .sidebar nav a.nav-item:first-of-type {
+    margin-top: 6px;
+    border-top: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+    border-radius: 0 0 7px 7px;
   }
   .topbar {
-    height: 44px;
-    padding: 0 16px;
+    display: none;
+  }
+  .console-main {
+    display: block;
+  }
+  .console-content {
+    display: block;
+    overflow: visible;
+    padding: 16px 16px 20px;
+  }
+  .console-content > .file-panel {
+    min-height: 0;
   }
   .bay-strip {
     padding: 10px 16px;
+    scroll-snap-type: x proximity;
+    scroll-padding: 0 16px;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 14px,
+      #000 calc(100% - 40px),
+      transparent
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 14px,
+      #000 calc(100% - 40px),
+      transparent
+    );
   }
   .bay {
+    flex: 0 0 auto;
+    width: auto;
     min-width: 150px;
+    max-width: min(240px, 72vw);
+    min-height: 44px;
+    scroll-snap-align: start;
   }
-  .console-content {
-    padding: 20px 16px;
+  .bay.add {
+    flex: none;
   }
   .page-heading {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px 12px;
   }
-  .drive-toolbar > button {
-    margin-left: 0;
+  .page-heading h1 {
+    font-size: 22px;
+  }
+  .page-heading .actions .button {
+    min-height: 36px;
+    padding: 0 12px;
+  }
+  .heading-sub {
+    display: none;
+  }
+  .page-heading .notice-slot {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    padding: 12px 16px;
+    background: var(--panel, #f3f2ee);
+    border-top: 1px solid var(--ink, #121211);
+    white-space: normal;
   }
   .panel-toolbar {
     flex-wrap: wrap;
   }
-  .panel-toolbar input {
+  .toolbar-tools {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .toolbar-tools input {
+    width: 100%;
     max-width: 100%;
+    flex: 1 1 100%;
   }
   .panel-footer {
     flex-direction: column;
     gap: 4px;
   }
-  .file-panel table {
-    table-layout: auto;
-    min-width: 720px;
+  .file-panel > .table-scroll {
+    overflow: visible;
+  }
+  .file-cell .file-path {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+  .file-dir,
+  .file-name {
+    display: inline;
+    overflow: visible;
+  }
+  .file-panel .row-actions {
+    justify-content: flex-start;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .file-panel .row-actions button {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 1px solid var(--line, rgba(18, 18, 17, 0.16));
+    border-radius: 6px;
+    background: #fff;
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .file-panel .row-actions button:first-child {
+    border-color: var(--ink, #121211);
+    font-weight: 600;
+  }
+  .file-panel .row-actions button:disabled {
+    opacity: 1;
+    color: var(--muted, #5d5b56);
+    border-style: dashed;
   }
   .entity-row {
     flex-wrap: wrap;
@@ -718,12 +983,16 @@
     min-width: 180px;
   }
   .console-main .banner.keyline {
-    display: block;
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
-  .keyline .led {
-    margin-right: 8px;
+  .keyline-text {
+    flex: 1 1 calc(100% - 24px);
+    overflow: visible;
+    white-space: normal;
   }
-  .keyline .button {
-    margin-left: 0;
+  .keyline-actions {
+    flex-wrap: wrap;
+    padding-left: 19px;
   }
 }
