@@ -48,6 +48,7 @@ function parse(raw: string[]) {
       drive: { type: 'string', multiple: true },
       agent: { type: 'string' },
       scope: { type: 'string', multiple: true },
+      'write-path': { type: 'string', multiple: true },
       label: { type: 'string' },
       quota: { type: 'string' },
       'key-file': { type: 'string' },
@@ -319,7 +320,9 @@ async function run(command: string, raw: string[]) {
       machine: machineName(),
       ...(key ? { driveKey: key } : {}),
     });
-    process.stdout.write(`${await runCheck(checker, driveId)}\n`);
+    process.stdout.write(
+      `${await runCheck(checker, driveId, { scopes: who.scopes, writePaths: who.writePaths ?? [] })}\n`,
+    );
     return;
   }
   if (command === 'agent' && args.positionals[0] === 'create')
@@ -358,6 +361,7 @@ async function run(command: string, raw: string[]) {
         args.values.label,
         drives,
         args.values.scope ?? ['read', 'write'],
+        args.values['write-path'],
       ),
     );
   }
@@ -536,10 +540,10 @@ Commands:
   login [--name AGENT] [--no-browser]   Approve in a browser (device flow); name defaults to "<machine> agent"
   login --api URL --token-stdin         Save an existing API key
   whoami                                Also shows localDriveKeys (which drives have a key here)
-  check [--drive ID]                    Write, read back, compare a test file; needs backed-up keys; prints "check ok"
+  check [--drive ID]                    Write, read back, compare a test file (read-only keys: decrypt an existing file); needs backed-up keys; prints "check ok"
   agent create --name NAME
   drive create --name NAME
-  key create --agent ID --drive ID --label LABEL --scope read --scope write
+  key create --agent ID --drive ID --label LABEL --scope read --scope write [--write-path P]...
   key revoke ID
   put LOCAL REMOTE --drive ID [--if-version ID | --overwrite]
   get REMOTE --drive ID [--output FILE]

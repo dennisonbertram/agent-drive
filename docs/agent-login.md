@@ -428,3 +428,22 @@ that the human's browser already holds, but it cannot recover an agent's key.
   From a bundle it takes the key for the selected drive only.
 - With a key loaded, "Download recovery file" saves the same JSON the drive-creation dialog
   offers and records `method: "file"` through the console's API.
+
+## 10. Write path scopes and preserved reconnect permissions
+
+- `api_keys.write_paths` and `device_authorizations.write_paths` (`text[]`, default empty, migration 0015) restrict mutations only. A key with `read` still reads every path in its drives. An empty
+  list means "may write anywhere the scopes allow".
+- Each entry is a canonical absolute path other than `/`; at most 16, deduplicated. A path is
+  allowed when it equals an entry or lies beneath it (`/inbox/x` allows `/inbox/x/a.txt`, not
+  `/inbox/xy`). `put`, `move` (both paths), `delete`, `copy` (destination) and `restore` are
+  checked; a denied call returns 403 `permission_denied`: `The API key may only write under <paths>.`
+  Committing an upload follows the path fixed at `put`. Console requests are never limited.
+- The approve body accepts `writePaths` next to `scopes`; the token response returns `write_paths`
+  and the CLI prints `Writes limited to: <paths>`. An empty first login gives default scopes and no
+  paths. This is a limit on writes, not access control on reading.
+- A reconnect with an empty approve body reuses the previous key's `scopes` and `write_paths`
+  instead of the defaults, whether or not any drive is reconnected (a valid previous key that reconnects no drives and gets a new drive keeps them too). Widening needs a new login with an explicit body. The console GET
+  returns `scopes` and `write_paths` for a reconnect, and the page says "Reconnects to: <drives>
+  (<scopes>; writes under <paths>)".
+- `check` on a key without `write` is read-only: it decrypts one existing live file and prints
+  `check ok drive=<id> (read-only)`. Writers put the check file under their first write path.

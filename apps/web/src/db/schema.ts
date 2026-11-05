@@ -108,6 +108,10 @@ export const apiKeys = pgTable(
       .notNull()
       .default(sql`ARRAY[]::uuid[]`),
     scopes: text('scopes').array().notNull(),
+    writePaths: text('write_paths')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
@@ -578,6 +582,10 @@ export const deviceAuthorizations = pgTable(
       .notNull()
       .default(sql`ARRAY[]::uuid[]`),
     scopes: text('scopes')
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::text[]`),
+    writePaths: text('write_paths')
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),

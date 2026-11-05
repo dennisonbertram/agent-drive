@@ -19,6 +19,8 @@ import {
   secureTransportAllowed,
   tags,
   uuid,
+  withinWritePaths,
+  writePaths,
 } from './validation';
 import {
   copyObject,
@@ -52,6 +54,7 @@ type Auth = {
   accountId: string;
   agentId: string;
   scopes: string[];
+  writePaths: string[];
   driveIds: string[];
   userId?: string;
   accountName?: string;
@@ -100,7 +103,7 @@ function bearer(request: Request) {
 
 async function authenticate(request: Request): Promise<Auth> {
   const result = await getPool().query(
-    `SELECT k.id, k.account_id, k.agent_id, k.scopes, k.drive_ids
+    `SELECT k.id, k.account_id, k.agent_id, k.scopes, k.write_paths, k.drive_ids
        FROM api_keys k
        JOIN accounts a ON a.id=k.account_id AND a.deleting_at IS NULL
       WHERE k.token_hash = $1 AND k.revoked_at IS NULL`,
@@ -113,6 +116,7 @@ async function authenticate(request: Request): Promise<Auth> {
     accountId: row.account_id,
     agentId: row.agent_id,
     scopes: row.scopes ?? [],
+    writePaths: row.write_paths ?? [],
     driveIds: row.drive_ids ?? [],
   };
 }
@@ -149,6 +153,7 @@ async function authenticateConsole(userId: string): Promise<Auth> {
         accountName: existing.rows[0].name as string,
         agentId: agent.rows[0]?.id as string,
         scopes: [...scopeNames],
+        writePaths: [],
         driveIds: [],
         userId,
       };
@@ -177,6 +182,7 @@ async function authenticateConsole(userId: string): Promise<Auth> {
       accountName: account.rows[0].name as string,
       agentId: agent.rows[0].id as string,
       scopes: [...scopeNames],
+      writePaths: [],
       driveIds: drives.rows.map((row) => row.id as string),
       userId,
     };
@@ -189,6 +195,14 @@ function need(auth: Auth, scope: string, driveId?: string) {
   if (driveId && !auth.driveIds.includes(driveId)) {
     throw new ApiError('permission_denied', 'The API key is not scoped to this drive.');
   }
+}
+
+function needWritePath(auth: Auth, path: string) {
+  if (!withinWritePaths(auth.writePaths, path))
+    throw new ApiError(
+      'permission_denied',
+      `The API key may only write under ${auth.writePaths.join(', ')}.`,
+    );
 }
 
 function manage(auth: Auth) {
@@ -426,6 +440,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
       agentId: auth.agentId,
       keyId: auth.keyId,
       scopes: auth.scopes,
+      writePaths: auth.writePaths,
       driveIds: auth.scopes.includes('manage') ? null : auth.driveIds,
       ...billingFlags(),
     });
@@ -540,7 +555,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, agent_id, label, drive_ids, scopes, revoked_at, created_at,
+      `SELECT id, agent_id, label, drive_ids, scopes, write_paths, revoked_at, created_at,
               created_at::text AS cursor_created_at
          FROM api_keys WHERE ${where} ORDER BY created_at, id LIMIT $${params.length}`,
       params,
@@ -569,6 +584,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
       throw new ApiError('validation_error', 'scopes must be a non-empty list of valid scopes.');
     }
     const scopes = [...new Set(body.scopes as string[])];
+    const paths = writePaths(body);
     const agent = await getPool().query('SELECT id FROM agents WHERE id = $1 AND account_id = $2', [
       agentId,
       auth.accountId,
@@ -582,10 +598,10 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
       throw new ApiError('not_found', 'One or more drives were not found.');
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const result = await getPool().query(
-      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
-       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[])
-       RETURNING id, agent_id, label, drive_ids, scopes, created_at`,
-      [auth.accountId, agentId, label, hashToken(token), drives, scopes],
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths)
+       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[])
+       RETURNING id, agent_id, label, drive_ids, scopes, write_paths, created_at`,
+      [auth.accountId, agentId, label, hashToken(token), drives, scopes, paths],
     );
     return response({ ...result.rows[0], token }, 201);
   }
@@ -1174,6 +1190,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
   need(auth, 'write', driveId);
   const body = await jsonBody(request);
   const path = canonicalPath(body.path);
+  needWritePath(auth, path);
   const ciphertextSize = boundedSize(body.ciphertextSize, 'ciphertextSize');
   const wrappedKey = stringField(body, 'wrappedKey', { required: true, max: 16_384 })!;
   const description = optionalString(body, 'description', 2_048);
@@ -1577,6 +1594,8 @@ async function fileEndpoint(
     const body = await jsonBody(request);
     const from = canonicalPath(body.path);
     const to = canonicalPath(body.destinationPath, 'destinationPath');
+    needWritePath(auth, from);
+    needWritePath(auth, to);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const moved = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
@@ -1609,6 +1628,7 @@ async function fileEndpoint(
     need(auth, 'delete', driveId);
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
+    needWritePath(auth, path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const deleted = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
@@ -1651,6 +1671,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   const destinationPath = restore
     ? sourcePath
     : canonicalPath(body.destinationPath, 'destinationPath');
+  needWritePath(auth, destinationPath);
   const requestedVersion =
     body.versionId === undefined
       ? undefined

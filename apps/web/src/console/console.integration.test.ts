@@ -233,6 +233,42 @@ describe('Phase 4 console API', () => {
     expect((await apiRequest('/whoami', activeKey.token)).status).toBe(401);
   });
 
+  it('does not apply key write paths to console moves and deletes', async () => {
+    const limited = await json(
+      await consoleRequest(ownerUserId, '/keys', 'POST', {
+        agentId: managedAgentId,
+        label: `limited-${suffix}`,
+        driveIds: [ownerDriveId],
+        scopes: ['read', 'write', 'delete'],
+        writePaths: ['/inbox/x'],
+      }),
+    );
+    expect(limited.write_paths).toEqual(['/inbox/x']);
+    await pool.query("INSERT INTO files (drive_id, path) VALUES ($1, '/console-wp.bin')", [
+      ownerDriveId,
+    ]);
+    const move = (token: string | null, to: string) =>
+      token
+        ? apiRequest(`/drives/${ownerDriveId}/move`, token, 'POST', {
+            path: '/console-wp.bin',
+            destinationPath: to,
+          })
+        : consoleRequest(ownerUserId, `/drives/${ownerDriveId}/move`, 'POST', {
+            path: '/console-wp.bin',
+            destinationPath: to,
+          });
+    expect((await move(limited.token, '/outputs/m.bin')).status).toBe(403);
+    expect((await move(null, '/outputs/m.bin')).status).toBe(200);
+    const removed = await consoleRequest(ownerUserId, `/drives/${ownerDriveId}/delete`, 'POST', {
+      path: '/outputs/m.bin',
+    });
+    expect(removed.status).not.toBe(403);
+    // Keep the shared trash and usage assertions in the next test unchanged.
+    const ids = `SELECT id FROM files WHERE drive_id = $1 AND path = '/outputs/m.bin'`;
+    await pool.query(`DELETE FROM file_events WHERE file_id IN (${ids})`, [ownerDriveId]);
+    await pool.query(`DELETE FROM files WHERE id IN (${ids})`, [ownerDriveId]);
+  });
+
   it('paginates trash, overrides submitted attribution, and reports isolated usage', async () => {
     const deletedFileId = randomUUID();
     const deletedVersionId = randomUUID();

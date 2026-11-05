@@ -13,6 +13,8 @@ type DeviceRequest = {
   expires_at: string;
   drives?: Drive[];
   creates_drive?: boolean;
+  scopes?: string[] | null;
+  write_paths?: string[] | null;
 };
 
 const codePattern = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
@@ -213,6 +215,9 @@ export default function Connect({
         {reconnect.length > 0
           ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
           : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.'}
+        {request.scopes
+          ? ` Keeps its previous permissions (${request.scopes.join(', ')}${request.write_paths?.length ? `; writes under ${request.write_paths.join(', ')}` : ''}).`
+          : ''}
       </p>
       {formError && (
         <div role="alert" className="banner error">

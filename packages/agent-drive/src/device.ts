@@ -15,6 +15,7 @@ import { generateDeviceKeyPair, unsealDriveKey, type SealedDriveKey } from './se
 type TokenResponse = {
   access_token: string;
   scope?: string;
+  write_paths?: string[];
   api_url?: string;
   agent_name?: string;
   drive_ids?: string[];
@@ -218,6 +219,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   options.log(`Logged in as agent ${token.agent_name ?? options.name}.`);
   options.log(`Usable drives: ${usable.join(', ')}`);
   options.log(`Scopes: ${token.scope ?? ''}`);
+  if (token.write_paths?.length) options.log(`Writes limited to: ${token.write_paths.join(', ')}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
     options.log(`New drive ${token.new_drive_id} created; its key is saved in the config file.`);

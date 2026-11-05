@@ -80,6 +80,7 @@ export type ApiKey = {
   label: string;
   drive_ids: string[];
   scopes: string[];
+  write_paths?: string[];
   revoked_at?: string | null;
   created_at: string;
   token?: string;
@@ -90,6 +91,7 @@ export type Whoami = {
   agentId: string;
   keyId: string;
   scopes: string[];
+  writePaths?: string[];
   driveIds: string[] | null;
 };
 
@@ -301,10 +303,22 @@ export class AgentDriveClient {
     return this.request<Drive>('drives', { method: 'POST', body: JSON.stringify(body) });
   }
 
-  async createKey(agentId: string, label: string, driveIds: string[], scopes: string[]) {
+  async createKey(
+    agentId: string,
+    label: string,
+    driveIds: string[],
+    scopes: string[],
+    writePaths?: string[],
+  ) {
     return this.request<ApiKey>('keys', {
       method: 'POST',
-      body: JSON.stringify({ agentId, label, driveIds, scopes }),
+      body: JSON.stringify({
+        agentId,
+        label,
+        driveIds,
+        scopes,
+        ...(writePaths ? { writePaths } : {}),
+      }),
     });
   }
 

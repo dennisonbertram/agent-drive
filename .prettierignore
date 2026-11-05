@@ -9,3 +9,4 @@ docs/plan.md
 docs/user-stories.md
 apps/web/next-env.d.ts
 docs/design/*.html
+apps/web/drizzle/meta/

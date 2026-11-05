@@ -11,7 +11,7 @@ export const SCOPE_HINT =
 export function apiErrorLines(error: AgentDriveApiError) {
   return [
     error.message,
-    error.code === 'permission_denied' ? SCOPE_HINT : '',
+    error.code === 'permission_denied' && /scope/iu.test(error.message) ? SCOPE_HINT : '',
     error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
     error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
   ].filter(Boolean);
@@ -52,17 +52,46 @@ export function pickCheckDrive(
   return usable[0] as string;
 }
 
+const CHECK_FILE = '/.agent-drive/check.txt';
+
+/** Read-only keys cannot write a check file, so prove the drive key opens an existing live file. */
+async function readOnlyCheck(client: Pick<AgentDriveClient, 'get' | 'list'>, driveId: string) {
+  let cursor: string | undefined;
+  do {
+    const page = await client.list(driveId, undefined, 50, cursor);
+    for (const file of page.items) {
+      if (file.path.endsWith(CHECK_FILE)) continue;
+      try {
+        await client.get(driveId, file.path);
+        return `check ok drive=${driveId} (read-only)`;
+      } catch (error) {
+        if (error instanceof DriveCryptoError)
+          throw new Error('This drive key cannot decrypt existing files.');
+        // Deleted or moved between list and get: try the next file.
+        if (!(error instanceof AgentDriveApiError && error.status === 404)) throw error;
+      }
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  throw new Error(
+    `check not verified drive=${driveId}: this read-only key has nothing to decrypt yet; run check again after another agent writes a file.`,
+  );
+}
+
 export async function runCheck(
-  client: Pick<AgentDriveClient, 'put' | 'get' | 'recent'>,
+  client: Pick<AgentDriveClient, 'put' | 'get' | 'recent' | 'list'>,
   driveId: string,
+  access: { scopes: string[]; writePaths: string[] } = { scopes: ['write'], writePaths: [] },
 ) {
+  if (!access.scopes.includes('write')) return readOnlyCheck(client, driveId);
   const payload = randomBytes(16);
-  const path = '/.agent-drive/check.txt';
+  const path = `${access.writePaths[0] ?? ''}${CHECK_FILE}`;
   // A wrong key would still pass the round trip below, so first prove it opens an existing file:
   // the newest one by the recent feed (newest first), not the first page of the path-ordered list.
   const events = (await client.recent(driveId, undefined, 50)).items;
   const newest = events.find(
-    (event) => event.path !== path && ['put', 'copy', 'restore'].includes(event.operation),
+    (event) =>
+      !event.path.endsWith(CHECK_FILE) && ['put', 'copy', 'restore'].includes(event.operation),
   );
   if (newest) {
     try {

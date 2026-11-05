@@ -56,9 +56,11 @@ usable drives and the config path. See `docs/agent-login.md`.
 `agent-drive whoami` adds `localDriveKeys`, a map of authorized drive IDs to whether this machine
 holds a key. `agent-drive check [--drive ID]` first downloads the newest existing file (other than
 the check file) and fails with "This drive key cannot decrypt existing files." if the key cannot
-open it. Then it writes a random file to `/.agent-drive/check.txt` with overwrite, reads it back, and prints `check ok drive=<id>`, or fails with exit 1. `drive create`
+open it. Then it writes a random file to `/.agent-drive/check.txt` (under the key's first write path, if it has any) with overwrite, reads it back, and prints `check ok drive=<id>`, or fails with exit 1. A key without the `write` scope cannot write, so `check` lists live files, downloads and decrypts the first one that still exists, and prints `check ok drive=<id> (read-only)` without writing anything. If no file decrypts (an empty drive), it prints `check not verified drive=<id>: ...` and exits 1; run it again after another agent writes a file. `drive create`
 prints only the drive and a note on stderr that the key is saved to the config; it never prints the
-key. A `permission_denied` error adds a hint to run `agent-drive login` again.
+key. A `permission_denied` error about a missing scope adds a hint to run `agent-drive login` again.
+
+`key create --agent ID --drive ID --label L --scope read --scope write [--write-path /inbox/x]...` limits the key's writes, moves, copies, deletes and restores to those folders (up to 16; each a canonical absolute path). Reads stay drive-wide. `whoami` shows `writePaths` (empty means no limit).
 
 ## Credential backup and skill install (contract section 9)
 

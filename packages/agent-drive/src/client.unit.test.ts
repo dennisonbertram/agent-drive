@@ -71,6 +71,22 @@ describe('AgentDriveClient transport guards', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('createKey sends writePaths only when given', async () => {
+    const bodies: unknown[] = [];
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'token',
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response('{}', { headers: { 'content-type': 'application/json' } });
+      },
+    });
+    await client.createKey('a', 'l', ['d'], ['read']);
+    await client.createKey('a', 'l', ['d'], ['read', 'write'], ['/inbox/x']);
+    expect(bodies[0]).not.toHaveProperty('writePaths');
+    expect(bodies[1]).toMatchObject({ writePaths: ['/inbox/x'] });
+  });
+
   it('maps typed API errors without logging raw responses', async () => {
     const client = new AgentDriveClient({
       apiUrl: 'http://localhost:3000',
