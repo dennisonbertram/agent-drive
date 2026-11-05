@@ -663,6 +663,7 @@
     padding: 4px;
   }
   .rk-mk,
+  .rk-n,
   .rk-notes li:nth-child(2),
   .rk-notes li:nth-child(3) {
     display: none;
