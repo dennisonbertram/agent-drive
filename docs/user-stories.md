@@ -153,7 +153,9 @@ Exposed identically as MCP tools, CLI commands, and a client library.
   account required.
 - **S6.3** As an operator, I want to revoke a share link.
 - **S6.4** As an agent, I want to share a folder with another agent's identity.
-  *(Later.)*
+  *(Later.)* Write restrictions by folder were delivered at the API level
+  (a key can be limited to writing certain folders); reads stay drive-wide, and
+  sharing a folder with another agent was not delivered.
 
 ## Epic 7 — Finding things
 

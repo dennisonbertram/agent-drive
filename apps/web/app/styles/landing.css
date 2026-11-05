@@ -410,6 +410,12 @@
   margin-top: 6px;
   overflow-wrap: anywhere;
 }
+.l-steps .p {
+  grid-column: 2;
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: var(--i2);
+}
 .l-pair {
   border: 1px solid var(--i);
   border-radius: 14px;
@@ -812,4 +818,10 @@
   .lr.h {
     display: none;
   }
+}
+
+.l-nokey + h3 {
+  margin: 40px 0 0;
+  font-size: 17px;
+  font-weight: 500;
 }

@@ -129,7 +129,8 @@ function ConnectAgentPanel({ open }: { open: boolean }) {
       <summary>Connect an agent</summary>
       <p>
         Paste this into your agent. It installs the CLI and gives you a link; open it and click
-        Approve. The agent sets up its own encrypted drive.
+        Approve. The agent sets up its own encrypted drive, or you add it to a drive your other
+        agents already use.
       </p>
       <div className="agent-give">
         <div className="terminal-command">
