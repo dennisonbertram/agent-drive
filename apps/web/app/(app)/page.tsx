@@ -103,7 +103,10 @@ export default async function Home() {
             </p>
             <SetupPanel instruction={instruction} label="Copy agent instruction" />
             <p className="l-cli">
-              or in a terminal: <b>{install}</b> <CopyButton text={install} className="l-copy" />
+              <span>or in a terminal:</span>{' '}
+              <span className="l-cmd">
+                <b>{install}</b> <CopyButton text={install} className="l-copy" />
+              </span>
             </p>
           </div>
           <LandingFigure />
