@@ -21,6 +21,7 @@ import {
   uuid,
   withinWritePaths,
   writePaths,
+  assertDelegation,
 } from './validation';
 import {
   copyObject,
@@ -555,7 +556,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, agent_id, label, drive_ids, scopes, write_paths, revoked_at, created_at,
+      `SELECT id, agent_id, label, drive_ids, scopes, write_paths, issued_by_agent_id, revoked_at, created_at,
               created_at::text AS cursor_created_at
          FROM api_keys WHERE ${where} ORDER BY created_at, id LIMIT $${params.length}`,
       params,
@@ -563,9 +564,21 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     return response(collection(rows.rows as Row[], limit, (row) => row.cursor_created_at));
   }
   if (parts.length === 1 && parts[0] === 'keys' && method === 'POST') {
-    manage(auth);
+    const delegated = !auth.scopes.includes('manage');
     const body = await jsonBody(request);
-    const agentId = uuid(stringField(body, 'agentId', { required: true }), 'agentId');
+    if (delegated) {
+      // A delegate key creates a new agent; it never attaches keys to an existing identity.
+      if (!auth.scopes.includes('delegate'))
+        throw new ApiError('permission_denied', 'The API key needs the delegate scope.');
+      if (body.agentId !== undefined)
+        throw new ApiError('validation_error', 'agentId is not allowed; pass agentName.');
+    }
+    const agentName = delegated
+      ? stringField(body, 'agentName', { required: true, max: 64 })!
+      : undefined;
+    const agentId = delegated
+      ? undefined
+      : uuid(stringField(body, 'agentId', { required: true }), 'agentId');
     const label = stringField(body, 'label', { required: true, max: 128 })!;
     if (!Array.isArray(body.driveIds) || body.driveIds.length > 100)
       throw new ApiError('validation_error', 'driveIds must be an array of UUIDs.');
@@ -585,11 +598,14 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     const scopes = [...new Set(body.scopes as string[])];
     const paths = writePaths(body);
-    const agent = await getPool().query('SELECT id FROM agents WHERE id = $1 AND account_id = $2', [
-      agentId,
-      auth.accountId,
-    ]);
-    if (!agent.rows[0]) throw new ApiError('not_found', 'Agent not found.');
+    if (delegated) assertDelegation(auth, { driveIds: drives, scopes, writePaths: paths });
+    if (agentId) {
+      const agent = await getPool().query(
+        'SELECT id FROM agents WHERE id = $1 AND account_id = $2',
+        [agentId, auth.accountId],
+      );
+      if (!agent.rows[0]) throw new ApiError('not_found', 'Agent not found.');
+    }
     const driveCheck = await getPool().query(
       'SELECT count(*)::int AS count FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])',
       [auth.accountId, drives],
@@ -597,13 +613,43 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     if (Number(driveCheck.rows[0].count) !== drives.length)
       throw new ApiError('not_found', 'One or more drives were not found.');
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
-    const result = await getPool().query(
-      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths)
-       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[])
-       RETURNING id, agent_id, label, drive_ids, scopes, write_paths, created_at`,
-      [auth.accountId, agentId, label, hashToken(token), drives, scopes, paths],
-    );
-    return response({ ...result.rows[0], token }, 201);
+    const row = await withTransaction(async (client) => {
+      let keyAgentId = agentId;
+      if (agentName) {
+        try {
+          keyAgentId = (
+            await client.query(
+              'INSERT INTO agents (account_id, name) VALUES ($1, $2) RETURNING id',
+              [auth.accountId, agentName],
+            )
+          ).rows[0].id as string;
+        } catch (error) {
+          if ((error as { code?: string }).code === '23505')
+            throw new ApiError(
+              'conflict',
+              `An agent named "${agentName}" already exists; choose another name.`,
+            );
+          throw error;
+        }
+      }
+      const result = await client.query(
+        `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths, issued_by_agent_id)
+         VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[], $8)
+         RETURNING id, agent_id, label, drive_ids, scopes, write_paths, issued_by_agent_id, created_at`,
+        [
+          auth.accountId,
+          keyAgentId,
+          label,
+          hashToken(token),
+          drives,
+          scopes,
+          paths,
+          delegated ? auth.agentId : null,
+        ],
+      );
+      return result.rows[0];
+    });
+    return response({ ...row, token }, 201);
   }
   if (parts.length === 2 && parts[0] === 'keys' && method === 'DELETE') {
     manage(auth);

@@ -81,6 +81,14 @@ or credentials bundle, they choose "Add to an existing drive instead" on the app
 pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
 never sees it. They can make the new agent read-only or limit its writes to one folder.
 
+## Several agents on one drive
+
+A sandbox, CI job, or anything set up without a browser: if your key has \`delegate\`, run
+\`agent-drive credentials issue --name <agent> --write-path <its folder> --stdout | <secret store>\`
+and tell the human to set \`AGENT_DRIVE_CREDENTIALS\` there. Never copy your own bundle into
+another agent's environment. If you lack \`delegate\`, ask the human to approve you again with
+"Let this agent add other agents" ticked.
+
 ## Hosted assistants
 
 Chat assistants that run in a vendor's cloud and have no shell on your machine are not

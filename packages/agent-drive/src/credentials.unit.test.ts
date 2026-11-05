@@ -10,6 +10,8 @@ import {
   confirmCredentials,
   exportCredentials,
   importCredentials,
+  issueCredentials,
+  buildBundle,
   reportEnvBackups,
   loadConfig,
   reportKeyBackup,
@@ -365,3 +367,108 @@ describe('enforcement and reporting', () => {
 
 void runCheck;
 void writeFile;
+
+describe('buildBundle and issue', () => {
+  it('buildBundle keeps only the named drives and round-trips', async () => {
+    const k1 = generateDriveKey();
+    const text = buildBundle(
+      {
+        apiUrl: 'https://x.test/api',
+        apiKey: 'new',
+        driveKeys: { [D1]: k1, [D2]: generateDriveKey() },
+        driveKeyOrigins: { [D1]: 'https://x.test', [D2]: 'https://x.test' },
+      },
+      [D1],
+    );
+    expect(decodeBundle(text)).toEqual({
+      v: 1,
+      apiUrl: 'https://x.test/api',
+      apiKey: 'new',
+      driveKeys: { [D1]: k1 },
+      driveKeyOrigins: { [D1]: 'https://x.test' },
+    });
+  });
+
+  const mint = () => {
+    const calls: unknown[][] = [];
+    const createKey = (async (...args: unknown[]) => {
+      calls.push(args);
+      return { id: 'key-1', token: 'adk_new' };
+    }) as never;
+    return { calls, createKey };
+  };
+
+  it('prints one env line with only the new key; the issuer token and config stay out', async () => {
+    const { key } = await setup();
+    const { calls, createKey } = mint();
+    const pipe = io(false);
+    const before = await readFile(process.env.AGENT_DRIVE_CONFIG!, 'utf8');
+    const result = await issueCredentials(
+      { name: 'sandbox-b', writePaths: ['/outputs'], machine: 'box', stdout: true },
+      pipe,
+      createKey,
+    );
+    const text = pipe.out.join('');
+    expect(text.match(/\n/gu)).toHaveLength(1);
+    expect(text.startsWith('AGENT_DRIVE_CREDENTIALS=adcred1.')).toBe(true);
+    expect(text).not.toContain('tok');
+    expect(decodeBundle(text.trim().replace('AGENT_DRIVE_CREDENTIALS=', ''))).toEqual({
+      v: 1,
+      apiUrl: 'https://x.test/api',
+      apiKey: 'adk_new',
+      driveKeys: { [D1]: key },
+      driveKeyOrigins: { [D1]: 'https://x.test' },
+    });
+    expect(calls[0]).toEqual([
+      undefined,
+      'sandbox-b (issued by box)',
+      [D1],
+      ['read', 'write'],
+      ['/outputs'],
+      'sandbox-b',
+    ]);
+    expect(result.keyId).toBe('key-1');
+    expect(await readFile(process.env.AGENT_DRIVE_CONFIG!, 'utf8')).toBe(before);
+  });
+
+  it('refuses a TTY without --to before minting anything', async () => {
+    await setup();
+    const { calls, createKey } = mint();
+    await expect(
+      issueCredentials({ name: 'b', stdout: true }, io(true), createKey),
+    ).rejects.toThrow(/terminal/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('writes --to with mode 600 and refuses an existing path before minting', async () => {
+    const { dir } = await setup();
+    const path = join(dir, 'issued');
+    const { calls, createKey } = mint();
+    await issueCredentials({ name: 'b', to: path }, io(true), createKey);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect(await readFile(path, 'utf8')).toMatch(/^AGENT_DRIVE_CREDENTIALS=adcred1\./u);
+    await expect(issueCredentials({ name: 'b', to: path }, io(true), createKey)).rejects.toThrow(
+      /exists/,
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses a dangling symlink at --to before minting', async () => {
+    const { dir } = await setup();
+    const link = join(dir, 'dangling');
+    await symlink(join(dir, 'nowhere'), link);
+    const { calls, createKey } = mint();
+    await expect(issueCredentials({ name: 'b', to: link }, io(true), createKey)).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a malformed drive key before minting', async () => {
+    await setup();
+    await writeConfig({ driveKeys: { [D1]: 'not-a-key' } });
+    const { calls, createKey } = mint();
+    await expect(
+      issueCredentials({ name: 'b', stdout: true }, io(false), createKey),
+    ).rejects.toThrow(/drive key/);
+    expect(calls).toHaveLength(0);
+  });
+});

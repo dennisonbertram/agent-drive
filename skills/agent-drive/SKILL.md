@@ -56,6 +56,12 @@ Run `agent-drive login` on the new agent's machine. If the human has the drive's
 credentials bundle, they choose "Add to an existing drive instead" on the approval page; their
 browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
 
+A sandbox, CI job, or anything set up without a browser: if your key has `delegate` (check
+`whoami`), run `agent-drive credentials issue --name <agent> --write-path <its folder> --stdout | <secret store>`
+and tell the human to set `AGENT_DRIVE_CREDENTIALS` there. Never copy your own bundle into another
+agent's environment. If you lack `delegate`, ask the human to approve you again with "Let this
+agent add other agents" ticked.
+
 ## CLI commands
 
 All take `--drive ID` unless noted.

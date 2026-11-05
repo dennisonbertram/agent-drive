@@ -36,6 +36,7 @@ type ApiKey = {
   agent_id: string;
   drive_ids: string[];
   scopes: string[];
+  issued_by_agent_id?: string | null;
   revoked_at: string | null;
 };
 type FileEntry = {
@@ -280,6 +281,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const fileItems = filePage?.scope === fileScope ? filePage.items : [];
   const countKeys = (agentId: string) =>
     apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
+  const issuedBy = (id?: string | null) =>
+    id ? `issued by ${agents.find((agent) => agent.id === id)?.name ?? 'another agent'}` : '';
   const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
   const shownFiles = fileItems.filter((file) =>
     file.path.toLowerCase().includes(filter.toLowerCase()),
@@ -1039,6 +1042,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <div className="entity-info">
                         <strong>{agent.name}</strong>
                         <code>{agent.id}</code>
+                        {apiKeys.some(
+                          (key) => key.agent_id === agent.id && key.issued_by_agent_id,
+                        ) && (
+                          <small>
+                            {issuedBy(
+                              apiKeys.find(
+                                (key) => key.agent_id === agent.id && key.issued_by_agent_id,
+                              )?.issued_by_agent_id,
+                            )}
+                          </small>
+                        )}
                       </div>
                       <span className="badge">
                         {countKeys(agent.id)} active {countKeys(agent.id) === 1 ? 'key' : 'keys'}
@@ -1106,6 +1120,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           <span>
                             {agents.find((agent) => agent.id === key.agent_id)?.name ?? 'Agent'} ·{' '}
                             {key.scopes.join(', ')}
+                            {key.issued_by_agent_id && ` · ${issuedBy(key.issued_by_agent_id)}`}
                           </span>
                           <small>
                             {key.drive_ids
