@@ -452,4 +452,23 @@ describe('buildBundle and issue', () => {
     );
     expect(calls).toHaveLength(1);
   });
+
+  it('refuses a dangling symlink at --to before minting', async () => {
+    const { dir } = await setup();
+    const link = join(dir, 'dangling');
+    await symlink(join(dir, 'nowhere'), link);
+    const { calls, createKey } = mint();
+    await expect(issueCredentials({ name: 'b', to: link }, io(true), createKey)).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses a malformed drive key before minting', async () => {
+    await setup();
+    await writeConfig({ driveKeys: { [D1]: 'not-a-key' } });
+    const { calls, createKey } = mint();
+    await expect(
+      issueCredentials({ name: 'b', stdout: true }, io(false), createKey),
+    ).rejects.toThrow(/drive key/);
+    expect(calls).toHaveLength(0);
+  });
 });

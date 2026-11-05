@@ -480,4 +480,6 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   `agentName`, creates a new agent (409 if the name exists; `agentId` returns 400) and a key with
   `issued_by_agent_id` set to the caller's agent (migration 0018). The console shows "issued by
   <agent>" in the Agents and API keys views. Revoking the key leaves the issuer and other keys
-  alone; revoking the issuer does not revoke what it issued.
+  alone; revoking the issuer does not revoke what it issued (intended: no cascade). The issuer
+  validates the drive key locally before minting and checks that a `--to` path is free (a dangling
+  symlink counts as present) so a failed delivery never leaves an orphan key.

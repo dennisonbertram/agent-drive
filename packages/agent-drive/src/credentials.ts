@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { validateUrl, type AgentDriveClient } from './client.js';
 import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
@@ -199,15 +199,17 @@ export async function issueCredentials(
     throw new Error(
       'Refusing to print credentials to a terminal. Pipe them to a secret store: `agent-drive credentials issue --name <agent> --stdout | <your secret store>`, or use --to <path>.',
     );
-  if (
-    options.to &&
-    !options.force &&
-    (await stat(options.to).then(
+  if (options.to && !options.force) {
+    // lstat: a dangling symlink counts as present. Only ENOENT means the path is free.
+    const present = await lstat(options.to).then(
       () => true,
-      () => false,
-    ))
-  )
-    throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      },
+    );
+    if (present) throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
+  }
   const config = await loadConfig();
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   const ids = Object.keys(config.driveKeys ?? {});
@@ -215,6 +217,11 @@ export async function issueCredentials(
   if (!drive) throw new Error('Pass --drive <id>; this machine holds no single default drive key.');
   const driveKey = await resolveDriveKey(drive, undefined, config);
   if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
+  try {
+    decodeDriveKey(driveKey);
+  } catch {
+    throw new Error(`The drive key for ${drive} on this machine is not a valid drive key.`);
+  }
   const scopes = options.scopes?.length ? options.scopes : ['read', 'write'];
   const writePaths = options.writePaths ?? [];
   const label = options.label ?? `${options.name} (issued by ${options.machine ?? 'unknown'})`;

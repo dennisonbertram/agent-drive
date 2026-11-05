@@ -1371,6 +1371,15 @@ describe('Phase 1 core API', () => {
     expect((await request(`/keys/${body.id}`, manageToken, 'DELETE')).status).toBe(200);
     expect((await request('/whoami', body.token)).status).toBe(401);
     expect((await request('/whoami', issuer)).status).toBe(200);
+    // Revoking the issuer does not cascade: the key it issued keeps working (no-cascade is intended).
+    const insideToken = (await json(inside)).token as string;
+    const revokeIssuer = await pool.query(
+      'UPDATE api_keys SET revoked_at = now() WHERE token_hash = $1',
+      [tokenHash(pathLimited)],
+    );
+    expect(revokeIssuer.rowCount).toBe(1);
+    expect((await request('/whoami', pathLimited)).status).toBe(401);
+    expect((await request('/whoami', insideToken)).status).toBe(200);
   });
 
   it('records drive key backup status without accepting key material', async () => {
