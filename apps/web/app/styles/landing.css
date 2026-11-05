@@ -242,6 +242,16 @@
   stroke: #111;
   stroke-width: 1;
 }
+.landing-fig .ki,
+.landing-fig .km {
+  fill: #111;
+}
+.landing-fig .kmt {
+  font:
+    600 8.5px 'Inter Tight',
+    sans-serif;
+  fill: #fff;
+}
 .landing-fig .kled {
   fill: #ff4a1c;
   stroke: #111;
