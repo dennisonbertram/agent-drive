@@ -3,7 +3,7 @@
 
 /* ---------- page frame ---------- */
 .billing-page {
-  max-width: 1272px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 0 32px;
   font-family: var(--sans, 'Inter Tight', system-ui, sans-serif);
@@ -663,6 +663,10 @@
 
 /* ---------- responsive ---------- */
 @media (max-width: 760px) {
+  /* same phone gutter as the landing page (.l-wrap) so the header does not jump */
+  .billing-page {
+    padding: 0 20px;
+  }
   /* stacked records: shared .table-stack rules live in globals.css */
   .settings-audit time,
   .settings-audit code {
@@ -673,9 +677,6 @@
   }
 }
 @media (max-width: 850px) {
-  .billing-page {
-    padding: 0 24px;
-  }
   .billing-metrics {
     grid-template-columns: 1fr 1fr;
   }
@@ -723,9 +724,6 @@
   }
 }
 @media (max-width: 620px) {
-  .billing-page {
-    padding: 0 16px;
-  }
   .billing-heading {
     align-items: flex-start;
     flex-direction: column;
