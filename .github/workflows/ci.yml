@@ -2,6 +2,9 @@ name: Regression checks
 
 on:
   workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -71,6 +74,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm services:up
+      - run: pnpm --filter agent-drive build
       - run: pnpm test:integration
       - if: always()
         run: docker compose down -v
@@ -89,7 +93,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm services:up
       - run: pnpm test:mcp
+      - if: always()
+        run: docker compose down -v
 
   playwright:
     name: playwright
@@ -106,4 +113,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm services:up
       - run: pnpm test:e2e
+      - if: always()
+        run: docker compose down -v

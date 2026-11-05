@@ -13,6 +13,9 @@ locally saved key. Drive keys are client secrets and are never sent to the API o
 Commands include `login`, `whoami`, `agent create`, `drive create`, `check`, `key create`, `key revoke`,
 `put`, `get`, `ls`, `mv`, `cp`, `rm`, `versions`, `restore`, `search`, `recent`, and `sync`.
 `put LOCAL REMOTE --drive ID` is create-only by default and encrypts before requesting an upload URL.
+A conflict prints what to do: `exists` and `changed` print "Current version: ID. Read the file again, merge
+your change, then retry with --if-version ID."; `trashed` says to restore the file or write with `--overwrite`;
+`absent` says to write without `--if-version`.
 Use `--overwrite` for an unconditional replacement, or `--if-version ID` for an optimistic
 conditional replacement; these flags are mutually exclusive. `get REMOTE --drive ID
 --output FILE` writes only after authenticated decryption succeeds; without `--output`, only

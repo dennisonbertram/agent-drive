@@ -800,18 +800,26 @@ describe('one-click connect (contract v2)', () => {
     const first = await json(await poll(chosen.device_code));
     expect(first.scope).toBe('read write delete share delegate');
     expect((await json(await whoami(first.access_token))).scopes).toContain('delegate');
-    // Reconnect with an unticked box keeps the previous scopes (S2); ticking adds delegate.
+    // delegate is never inherited: every approval needs an explicit tick.
     const held = first.drive_ids[0];
-    const again = await start(
-      { client_name: `del-${suffix}`, known_drive_ids: [held] },
-      nextIp(),
-      first.access_token,
-    );
-    expect((await approveEmpty(again.user_code)).status).toBe(200);
-    await allowPoll(again.device_code);
-    expect((await json(await poll(again.device_code))).scope).toBe(
-      'read write delete share delegate',
-    );
+    const reconnect = async (key: string, body: Record<string, unknown>) => {
+      const again = await start(
+        { client_name: `del-${suffix}`, known_drive_ids: [held] },
+        nextIp(),
+        key,
+      );
+      expect(
+        (await consoleCall(user, `/device/${again.user_code}/approve`, 'POST', body)).status,
+      ).toBe(200);
+      await allowPoll(again.device_code);
+      return json(await poll(again.device_code));
+    };
+    const unticked = await reconnect(first.access_token, {});
+    expect(unticked.scope).toBe('read write delete share');
+    const ticked = await reconnect(unticked.access_token, { delegate: true });
+    expect(ticked.scope).toBe('read write delete share delegate');
+    const falsy = await reconnect(ticked.access_token, { delegate: false });
+    expect(falsy.scope).toBe('read write delete share');
     // Reconnect of a read-only key with delegate ticked: previous scopes plus delegate.
     const ro = await start({ client_name: `ro-${suffix}` }, nextIp());
     await consoleCall(user, `/device/${ro.user_code}/approve`, 'POST', {

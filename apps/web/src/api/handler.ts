@@ -1336,16 +1336,37 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         [driveId, source.path],
       );
       const file = fileResult.rows[0] as Row | undefined;
-      if (lockedIntent.conditional_mode === 'create' && file)
-        throw new ApiError('conflict', 'The file already exists.');
-      if (
-        lockedIntent.conditional_mode === 'version' &&
-        (!file || file.current_version_id !== lockedIntent.base_version_id)
-      ) {
-        throw new ApiError(
-          'conflict',
-          'The file changed since the conditional write was prepared.',
-        );
+      const currentVersionId = (file?.current_version_id as string | undefined) ?? null;
+      const trashedMessage = 'The file is in the trash. Restore it, or write with overwrite.';
+      if (lockedIntent.conditional_mode === 'create' && file) {
+        if (file.deleted_at)
+          throw new ApiError('conflict', trashedMessage, 409, {
+            state: 'trashed',
+            currentVersionId,
+          });
+        throw new ApiError('conflict', 'The file already exists.', 409, {
+          state: 'exists',
+          currentVersionId,
+        });
+      }
+      if (lockedIntent.conditional_mode === 'version') {
+        if (!file)
+          throw new ApiError('conflict', 'There is no file at this path.', 409, {
+            state: 'absent',
+            currentVersionId: null,
+          });
+        if (file.deleted_at)
+          throw new ApiError('conflict', trashedMessage, 409, {
+            state: 'trashed',
+            currentVersionId,
+          });
+        if (file.current_version_id !== lockedIntent.base_version_id)
+          throw new ApiError(
+            'conflict',
+            'The file changed since the conditional write was prepared.',
+            409,
+            { state: 'changed', currentVersionId },
+          );
       }
       const used = await client.query(
         'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
