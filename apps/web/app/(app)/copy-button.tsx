@@ -18,6 +18,7 @@ export function CopyButton({
     // navigator.clipboard is undefined on insecure (plain HTTP) origins.
     if (!navigator.clipboard?.writeText) {
       setStatus('Copy failed');
+      setTimeout(() => setStatus(''), 2000);
       return;
     }
     navigator.clipboard.writeText(text).then(
@@ -25,13 +26,16 @@ export function CopyButton({
         setStatus('Copied');
         setTimeout(() => setStatus(''), 2000);
       },
-      () => setStatus('Copy failed'),
+      () => {
+        setStatus('Copy failed');
+        setTimeout(() => setStatus(''), 2000);
+      },
     );
   };
   return (
     <>
       <button type="button" className={className} onClick={copy} aria-label={label}>
-        {status === 'Copied' ? 'Copied' : caption}
+        {status || caption}
       </button>
       <span className="sr-only" role="status" aria-live="polite">
         {status}
