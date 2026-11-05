@@ -258,7 +258,7 @@ footer nav{display:flex;gap:24px;flex-wrap:wrap}footer a{text-decoration:none;co
   <h3>Add a second agent to a drive</h3>
   <ol class="steps">
    <li><i>1</i><b>Approve it in the browser.</b><div class="t">Paste the same line into it, then choose the drive on /connect.</div></li>
-   <li><i>2</i><b>Give a sandbox a .env line.</b><div class="t">agent-drive credentials issue --drive "$DRIVE_ID"</div></li>
+   <li><i>2</i><b>Give a sandbox a .env line.</b><div class="t">agent-drive credentials issue --name devin --drive "$DRIVE_ID" --stdout</div></li>
    <li><i>3</i><b>Hand it over from an agent that has the drive.</b><div class="t">agent-drive grant CXRH-TZJT</div></li>
   </ol>
  </div>

@@ -314,7 +314,9 @@ export default async function Home() {
               <li>
                 <i>2</i>
                 <b>Give a sandbox a .env line.</b>
-                <div className="t">agent-drive credentials issue --drive &quot;$DRIVE_ID&quot;</div>
+                <div className="t">
+                  agent-drive credentials issue --name devin --drive &quot;$DRIVE_ID&quot; --stdout
+                </div>
               </li>
               <li>
                 <i>3</i>
