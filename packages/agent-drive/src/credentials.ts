@@ -6,6 +6,7 @@ import { writeFileSafely } from './safe-write.js';
 import {
   readConfig,
   resolveDriveKey,
+  resolveDriveId,
   writeConfig,
   DEFAULT_API_URL,
   type AgentDriveConfig,
@@ -212,9 +213,7 @@ export async function issueCredentials(
   }
   const config = await loadConfig();
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
-  const ids = Object.keys(config.driveKeys ?? {});
-  const drive = options.drive ?? (ids.length === 1 ? ids[0] : undefined);
-  if (!drive) throw new Error('Pass --drive <id>; this machine holds no single default drive key.');
+  const drive = resolveDriveId(options.drive, config, apiUrl);
   const driveKey = await resolveDriveKey(drive, undefined, config);
   if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
   try {
@@ -339,6 +338,8 @@ export async function reportKeyBackup(
         body: JSON.stringify({ method }),
         signal: AbortSignal.timeout(5000),
       });
+      // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
+      if (response.status === 403) continue;
       if (!response.ok) throw new Error(String(response.status));
     } catch {
       warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);

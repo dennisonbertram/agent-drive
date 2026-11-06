@@ -27,6 +27,19 @@ export async function resolveLoginApiUrl(flag: string | undefined) {
   return flag ?? process.env.AGENT_DRIVE_API_URL ?? (await readConfig()).apiUrl ?? DEFAULT_API_URL;
 }
 
+/** The --drive flag, else the only drive key saved for this API origin, else an error naming the choices. */
+export function resolveDriveId(flag: string | undefined, config: AgentDriveConfig, apiUrl: string) {
+  if (flag) return flag;
+  const origin = originOf(apiUrl);
+  const ids = Object.keys(config.driveKeys ?? {}).filter(
+    (id) => config.driveKeyOrigins?.[id] === origin,
+  );
+  if (ids.length === 1) return ids[0]!;
+  throw new Error(
+    `A --drive ID is required. ${ids.length ? `Configured drives for this API: ${ids.join(', ')}.` : 'No drive key is configured for this API.'}`,
+  );
+}
+
 export function configPath() {
   return process.env.AGENT_DRIVE_CONFIG ?? join(homedir(), '.config', 'agent-drive', 'config.json');
 }

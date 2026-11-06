@@ -73,7 +73,7 @@ agent add other agents" ticked.
 
 ## CLI commands
 
-All take `--drive ID` unless noted.
+All take `--drive ID` unless noted. With one drive key saved for the current API, `--drive` can be left out.
 
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
 - `get REMOTE [--version ID] [--output FILE]` (use `--output` for binary or large files)

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
-import { AgentDriveClient, AgentDriveApiError } from './client.js';
+import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
 import { generateDriveKey } from './crypto.js';
 import {
   apiErrorLines,
@@ -29,6 +29,7 @@ import {
   driveKeyEnvironmentName,
   machineName,
   resolveLoginApiUrl,
+  resolveDriveId,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
@@ -84,7 +85,7 @@ function parse(raw: string[]) {
 }
 
 function output(value: unknown) {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+  process.stdout.write(`${JSON.stringify(publicOutput(value))}\n`);
 }
 
 const STALE_BACKUP_NOTE =
@@ -116,7 +117,13 @@ async function stdinText() {
 async function connect(args: ReturnType<typeof parse>) {
   const connection = await resolveConnection();
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
-  const drive = args.values.drive?.[0];
+  // Kept apart from args.values.drive: `check` has its own selection when --drive is omitted.
+  try {
+    defaultDrive = resolveDriveId(undefined, connection.config, connection.apiUrl);
+  } catch (error) {
+    missingDrive = error instanceof Error ? error.message : undefined;
+  }
+  const drive = args.values.drive?.[0] ?? defaultDrive;
   const driveKey = drive
     ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
     : undefined;
@@ -128,9 +135,13 @@ async function connect(args: ReturnType<typeof parse>) {
   });
 }
 
+// Set by connect() when no --drive was given and no single default exists.
+let missingDrive: string | undefined;
+let defaultDrive: string | undefined;
+
 function requiredDrive(args: ReturnType<typeof parse>) {
-  const id = args.values.drive?.[0];
-  if (!id) throw new Error('A --drive ID is required.');
+  const id = args.values.drive?.[0] ?? defaultDrive;
+  if (!id) throw new Error(missingDrive ?? 'A --drive ID is required.');
   return id;
 }
 
@@ -185,13 +196,7 @@ async function run(command: string, raw: string[]) {
     if (!args.positionals[0]) throw new Error('backup requires LOCAL_DIRECTORY.');
     const connection = await resolveConnection();
     await reportEnvBackups(connection.apiUrl, connection.apiKey);
-    let driveId = args.values.drive?.[0];
-    if (!driveId) {
-      const ids = Object.keys(connection.config.driveKeys ?? {});
-      if (ids.length !== 1 || !ids[0])
-        throw new Error('Pass --drive ID: the config does not hold exactly one drive key.');
-      driveId = ids[0];
-    }
+    const driveId = resolveDriveId(args.values.drive?.[0], connection.config, connection.apiUrl);
     const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
     const backupClient = new AgentDriveClient({
       apiUrl: connection.apiUrl,

@@ -7,6 +7,7 @@ import {
   DEFAULT_API_URL,
   readConfig,
   resolveLoginApiUrl,
+  resolveDriveId,
   writeConfig,
 } from './config.js';
 
@@ -86,5 +87,30 @@ describe('private CLI configuration', () => {
     vi.stubEnv('AGENT_DRIVE_API_URL', 'https://env.test/api');
     expect(await resolveLoginApiUrl(undefined)).toBe('https://env.test/api');
     expect(await resolveLoginApiUrl('https://flag.test/api')).toBe('https://flag.test/api');
+  });
+
+  describe('resolveDriveId', () => {
+    const A = '11111111-1111-4111-8111-111111111111';
+    const B = '22222222-2222-4222-8222-222222222222';
+    const api = 'https://x.test/api';
+    it('uses the flag when given', () => {
+      expect(resolveDriveId(B, {}, api)).toBe(B);
+    });
+    it('defaults to the only drive key saved for this API origin', () => {
+      const config = { driveKeys: { [A]: 'k' }, driveKeyOrigins: { [A]: 'https://x.test' } };
+      expect(resolveDriveId(undefined, config, api)).toBe(A);
+    });
+    it('errors listing the ids when there are none or several', () => {
+      expect(() => resolveDriveId(undefined, {}, api)).toThrow(/--drive ID is required/);
+      const two = {
+        driveKeys: { [A]: 'k', [B]: 'k' },
+        driveKeyOrigins: { [A]: 'https://x.test', [B]: 'https://x.test' },
+      };
+      expect(() => resolveDriveId(undefined, two, api)).toThrow(new RegExp(`${A}.*${B}`));
+    });
+    it('ignores a key saved for another origin', () => {
+      const other = { driveKeys: { [A]: 'k' }, driveKeyOrigins: { [A]: 'https://other.test' } };
+      expect(() => resolveDriveId(undefined, other, api)).toThrow(/--drive ID is required/);
+    });
   });
 });
