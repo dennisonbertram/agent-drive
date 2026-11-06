@@ -53,6 +53,23 @@ test.describe('shared site header', () => {
     for (const l of links) await expect(l).toBeHidden();
   });
 
+  test('menu works from the keyboard and exposes its state', async ({ page }) => {
+    await page.setViewportSize(phone);
+    await page.goto('/');
+    const menu = page.getByRole('button', { name: 'Menu' });
+    await menu.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', { name: 'Menu', expanded: true })).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('header.site-header nav a').first()).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('header.site-header nav a').nth(1)).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('header.site-header nav a').first()).toBeHidden();
+    await expect(menu).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Menu', expanded: false })).toBeVisible();
+  });
+
   test('desktop shows the links and no Menu button', async ({ page }) => {
     await page.setViewportSize(desktop);
     await page.goto('/');
@@ -84,13 +101,31 @@ test.describe('auth cross-links', () => {
   });
 
   test('keeps a same-origin redirect_url and drops anything else', async ({ page }) => {
-    const link = () => page.getByRole('main').getByRole('link', { name: 'Create a free account' });
-    await page.goto('/sign-in?redirect_url=%2Fconnect%3Fcode%3DBCDF-GHJK');
-    await expect(link()).toHaveAttribute('href', /redirect_url=%2Fconnect%3Fcode%3DBCDF-GHJK/);
-    await page.goto('/sign-in?redirect_url=https%3A%2F%2Fevil.example');
-    await expect(link()).toHaveAttribute('href', '/sign-up');
-    await page.goto('/sign-in?redirect_url=%2F%2Fevil.example');
-    await expect(link()).toHaveAttribute('href', '/sign-up');
+    const bad = [
+      'https://evil.example',
+      '//evil.example',
+      '/\\evil.example',
+      '%2F%5Cevil.example',
+      '/\t/evil.example',
+      '/%09/evil.example',
+      'javascript:alert(1)',
+    ];
+    const cases = [
+      ['/sign-in', 'Create a free account', '/sign-up'],
+      ['/sign-up', 'Sign in', '/sign-in'],
+    ] as const;
+    for (const [from, name, to] of cases) {
+      const link = () => page.getByRole('main').getByRole('link', { name, exact: true });
+      await page.goto(`${from}?redirect_url=${encodeURIComponent('/connect?code=ABCD-EFGH')}`);
+      await expect(link()).toHaveAttribute('href', /redirect_url=%2Fconnect%3Fcode%3DABCD-EFGH/);
+      for (const value of bad) {
+        // Raw values that are already percent-encoded are sent as is; others are encoded once.
+        const q =
+          value.startsWith('%') || value.includes('%09') ? value : encodeURIComponent(value);
+        await page.goto(`${from}?redirect_url=${q}`);
+        await expect(link(), `${from} ${value}`).toHaveAttribute('href', to);
+      }
+    }
   });
 });
 

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BrandMark } from './brand-mark';
+import { SiteMenuButton } from './site-menu';
 import './styles/site-header.css';
 
 type Current = 'pricing' | 'sign-in' | 'sign-up';
@@ -23,9 +24,7 @@ export function SiteHeader({ current }: { current?: Current }) {
             Sign in
           </Link>
         </nav>
-        <button className="site-menu" popoverTarget="site-nav" type="button">
-          Menu
-        </button>
+        <SiteMenuButton />
         <Link className="site-signup" href="/sign-up" aria-current={page('sign-up')}>
           Sign up free
         </Link>
@@ -34,9 +33,23 @@ export function SiteHeader({ current }: { current?: Current }) {
   );
 }
 
-/** Same-origin paths only (one leading slash); anything else is dropped. */
-export const safeRedirect = (v: string | string[] | undefined) =>
-  typeof v === 'string' && /^\/(?!\/)/.test(v) ? v : undefined;
+/**
+ * Same-origin paths only. Rejects backslashes and control or whitespace characters (browsers
+ * treat "/\\evil" and "/<tab>/evil" as other origins), then resolves the value against a
+ * placeholder origin and keeps it only if it stays on that origin.
+ */
+export function safeRedirect(v: string | string[] | undefined) {
+  if (typeof v !== 'string' || !v.startsWith('/') || /[\\\s\u0000-\u001f\u007f]/.test(v))
+    return undefined;
+  const base = 'https://placeholder.invalid';
+  try {
+    const u = new URL(v, base);
+    if (u.origin !== base || u.pathname.startsWith('//')) return undefined;
+    return u.pathname + u.search + u.hash;
+  } catch {
+    return undefined;
+  }
+}
 
 /** One-line cross-link under the sign-in and sign-up cards. */
 export function AuthLinks({
