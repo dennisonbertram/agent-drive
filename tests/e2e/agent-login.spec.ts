@@ -201,11 +201,12 @@ test.describe('agent device login', () => {
     await expect(page.locator('select, input[type="password"]')).toHaveCount(0);
     await expect(page.locator('input[type="checkbox"]')).toHaveCount(1);
     await expect(page.locator('input[type="checkbox"]')).not.toBeChecked();
-    if (delegate) await page.getByLabel('Let this agent add other agents to its drives').check();
+    if (delegate) {
+      await page.getByText('Optional: let this agent connect other agents').click();
+      await page.getByLabel('Let this agent add other agents to its drives').check();
+    }
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
   }
 
   // Records every browser request (URL, headers, body) so tests can prove secrets never left it.
@@ -431,12 +432,10 @@ test.describe('agent device login', () => {
 
     const second = await startLogin(env, 'again-bot');
     await page.goto(second.path);
-    await expect(page.getByText(/^Reconnects to: /)).toBeVisible();
+    await expect(page.getByText('It reconnects to the drive it used before')).toBeVisible();
     await expect(page.getByText('This agent gets its own encrypted drive')).toHaveCount(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
     const secondResult = await second.login.done;
     expect(secondResult.status, secondResult.stderr).toBe(0);
     expect(secondResult.stdout + secondResult.stderr).not.toMatch(/adk_/);
@@ -578,9 +577,7 @@ test.describe('agent device login', () => {
     );
     await page.getByRole('button', { name: 'Approve agent' }).click();
     const sent = (await approveRequest).postData() ?? '';
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
     expect(sent).toContain('sealedDriveKeys');
     expect(sent).not.toContain(driveKey);
     expect(sent).not.toContain(configA.apiKey);
@@ -654,9 +651,7 @@ test.describe('agent device login', () => {
     );
     await page.getByRole('button', { name: 'Approve agent' }).click();
     const sent = (await approveRequest).postData() ?? '';
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
     expect(sent).toContain('sealedDriveKeys');
     expect(sent).not.toContain(driveKey);
     expect(sent).not.toContain(configA.apiKey);
@@ -735,9 +730,7 @@ test.describe('agent device login', () => {
     expect(await fileCount()).toBe(1);
     await page.getByPlaceholder('/inbox/x').fill('/inbox/b');
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
     expect((await third.login.done).status).toBe(0);
   });
 
@@ -758,7 +751,10 @@ test.describe('agent device login', () => {
     const again = await startLogin(env, 'lost-bot');
     await page.goto(again.path);
     await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
-    await expect(page.getByText(/Keeps its previous permissions/)).toBeVisible();
+    await expect(page.getByText(/keeps its previous permissions/)).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('New encrypted drive');
+    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: 'Add to an existing drive instead' }),
     ).toHaveCount(0);
@@ -808,8 +804,9 @@ test.describe('agent device login', () => {
 
     // The human sees who offered what, and approves once.
     await page.goto(b.path);
-    await expect(page.getByText(`Offered by ${granter}`, { exact: false })).toBeVisible();
-    await expect(page.getByText('writes under /inbox/b')).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-facts')).toContainText(granter);
+    await expect(page.locator('.connect-facts')).toContainText('/inbox/b');
     await expect(
       page.getByRole('button', { name: 'Add to an existing drive instead' }),
     ).toHaveCount(0);
@@ -825,9 +822,7 @@ test.describe('agent device login', () => {
       });
     }
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
     const resultB = await b.login.done;
     expect(resultB.status, resultB.stderr).toBe(0);
 
@@ -886,11 +881,11 @@ test.describe('agent device login', () => {
     expect(granted.status, granted.stderr).toBe(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('The request changed; review it again.')).toBeVisible();
-    await expect(page.getByText('Offered by granter2-bot', { exact: false })).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
+    await expect(page.locator('.connect-facts')).toContainText('No writes');
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(
-      page.getByText('Approved. Return to your agent; it will finish setup'),
-    ).toBeVisible();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByText(/can now read the drive/)).toBeVisible();
     const resultB = await b.login.done;
     expect(resultB.status, resultB.stderr).toBe(0);
     const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
@@ -929,7 +924,7 @@ test.describe('agent device login', () => {
     test.setTimeout(120_000);
     await newUser(context);
     await page.goto('/connect?code=BCDF-GHJK');
-    const missing = page.locator('.banner.info');
+    const missing = page.locator('.banner.error');
     await expect(missing).toBeVisible();
     const login = missing.locator('code', { hasText: 'agent-drive login' });
     await expect(login).toHaveCSS('white-space', 'nowrap');
@@ -937,13 +932,159 @@ test.describe('agent device login', () => {
     const env = cliEnv(baseURL!, root, 'style', 'style-box');
     const { login: cliLogin, path } = await startLogin(env, 'style-bot');
     await page.goto(path);
-    await expect(page.locator('p.banner.info')).toHaveCSS('font-size', '13px');
+    await expect(page.locator('.connect-explain')).toHaveCSS('font-size', '13px');
     await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '16px');
     await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
     await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
     await expect(page.locator('.connect-facts')).toContainText('Local test session');
     // Nothing approves it, so the request stays pending; stop the CLI.
     cliLogin.child.kill();
+  });
+
+  test('review card puts the decision first and Approve in the first viewport', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'first-vp', 'vp-box');
+    const { login, path } = await startLogin(env, 'vp-bot');
+    for (const [width, height] of [
+      [1440, 900],
+      [768, 1024],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto(path);
+      await expect(page.getByRole('heading', { name: 'Connect vp-bot?' })).toBeVisible();
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
+      await expect(page.getByRole('button', { name: 'Approve agent' })).toBeInViewport({
+        ratio: 1,
+      });
+      const size = (selector: string) =>
+        page.locator(selector).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+      expect(await size('h1')).toBeGreaterThan(await size('.connect-code'));
+      await expect(page.locator('.connect-code-line + .connect-actions')).toHaveCount(1);
+      await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+      await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeHidden();
+    }
+    await page
+      .locator('summary', { hasText: 'Optional: let this agent connect other agents' })
+      .click();
+    await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeVisible();
+    login.child.kill();
+  });
+
+  test('existing-drive form fits, and a bad key error sits by the field', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(180_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'fit-a', 'm-fit-a');
+    const first = await startLogin(envA, 'fit-a-bot');
+    await approve(page, first.path, 'fit-a-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const envB = cliEnv(baseURL!, root, 'fit-b', 'm-fit-b');
+    const second = await startLogin(envB, 'fit-b-bot');
+    const approveButton = page.getByRole('button', { name: 'Approve agent' });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(second.path);
+    const branch = page.getByRole('button', { name: 'Add to an existing drive instead' });
+    expect((await branch.boundingBox())!.height).toBeGreaterThanOrEqual(40);
+    await branch.click();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const card = await page.locator('.connect-card').boundingBox();
+    expect(card!.height).toBeLessThanOrEqual(850);
+    await expect(approveButton).toBeInViewport({ ratio: 1 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(approveButton).toBeInViewport({ ratio: 1 });
+    await page.getByPlaceholder('/inbox/x').focus();
+    await expect(approveButton).toBeInViewport({ ratio: 1 });
+
+    // A bad pasted key is reported next to the key field in plain words.
+    await page.locator('input[type="password"]').fill('not-a-key');
+    await approveButton.click();
+    const error = page.locator('#connect-key-error');
+    await expect(error).toBeVisible();
+    await expect(error).toBeInViewport();
+    await expect(error).toContainText('This is not a valid drive key.');
+    await expect(page.locator('input[type="password"]')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByText('Invalid base64url')).toHaveCount(0);
+    second.login.child.kill();
+  });
+
+  test('approved state links to the console', async ({ page, context, baseURL }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'done-state', 'm-done');
+    const { login, path, code } = await startLogin(env, 'done-bot');
+    await approve(page, path, 'done-bot', code);
+    await expect(page.getByRole('heading', { name: 'done-bot is connected' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open console' })).toHaveAttribute(
+      'href',
+      '/console',
+    );
+    await expect(page.getByText('Approved')).toHaveCount(0);
+    expect((await login.done).status).toBe(0);
+  });
+
+  test('an offer shows up when the user returns to the page', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'focus-a', `m-${randomBytes(3).toString('hex')}`);
+    const a = await startLogin(envA, 'focus-a-bot');
+    await approve(page, a.path, 'focus-a-bot', a.code, true);
+    expect((await a.login.done).status).toBe(0);
+    const [driveId] = Object.keys((await readConfig(envA)).driveKeys);
+
+    const envB = cliEnv(baseURL!, root, 'focus-b', 'm-focus-b');
+    const b = await startLogin(envB, 'focus-b-bot');
+    await page.goto(b.path);
+    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    const granted = await cli(['grant', b.code, '--read-only'], envA);
+    expect(granted.status, granted.stderr).toBe(0);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(page.getByText('offered a drive for this login')).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-facts')).toContainText('focus-a-bot');
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    expect((await b.login.done).status).toBe(0);
+    const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
+      scopes: string[];
+      driveIds: string[];
+    };
+    expect(who.scopes).toEqual(['read']);
+    expect(who.driveIds).toEqual([driveId]);
+  });
+
+  test('code entry formats and keeps the field still', async ({ page, context }) => {
+    await newUser(context);
+    await page.goto('/connect');
+    const input = page.getByPlaceholder('XXXX-XXXX');
+    await expect(input).toBeFocused();
+    await page.keyboard.type('bcdfghjk');
+    await expect(input).toHaveValue('BCDF-GHJK');
+    const before = (await input.boundingBox())!.y;
+    await page.getByRole('button', { name: 'Continue' }).click();
+    const banner = page.locator('.banner.error[role="alert"]');
+    await expect(banner).toBeVisible();
+    await expect(input).toHaveAttribute('aria-invalid', 'true');
+    await expect(input).toHaveAttribute('aria-describedby', 'connect-code-error');
+    expect((await input.boundingBox())!.y).toBe(before);
+    await input.fill('');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByText('Enter the code your agent printed.')).toBeVisible();
   });
 
   test('signed out visitors are sent to sign-in', async ({ page }) => {

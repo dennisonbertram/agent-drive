@@ -1,0 +1,291 @@
+{
+  "1440x900/default": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 2528,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 40, 44],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "14px",
+          "11px",
+          "52px",
+          "16px",
+          "24px",
+          "13px",
+          "19px",
+          "12px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "14px/400": 1,
+          "14px/500": 5,
+          "11px/500": 32,
+          "52px/500": 1,
+          "16px/400": 1,
+          "24px/500": 3,
+          "13px/400": 109,
+          "13px/600": 1,
+          "19px/500": 2,
+          "13px/500": 3,
+          "13px/700": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[197, 200]]
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Billing\"",
+          "w": 35,
+          "h": 21
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "div.settings-delete-grid \"Delete one driveDrivenightly-b\"",
+          "children": 2,
+          "heights": [446, 373]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/default": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 2412,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 40, 44],
+        "offScale": [5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "14px",
+          "11px",
+          "38px",
+          "16px",
+          "24px",
+          "13px",
+          "19px",
+          "12px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "14px/400": 1,
+          "14px/500": 5,
+          "11px/500": 32,
+          "38px/500": 1,
+          "16px/400": 1,
+          "24px/500": 3,
+          "13px/400": 109,
+          "13px/600": 1,
+          "19px/500": 2,
+          "13px/500": 3,
+          "13px/700": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[57, 60]]
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Billing\"",
+          "w": 35,
+          "h": 21
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [
+        {
+          "container": "div.settings-delete-grid \"Delete one driveDrivenightly-b\"",
+          "children": 2,
+          "heights": [446, 373]
+        }
+      ],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "390x844/default": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 4683,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "p \"Account deletion also closes b\"",
+          "w": 267,
+          "h": 214,
+          "fillPct": 0,
+          "pctOfViewport": 17
+        },
+        {
+          "el": "p \"New access is disabled when th\"",
+          "w": 267,
+          "h": 172,
+          "fillPct": 0,
+          "pctOfViewport": 14
+        }
+      ],
+      "spacing": {
+        "observed": [3, 4, 5, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 40],
+        "offScale": [3, 5, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 5],
+          [5, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "13px",
+          "11px",
+          "32px",
+          "16px",
+          "14px",
+          "24px",
+          "19px",
+          "12px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "13px/400": 85,
+          "13px/500": 29,
+          "11px/500": 32,
+          "32px/500": 1,
+          "16px/400": 1,
+          "14px/500": 4,
+          "24px/500": 3,
+          "13px/600": 1,
+          "19px/500": 2,
+          "13px/700": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[41, 44]]
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Billing\"",
+          "w": 32,
+          "h": 20
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [
+        {
+          "el": "tr \"WhenActionActorResult\"",
+          "spillPx": 248
+        }
+      ],
+      "wrappedControls": []
+    }
+  }
+}

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "F-018-01",
+    "story_id": "STORY-018",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Label matches action",
+    "score": "warn",
+    "description": "The dashed tile labelled '+ YOUR NEXT AGENT' opens the 'Create a drive' dialog, not an agent flow.",
+    "expected": "Label says 'New drive' (or the tile leads to adding an agent).",
+    "actual": "Create a drive dialog opens; a user wanting to add an agent is misled.",
+    "screenshot": "screenshots/variation-next-agent-tile.png",
+    "suggested_fix": "Rename tile to '+ New drive' or remove it since '+ New drive' button already exists.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-018-02",
+    "story_id": "STORY-018",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "State survives reload / deep link",
+    "score": "warn",
+    "description": "Selected drive and tab are not in the URL; reload forgets both the drive selection and loaded keys.",
+    "expected": "URL like /console?drive=ID&tab=files so reload, back, and shared links return to the same place.",
+    "actual": "URL stays /console; reload returns to the first drive and drops the key.",
+    "screenshot": "screenshots/variation-reload.png",
+    "suggested_fix": "Persist drive id and tab in the query string.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-018-03",
+    "story_id": "STORY-018",
+    "severity": "low",
+    "category": "hierarchy",
+    "criterion": "Same information repeated",
+    "score": "warn",
+    "description": "Duplicate drive meta in three places (tile, card header drive id, banner) and the 'Key backed up' banner does not say which drive it is about.",
+    "expected": "Banner names the drive or lives inside the card header.",
+    "actual": "Generic banner above the card.",
+    "screenshot": "screenshots/step-2-switched.png",
+    "suggested_fix": "Move backup status into the card header next to the key badge.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
+]

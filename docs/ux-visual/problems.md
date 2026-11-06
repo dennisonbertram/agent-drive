@@ -1,156 +1,290 @@
-# ux-visual problem register (Phase 3), T1 Rack, 2026-11-04
+# Problem register (ux-visual run 2, 2026-11-06)
 
-Inputs: the six findings.md files (marketing 19, console-files 21, console-secondary 26, account 19, connect 15, share 16 = 116 findings), their audit.json where cited, `inventory.md`, `docs/design/t1-rollout.md`. Severity is the highest rating any reviewer gave, after the page inspector's own downgrades. Rank = severity x reach x centrality / effort, P0 first.
+Inputs: `pages/{console,landing,pricing,auth,connect,llms,share,settings,billing}/findings.md` and `audit.json`, `pages/inventory-notes.md`, `docs/ux-flow/report.md`, `docs/ux-walker/latest-report.md`. Inventory: `inventory.md`. Earlier run: `archive-t1/`.
 
-Duplicates merged: CF-09 = CS-15 (lime dot); CF-10 = CS-16 = MARKETING-01 = ACCOUNT-01 (old brand mark; ACCOUNT-16 and SHARE-14 are related); CF-03 = CS-03 = CS-04 = ACCOUNT-06 = ACCOUNT-07 (table unreachable at 375); CF-11 = CS-06 = CS-07 (mobile nav and bay strip); MARKETING-03 = ACCOUNT-02 (double rule); MARKETING-04 = ACCOUNT-03 (disabled paid plan buttons); CF-15 = CS-08 (1920 left edges); CF-04 = CS-05 (truncation); CF-12 = CS-19 = ACCOUNT-17 (small targets). Rejected false positives (contrast audits on dark panels, "localhost in copy") are not carried.
+Finding ids are the inspectors' own: F = console, L = landing, PR = pricing, A = auth, CN = connect, SH = share page, ST = settings, BL = billing, LL = llms.txt. Evidence paths are relative to `docs/ux-visual/pages/<page>/shots/`. All findings were observed by one inspector per page (no second opinions), so "found by" agreement is weak; agreement with ux-flow or ux-walker is noted where it exists.
 
-## Top 12 clusters (carried forward)
+## Method
 
-### C01 Files table path column collapses (P0, ranked 1)
+Deduplication: the same fault seen at several viewports counts once. The 89 inspector findings (console 20, landing 11, pricing 7, auth 6, connect 17, share 9, settings 10, billing 8, llms 1) were grouped by root cause into 18 clusters (87 findings placed; A-5 and A-6 are not, see the end). One cluster is one design decision, fixed at the shared component, token or layout.
 
-- Root cause: `.file-panel table` uses fixed widths for size/author/date/actions (110+160+168+210 = 648) and the path column gets what is left; between 761 and ~1030px that is 0-138px. Truncation keeps the directory and cuts the file name; the cell has no `title`; rows have no hover state.
-- Findings: CF-01, CF-04, CF-13, CF-12 (weight/target part), CS-05, CS-19 (row actions). Surfaces: `/console` Files, Trash table (same pattern). Evidence: lead screenshot plus `768x1024-populated-nokey.png`, th width 0 at 768 / 14 at 900 / 138 at 1024.
-- Severity P0. Reach: every file list at tablet widths, plus truncation at all widths.
-- Acceptance: at 768, 900, 1024 the path column is at least 240px and its file name is visible in every row; no header overlaps; truncated paths keep the file name (truncate the directory side) and have `title` equal to the full path; row hover and focus-within change background; row action targets at least 24px tall; Download remains the strongest action.
-- decision: obvious. Give the path column `width:auto; min-width:240px` and let the fixed columns shrink or drop Author under 1030px; split directory and name so the middle truncates; add `title`; add `tr:hover` and `:focus-within`; raise `.row-actions` link min-height to 28px.
-- files: `apps/web/app/styles/console.css` (~436-520 `.file-panel table`, th widths, `.file-path`, `.row-actions`, media queries 618-729); `apps/web/app/(app)/console/console.tsx` (~765-840 file cell; Trash table ~748).
+Ranking score = severity weight x reach x centrality x owner multiplier / effort.
 
-### C02 Old identity left over: brand mark and lime dot (P1, rank 2)
+- Severity weight: P0 8, P1 4, P2 2, P3 1.
+- Reach (1 to 5): number of surfaces, states and journeys touched. 5 means most of the app or six or more journeys.
+- Centrality: 3 for the two owner goals (console as a clear cloud drive; sign-up and setup), 2 for other core use, 1 for rare pages.
+- Owner multiplier: 1.5 when the cluster sits on an owner goal.
+- Effort: S 1, S to M 1.5, M 2, L 4. Where a cluster is large I score its phase-1 scope (stated in the cluster).
+  No cluster is P0 (no blocked journey, no data loss other than the missing Undo on Trash, which is recoverable from the Trash tab).
 
-- Root cause: the T1 brand tile and the signal-orange palette exist only in landing/share/connect. Console sidebar, billing, settings, sign-in/up, pricing still render the old "a/ agent drive" `.brand-mark`; `.status-dot` in `globals.css:213` is still #a2cb67 lime.
-- Findings: CF-09, CS-15, CF-10, CS-16, MARKETING-01, ACCOUNT-01, ACCOUNT-16 (brand part), SHARE-14 (logo lacks inset highlight). Surfaces: all of /console, /console/billing, /console/settings, /pricing, /sign-in, /sign-up. Evidence: computed `rgb(162,203,103)`; grep `brand-mark` in console.tsx:472, billing-client.tsx:253, settings-client.tsx:206, pricing/page.tsx, sign-in/up page.tsx.
-- Severity P1. Reach: every signed-in and pricing page.
-- Acceptance: grep finds no `a/` brand-mark markup; every header shows the logo tile with LED plus "Agent Drive" (identical computed size/colour to landing); `.status-dot` computed colour equals `--sig` (or neutral), no #a2cb67 anywhere in CSS; one shared component used by console, billing, settings, pricing, auth pages.
-- decision: obvious (match `docs/design/t1-rack-reference.html:185` and the landing brand). Create a shared `BrandMark` component and `.brand-logo` rules in globals.css (move from `landing.css` `.landing-logo`, including `share.css` inset highlight); recolour `.status-dot`.
-- files: `apps/web/app/globals.css` (`.brand`, `.brand-mark` ~150-160, `.status-dot` ~213; new `.brand-logo`); new `apps/web/app/brand-mark.tsx`; adoption edits in `console.tsx:472-473`, `billing-client.tsx:253`, `settings-client.tsx:206`, `pricing/page.tsx`, `sign-in/[[...sign-in]]/page.tsx`, `sign-up/[[...sign-up]]/page.tsx`; delete `.sidebar .brand-mark` (console.css:22-30) and `.billing-page/.auth-page .brand-mark` (account.css:20-31).
+Already-decided simplifications from `ux-flow/report.md` (proposals 1 to 11) and `ux-walker/latest-report.md` (High findings F-001-02, F-019-01, F-022-01, F-024-01, F-STORY-046-01, F-STORY-065-01) are folded into clusters and are not contradicted. Each cluster names the proposal it implements.
 
-### C03 Wide tables unreachable on phones (P1, rank 3)
+## Ranked cluster list
 
-- Root cause: tables keep a 620-1851px intrinsic width inside a 293-341px `.table-scroll` with no cue, so size, author, Download, Restore, usage columns, audit columns are off-screen.
-- Findings: CF-03, CS-03, CS-04, CS-24, ACCOUNT-06, ACCOUNT-07. Surfaces: Files, Trash, Usage by author, billing Usage by agent, settings Audit log, at 375 (and 768 for audit). Evidence: tsSW 1851/341, 728/341, 620/341, 620/293, 630/293.
-- Severity P1. Reach: 5 tables, core job (Download, Restore) at 375.
-- Acceptance: at 375 the primary action of each row (Download, Restore) is visible without sideways scroll; no table scroller is wider than 1.3x its box unless a visible scroll cue (edge fade or shadow) is present; no mid-word clipped action text.
-- decision: design. Open question: stacked row-cards under 760px (reorganises every table) versus keeping tables with an edge fade plus sticky first column. Both stay inside the design system.
-- files: `console.css` (`.table-scroll`, 760px query), `console-panels.css` (usage/trash tables), `account.css` (`.billing-page table`, `.settings-audit`, max-width 700 block), `console.tsx` (~748, 1117 table markup), `billing-client.tsx`, `settings-client.tsx` (table markup if cards).
+| Rank | Id  | Title                                                            | Severity | Reach | Score | Status             |
+| ---- | --- | ---------------------------------------------------------------- | -------- | ----- | ----- | ------------------ |
+| 1    | C01 | Sign-up front door and mobile marketing header                   | P1       | 4     | 72    | Carried            |
+| 2    | C02 | Console error, loading and empty states                          | P1       | 3     | 54    | Carried            |
+| 3    | C03 | File-row actions and feedback where the action happens           | P1       | 4     | 48    | Carried            |
+| 4    | C04 | Console as a cloud-drive file browser                            | P1       | 5     | 45    | Carried            |
+| 5    | C05 | Unlock on demand: Download always works, one key-state signal    | P1       | 5     | 45    | Carried            |
+| 6    | C06 | First-run console and key backup                                 | P1       | 3     | 36    | Carried            |
+| 7    | C07 | /connect: approval card, existing-drive form, approved next step | P1       | 3     | 27    | Carried            |
+| 8    | C08 | Share from the console: Share action and Shared links list       | P1       | 3     | 27    | Carried            |
+| 9    | C09 | Operator and unconfigured-deployment language shown to visitors  | P2       | 3     | 27    | Deferred           |
+| 10   | C10 | One concept, one name; filler copy                               | P2       | 5     | 20    | Deferred           |
+| 11   | C11 | Share page (recipient) states and next steps                     | P1       | 2     | 16    | Deferred           |
+| 12   | C12 | Billing and usage: units, plan, "Not connected"                  | P1       | 3     | 16    | Deferred           |
+| 13   | C13 | Type scale, spacing scale and touch targets                      | P2       | 5     | 10    | Deferred           |
+| 14   | C14 | Console list on phones and tablets                               | P1       | 2     | 8     | Deferred (see C04) |
+| 15   | C15 | Settings: audit log language and page order                      | P1       | 2     | 5     | Deferred           |
+| 16   | C16 | Marketing and docs content polish                                | P2       | 3     | 3     | Deferred           |
+| 17   | C17 | Agents and API keys as one table                                 | P2       | 3     | 3     | Deferred           |
+| 18   | C18 | Settings: permanent-actions section                              | P2       | 1     | 2     | Deferred           |
 
-### C04 Console is not one screen; 1920 left edges differ (P1, rank 4)
+Tie-break notes. C04 and C05 tie at 45 and C07, C08 and C09 at 27. I ranked P1 clusters on an owner goal above a P2 cluster with the same score, which is why C09 (conditional on a deployment that has no Clerk or Stripe) is deferred even though it is cheap. C04 is scored at phase 1 (breadcrumb with folder rows, sort, file icons, Recent, one primary action); inline preview and a full folder tree are later phases. C14 is deferred because C04's list redesign should include the 390px card layout; if C04's designers keep the table, C14 must move up.
 
-- Root cause: `.console-shell/.console-main/.table-scroll` have no height or overflow contract, so the document scrolls (1097 at 1440x900) and footers fall below the fold; the bay strip and topbar are full-bleed while `.console-content` is capped at 1400 and centred.
-- Findings: CF-02, CF-15, CS-08, CS-01 (scroll part; cause also in C09). Surfaces: all console tabs. Evidence: scrollHeight 1097/1145; bay-strip x=224 vs heading x=400 at 1920.
-- Severity P1. Reach: all console tabs.
-- Acceptance: at 1440x900 and 1920x1080, populated Files, API keys, Agents, Trash have `document.scrollingElement.scrollHeight <= innerHeight`; only the table body scrolls (sticky thead); at 1920 bay strip, breadcrumb and content share one left edge (+-1px).
-- decision: obvious (norm L1 for app surfaces; the T1 shell). `.console-shell{height:100dvh}`, flex column, `min-height:0`, `.table-scroll{overflow:auto}`, sticky `thead`; apply the same max-width container to strip and topbar.
-- files: `console.css` (`.console-shell`, `.console-main`, `.console-content` ~171, `.bay-strip` ~183, `.topbar`), `console-panels.css` (`.file-panel`).
+---
 
-### C05 Mobile section nav and bay strip clip (P1, rank 5)
+## Carried forward
 
-- Root cause: overflowing horizontal strips with no overflow cue, snap, or scroll-into-view; nav label "Billing & limits" collapses to "$"; five stacked header regions use about 320px at 375.
-- Findings: CF-11, CS-06, CS-07, MARKETING-09 (landing nav drops links, 21px links, same cause: no small-screen nav). Surfaces: console at 375/768, landing nav. Evidence: bay-strip scrollWidth 662 vs 375, nav 576 vs 343.
-- Severity P1. Reach: all console tabs on phone and tablet.
-- Acceptance: at 375 selected drive chip fully visible on load (scrollIntoView); both strips show an edge fade when overflowing; every nav destination is reachable and labelled (no bare "$"); content starts at or above y=260 at 375.
-- decision: design. Open question: how mobile section navigation presents (scrolling tabs with fade, bottom tab bar, or a menu button) and whether breadcrumb/h1/tab triplication collapses.
-- files: `console.css` (`.bay-strip`, `.sidebar nav`, max-width 760 block 618-729), `console.tsx` (~532 scroll selected chip, nav labels); `landing.css` (`.landing-links` hide rules) only if landing nav is included (deferred).
+### C01. Sign-up front door and mobile marketing header
 
-### C06 Billing and pricing states give wrong or no feedback (P1, rank 6)
+- Root cause: the marketing header is built twice (landing and pricing differ) and has no "Sign up" action; on phones the nav is not rendered at all. The only path to a free account is "Start with Free" on /pricing.
+- Findings: L-1, L-2, L-4, PR-2, A-1 (auth card has no way to the other auth page). Also covers L-3 (Docs and llms.txt are the same link) as the nav item to remove. Matches ux-flow proposal 2 and walker F-001-02.
+- Surfaces: `/`, `/pricing`, `/sign-in`, `/sign-up` at 1440, 768, 390; shared header component.
+- Evidence: `landing/shots/390x844-home.png`, `landing/shots/1440x900-home.png`, `pricing/shots/1440x900-main.png`, `auth/shots/1440x900-signin.png`. Measured: at 390 the DOM lists only footer nav (about 7,800 px down); `a[href="/llms.txt"]` appears twice in nav.
+- Severity: P1. Reach 4. Effort S.
+- Acceptance criteria:
+  1. One shared header component renders on / and /pricing with identical items, height and rule width at 1440, 768 and 390.
+  2. Signed-out header shows exactly one orange "Sign up free" and a text "Sign in"; no "Console" link while signed out; Docs and llms.txt appear once.
+  3. At 390x844 the header exposes Sign up, Sign in and the other nav items without scrolling (menu button or inline), each target at least 44 px tall.
+  4. A signed-out visitor reaches the sign-up page in one click from the first viewport at every width.
+  5. /sign-in links to /sign-up and /sign-up links to /sign-in; both link to Pricing or Docs.
+  6. The final CTA on / offers "Create a free account" next to the agent Copy button.
 
-- Root cause: the unavailable-checkout state is drawn with ad hoc opacity on live-looking primary/outline buttons; errors render at page top; form labels are ambiguous.
-- Findings: MARKETING-04, ACCOUNT-03, ACCOUNT-10, ACCOUNT-05, ACCOUNT-13, CS-22, CS-25. Surfaces: `/pricing`, `/console/billing`, `/console/settings`, receipt dialogs. Evidence: devbtn opacity 0.48 orange; banner at y=-519 after Save with bad input.
-- Severity P1. Reach: billing page (one task page) and every disabled button.
-- Acceptance: one disabled style (no orange fill, no opacity-faded primary) across billing, pricing, settings, dialogs; each disabled button has adjacent text stating why; a failed Save puts the error within 80px of the Save button and in the viewport; "EMAIL ME AT (USD)" label renamed so it does not read as an email field; Free/Developer cards do not both show emphasis.
-- decision: obvious for the shared disabled style, inline error placement and label wording (`globals.css` `.button:disabled`, `.billing-form` error slot). Pricing "SELECTED" badge removal and the `paidAvailable` disabling are marked below.
-- product-change: needs user decision: making Choose Developer/Team non-links when `!paidAvailable` (today they route to /console/billing then /sign-in).
-- files: `globals.css` (`.button:disabled`; owned by WP0), `account.css` (`.billing-plan.selected`, `.billing-plan > .button`, `.settings-delete-grid` buttons), `pricing/page.tsx`, `billing-client.tsx` (error slot, labels), `settings-client.tsx` (disabled reason line).
+### C02. Console error, loading and empty states
 
-### C07 Share error states look like normal states (P1, rank 7)
+- Root cause: the console has no shared state components. Each tab renders a raw string for errors and its own empty copy, and nothing keys the empty state to a failed load.
+- Findings: F05 (raw "Failed to fetch", no retry, false empty state beneath it, 56 px shift), F10 (filtered panel keeps dead space, footer jammed under one row), part of F18 (count in 3 places), F08 (Trash columns truncated or constant), plus the unverified loading state (flashes; ux-flow saw Trash stuck on "Loading files" without a timeout message).
+- Surfaces: Files, Trash, Agents, API keys, Usage at 1440 and 390.
+- Evidence: `console/shots/1440-list-error.png`, `1440-files-filtered.png`, `1440-trash.png`, `1440-loading.png`. Computed: error banner shifts content 56 px.
+- Severity: P1. Reach 3. Effort S.
+- Acceptance criteria:
+  1. A failed list request shows a plain-language message ("Could not load files"), a Retry button, uses the system error colour with role=alert, and hides the "Ready for your first file" empty state.
+  2. A loading state exists for every list, shows a skeleton or text within 150 ms of the request, and after 10 s shows "Still loading" with Retry.
+  3. Showing or hiding the error or the filter result moves no other element more than 2 px (reserved space or overlay).
+  4. A filter with zero matches says "No files match 'x'" with a Clear filter button; with one match the panel has no more than 24 px below the footer.
+  5. Trash columns show the full deleted date with no truncation at 1440 and 768, and no column holds the same value in every row.
+  6. File count appears at most twice on the Files screen.
 
-- Root cause: `ShareClient` renders every failure in the same card as success: grey LED, white filename label holding the heading, an inert 8px bar where Download sits, one reused paragraph, and duplicate encryption captions.
-- Findings: SHARE-02, SHARE-03, SHARE-04, SHARE-05, SHARE-06, SHARE-08, SHARE-09, SHARE-10, SHARE-11, SHARE-13, SHARE-14, SHARE-12 (vertical centring). Surfaces: `/s/[id]` all 9 states. Evidence: shots expired/revoked/not-found identical; readout 48,254 vs 48,213 on disk.
-- Severity P1. Reach: every share recipient who hits an error (and ready-state wording).
-- Acceptance: error LED uses an alarm colour distinct from ready/loading; label text no longer styled as a filename; no `.share-pull` bar in non-ready states; separate body text for not-found / expired / revoked / wrong-key, none says "Your files have not been changed"; size shown human-readable (KB/MB, not encrypted bytes); expiry shows a date with timezone or relative time; one encryption caption, readout labels at least 12px; card min-height equal across states (+-8px); footer has no one-word widow.
-- decision: obvious (copy and styling of existing data per `t1-rack-reference.html`). Excluded: SHARE-01 paste-link/key field, SHARE-07 retry button (product-change: needs user decision), SHARE-15 sender/type context (needs API; needs user decision).
-- files: `apps/web/app/s/[id]/share-client.tsx` (`errorHeadings`, body branch, readout formatting, remove `.share-note` or `.share-footer`); `apps/web/app/styles/share.css` (`.share-card[data-state='error'] .share-led`, `.share-pull`, `.share-details span`, `.share-note`, `.share-footer`, `.share-card` min-height, `.share-shell` centring, `.share-logo`).
+### C03. File-row actions and feedback where the action happens
 
-### C08 Files view loading, empty and count states misstate the drive (P1, rank 8)
+- Root cause: row actions are three equal-weight text links with no confirmation or undo, and results are reported in the page header far from the row. There is no toast component.
+- Findings: F04 (Trash is a 46x28 link beside Versions; I trashed two files by mis-click), F15 (Versions dialog shows UUIDs and seconds, no way to view an old version, lone "Current" row unexplained), F17 (receipt dialog hierarchy: Copy orphaned, recommended action outline, primary disabled). Folds ux-flow proposal 8 (toasts near action naming the file with Undo or "Show file"; named in-app confirm instead of native `confirm()`; Trash notice that share links stop working).
+- Surfaces: Files rows, Trash rows, Versions dialog, receipt dialog, Agents revoke.
+- Evidence: `console/shots/1440-trash.png`, `1440-versions-dialog.png`, `1440-versions-multi.png`, `1440-receipt.png`.
+- Severity: P1. Reach 4. Effort S to M.
+- Acceptance criteria:
+  1. Trashing a file shows a toast within 100 ms, adjacent to the list (bottom-left, within the viewport at 1440 and 390), that names the file, has an Undo that restores it, and stays at least 6 s.
+  2. Row actions are one primary (Download or Open), and Versions, Share and Trash live in a row menu or overflow; no destructive action sits within 8 px of another action; hit area at least 32 px high (44 on touch).
+  3. Restore from Trash and Versions show a toast naming the file and a "Show file" action; nothing is reported only in the page header.
+  4. Revoking an agent uses an in-app confirm naming the agent and the number of active keys, and afterwards the row changes state in place (no "Revoke access" at 0 keys).
+  5. The Versions dialog lists version number or relative date, size and author, no UUID in the default view, and says "This is the current version" for a single-version file.
+  6. In the receipt dialog the recommended action ("Save recovery key") is the single orange primary, Copy sits beside the key, and Continue is a secondary until the box is ticked.
 
-- Root cause: panel branches in `console.tsx` do not distinguish loading from empty; banners render regardless of file count; footer count ignores the filter.
-- Findings: CF-07, CF-06, CF-14. Surfaces: `/console` Files at all viewports. Evidence: loading shot shows "Connect an agent" empty copy and badge 0; empty drive shows key-loss warning; footer "10 loaded" with 2 rows.
-- Severity P1 (CF-07). Reach: first load of every drive, every empty drive.
-- Acceptance: during load no empty-state copy or "0" badge is shown (skeleton or neutral "Loading files..." only, same panel height as loaded +-10%); a drive with 0 files shows no backup-loss banner and no key-browse banner; footer reads "2 of 10" when filtered; filter disabled on an empty drive; no-match message uses empty-state style.
-- decision: obvious (conditional rendering of existing state; no new behaviour).
-- files: `console.tsx` (~910 loading vs empty, ~680-760 banners and panel footer), `console-panels.css` (`.empty`, skeleton height).
+### C04. Console as a cloud-drive file browser
 
-### C09 Chrome stacked above the work (P1, rank 9)
+- Root cause: the Files tab is a flat log table of full paths, built for agents writing files. The list model has no hierarchy, sort, selection, file types or Recent view, and the page's only primary button creates a drive.
+- Findings: F01, F02, F18, F20 (filler subtitle and footer copy consume space), F12 (drive strip repeated on account-level tabs, pushes content down 74 px). Folds ux-flow proposal 4, walker F-019-01 (no folder browsing) and F-022-01 (no Recent, no sort), and the opening-drive rule (open on the last-used drive).
+- Surfaces: Files and Trash at all viewports; sidebar; drive strip.
+- Evidence: `console/shots/1440-files-researchbot.png`, `1440-files-nightly.png`, `1440-agents.png`, `1440-usage.png`. Measured: path prefix `/inbox/x/` repeated five times, `/logs/` six times; no sort, folder or upload handlers in `console.tsx`.
+- Severity: P1. Reach 5. Effort L (phase 1 scored M: breadcrumb and folder rows, sort, file-type icon, Recent view, one primary action, remembered drive).
+- Acceptance criteria:
+  1. Files shows folders as rows (folder icon, name, item count) and files inside the current folder with their name only (no repeated path prefix); a breadcrumb above the list navigates up; the selected folder is in the URL so reload and back work.
+  2. Name, Modified and Size headers sort, default Modified newest first; the sort state is visible (arrow) and keyboard-operable.
+  3. A Recent view lists the most recently modified files across the drive, using the existing `recent` API.
+  4. Each file row has a type icon; no mono full path is the row title.
+  5. The Files screen has exactly one orange primary that acts on files (for example "Connect an agent" while agents write all files, or Upload if added), and "New drive" is secondary.
+  6. Opening /console selects the last-used drive, not the alphabetical first.
+  7. Account-level tabs (Agents, API keys, Usage) do not show the drive strip, so their first content row starts at least 70 px higher than today.
+  8. At 1440x900 the page has no page-level scroll (pageScrollY 0) with the list scrolling inside its panel, as today.
+  9. Filler subtitles ("A home for the work. A starting point for what's next.", "Built for the work between sessions.") are removed or replaced with functional text.
+- Open dependency: inline preview for text files (ux-flow 4) is phase 2.
 
-- Root cause: informational blocks (drive id/key badge row, backup banner, key-info banner, key-loaded notice, persisting status notice, the 320px Connect an agent card) all render above the table or list and repeat key state three times.
-- Findings: CF-05, CF-08, CF-17, CF-18, CF-20, CS-01, CS-02, CS-09, CS-17, CS-21, CS-23, CS-26. Surfaces: Files, Agents, API keys, Trash. Evidence: table starts y=417/465 of 900, file list below fold at 375; notice shifts content 57px; API keys scrolls up to 1529px at 375.
-- Severity P1. Reach: all console tabs.
-- Acceptance: key state stated once; first table row or key row starts above y=380 at 1440x900 (above y=520 at 375); loading a key does not shift the table; notice clears on tab change; Connect an agent card is collapsed or hidden once an agent/key exists; one primary "New drive" button in onboarding; one name for Files across topbar/nav/h1.
-- decision: design. Open question: whether state moves into a single compact status line on the toolbar vs a collapsible "Setup" strip, and whether Connect an agent collapses to `<details>` or leaves the tab. Use the T1 backup status line ("LED plus one line") as the base.
-- product-change: needs user decision: renaming nav/h1 copy for CF-20 and the "YOUR NEXT AGENT" chip (CS-17).
-- files: `console.tsx` (~126 connect-agent section, ~605-760 toolbar/banners/notice, ~563 add chip, tab-change notice clear), `console-panels.css`, `console.css`.
+### C05. Unlock on demand: Download always works, one key-state signal
 
-### C10 Pricing/billing/settings do not share the landing page template (P1, rank 10)
+- Root cause: the drive key is a precondition shown as disabled controls instead of a step reached on demand; key state is displayed three ways with one colour used for good and bad.
+- Findings: F03, F07, F14, and the download-completion gap (key lost on reload). Folds ux-flow proposals 1 and 6 and the sharing prerequisite (share needs the same prompt).
+- Surfaces: Files rows, toolbar, banner, key-load dialog, Versions.
+- Evidence: `console/shots/1440-files-researchbot.png` (29 disabled Downloads), `1440-files-keyloaded.png` (29 outlined Downloads), `1440-keyload-dialog.png`, `1440-keyload-error.png`. Measured: disabled style #6b6963 at 0.6 opacity (about 2.5:1 on white); the error line moves the form 33 px.
+- Severity: P1. Reach 5. Effort M.
+- Acceptance criteria:
+  1. No Download button is disabled because of the key; clicking Download with no key opens one prompt with the recovery file chooser first.
+  2. Choosing the recovery file loads the key and starts the download without a further click; the file field is the primary control and a pasted-key field is behind a disclosure.
+  3. The prompt does not shift on error (error reserved or overlaid, 0 px shift) and the error text is plain ("That recovery file is not for this drive"), not "base64url-encoded 32-byte key".
+  4. A clicked row shows a busy label while downloading and a toast when the file is saved.
+  5. Key state appears in one place (a chip) with colour meaning: green for loaded or backed up, red for required or not backed up; "Download recovery file" is hidden or explained once the key is backed up; the banner, badge and Load/Forget button are no longer three separate signals.
+  6. Optional "Remember on this device" keeps the key across reload.
+  7. Contrast of every enabled and disabled control on Files is at least 4.5:1 (disabled text at least 3:1).
 
-- Root cause: `.billing-header` / `.billing-heading` are a separate template from `.landing-nav`: double rule (84 and 124), different nav links, narrower container, different footer, no link between Billing and Settings, no pricing "current" state.
-- Findings: MARKETING-02, MARKETING-03, ACCOUNT-02, MARKETING-11 (footer), MARKETING-15 (button heights), MARKETING-17 (titles), ACCOUNT-11, ACCOUNT-09 (grid alignment). Surfaces: `/pricing`, `/console/billing`, `/console/settings`. Evidence: borders at y=83 and 124/128.
-- Severity P1/P2. Reach: 3 pages.
-- Acceptance: exactly one horizontal rule between header and page title; pricing header links match landing (Pricing current, Sign in, Open console); container left edge equals landing (116 at 1440); billing and settings link to each other and use one back label; delete columns tops equal (+-2px); pricing `<title>` differs from landing; footers identical.
-- decision: obvious for rule removal, header link set, footer, title, delete-column `align-items:start`. design only for ACCOUNT-12 (billing/settings inside console shell), deferred.
-- files: `account.css` (`.billing-header`, `.billing-heading`, `.settings-delete-grid`, container), `pricing/page.tsx`, `billing-client.tsx`, `settings-client.tsx`; metadata title in `pricing/page.tsx` (not layout.tsx).
+### C06. First-run console and key backup
 
-### C11 Dialogs, secrets and copy affordances (P2, rank 11)
+- Root cause: the first visit offers competing "create a drive" paths and the backup banner does not reflect that a recovery file was saved.
+- Findings: F16 (two controls for one action, a "↗" on an in-page action, inert step labels, panel 11% filled), F19 (banner still says "hasn't been backed up" after Save recovery key), and the drive-name field with no default. Folds ux-flow proposal 3 and walker F-024-01 (saving the recovery file does not clear the banner). F19 was "suspected" in the headless browser; the walker record makes it High, so it is treated as real but needs a real-browser check.
+- Surfaces: `/console` with no drives, New drive dialog, receipt, post-create banner.
+- Evidence: `console/shots/1440-onboarding.png` (audit.json 1440/onboarding fillPct 11), `1440-newdrive-onboarding.png`, `1440-receipt.png`, `1440-empty-drive-keyloaded.png`.
+- Severity: P1. Reach 3. Effort S to M.
+- Acceptance criteria:
+  1. First visit has exactly one orange primary; the "Connect your agent" panel with the llms.txt line and Copy is the lead, and "New drive" is secondary; no "↗" on in-page actions.
+  2. The New drive name field has a default value ("my-drive"), submittable with Enter.
+  3. The receipt has one confirmation ("Download recovery file and continue") that saves the file and closes the dialog.
+  4. Immediately after that action, the banner reads "Key backed up" (green), never "hasn't been backed up".
+  5. The first-run panel fills at least 35% of the 1440x900 viewport or is vertically balanced (no 89% blank).
+  6. The step list uses numerals the same as the landing page and reflects state (done, current).
 
-- Root cause: `Dialog` has no focus management and secret receipts are bare textareas; `CopyButton` failure goes only to an sr-only region.
-- Findings: CS-12, CS-13, CS-18, CS-22, MARKETING-10, CF-18, CS-25. Surfaces: New drive, Load key, New agent, New API key, API key reveal, drive key reveal, Versions; every CopyButton. Evidence: activeElement = Close; textarea resize grabber; "Copy failed" never visible.
-- Severity P2. Reach: 7 dialogs, secrets (security-adjacent).
-- Acceptance: on open, focus lands on first field (or primary for receipts); on close, focus returns to the opener; secret receipts have a Copy button and `resize:none`; drive id has a Copy button; failed copy shows visible label "Copy failed" that resets after 2s; agent select shows the full name (wraps or title).
-- decision: obvious (missing copy buttons, focus order).
-- files: `console.tsx` (~200-240 Dialog, receipt dialogs, drive id), `console-panels.css` (dialog textarea, select), `apps/web/app/(app)/copy-button.tsx`.
+### C07. /connect: approval card, existing-drive form, approved next step
 
-### C12 Connect card specificity bugs and dot-grid ground (P2, rank 12)
+- Root cause: the review card is built as a stack of equal blocks, so the code outranks the decision, the delegate option precedes Approve, the existing-drive branch is a hidden link that expands the card to 1,300 px, and the final state has no onward link.
+- Findings: CN-1, CN-6, CN-7, CN-8, CN-9, CN-10, CN-11, CN-12, CN-13, CN-14, CN-15, CN-16, CN-2, CN-3, CN-4, CN-5, CN-17, A-4 (brand placement differs from auth pages). Folds ux-flow proposal 7 (Approved page links to the console and says it will update; delegate checkbox behind a disclosure) and the "three names for one secret" copy item.
+- Surfaces: `/connect` entry, review-new, existing, offer, approved, errors at 1440, 768, 390 (and 375, 1920).
+- Evidence: `connect/shots/1440x900-existing.png` (pageScrollY 409; Approve at y about 1155), `1440x900-review-new.png`, `1440x900-offer.png`, `1440x900-approved.png`, `1440x900-invalid-code.png`, `1440x900-existing-err-wrongkey.png`, `390x844-existing.png`. Measured: native checkbox 13x13; branch link 178x16; label spacing 13 px above versus 19 px below.
+- Severity: P1 (CN-1), others P2. Reach 3. Effort M.
+- Acceptance criteria:
+  1. In review-new and offer at 1440x900, 768x1024 and 390x844 the Approve button is fully inside the first viewport (scrollY at most 0 to reach it).
+  2. In the existing-drive form at 1440x900 Approve is inside the viewport (card height at most 850 px); at 390x844 the Approve button is reachable within one scroll of at most 300 px.
+  3. The decision heading ("Connect vis-agent-a?") is the largest text on the card; the pairing code is smaller than the heading.
+  4. The delegate option is in a collapsed disclosure; the "Add to an existing drive" branch is a visible secondary button, at least 40 px tall.
+  5. Offer permissions are a structured list (drive, access, write paths), not a run-on sentence.
+  6. Checkboxes use the design system's styled control and have a 24 px or larger hit area; hint text sits at least 16 px from the Approve button.
+  7. The drive key has one name across the form (the same word as the console); the file input is styled like the other controls; labels are 4 to 8 px above their own field and at least 16 px below the previous one.
+  8. A form error appears next to its field, highlights it, and never lies off-screen at 1440x900 or 390x844 (scrolls into view); raw browser messages are replaced.
+  9. The approved state names what was granted, links to the console, and says the console will update; "Approved" is not repeated in heading and body.
+  10. The code field is focused on load, uppercases input and inserts the hyphen; the unknown-code banner uses the error treatment (not neutral grey) and its insertion shifts the field by 0 px.
+  11. The brand mark is placed the same on /connect and /sign-in (same left alignment and top offset).
 
-- Root cause: `.connect-shell .panel > p` (0,2,1) beats `.connect-note` and `.banner`, giving margin 0 and wrong font size; `html`/`body` do not fill the viewport so the dot grid stops at content height on every short page; Deny is 13px beside a 16px Approve.
-- Findings: CONNECT-02, CONNECT-03, CONNECT-04, CONNECT-09, CONNECT-11, CONNECT-12, CONNECT-14, CONNECT-13 (card position). Surfaces: `/connect` all states; dot-grid on /s, approved, sign-in, any short page. Evidence: html 842.9 vs 900; note margin-top 0; banner 14px grey.
-- Severity P2. Reach: connect plus every short page.
-- Acceptance: `html` height >= `innerHeight` on all short pages (dot grid fills viewport); `.connect-note` margin-top 16px; info banner computed font equals error banner (13px ink); `agent-drive login` rendered in nowrap mono `<code>`; Deny and Approve same font size; no page scroll in approve-error at 1440x900.
-- decision: obvious (specificity fix `p:not(.banner):not(.connect-note)`, `min-height:100%`).
-- files: `globals.css` (`html,body` min-height; WP0), `connect.css` (`.connect-shell .panel > p`, `.connect-note`, `.banner`, `.button.secondary`, padding-bottom), `connect.tsx` (wrap login command in `<code>`).
+### C08. Share from the console: Share action and Shared links list
 
-## Deferred (reasons)
+- Root cause: sharing exists in the CLI and API but the console has no Share action or list, so the human sender cannot do the job (0 of 3 steps possible). The visual run did not screenshot a missing screen; this cluster comes from ux-flow and walker evidence and from the code (no share handler in `console.tsx`).
+- Findings: no inspector finding (absence). ux-flow proposal 5 and walker F-STORY-046-01 (High). Row actions overlap C03 and the unlock prompt overlaps C05.
+- Surfaces: Files row menu, a Shared links list (new), Trash notice ("share links stop working").
+- Evidence: `docs/ux-flow/report.md` section 5; `docs/ux-walker/latest-report.md` F-STORY-046-01; `console/shots/1440-files-researchbot.png` shows row actions Download, Versions, Trash only.
+- Severity: P1. Reach 3. Effort M.
+- Acceptance criteria:
+  1. A Share action on every file row opens a dialog with expiry (default 7 days) and a Copy link button; the full URL including the `#k=` fragment is copied; the toast says "Link copied".
+  2. A Shared links list shows file, created, expires, status and Revoke; revoke asks for confirmation naming the file and updates in place.
+  3. Sharing a file with no key loaded uses the same unlock prompt as Download (C05).
+  4. Trashing a file with active links says so in its confirm or toast.
+  5. From a populated drive, creating a link takes at most 3 clicks from the Files list.
 
-| id  | title                                | findings                                                                                                                                                                         | severity | decision | reason                                                                                                                                                                                   |
-| --- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C13 | Landing/marketing polish             | MARKETING-05..09 (rack 7.5px labels, 768 left edge, 375 setup row, CTA hierarchy, nav), 12-14, 16, 18, 19                                                                        | P2       | obvious  | Marketing page already strong; lower centrality. Cheap follow-up in `landing.css`/`page.tsx`.                                                                                            |
-| C14 | Connect content and trust            | CONNECT-01, 05, 06, 07, 08, 10                                                                                                                                                   | P1/P2    | design   | CONNECT-01 (show signed-in account) is product-change: needs user decision; the rest are copy/new actions (Open console link, rate-limit countdown, relative expiry) needing a decision. |
-| C15 | Share recovery                       | SHARE-01, 07, 15, 16                                                                                                                                                             | P1       | design   | product-change: needs user decision (paste link/key field, retry button, sender/type, timeout).                                                                                          |
-| C16 | Console data/product changes         | CS-10 (revoke scope text, dead Revoke), CS-11 (key prefix/created), CS-14 (Egress card), CF-16 (upgrade link in plan-limit dialog), ACCOUNT-08 (audit log filtering), ACCOUNT-12 | P2       | design   | product-change: needs user decision (removes or adds behaviour or data).                                                                                                                 |
-| C17 | Billing layout/order                 | ACCOUNT-04, 14, 15, 19, MARKETING-16                                                                                                                                             | P2/P3    | design   | Section reorder and metric meters change layout structure; revisit after C06.                                                                                                            |
-| C18 | Type/spacing scale and touch targets | CF-21, CS-20, ACCOUNT-17/18, CONNECT-15, MARKETING-06/10 sizes                                                                                                                   | P3       | obvious  | Broad token pass, low severity each; touch targets under 24px in console are covered by C01. Do after the top 12.                                                                        |
-| C19 | Onboarding at 375                    | CF-19                                                                                                                                                                            | P3       | obvious  | Single-surface, minor.                                                                                                                                                                   |
-| C20 | Pricing fine print                   | MARKETING-16                                                                                                                                                                     | P3       | obvious  | Presentation only, low severity.                                                                                                                                                         |
+---
+
+## Deferred
+
+### C09. Operator and unconfigured-deployment language shown to visitors
+
+- Root cause: configuration status (Clerk, Stripe, email) is rendered as user-facing copy instead of being hidden or replaced when a deployment is not configured.
+- Findings: PR-1, A-2, BL3 (email alert offered although "Email delivery is not configured"), PR-7 ("Coming soon" buttons with no reason), BL2 (all plan CTAs disabled with the reason in a banner). Severity is P2 in production if Stripe and Clerk are configured: PR-1 was marked "may be environment-conditional" by its inspector and the real Clerk forms were not seen.
+- Surfaces: `/pricing`, `/sign-in`, `/sign-up`, `/console/billing`.
+- Evidence: `pricing/shots/1440x900-main.png`, `auth/shots/1440x900-signup.png`, `billing/shots/1440x900-default.png`.
+- Severity: P2 (conditional). Reach 3. Effort S.
+- Acceptance criteria: no page shows the words "configure" or "deployment" to a signed-out visitor; a disabled control states its reason on the control; an unavailable alert channel is hidden or marked "Email alerts: coming soon" beside the field; the checkout banner appears only to an owner signed in.
+
+### C10. One concept, one name; filler copy
+
+- Root cause: vocabulary was chosen per screen. Folds ux-flow proposal 11.
+- Findings: A-3 ("workspace"), L-3, F20, CN-12 (three names for one secret), L-9 and PR-6 ($0 versus $0.00), and the unit mismatch 9.5 KB versus 9.4 KiB, "author" versus "agent".
+- Surfaces: all pages. Evidence: `auth/shots/1440x900-signup.png`, `landing/shots/1440x900-home-full.png`, `pricing/shots/1440x900-main.png`.
+- Severity: P2. Reach 5. Effort S.
+- Acceptance criteria: a copy glossary exists with one term each for drive, agent, key, storage unit and price format; a grep for "workspace", "credentials bundle" and "recovery file" naming the same secret differently returns one term; prices render identically on / and /pricing; storage uses one unit system.
+
+### C11. Share page (recipient) states and next steps
+
+- Root cause: the share card was designed as a hardware transfer panel and handles only the happy path; error and progress states reuse text. ux-flow lists the recipient page as "already minimal" for the happy path, so this cluster changes error and progress states and file identity, not the two-step flow.
+- Findings: SH1, SH2, SH3, SH4, SH5, SH6, SH7, SH8, SH9.
+- Surfaces: `/s/<id>` all states, 3 viewports.
+- Evidence: `share/shots/1440x900-ready.png`, `1440x900-wrong-key.png`, `1440x900-revoked.png`, `1440x900-decrypting.png`, `390x844-missing-key.png`, `1440x900-loading.png`.
+- Severity: P1 (SH2, SH4), others P2 to P3. Reach 2. Effort S.
+- Acceptance criteria: ready shows file name, a file-type icon and real plaintext size (not "439 B encrypted") when known; wrong key says "This link's key does not match" with a paste-link form and is reported without needing the Download click where possible; error cards link to Agent Drive; downloading shows a progress indicator and a "Saved" confirmation; the paste input has a placeholder and equal height to its button; loading shows one line and does not change card height by more than 2 px; the encryption footer is removed from error cards.
+
+### C12. Billing and usage: units, plan, "Not connected"
+
+- Root cause: billing rows show an integration status as data and the allowance is on a different screen from usage. Folds ux-flow proposal 9.
+- Findings: BL1, BL4, BL5, BL6, BL7, F09 (usage table rules inconsistent).
+- Surfaces: `/console/billing`, console Usage tab.
+- Evidence: `billing/shots/1440x900-default-full.png`, `billing/shots/390x844-default.png`, `console/shots/1440-usage.png`.
+- Severity: P1 (BL1), others P2. Reach 3. Effort S to M.
+- Acceptance criteria: no "Not connected" string in table rows or tile values for a Free user; Usage shows "x of y" against the plan with a link to Billing; numeric columns are right-aligned; zero-use rows can be hidden; summary tiles at 768 are equal height and width; at 390 the first plan appears within the first screen; usage table has one consistent rule style.
+
+### C13. Type scale, spacing scale and touch targets
+
+- Root cause: no enforced token set; sizes and gaps are hand-picked per component.
+- Findings: L-7, L-8, PR-5, CN-7, CN-17, SH9, ST10, BL8, F04 (target size), F09. Measured: 16 distinct font sizes on the landing page; off-scale gaps 3, 6, 7, 9, 10, 13, 14, 18, 22, 26; targets under 24 px on every audited page.
+- Evidence: `landing/audit.json`, `connect/audit.json` (`spacing.offScale`, `smallTargets`), `settings/audit.json`, `billing/audit.json`.
+- Severity: P2. Reach 5. Effort M.
+- Acceptance criteria: at most 8 font sizes per page; every padding, margin and gap is a token step; smallTargets in the audit is 0 at 390 and 768 (at least 24 px, 44 px for primary touch actions).
+
+### C14. Console list on phones and tablets
+
+- Root cause: the table collapses to 174 px stacked cards at 390 with a 330 px toolbar; at 768 it drops columns and wraps.
+- Findings: F06, F11, plus ST5 and BL4 pattern for table rows on phones. Resolve together with C04.
+- Evidence: `console/shots/390-files.png`, `768-files.png`. Measured: pageScrollY 4,784 at 390; rows 174 px (390) and 83 px (768).
+- Severity: P1. Reach 2. Effort M.
+- Acceptance criteria: at 390 a file row is at most 64 px; at least 8 files are visible on the first screen; the toolbar before the first file is at most 120 px; at 768 no truncated subtitle and no wrapping panel title or footer.
+
+### C15. Settings: audit log language and page order
+
+- Root cause: the audit log renders raw event names and the user's own page views, and sits first on a page whose second job is deletion.
+- Findings: ST1, ST2, ST3, ST5, ST6, ST9. Folds ux-flow overlap "Activity & deletion mixing an audit log with account deletion (split)".
+- Evidence: `settings/shots/1440x900-default-full.png`, `390x844-default-full.png`. Measured: pageScrollY 2,528 at 1440, 4,683 at 390; 25 rows of 74 px.
+- Severity: P1. Reach 2. Effort S to M.
+- Acceptance criteria: event names are written in plain words ("Listed files", "Revoked an agent") and read-only page views are hidden by default; rows are at most 40 px at 1440; the page has two anchors or tabs (Activity, Delete) with deletion reachable in one click; at 390 a log row is at most 72 px; the empty deletion list says "No deletion requests".
+
+### C16. Marketing and docs content polish
+
+- Root cause: section-level layout choices on / and /pricing without a shared grid; /llms.txt has long lines.
+- Findings: L-5 (fake approval card differs from the real one), L-6, L-10, L-11, PR-3, PR-4, LL-1 (llms.txt: lines up to 251 chars, duplicate step 3).
+- Evidence: `landing/shots/1440x900-scroll3500.png` versus `connect/shots/1440x900-review-new.png`, `1440x900-scroll1500.png`, `pricing/shots/1440x900-main-full.png`.
+- Severity: P2. Reach 3. Effort M.
+- Acceptance criteria: the landing mock approval card matches the real /connect card; the three feature columns differ by at most 2 lines; plan features are set in the body font, one per line; llms.txt lines are at most 100 characters and step numbers are unique; the "How usage works" columns align.
+
+### C17. Agents and API keys as one table
+
+- Root cause: two tabs for overlapping access objects; neither shows drive, write path or last use. Folds ux-flow proposal 10 (effort L).
+- Findings: F13 (15 full-weight "Revoke access" buttons, UUIDs, zero-key agents still revocable), walker F-STORY-065-01 (no Rotate key action).
+- Evidence: `console/shots/1440-agents.png`, `1440-apikeys.png`.
+- Severity: P2. Reach 3. Effort L.
+- Acceptance criteria: one agent table with drives, permissions and last used; "Replace key" in at most 3 steps; revoke is a row-menu action; no UUIDs in the default view.
+
+### C18. Settings: permanent-actions section
+
+- Root cause: the two delete forms have different structures, so inputs and buttons do not align.
+- Findings: ST4, ST7, ST8.
+- Evidence: `settings/shots/1440x900-default-full.png` (audit geometry unevenRows on settings-delete-grid).
+- Severity: P2. Reach 1. Effort S.
+- Acceptance criteria: both delete panels have the same structure so their inputs and buttons share a y position at 1440; the drive select starts empty ("Choose a drive"); the permanent-action label is at least 12 px; the details toggle looks like a link, not a disabled field.
+
+---
+
+## Findings not placed
+
+- F07 is in C05, F18 is split between C02 and C04. Every inspector finding (F01 to F20, L-1 to L-11, PR-1 to PR-7, A-1 to A-6, CN-1 to CN-17, SH1 to SH9, ST1 to ST10, BL1 to BL8, LL-1) appears in at least one cluster except A-5 and A-6.
+- A-5 (Clerk appearance theme, code-read only, unverified) and A-6 (auth card uses 11% of the 390x844 viewport) are unplaced. A-5 needs a Clerk-configured run before it can be judged; A-6 is a P3 and is covered if C01 adds the cross-links that fill the auth card.
+- Environment-only notes (Copy fails in headless Chrome clipboard) are not defects.
 
 ## Coverage check against inventory.md
 
-Audited: landing (default, reduced motion), pricing (checkout disabled), console Files (onboarding, empty, populated, key not loaded/loaded, backup shown/hidden, loading, filter, 3 drives), Agents, API keys (empty/list/revoked), Usage, Trash, dialogs (New drive, Load key, New agent, New API key, API key reveal, drive key reveal, Versions), billing, settings (zero drives), Clerk fallback panel, connect (all listed states), share (all 7 listed states plus loading). Four viewports each. Note: `pages/console`, `pages/landing`, `pages/pricing` findings files also exist; they were not part of this pass (marketing covers landing and pricing).
+Audited with screenshots at three viewports: /, /pricing, auth fallback card, /connect (all states), /s/<id> (8 states), /console Files, Trash, Agents, API keys, Usage, dialogs, first visit, /console/settings, /console/billing.
 
-Not audited or unverified:
+Not audited or only partly audited (gaps):
 
-- Real Clerk `<SignIn>`/`<SignUp>` widgets, OAuth buttons, Clerk error states, `t1Appearance` styling, and the signed-in account identity in headers (Clerk not configured locally).
-- Paid checkout, Stripe portal, a paid plan, statement history, deletion with a populated drive list, non-empty deletion requests (settings seen only with zero drives).
-- 4+ drives in the bay strip (free plan cap is 3); overflow is predicted, not observed.
-- Native `window.confirm` for Revoke (console.tsx 953, 1026) and Restore from Trash.
-- Escape in receipt dialogs relaunched the headless browser twice: unverified whether tool or app (possible secret-loss path; test in a real browser).
-- Connect "Looking up" transient state and non-404 lookup error; share on a real slow network (loading was forced).
-- Live motion (LED blink, rack animation) beyond the reduced-motion check.
-
-## Implementation plan (5 work packages, disjoint files)
-
-Product-change items marked above are excluded from all packages.
-
-- WP0 Foundation (runs first): `apps/web/app/globals.css`, new `apps/web/app/brand-mark.tsx`, `apps/web/app/(app)/copy-button.tsx`. Does: C02 shared mark and lime fix, C06 shared `.button:disabled` style, C12 ground min-height, C11 copy-button visible failure, plus any shared scroll-cue class C03 needs. Exports `BrandMark` and `.brand-logo`.
-- WP1 Console (waits for WP0): `console.tsx`, `console.css`, `console-panels.css`. Does C01, C04, C05, C08, C09, C11 (dialogs), console part of C02 and C03. Largest package; run its clusters in the order C01, C04, C08, C11, then C05/C09 after their design decisions. Do not split console.tsx between agents.
-- WP2 Account and pricing (waits for WP0): `pricing/page.tsx`, `billing/billing-client.tsx`, `settings/settings-client.tsx`, `sign-in/.../page.tsx`, `sign-up/.../page.tsx`, `account.css`. Does C10, C06 page-level parts, account part of C02 and C03.
-- WP3 Connect (independent): `connect/connect.tsx`, `connect.css`. Does C12 non-global parts. (`connect/page.tsx` stays untouched; connect already uses the new mark.)
-- WP4 Share (independent): `app/s/[id]/share-client.tsx`, `share.css`. Does C07.
-
-No package is assigned `landing.css` or `(app)/page.tsx`; landing polish (C13) is deferred. WP1 and WP2 depend on WP0 only for `BrandMark`, `.button:disabled` and `.brand-logo`; WP3 and WP4 can start immediately.
+1. Real Clerk sign-in and sign-up forms, Clerk error states and the Clerk appearance theme (A-5). Blocks acceptance checks for C01 items 5 and 6 and C09 until Clerk is configured.
+2. Console loading states (too fast to capture) and Trash stuck on "Loading files" (seen only in the ux-flow run).
+3. Download completion and file-save in the console and on the share page; the share page expired and "Try again" states; large-file progress.
+4. Console states with many drives (more than 2), folders, and 1,000+ files (the fix for C04 has no stress evidence).
+5. Billing with checkout enabled, spending-control validation errors, export result and empty usage; settings with an empty or failed audit log, a submitted deletion, and the expanded "When is data actually removed?".
+6. Agents revoke and key rotate flows after the action (native `confirm()` dialogs cannot be screenshotted).
+7. Dark mode and print are not in the inventory (no evidence that either exists).
+8. Keyboard and screen-reader pass was done only for focus rings and tab order on /, /pricing and /connect; the console dialogs were checked for Escape and focus rings only.
+9. The 1920x1080 and 375x812 viewports exist only for connect, landing and pricing; console and share have no wide or 375 shots.
+10. Second opinions were skipped for all pages in this run, so every finding rests on one inspector.

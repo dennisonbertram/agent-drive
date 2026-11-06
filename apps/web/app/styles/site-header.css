@@ -1,0 +1,142 @@
+/* Shared public header: /, /pricing, /sign-in, /sign-up. Uses global tokens from globals.css. */
+.site-header {
+  border-bottom: 1px solid var(--line-strong, #111);
+  background: var(--bg, #fff);
+  color: var(--ink, #111);
+  font-family: var(--sans, system-ui, sans-serif);
+  line-height: 1.5;
+}
+.site-header *,
+.site-header *::before,
+.site-header *::after {
+  box-sizing: border-box;
+}
+.site-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  max-width: 1160px;
+  height: 60px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+.site-header .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  color: var(--ink, #111);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+.site-nav a {
+  color: var(--ink-2, #3b3a37);
+  font-size: 14px;
+  text-decoration: none;
+}
+.site-nav a:hover,
+.site-nav a[aria-current='page'] {
+  color: var(--ink, #111);
+}
+.site-menu,
+.site-signup {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink, #111);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  box-shadow: 0 2px 0 var(--ink, #111);
+  color: var(--ink, #111);
+  font: 500 14px var(--sans, system-ui, sans-serif);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.site-menu:active,
+.site-signup:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+.site-signup {
+  min-height: 36px;
+  padding: 0 14px;
+}
+/* The hero Copy button is the page's one orange primary. To make this the primary
+   instead, add the class "signal" to the link in site-header.tsx. */
+.site-signup.signal {
+  background: var(--sig, #ff4a1c);
+}
+.site-header :focus-visible {
+  outline: 2px solid var(--focus, #111);
+  outline-offset: 2px;
+}
+
+@media (min-width: 761px) {
+  .site-nav[popover] {
+    position: static;
+    inset: auto;
+    display: flex;
+    gap: 28px;
+    width: auto;
+    height: auto;
+    margin: 0 0 0 auto;
+    padding: 0;
+    border: 0;
+    background: none;
+    overflow: visible;
+  }
+  .site-menu {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .site-header-inner {
+    gap: 12px;
+    padding: 0 20px;
+  }
+  .site-menu {
+    min-height: 44px;
+    margin-left: auto;
+    padding: 0 14px;
+  }
+  .site-signup {
+    min-height: 44px;
+  }
+  .site-nav:popover-open {
+    position: fixed;
+    inset: 64px 16px auto auto;
+    display: grid;
+    min-width: 200px;
+    height: auto;
+    margin: 0;
+    padding: 8px;
+    border: 1px solid var(--line-strong, #111);
+    border-radius: 6px;
+    background: var(--panel, #fff);
+    box-shadow: 0 2px 0 var(--line-strong, #111);
+  }
+  .site-nav:popover-open a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 12px;
+  }
+}
+
+/* Very narrow phones: keep the wordmark as the link's accessible name but show only the logo. */
+@media (max-width: 360px) {
+  .site-header-inner {
+    gap: 8px;
+    padding: 0 12px;
+  }
+  .site-header .brand {
+    font-size: 0;
+  }
+  .site-menu,
+  .site-signup {
+    padding: 0 10px;
+  }
+}

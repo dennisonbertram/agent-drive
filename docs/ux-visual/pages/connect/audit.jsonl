@@ -1,0 +1,2098 @@
+{
+  "1440x900/entry": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/bad-format": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/not-found": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/waiting-new-drive": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code GVNT-LXVF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/approve-error": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 23,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 2,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code GVNT-LXVF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/reconnect": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code BHRM-ZSVS\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/approved": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/denied": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/entry": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/bad-format": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/not-found": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/waiting-new-drive": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/approve-error": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 2,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/reconnect": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code DMLT-SZBR\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/approved": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/denied": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/entry": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/bad-format": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/not-found": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/waiting-new-drive": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/approve-error": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 2,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/reconnect": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code HNTL-RDFM\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/approved": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/denied": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 20, 22, 24, 40],
+        "offScale": [10, 22],
+        "nearDupes": [
+          [8, 10],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/entry": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 20, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/bad-format": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 20, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/not-found": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 20, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/waiting-new-drive": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 7,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "39px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "39px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/approve-error": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 87,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "39px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "39px/500": 1,
+          "13px/400": 2,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code KPTV-GQTF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/reconnect": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "39px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "39px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code CJJK-SKPP\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/approved": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/denied": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 1,
+          "24px/600": 1,
+          "14px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/error-rate-limited": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1920x1080/error-rate-limited": {
+    "layout": {
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/error-rate-limited": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 20, 22, 24, 40],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/error-rate-limited": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 20, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "11px", "24px", "14px", "13px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "11px/500": 2,
+          "24px/600": 1,
+          "14px/400": 1,
+          "13px/400": 1,
+          "16px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "375x812/long-names": {
+    "layout": {
+      "viewport": {
+        "width": 375,
+        "height": 812,
+        "pageScrollY": 107,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 14, 16, 18, 24],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "39px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "39px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code RBHZ-XFHD\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "1440x900/emoji-name": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 8, 10, 12, 16, 18, 20, 22, 24, 40],
+        "offScale": [10, 18, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [16, 18],
+          [18, 20],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["20px", "24px", "11px", "44px", "13px", "14px", "16px"],
+        "sizes": {
+          "20px/650": 1,
+          "20px/750": 1,
+          "24px/600": 1,
+          "11px/500": 1,
+          "44px/500": 1,
+          "13px/400": 1,
+          "14px/400": 5,
+          "14px/500": 3,
+          "16px/600": 1,
+          "13px/600": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [],
+      "lowContrast": [
+        {
+          "el": "span.connect-tag \"Pairing code\"",
+          "ratio": 2.03
+        },
+        {
+          "el": "span.connect-code \"Code PXNZ-CXLF\"",
+          "ratio": 2.11
+        },
+        {
+          "el": "p \"Check that this matches your a\"",
+          "ratio": 1.65
+        }
+      ],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  }
+}
+{"key":"1440x900-entry","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   14,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"768x1024-entry","layout":"{\n \"viewport\": {\n  \"width\": 768,\n  \"height\": 1024,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   14,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-entry","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   14,\n   16,\n   18,\n   20,\n   24\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-format-error","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   12,\n   14,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 2,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-invalid-code","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   12,\n   14,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"12px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 2,\n   \"12px/400\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-invalid-code","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   24\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\",\n   \"13px\",\n   \"12px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 2,\n   \"20px/500\": 1,\n   \"14px/400\": 1,\n   \"13px/400\": 2,\n   \"12px/400\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-review-new","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 2,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"button.connect-link \\\"Add to an existing drive inste\\\"\",\n   \"w\": 178,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"768x1024-review-new","layout":"{\n \"viewport\": {\n  \"width\": 768,\n  \"height\": 1024,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 2,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"button.connect-link \\\"Add to an existing drive inste\\\"\",\n   \"w\": 178,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-review-new","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 9,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   24\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 2,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"button.connect-link \\\"Add to an existing drive inste\\\"\",\n   \"w\": 178,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-existing","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 409,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 4,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"768x1024-existing","layout":"{\n \"viewport\": {\n  \"width\": 768,\n  \"height\": 1024,\n  \"pageScrollY\": 285,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 4,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-existing","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 462,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   24\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 4,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-existing-err-empty","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 484,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 5,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-existing-err-wrongkey","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 525,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 5,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-existing-err-wrongkey","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 579,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   24\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 5,\n   \"20px/500\": 1,\n   \"14px/500\": 6,\n   \"13px/500\": 6,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  },\n  {\n   \"el\": \"button.connect-link \\\"Use a new drive instead\\\"\",\n   \"w\": 135,\n   \"h\": 16\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-approved","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   14,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   10,\n   14,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 1,\n   \"20px/500\": 1,\n   \"14px/400\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-approved","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   8,\n   10,\n   14,\n   16,\n   18,\n   24\n  ],\n  \"offScale\": [\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    10\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"20px\",\n   \"14px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 1,\n   \"20px/500\": 1,\n   \"14px/400\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"1440x900-offer","layout":"{\n \"viewport\": {\n  \"width\": 1440,\n  \"height\": 900,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"768x1024-offer","layout":"{\n \"viewport\": {\n  \"width\": 768,\n  \"height\": 1024,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   20,\n   22,\n   24,\n   40\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18,\n   22\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ],\n   [\n    18,\n    20\n   ],\n   [\n    20,\n    22\n   ],\n   [\n    22,\n    24\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}
+{"key":"390x844-offer","layout":"{\n \"viewport\": {\n  \"width\": 390,\n  \"height\": 844,\n  \"pageScrollY\": 0,\n  \"pageScrollX\": 0\n },\n \"offscreenPrimary\": [],\n \"scrollers\": [],\n \"deadSpace\": [],\n \"spacing\": {\n  \"observed\": [\n   4,\n   8,\n   9,\n   10,\n   12,\n   14,\n   16,\n   18,\n   24\n  ],\n  \"offScale\": [\n   9,\n   10,\n   14,\n   18\n  ],\n  \"nearDupes\": [\n   [\n    8,\n    9\n   ],\n   [\n    9,\n    10\n   ],\n   [\n    10,\n    12\n   ],\n   [\n    12,\n    14\n   ],\n   [\n    14,\n    16\n   ],\n   [\n    16,\n    18\n   ]\n  ]\n },\n \"type\": {\n  \"distinctFontSizes\": [\n   \"17px\",\n   \"11px\",\n   \"34px\",\n   \"13px\",\n   \"20px\",\n   \"14px\",\n   \"16px\"\n  ],\n  \"sizes\": {\n   \"17px/600\": 1,\n   \"11px/500\": 5,\n   \"34px/500\": 1,\n   \"13px/400\": 3,\n   \"20px/500\": 1,\n   \"14px/500\": 5,\n   \"13px/500\": 1,\n   \"16px/600\": 1\n  }\n },\n \"alignment\": {\n  \"nearMissEdges\": []\n },\n \"smallTargets\": [\n  {\n   \"el\": \"a.brand \\\"Agent Drive\\\"\",\n   \"w\": 114,\n   \"h\": 20\n  },\n  {\n   \"el\": \"input\",\n   \"w\": 13,\n   \"h\": 13\n  }\n ],\n \"lowContrast\": [],\n \"overlaps\": [],\n \"fixedOverlays\": []\n}","geometry":"{\"pageOverflowX\":0,\"unevenRows\":[],\"overflowSpills\":[],\"wrappedControls\":[]}"}

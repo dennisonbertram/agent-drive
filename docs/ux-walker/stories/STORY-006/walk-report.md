@@ -1,9 +1,14 @@
-# STORY-006 Walk Report (PASS with findings)
+# STORY-006 walk report (ux-walker-a)
 
-1. Landing card "01 / PRIVATE BY DESIGN / You hold the keys." (step-1.png): says contents encrypt on device, service never gets the drive key; no metadata mention (F-006-01). Geometry: clean.
-2. /pricing "Your data and access" (step-2.png): Private contents card states paths, sizes, tags, activity remain visible; recovery key warning; Leave on your terms: deletion via retryable background purge. Geometry: clean. Console showed an RSC prefetch error (F-006-04).
-3. Share error page /s/ynkBnllNu3sLpeEMjwDRgg (step-3.png): "This link is missing a valid decryption key" with a lock icon and "Ask the sender for the complete link, including everything after the # symbol." Geometry: clean; logo mark "ad" differs from "a/" (F-006-02); no recovery action (F-006-03). Mobile (mobile-check.png): card stacks cleanly, geometry clean.
+Result: PASS with findings. Real code from `agent-drive login --name claude-code --no-browser --api http://localhost:3500/api` (isolated config under the scratchpad; synthetic user e2e_walkera3). Clerk is unset, so "sign in" was a POST to /api/test-session.
 
-## Flow Log
+1. Signed out, opened /connect?code=JDZG-NGQP -> redirected to /sign-in?redirect_url=%2Fconnect%3Fcode%3DJDZG-NGQP (step-1-connect-signedout.png shows the not-configured card; no hint on that card that an agent is waiting). Redirect_url preserved: pass.
+2. After test sign-in, re-opened the same URL -> /connect page (step-3-connect.png). Shows pairing code, Agent, Machine, Account ("Local test session" here; real Clerk shows email), Requested, info box, "Add to an existing drive instead" link, delegate checkbox, Approve agent. Geometry audit: clean. Measured: the delegate checkbox help text ends about 2px above the Approve button (button top 656px; text block bottom ~654px), visibly cramped. No sign-out or switch-account control on the page.
+3. Mobile 390x844 (mobile-check.png): stacks well, no overflow; same cramped gap above Approve.
+4. Click Approve agent -> "Approved" / "Approved. Return to your agent; it will finish setup on its own." (step-4-approved.png). Audit clean. The terminal immediately printed "Logged in as agent claude-code ... New drive ... created". Heading and body both say "Approved". No link back to console or any next step (dead end except closing the tab).
 
-Specified 4 steps, needed 2 (landing + pricing), matches Ideal 2. Hesitation: landing vs pricing disagree on how much is private. Quickstart not clicked.
+## Flow log
+
+- Ideal 2 steps; actual 2 (sign in, Approve), but the code survived the sign-in redirect.
+- Hesitation: no way to confirm which account is signed in beyond the Account row; no switch-account control.
+- Duplicate: "Approved" tag/heading/body say it three times.

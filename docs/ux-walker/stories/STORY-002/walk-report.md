@@ -1,10 +1,16 @@
-# STORY-002 Walk Report (PASS with findings)
+# STORY-002 walk report (ux-walker-a)
 
-1. Landing -> nav Pricing -> /pricing loads (step-2.png): heading and subtext as specified. Geometry: unevenRows on header nav (Quickstart 101 vs Sign in 77, differing label lengths, not a defect).
-   2-4. Cards read (step-2.png): Free $0.00/3 drives/5 GiB; Developer $20.00/25/100 GiB (highlighted); Team $200.00/250/"1024 GiB" (F-002-01). Cards are equal width and height; CTAs align at the bottom.
-   5-6. Scrolled to "How usage works" and rates (step-3.png, step-4.png): version/trash storage note present; Free hard stop only in fine print; "Not charged" egress next to measurement caption (F-002-02). Header column wider than landing (F-002-03). Geometry: clean apart from the nav note.
-   Errors: Clerk development-keys warning only on this page.
+Result: PASS (with notes). Sign-in was done via /api/test-session as e2e_uxreview because Clerk is unset; the Clerk credential form was not walked.
 
-## Flow Log
+1. Signed out, /console, /console/billing, /console/settings all redirect to /sign-in (step-1-console-signedout.png: "Sign-in is not configured" card). /connect redirects with redirect_url preserved.
+2. After the test session POST, /console shows "Opening your workspace... Loading your drives and access settings." (step-3-loading.png: Refresh enabled, New drive greyed, clean).
+3. Files tab loads (step-3-console.png). Geometry audit hits are the drive strip chips (deliberate, 280/280/168 incl. dashed "Your next agent") and button pairs: acceptable. Screenshot: sidebar, drive strip, "Key backed up 11/6/2026 (file)" banner, files table with disabled Download.
+4. Download is disabled with title "Load your drive key first" - only a hover tooltip; the visible chip "KEY REQUIRED FOR DOWNLOADS" + "Load drive key" make it understandable.
+   Mobile (mobile-check.png): sidebar collapses to a "Files" dropdown, table becomes labelled cards, no page overflow. (Audit "spill" hits are the hidden table header row.)
 
-Specified 6 steps; needed 3 (landing, Pricing, read cards), matches Ideal 3. Hesitation: whether 100 GiB suffices given versions count toward storage. Duplicated info: plan feature "CLI, MCP, web console, and encrypted sharing" repeated on all three cards.
+## Flow log
+
+- Ideal 2 steps; actual 2 (Sign in, then console). No re-entry needed.
+- Lands on "nightly-builds" (alphabetical first, not the main drive "research-bot"); user must choose the drive.
+- Hesitation: user with two drives sees the lesser one by default; disabled Download repeated on every row (3 disabled buttons plus a chip plus the Load drive key button = same message 5 times).
+- Banner "Key backed up" has a red dot, the same colour as the warning state in the story's key banner.

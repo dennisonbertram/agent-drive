@@ -1,107 +1,148 @@
-# UX Flow Critique — 2026-11-03
+# UX Flow Critique - 2026-11-06
+
+Owner priorities used for ranking: the console should feel like a clear cloud drive (Dropbox-style), and sign-up and setup should work well. Journeys on those paths weigh most.
 
 ## Run Summary
 
-| Metric             | Value                                                                                                      |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| Journeys critiqued | 8 (STORY-011, 021+023, 024, 030, 037, 069, 080 with 082 as a variation)                                    |
-| Evidence source    | Live pass on https://agent-drive.vercel.app: 14 screenshots in `screens/`, plus live CLI/MCP runs and code |
-| Verdicts           | 0 minimal · 5 acceptable (011, 030, 037, 069 with the script, 080) · 2 convoluted (021+023, 024)           |
+| Metric             | Value                                                                                                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Journeys critiqued | 8 (signup, first-run-setup, find-open-file, download-decrypt, versions-trash, sharing, second-agent, agents-keys-billing)                                                                                           |
+| Evidence source    | Live pass on a local seeded server (http://localhost:3500, seeded user e2e_uxreview, drives research-bot and nightly-builds) on 2026-11-06. Clerk is not configured locally, so the real sign-up form was not seen. |
+| Verdicts           | 0 minimal - 5 acceptable - 3 convoluted                                                                                                                                                                             |
+| Redundancy         | 8 duplicate paths - 10 duplicate information - 6 overlapping features - 10 hierarchy/IA findings (`redundancy.md`)                                                                                                  |
+
+Verdict sources: signup, first-run-setup, versions-trash and sharing carry a verdict written in their own critique (sharing: convoluted for the human sender, the recipient page is minimal). The other four critiques did not state a verdict; I assigned find-open-file (acceptable), second-agent (acceptable), download-decrypt (convoluted) and agents-keys-billing (convoluted) from their scorecards.
+
+Limits of this run:
+
+- The machine was under heavy load (a load average above 300 was recorded in first-run-setup and above 230 in versions-trash), and the local MinIO storage at 127.0.0.1:19000 accepted connections but stopped answering. As a result the download in download-decrypt was never observed finishing: the Download button stayed disabled for over 25 seconds. The key-loading screens were seen; the file save, the success notice and the next-visit behaviour were not (next-visit behaviour comes from code reading and dialog text only).
+- find-open-file has no mobile file-list screenshot (09 shows only an error state).
+- Some timings (console calls of 5 to 10 minutes in agents-keys-billing, a Trash tab stuck on "Loading files" in versions-trash) are attributed to the environment, not the product; the missing timeout or retry message on those screens is a product observation.
+- One critic's mis-click trashed a seeded file and restored it; the weekly report's AUTHOR now reads Console (find-open-file, Functional note).
 
 ## Friction Scorecard
 
-| Journey                                    | Steps (actual/ideal)          | Main friction                                                                           | Verdict                                    |
-| ------------------------------------------ | ----------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------ |
-| STORY-011 Landing → pricing → sign-up      | 3–4 / 3                       | "Open console" for anonymous visitors; "Manage your plan" on plans the visitor lacks    | acceptable                                 |
-| STORY-021+023 First drive, agent and key   | ~14 / 7                       | Separate agent and key dialogs; two "I saved…" checkboxes; permissions shown up front   | convoluted                                 |
-| STORY-024 Console → terminal hand-off      | ~9 / 4                        | Placeholder host and drive id in the terminal block; drive key not saved by `login`     | convoluted                                 |
-| STORY-030 Unlock with recovery file        | 5 / 3                         | Choosing the file doesn't load the key; Download dimmed instead of opening unlock       | acceptable                                 |
-| STORY-037 Share via CLI, recipient, revoke | sender 3 / 1; recipient 2 / 2 | JSON output instead of the URL; `share list` lacks path and expiry; no console share UI | acceptable                                 |
-| STORY-069 Weekly trace archive             | 1 command with script / 1     | Not a built-in CLI command; skill steps repeat the script                               | acceptable (convoluted without the script) |
-| STORY-080 Upgrade Free → Developer         | 5 / 3                         | Pricing hops to the billing hub; plan cards duplicated; checkout button below the fold  | acceptable                                 |
+| Journey             | Steps (actual/ideal)                                                                          | Needless decisions                                                    | Re-entry                         | Dead ends                                              | Verdict                                |
+| ------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ | -------------------------------------- |
+| signup              | 3+/2 landing to console; 5/3 first drive and key saved (signup.md)                            | 3 (drive name with no default; Sign in vs Console vs Start with Free) | 1 (key lost on reload)           | 2 (local sign-in pages; "Connect an agent" jumps away) | acceptable                             |
+| first-run-setup     | Human 3/3; agent 5 commands/3-4 (first-run-setup.md)                                          | 2 (delegate checkbox; backup path)                                    | 0                                | 2 ("Approved" card; files not openable without key)    | acceptable                             |
+| find-open-file      | 3/2 to the row; +5 vs 1 to read the content (find-open-file.md)                               | 2 (which drive; which weekly file is newest)                          | 1 (filter cleared on tab switch) | 1 (no "recent" answer)                                 | acceptable (assigned)                  |
+| download-decrypt    | 6/2 (download-decrypt.md)                                                                     | 1                                                                     | 1 (key again after every reload) | 1 (disabled Download)                                  | convoluted (assigned)                  |
+| versions-trash      | Restore version 6/3; restore from Trash 3/2 (versions-trash.md)                               | 1                                                                     | 1 (filter text)                  | 2 (restore notice in header; no "View file")           | acceptable                             |
+| sharing             | Human sender 0 of 3 possible in console; recipient 2/2; list/revoke 0 in console (sharing.md) | 1                                                                     | 0                                | 2 (no Share action; `share list` has no URL)           | convoluted (sender); recipient minimal |
+| second-agent        | Route A 6/4 (story ideal); route B 2; route C 0 (second-agent.md)                             | 5 on route A; 2 on route B                                            | 1 (recovery file on route A)     | 1 ("Approved" screen)                                  | acceptable (assigned)                  |
+| agents-keys-billing | Rotate a key 11/3; usage vs plan 3 screens/1; revoke an agent 2/2 (agents-keys-billing.md)    | 2 (New key dialog defaults)                                           | 0                                | 1 (revoke gives no notice)                             | convoluted (assigned)                  |
 
 ## Redundancy Map
 
-Full detail is in [redundancy.md](redundancy.md): 9 duplicate paths, 9 duplicated facts, 8 overlapping features and 10 IA findings.
+Condensed from `redundancy.md`.
 
-- **Duplicate paths:** two routes to Billing inside the console (Usage "EGRESS & COST" card holds only a link); drive selector + "Load drive key" repeated on Files and Trash; "Restore this version" offered on the only version (`screens/13`). Recommendation: one canonical control each.
-- **Duplicate information:** storage shown as "3.8 MB" (Usage) and "3.8 MiB" (Billing); plan allowances worded differently on /pricing and /console/billing ("1024 GiB" vs "1.0 TiB"); the console author is "Human console", "Console" and "Console user"; sidebar Files badge shows 1 while 9 files are listed (`screens/02`).
-- **Overlapping features:** sharing exists only in the CLI and MCP; the console can't create, list or revoke links. Billing repeats the Usage-by-agent table.
-- **IA:** five in-page tabs plus two separate pages with different "Back" labels; Usage/Billing and Agents/API keys each split one concept in two.
+Duplicate paths (8). Sign-up has five doors and no "Sign up" button (signup/01, 05, 06): recommend one "Sign up free" button. First drive/agent creation has five entry points with different outcomes (signup/07, 10; abb/01): recommend one primary and one secondary. Second-agent access has three routes (second-agent/01, 02, 06): keep all, explain once. Restore has two surfaces (versions/03, 06): keep both, one notice. Revoke has two scopes under one verb (abb/01, 05): name the target on the button. The drive key can be loaded three ways (download/05, 06): file first, auto-submit. Finding files and "what changed" is weakest in the console (find/03): add Recent and server-side search. Plan usage is spread over Usage, Billing and Pricing (abb/07, 08, 09): show the allowance on Usage.
+
+Duplicate information (10). Storage shown as 9.5 KB and 9.4 KiB (abb/07, 08); "Usage by author" and "Usage by agent" (abb/07, 08); plan cards on Pricing and Billing (abb/08, 09); key state in badge, button and banner with red meaning both good and bad (download/07, find/07, signup/10); drive ID with Copy on every view (signup/10); two nav links to sign-in (signup/01); UUIDs on every Agents and Versions row (abb/01, versions/03); AUTHOR overwritten by "Console" after restore (find/07); title echoes on Trash (versions/06).
+
+Overlapping features (6). Agents and API keys tabs (merge); Trash tab and Versions dialog (keep, share notice); Usage and Billing; five partial "what happened" sources (one Activity view); Pricing and Billing plan cards; Activity & deletion mixing an audit log with account deletion (split).
+
+Hierarchy and IA (10). Drive/workspace/Drives & files naming; drive vs agent (the "YOUR NEXT AGENT" tile creates a drive; drive and agent both named `claude-code`); author vs agent; five names for the drive key; storage naming; one "revoke" for two scopes; 7 sidebar items for a user with an empty account; upload, share, recents and search missing from the console; drive strip on account-level tabs; alphabetically-first default drive and mixed colour meaning.
 
 ## Simplification Proposals (ranked)
 
-Ranked by how central the journey is, then by steps removed, then by effort.
+Ranking: (journeys improved x steps or elements removed) / effort, weighted toward the owner's two priorities (console as a clear cloud drive; sign-up and setup).
 
-### 1. Put the real host and drive id in the console's terminal block
+### 1. Unlock on demand: one prompt, auto-submit, remember on this device
 
-- **Now:** `agent-drive login --api https://your-agent-drive-host` and `--drive <drive-id>` are placeholders (`screens/04`, `console.tsx:860`). The console knows both values.
-- **Proposed:** render `window.location.origin` and the selected drive id, plus the exact `AGENT_DRIVE_KEY_<ID>` variable name, with a Copy button.
-- **Saves:** 2–3 steps and the most likely first-run failure in STORY-024 and STORY-021+023.
-- **Effort:** S. **Evidence:** journeys/STORY-024.md, journeys/STORY-021-023.md.
+- **Now**: Download is disabled until the key is loaded; 6 steps to a decrypted download (download-decrypt Scorecard, screens 02, 05, 06, 07). Choosing a recovery file does not submit; a dots field shows a secret the user did not type (06). Key is lost on reload.
+- **Proposed**: Download is always enabled. If the key is missing it opens a prompt with the file chooser first; choosing the file loads the key and starts the download. Optional "Remember on this device".
+- **Saves**: 4 steps and 1 confirmation per download; helps download-decrypt, find-open-file (+5 to read), versions-trash (Download greyed, versions/01), sharing (share needs the same prompt), second-agent route A (second-agent/02) and first-run (files not openable, first-run/03). 6 journeys.
+- **Effort**: M
+- **Evidence**: download-decrypt.md (Simpler Version); find-open-file.md; first-run-setup.md (03); second-agent.md (route A). Download completion not observed (see Run Summary).
 
-### 2. One "Connect an agent" dialog
+### 2. Sign-up front door
 
-- **Now:** Agents → Create agent → automatic jump to API keys → Create API key → Save key (~7 steps, `screens/03`, `screens/04`).
-- **Proposed:** a single dialog with the agent name, a key label defaulting to the agent name, read+write on the current drive by default with "Change access" collapsed, then one screen showing the key, the drive key and the filled-in terminal block with Copy buttons.
-- **Saves:** about 4 steps in the onboarding journey.
-- **Effort:** M. **Evidence:** journeys/STORY-021-023.md.
+- **Now**: Landing nav has "Sign in" and "Console", no sign-up button; the final CTA repeats the agent Copy button (signup/01, 02); the only labelled path is "Start with Free" on Pricing (signup/05); at 390 px the header nav is hidden (signup/12).
+- **Proposed**: One orange "Sign up free" next to "Sign in"; drop "Console" while signed out; "Create a free account" beside the final Copy button; keep a mobile header link.
+- **Saves**: 1 to 2 steps and 1 decision; one journey but the entry to every other journey.
+- **Effort**: S
+- **Evidence**: signup.md (Take-away Pass 01, 02, 05, 12). The Clerk form itself was not evaluated.
 
-### 3. `agent-drive connect` that saves both keys
+### 3. First console visit leads with "Connect your agent"
 
-- **Now:** `login` saves only the API URL and key, so the drive key has to be exported in every new shell (`cli.ts` login branch).
-- **Proposed:** `agent-drive connect --api HOST --drive ID` prompts with hidden input for the API key and drive key, saves both in the private config, and makes `--drive` optional when only one drive is configured. `--key-file` should accept the recovery JSON the console downloads.
-- **Saves:** 2+ steps per new shell or machine. **Effort:** M. **Evidence:** journeys/STORY-024.md.
+- **Now**: 5 steps to a drive with a saved key (signup/07 to 10); drive name has no default (08); the key dialog has four actions (09); right after saving, a red banner says the key is not backed up (10, which I opened).
+- **Proposed**: Open on the connect-an-agent panel with the llms.txt line and Copy; "New drive" becomes secondary. If a drive is created: default name, one "Download recovery file and continue" button as the save confirmation, no contradictory banner.
+- **Saves**: about 2 steps and 1 decision; 1 competing first action removed; helps signup and first-run.
+- **Effort**: S to M
+- **Evidence**: signup.md (Simpler Version); signup/07, 08, 09, 10.
 
-### 4. Upgrade straight from /pricing
+### 4. Make the file list behave like a cloud drive
 
-- **Now:** "Manage your plan" (also shown to visitors without a plan) → /console/billing → scroll past three stat cards → "Choose developer" (`screens/01`, `screens/07`).
-- **Proposed:** an "Upgrade to Developer/Team" button that opens checkout directly (or `/console/billing?upgrade=developer`). Free users see one upgrade panel instead of repeated plan cards.
-- **Saves:** 2 steps on the money path. **Effort:** S–M. **Evidence:** journeys/STORY-080.md.
+- **Now**: Opens on the alphabetically first drive (find Scorecard; abb/01); one flat list with full paths, no sort (find/02), filter matches loaded paths only (03), both weekly files show the same MODIFIED time (03), no Recents, no breadcrumbs, no preview (catalog Cloud-drive table).
+- **Proposed**: Open on the last-used drive; sortable columns, default newest first; a Recent view using the existing `recent` API; path breadcrumb; inline preview for text files; remember the last drive for the Add-to-existing form too.
+- **Saves**: 1 step and 1 decision on find-open-file; 1 trap removed on second-agent (second-agent/02); answers the "latest report" question that is unanswerable today.
+- **Effort**: M to L
+- **Evidence**: find-open-file.md (Simpler Version, Clarity Issues); second-agent.md (Trap); catalog "Cloud-drive expectations vs. today".
 
-### 5. Choosing a recovery file unlocks the drive
+### 5. Share from the file row, with a Shared links list
 
-- **Now:** the file input fills a masked field, then the user clicks "Load key"; Download is dimmed while locked (`screens/12`, `console.tsx:331-350`).
-- **Proposed:** selecting a valid file loads the key and closes the dialog; clicking Download on a locked row opens the unlock dialog.
-- **Saves:** 2 steps. **Effort:** S. **Evidence:** journeys/STORY-030.md.
+- **Now**: Sharing cannot be done in the console; the Files row has Download, Versions, Trash (sharing/01); `share list` prints raw JSON with no URL and revoke takes an id only (sharing.md).
+- **Proposed**: A Share action on the row (expiry default 7 days, Copy link) and a "Shared links" list with created, expires, status, Revoke.
+- **Saves**: makes a 3-step job possible; list and revoke go from 0 to 2 steps in the console.
+- **Effort**: M
+- **Evidence**: sharing.md (Scorecard, Simpler Version).
 
-### 6. Share CLI prints the link
+### 6. One key-status chip and consistent colours
 
-- **Now:** `share` prints a JSON object; `share list` has no path or expiry.
-- **Proposed:** print the URL and expiry by default, with `--json` for the object; add path and expiry to `share list`.
-- **Saves:** a parsing step for every share. **Effort:** S. **Evidence:** journeys/STORY-037.md.
+- **Now**: Key state in a badge, a button and a banner; red is used for both good and bad states; "Download recovery file" shown beside "Key backed up" (download/07, find/07, signup/10).
+- **Proposed**: One status chip (green for loaded or backed up, red for required or not backed up); hide "Download recovery file" once backed up or explain it makes another copy; add a busy label on the clicked row while downloading (download/08).
+- **Saves**: 2 duplicate indicators and a contradiction; 3 journeys (download-decrypt, find-open-file, signup).
+- **Effort**: S
+- **Evidence**: download-decrypt.md (Take-away 07, 08); signup.md (10).
 
-### 7. One name and one unit per concept
+### 7. First-run setup: one `setup` command and a useful Approved page
 
-- **Now:** "drive key" / "recovery key" / "decryption key"; MB vs MiB; "1024 GiB" vs "1.0 TiB"; three names for the console author; "1 agents", "1 drives"; the Files badge counts drives.
-- **Proposed:** pick one term and one unit each; fix the plurals and the badge.
-- **Effort:** S. **Evidence:** redundancy.md.
+- **Now**: Agent runs 5 commands (install, login, credentials export, skill install, check) and must choose a backup path (first-run Scorecard); the Approved card has no link to the console and no status (first-run/02); `/.agent-drive/check.txt` shows as user content (first-run/03); the delegate checkbox is the heaviest element on /connect (01).
+- **Proposed**: One `setup` command folding login, export, skill install and check; Approved page links to the console and says it will update; hide self-test files by default; put the delegate checkbox behind a disclosure on every route.
+- **Saves**: llms.txt steps 6 to 2; 1 dead end on first-run and second-agent (second-agent/05).
+- **Effort**: M
+- **Evidence**: first-run-setup.md (Simpler Version); second-agent.md (Take-away 05).
 
-### 8. Built-in verified archive command
+### 8. Feedback where the action happens (toasts with Undo / Show file, in-app confirms)
 
-- **Now:** the weekly trace archive works through a skill script (`skills/agent-drive-trace-archive/archive-traces.sh` on branch `feat/trace-archive-skill`), which parses CLI JSON with `sed` and `grep`.
-- **Proposed:** `agent-drive archive DIR --drive ID --verify --delete-local [--dry-run]`, with distinct exit codes (the script now exits 3 when files are held back as possible secrets).
-- **Effort:** M. **Evidence:** journeys/STORY-069.md.
+- **Now**: Trash is immediate with no Undo (find/04-accidental-trash, versions/08); the restore notice appears in the page header and does not name the file (versions/04, 07); the revoke notice is above a changed row that is off screen (abb/06); revoking an agent gives no notice (abb/02) and uses native `confirm()` dialogs; the agent row stays "Revoke access" at 0 active keys (abb/01).
+- **Proposed**: Toasts near the action that name the file or agent, with Undo or "Show file"; row-level state after revoke; named in-app confirm for revoke.
+- **Saves**: 4 dead ends; 3 journeys (find-open-file, versions-trash, agents-keys-billing).
+- **Effort**: S to M
+- **Evidence**: versions-trash.md; agents-keys-billing.md; find-open-file.md (Functional note).
 
-### 9. Share management in the console
+### 9. Usage against the plan in one place
 
-- **Now:** no way to create, list or revoke a share from the web.
-- **Proposed:** a Share action on file rows and a shares list per drive.
-- **Effort:** M–L. **Evidence:** redundancy.md, journeys/STORY-037.md.
+- **Now**: Allowance only on Billing; Usage shows no limit (abb/07, 08); 9.5 KB vs 9.4 KiB; "Usage by author" vs "Usage by agent"; plan cards duplicated on Pricing; "EGRESS & COST" card has no figures; "Not connected" in every row (abb/08, which I opened).
+- **Proposed**: Usage shows "9.4 KiB of 5 GiB" and links to Billing; one unit and one name; one plan component; remove empty cards and the "Not connected" column for Free users.
+- **Saves**: 2 screens on "am I near the plan" (3 to 1); 4 duplicated facts.
+- **Effort**: S
+- **Evidence**: agents-keys-billing.md (Scorecard, Take-away 07 to 09, Clarity Issues).
 
-### 10. Show a revoked or expired message without the key fragment
+### 10. Agents and keys as one table; Replace key
 
-- **Now:** a share link opened without its `#k=` fragment says "This link is missing a valid decryption key" even when it was revoked (`screens/11`, `share-client.tsx:67`). With the fragment, the page correctly says "Share link revoked" (checked live).
-- **Proposed:** fetch the share status before checking for the fragment.
-- **Effort:** S. **Evidence:** journeys/STORY-037.md.
+- **Now**: Two tabs with overlapping revoke; neither shows drive or write path (abb/01, 05); rotate takes 11 steps (abb Scorecard); the New key dialog defaults to the first agent and drive (abb/03).
+- **Proposed**: One agent table with drives, permissions, last used and how access was granted; "Replace key" that issues, shows the secret once, and revokes the old key; buttons named by target.
+- **Saves**: rotate 11 to about 3; 1 tab; helps agents-keys-billing and second-agent (second-agent/07, 08).
+- **Effort**: L
+- **Evidence**: agents-keys-billing.md (Simpler Version); second-agent.md (Take-away 07/08).
+
+### 11. One concept, one name (cheap copy pass; do alongside 2 and 3)
+
+- **Now**: drive/workspace/Drives & files; "YOUR NEXT AGENT" tile creates a drive; author vs agent; five names for the drive key; three names for storage (see redundancy.md Hierarchy & IA 1 to 5).
+- **Proposed**: "Drive" for the store, "agent" for the identity, one word for the key, one storage term; replace filler subtitles ("A home for the work...") with plain text.
+- **Saves**: 0 steps; removes the naming confusion on all 8 journeys.
+- **Effort**: S
+- **Evidence**: redundancy.md; signup.md and first-run-setup.md Clarity Issues.
 
 ## Already Minimal
 
-- The recipient side of a share link: open the link, then Download (STORY-037).
-- `agent-drive put LOCAL REMOTE` itself, and the put → download → hash → delete order of the archive script, which holds back rather than prompts (STORY-069).
-- The direct landing → "Start with Free" → sign-up route matches its ideal (STORY-011).
+- Recipient share page: open, click Download, 2 of 2 steps, shows filename, size, local-time expiry and no sign-in; the revoked page has a clear next step (sharing/04, 06; sharing.md). Keep as is.
+- Human side of first-run setup: 3 actions, 1 confirmation, no re-entry; /connect has one orange primary and works on mobile (first-run-setup Scorecard; first-run/01, 05).
+- The `grant` route: owner opens a link and clicks Approve; the card states who offered what in one sentence; no key handling (second-agent/06, called "the best screen").
+- Restore flows: both cost 2 to 3 clicks with no confirmation (versions-trash Verdict). The gaps there are information and feedback (proposal 8), not step count.
+- Smaller items: the key dialog line "Your key stays in this page's memory..." (download/05), the file panel footer "File contents encrypted - Paths and metadata visible to the service" (download Clarity Issues), the Versions text "Restore creates a new current version" (find/04-versions), and the mobile console layout (signup/11, abb/10).
 
-## Not covered
-
-- Stripe checkout and the return trip were not clicked; everything after "Choose developer" comes from code.
-- The empty-state and create/save dialogs were observed live by the lead but not screenshotted.
+No GitHub issues were filed (`--no-issues`).

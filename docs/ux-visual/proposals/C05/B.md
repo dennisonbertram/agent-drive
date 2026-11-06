@@ -1,34 +1,51 @@
-# C05-B Restructure: bottom tab bar plus a single drive switcher
+# C05 / B: Restructure (key state lives on the drive; unlock sheet and drop-anywhere)
 
-Mock: `mock-B.html`, `mock-B.png` (375x812, More sheet open). Content (eyebrow) starts at y=134.
+Pairs with C04/B (drive switcher tile, details pane, Sheet pattern).
 
 ## Change
 
-Treat the phone as an app, not a shrunken sidebar.
+Treat the key as a property of the drive, shown once on the drive switcher tile, and make unlocking a non-modal sheet.
 
-- Fixed bottom bar, 64px, 6 equal slots: Files, Agents, API keys, Usage, Trash, More. "More" opens a bottom sheet with "Billing & limits" and "Activity & deletion" (48px rows). All 7 sections are labelled in plain text.
-- The top header is the brand row plus ONE full-width drive switcher (selected drive, size and file count, "SWITCH") instead of the horizontal bay strip. Tapping opens a sheet listing all drives and "Add a drive (your next agent)".
-- Breadcrumb/topbar removed on phone.
-- Active tab: ink text plus 3px signal-orange top rule.
+1. Key state appears in one place: the drive switcher tile (C04/B), as a status line with a lock icon: red "Locked" or green "Unlocked". No toolbar badge, no banner, no separate Load/Forget button. Backup state is a second line in the tile menu ("Recovery file saved Nov 6" or red "Not backed up: Download recovery file").
+2. Download is always enabled (no disabled state). While locked, Download opens the unlock Sheet anchored to the details pane (desktop: slides over the pane; 390: bottom sheet). Sheet content: a drop target "Drop your recovery file here" with a "Choose file" button; "Paste a key" in a disclosure.
+3. Drop anywhere: a recovery file dropped on the file list while locked shows an overlay "Release to unlock research-bot" and unlocks. Keyboard and touch users use the Choose file button (the drop is an extra, not the only path).
+4. After unlock, the sheet closes and the pending download starts. Errors render in a reserved line inside the sheet ("That recovery file is not for this drive.").
+5. Row busy label while downloading; toast "Saved <name>" when done (same toast as C03).
+6. Remember on this device: a switch in the unlock sheet and in the tile menu, same mechanism as A (non-extractable WebCrypto AES-GCM key plus ciphertext in IndexedDB). Adds an idle lock: the key leaves memory after 30 minutes without use unless remembered.
+7. Tokens: `--ok`, `--danger` as in A; disabled text without opacity.
 
-## Before / after
+## Before / after (1440)
 
-Before: ~320px of header, two scrolling strips. After: header 110px, one non-scrolling control, bottom bar always in thumb reach. Content at y=134.
+```
+ [ research-bot v ]  (lock) Locked        details pane
+ ...                                      2026-11-01.jsonl  [Download]
+ Download ->  +-- Unlock research-bot --------+
+              | Drop your recovery file here  |
+              | [Choose file]                 |
+              | (error line reserved)         |
+              | > Paste a key  [x] Remember   |
+              +-------------------------------+
+```
 
-## Files and selectors
+At 390 the tile lives in the top bar; the sheet rises from the bottom (48 px controls, thumb reachable).
 
-- `console.css` 760px block: `.sidebar nav` becomes `position:fixed; bottom:0; display:grid; grid-template-columns:repeat(6,1fr)`; `.console-shell{padding-bottom:64px}`; hide `.bay-strip` and show a new `.drive-switch` button; new `.more-sheet`, `.scrim`.
-- `console.tsx`: nav gets a "More" `<button aria-haspopup>` and sheet; new `DriveSwitch` using existing `drives`, `selected`, `open('drive')`; keep the desktop bay strip markup (hide by CSS) or render both.
-- Billing and settings routes are separate pages with their own layout, so the bottom bar must be shared (extract a `ConsoleNav`) or those pages show no nav at all. That is a structural change across `console/billing` and `console/settings`.
-- New components, new tokens for bar height and safe-area inset (`env(safe-area-inset-bottom)`).
+## Files touched
 
-## Effort and risk
+`console.tsx` (download, loadKeyFile), new `unlock-sheet.tsx` (uses the C04/B Sheet), new `remembered-key.ts`, `drive-switcher.tsx` from C04/B, `console.css`/`console-panels.css` (remove `.keyline`, `.badge.positive`), `globals.css` tokens. Effort: L (M if built after C04/B).
 
-Large (1 to 2 days). Risks: the fixed bar competes with page-level primary actions and with the on-screen keyboard; billing and settings need the shared nav; a second place to maintain drive logic; "More" hides two destinations one tap deeper (billing is a core paid-plan path); six slots at 375px leave 62px per label ("API keys" at 10.5px is tight); focus management for two sheets.
+## Risks
 
-## Acceptance
+- Depends on C04/B shipping the Sheet and switcher; if C04 picks A or C, use C05/A or C05/C instead.
+- Drop-anywhere handler must call `preventDefault` only for files and only while locked, so it does not swallow browser drag behavior.
+- Same storage trade-off as A for Remember: anyone with this browser profile, or script on the origin, can use the stored key. Say so next to the switch.
+- Idle lock can surprise a user mid-task; show a toast "Locked after 30 minutes. Click Download to unlock."
 
-- All 7 reachable and labelled: yes, all visible or one tap away, no scrolling.
-- Selected drive fully visible: yes, always, full name.
-- No clipped labels: yes.
-- Content at or above y=260: yes (134), best of three.
+## Acceptance criteria
+
+1. No disabled Download; one prompt with file first: items 2-3.
+2. File choice or drop loads key and starts download; paste in a disclosure: items 3-4.
+3. 0 px shift and plain error: item 4.
+4. Busy label and toast: item 5.
+5. One signal (tile status line), green/red, recovery download shown only when not backed up: item 1.
+6. Remember on this device: item 6.
+7. Contrast: item 7.

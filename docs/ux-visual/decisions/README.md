@@ -1,21 +1,43 @@
-# UX visual decisions — 2026-11-03
+# Decisions index (ux-visual run 2)
 
-Judged by the lead with `solution-rubric.md`, in place of the full judge panel (one judge per
-lens plus external models), to keep this run proportionate. Proposals are in `../proposals/`.
-Copy marked TBD in any proposal is left out; product wording decisions stay with the owner.
+Phase 5 only. External MUSE Wonder and Gemini Argon judges were skipped in this run; each decision uses the three internal judge lenses (usability, visual craft, engineering). Implementation is done in /ux-auto-improve.
 
-| Cluster                        | Chosen                                                                                                                              | Why it wins                                                                                                   | Not chosen, and why                                                                                                                                  |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VC-1 Contrast                  | **A** — three text-colour tokens in `globals.css` (`--muted #5f695f` and siblings), selectors switched to them                      | Meets WCAG AA on every measured selector with the smallest diff; tokens fix the root cause (hard-coded greys) | B removes a text tier and restructures rows (more risk, no extra contrast gain); C renames the whole colour system (large churn for the same result) |
-| VC-2 Type scale                | **A** — six size tokens, every existing size snapped to the nearest, minimum 12px for text                                          | Removes 8–10px text without redesigning screens; one place to change sizes later                              | B adds a density mode (new concept); C changes the working size to 14px everywhere (visible redesign, needs owner sign-off)                          |
-| VC-3 Settings scroll trap      | **A** — remove the audit log's inner scroll region so the page has one scroll owner                                                 | Directly meets "single scroll owner"; no navigation change                                                    | B/C reorder the page or add a route — reasonable later, but they change information architecture already under issue #31                             |
-| VC-4 Landing CLI snippet       | **A without the output line** — wrap the command and add a Copy button                                                              | Command fully visible at 375px, no horizontal scroll; copy is the conventional affordance                     | The output line needs invented CLI output (TBD); B/C restructure the hero (deferred VC-7 territory)                                                  |
-| VC-5 Pricing allowance wording | **A, wording part only** — when `S3_EGRESS_METERING=none`, plan cards say downloads are not charged instead of listing an allowance | Removes the contradiction between cards and the overage table using a fact the app already knows              | Moving the filled button and a "Recommended" label are product decisions (TBD); B/C rebuild the page                                                 |
+## Decisions
 
-## Acceptance criteria carried into implementation
+| Cluster | Decision                                                                                                                                                    |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C01     | A (shared SiteHeader, details menu at 390) + hero secondary "Create a free account" + SiteHeader above auth cards + shared auth footer line                 |
+| C02     | B (shared ListState and one status value per list), first; Files and Trash first; A's friendlyError and min-height; keep footer line                        |
+| C03     | A (menu, Toast with Undo, ConfirmDialog, in-place revoke) with C's wording, Dropbox version labels, Trash as danger item; receipt dropped (C06)             |
+| C04     | A + C grafts (breadcrumb with drive dropdown, view switcher in URL, sort, icons, one primary, remembered drive, 56-60 px mobile rows, load cap); covers C14 |
+| C05     | A (Download never disabled, unlock dialog, one key chip, --ok/--danger) + 30 min idle lock; "Remember on this device" deferred                              |
+| C06     | A (one "Download recovery file and continue" that POSTs key-backup) + C's Step line, sentence and hidden key                                                |
+| C07     | A + C's order (heading, capability list, code above Approve), delegate disclosure, existing-drive inline step, polling; no Deny                             |
+| C08     | A (Share in menu and row, dialog with expiry, links for this file, Shared view) + no-key POST test                                                          |
 
-- VC-1: every text selector measured in `problems.md` reaches ≥ 4.5:1 (≥ 3:1 for ≥ 24px or ≥ 18.66px bold); disabled controls exempt.
-- VC-2: no rendered text below 12px on landing, pricing, share, console, billing and settings; font sizes come from the six tokens.
-- VC-3: `/console/settings` has one scroll owner; wheel scrolling over the audit log reaches "Delete your data".
-- VC-4: at 375×812 the landing command is fully visible without horizontal scroll; Copy places the exact command on the clipboard and announces success.
-- VC-5: with `S3_EGRESS_METERING=none`, no plan card lists a download allowance; without it, cards are unchanged.
+## Build order
+
+C02 -> C06 -> C05 -> C04 -> C03 -> C08 -> C07 -> C01.
+C07 and C01 do not touch `console.tsx` and can run in parallel with each other and with the console clusters. Clusters editing `console.tsx` run sequentially.
+
+## Shared tokens and components
+
+- Tokens `--ok` (green) and `--danger` (red): defined once in `apps/web/app/globals.css` (by C02/C05, whichever lands first, `--danger` in C02), documented in `docs/design/spec-brief.md`; status only, never decoration. Orange stays for the primary action and LED.
+- `ListState` + `useListLoad` (C02): used by C04 rows and the Shared view.
+- `Toast` and `ConfirmDialog` on the existing `Dialog` (C03): used by C05 (Saved), C06 (recovery downloaded), C08 (Link copied).
+- Row "⋯" menu (C03, keyboard operable): holds Versions, Share (C08), Trash.
+- View switcher `Browse | Recent | Shared` (C04): Shared filled by C08.
+- Key chip and unlock Dialog with `pendingAction` (C05): used by Download and Share; chip menu shows backup state set by C06.
+- Backup helper (C06): download plus POST key-backup, shared by banner action and receipt.
+- `SiteHeader` (C01).
+
+## Conflicts resolved
+
+- Receipt dialog: C06 owns it; C03's receipt criterion dropped.
+- Banner vs chip: C05 chip replaces the banner, badge and Load/Forget; C06's "Key backed up" is the chip menu line.
+- Drive strip: replaced by C04's breadcrumb drive dropdown; account tabs show no drives.
+- Skeleton column template (C02) vs C04 columns: template exposed as a CSS variable.
+- Deny on /connect: not added (owner decision), despite judges proposing it.
+- Remember on this device: deferred out of C05 to its own PR (opt-in, off by default, warning; no CSP found).
+- Trash share notice (C03) depends on C08's background share count.
+- Judges' picks differing from the lead: C04 usability judge picked C; C05 usability judge picked C; C07 judges split. Lead decisions follow the notes in each file.
