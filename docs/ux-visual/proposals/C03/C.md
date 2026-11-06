@@ -9,7 +9,7 @@
 
 ## Change
 Apply those conventions directly, no new structure beyond them:
-- Hover (and always on touch) reveals an inline action pair: Download as a text button, `⋮` as a 32 px (44 on touch) icon button opening a menu: Open versions, Share, Move to Trash (danger text, below a divider). Trash is not a visible row button.
+- Each row shows an inline action pair, always visible: Download as a text button, `⋮` as a 32 px (44 on touch) icon button opening a menu: Open versions, Share, Move to Trash (danger text, below a divider). Trash is not a visible row button.
 - Snackbar component `.toast` (bottom-left, 8 s, Undo or Show file location link) added to the design system; replaces `notice` for file results.
 - Revoke agent / revoke key: modal "Revoke research-bot?" with "2 active keys will stop working immediately." Cancel / Revoke (danger fill). Row becomes a "Revoked" chip; the row action disappears.
 - Trash toast mentions the share consequence like Drive's "shared files stop being visible": "Moved b.txt to Trash. Its share links stop working. Undo." (only when the file has shares; TBD whether the list payload carries that).
@@ -20,7 +20,7 @@ Apply those conventions directly, no new structure beyond them:
 apps/web/app/(app)/console/console.tsx, console.css (.toast, .row-menu, hover reveal with `@media (hover:none)` always visible), globals.css (--danger).
 
 ## Effort and risk
-M. Risk: hover-only icons hurt discoverability and keyboard use, so the `⋮` button stays visible at all times and only the Download text hides on hover is rejected; keep both always visible. Gmail-style no-confirm trash relies on Undo working: capture drive id and path, and handle the 8 s window across tab switches.
+M. Risk: hover-only icons hurt discoverability and keyboard use, so both Download and the `⋮` button stay visible at all times (no hover-only reveal). Gmail-style no-confirm trash relies on Undo working: capture drive id and path, and handle the 8 s window across tab switches.
 
 ## Acceptance criteria
 1. Snackbar naming the file with Undo, bottom-left, under 100 ms, 8 s: yes.
