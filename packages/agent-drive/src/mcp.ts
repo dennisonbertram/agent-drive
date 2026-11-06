@@ -4,7 +4,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { AgentDriveApiError, AgentDriveClient, publicOutput } from './client.js';
 import { conflictHint } from './check.js';
-import { resolveConnection, driveKeyEnvironmentName, machineName } from './config.js';
+import {
+  resolveConnection,
+  resolveDriveId,
+  driveKeyEnvironmentName,
+  machineName,
+} from './config.js';
 import { reportEnvBackups } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 
@@ -109,20 +114,37 @@ async function safely(action: () => Promise<unknown>, untrusted = true) {
 
 function printableText(bytes: Uint8Array) {
   if (bytes.byteLength > 64 * 1024)
-    throw new McpInputError('Large or binary files require outputPath.');
+    throw new McpInputError('Large or binary files require the download tool.');
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    throw new McpInputError('Binary or non-UTF-8 files require outputPath.');
+    throw new McpInputError('Binary or non-UTF-8 files require the download tool.');
   }
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
-    throw new McpInputError('Binary files require outputPath.');
+    throw new McpInputError('Binary files require the download tool.');
   }
   return text;
 }
 
-export function createMcpServer(client: AgentDriveClient) {
+/** Maps an optional driveId argument to a drive ID, or throws a message for the agent. */
+type DriveResolver = (driveId: string | undefined) => string;
+
+export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveResolver) {
+  const drive = (driveId: string | undefined) => {
+    try {
+      if (resolveDrive) return resolveDrive(driveId);
+    } catch (error) {
+      throw new McpInputError(
+        (error instanceof Error ? error.message : 'Unable to choose a drive.').replace(
+          '--drive ID',
+          'driveId',
+        ),
+      );
+    }
+    if (!driveId) throw new McpInputError('A driveId is required.');
+    return driveId;
+  };
   const server = new McpServer({ name: 'agent-drive', version: '0.0.0' });
   server.registerTool(
     'whoami',
@@ -139,7 +161,7 @@ export function createMcpServer(client: AgentDriveClient) {
       description:
         'Encrypt and upload a text or local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.',
       inputSchema: {
-        driveId: id,
+        driveId: id.optional(),
         path,
         text: z.string().optional(),
         localPath: z.string().optional(),
@@ -149,7 +171,7 @@ export function createMcpServer(client: AgentDriveClient) {
         description: z.string().optional(),
         userId: z.string().optional(),
       },
-      annotations: { destructiveHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(async () => {
@@ -161,7 +183,7 @@ export function createMcpServer(client: AgentDriveClient) {
           args.text !== undefined
             ? new TextEncoder().encode(args.text)
             : await readFile(args.localPath!);
-        const version = await client.put(args.driveId, args.path, bytes, {
+        const version = await client.put(drive(args.driveId), args.path, bytes, {
           ...(args.overwrite ? { mode: 'overwrite' as const } : {}),
           ...(args.ifVersionId
             ? { mode: 'overwrite' as const, ifVersionId: args.ifVersionId }
@@ -177,54 +199,63 @@ export function createMcpServer(client: AgentDriveClient) {
     'get',
     {
       description:
-        'Download and fully decrypt a file. Use outputPath for large or binary data; otherwise returns small printable UTF-8 text.',
-      inputSchema: {
-        driveId: id,
-        path,
-        versionId: z.string().optional(),
-        outputPath: z.string().optional(),
-      },
-      annotations: { openWorldHint: true },
+        'Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.',
+      inputSchema: { driveId: id.optional(), path, versionId: z.string().optional() },
+      annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(async () => {
         const result = await client.get(
-          args.driveId,
+          drive(args.driveId),
           args.path,
           args.versionId ? { versionId: args.versionId } : {},
         );
-        let text: string | undefined;
-        if (args.outputPath) {
-          const handle = await open(args.outputPath, 'wx', 0o600);
-          try {
-            await handle.chmod(0o600);
-            await handle.writeFile(result.bytes);
-          } catch (error) {
-            await handle.close();
-            await rm(args.outputPath, { force: true });
-            throw error;
-          }
+        return { version: result.version, text: printableText(result.bytes) };
+      }),
+  );
+  server.registerTool(
+    'download',
+    {
+      description:
+        'Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.',
+      inputSchema: {
+        driveId: id.optional(),
+        path,
+        outputPath: z.string().min(1),
+        versionId: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async (args) =>
+      safely(async () => {
+        const result = await client.get(
+          drive(args.driveId),
+          args.path,
+          args.versionId ? { versionId: args.versionId } : {},
+        );
+        const handle = await open(args.outputPath, 'wx', 0o600);
+        try {
+          await handle.chmod(0o600);
+          await handle.writeFile(result.bytes);
+        } catch (error) {
           await handle.close();
-        } else {
-          text = printableText(result.bytes);
+          await rm(args.outputPath, { force: true });
+          throw error;
         }
-        return {
-          version: result.version,
-          ...(text !== undefined ? { text } : {}),
-          ...(args.outputPath ? { outputPath: args.outputPath } : {}),
-        };
+        await handle.close();
+        return { version: result.version, outputPath: args.outputPath };
       }),
   );
   server.registerTool(
     'list',
     {
       description: 'List one page of file metadata in a drive.',
-      inputSchema: { driveId: id, prefix: z.string().optional(), ...page, ...filters },
+      inputSchema: { driveId: id.optional(), prefix: z.string().optional(), ...page, ...filters },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(() =>
-        client.list(args.driveId, args.prefix, args.limit, args.cursor, {
+        client.list(drive(args.driveId), args.prefix, args.limit, args.cursor, {
           ...(args.tag ? { tag: args.tag } : {}),
           ...(args.agentId ? { agentId: args.agentId } : {}),
           ...(args.machine ? { machine: args.machine } : {}),
@@ -236,28 +267,33 @@ export function createMcpServer(client: AgentDriveClient) {
     'move',
     {
       description: 'Move a remote file to a new path.',
-      inputSchema: { driveId: id, path, destinationPath: path, userId: z.string().optional() },
-      annotations: { openWorldHint: true },
+      inputSchema: {
+        driveId: id.optional(),
+        path,
+        destinationPath: path,
+        userId: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) =>
-      safely(() => client.move(args.driveId, args.path, args.destinationPath, args.userId)),
+      safely(() => client.move(drive(args.driveId), args.path, args.destinationPath, args.userId)),
   );
   server.registerTool(
     'copy',
     {
       description: 'Copy a remote file or version to a new path.',
       inputSchema: {
-        driveId: id,
+        driveId: id.optional(),
         path,
         destinationPath: path,
         versionId: z.string().optional(),
         userId: z.string().optional(),
       },
-      annotations: { openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async (args) =>
       safely(() =>
-        client.copy(args.driveId, args.path, args.destinationPath, {
+        client.copy(drive(args.driveId), args.path, args.destinationPath, {
           ...(args.versionId ? { versionId: args.versionId } : {}),
           ...(args.userId ? { userId: args.userId } : {}),
         }),
@@ -267,35 +303,41 @@ export function createMcpServer(client: AgentDriveClient) {
     'delete',
     {
       description: 'Soft-delete a remote file.',
-      inputSchema: { driveId: id, path, userId: z.string().optional() },
-      annotations: { destructiveHint: true, openWorldHint: true },
+      inputSchema: { driveId: id.optional(), path, userId: z.string().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async (args) => safely(() => client.delete(args.driveId, args.path, args.userId)),
+    async (args) => safely(() => client.delete(drive(args.driveId), args.path, args.userId)),
   );
   server.registerTool(
     'versions',
     {
       description: 'List one page of versions for a remote path.',
-      inputSchema: { driveId: id, path, ...page },
+      inputSchema: { driveId: id.optional(), path, ...page },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async (args) => safely(() => client.versions(args.driveId, args.path, args.limit, args.cursor)),
+    async (args) =>
+      safely(() => client.versions(drive(args.driveId), args.path, args.limit, args.cursor)),
   );
   server.registerTool(
     'restore',
     {
       description: 'Restore the current file or a selected version.',
       inputSchema: {
-        driveId: id,
+        driveId: id.optional(),
         path,
         versionId: z.string().optional(),
         userId: z.string().optional(),
       },
-      annotations: { destructiveHint: true, openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(async () => {
-        const result = await client.restore(args.driveId, args.path, args.versionId, args.userId);
+        const result = await client.restore(
+          drive(args.driveId),
+          args.path,
+          args.versionId,
+          args.userId,
+        );
         return {
           ...result,
           version: result.version,
@@ -306,13 +348,13 @@ export function createMcpServer(client: AgentDriveClient) {
     'search',
     {
       description: 'Search one page of file versions by text and attribution metadata.',
-      inputSchema: { driveId: id, q: z.string().optional(), ...filters, ...page },
+      inputSchema: { driveId: id.optional(), q: z.string().optional(), ...filters, ...page },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(() =>
         client.search(
-          args.driveId,
+          drive(args.driveId),
           {
             ...(args.q ? { q: args.q } : {}),
             ...(args.tag ? { tag: args.tag } : {}),
@@ -331,7 +373,7 @@ export function createMcpServer(client: AgentDriveClient) {
       description:
         "List drive events in order with the author agent's name. Pass the returned latestCursor back as cursor to get only newer events (since is ignored when cursor is set). waitSeconds blocks up to that long for the next event.",
       inputSchema: {
-        driveId: id,
+        driveId: id.optional(),
         // validated by the server only when no cursor is sent
         since: z.string().max(128).optional(),
         waitSeconds: z.number().int().min(1).max(30).optional(),
@@ -342,14 +384,14 @@ export function createMcpServer(client: AgentDriveClient) {
     async (args, extra) =>
       safely(() =>
         args.waitSeconds
-          ? client.waitForRecent(args.driveId, {
+          ? client.waitForRecent(drive(args.driveId), {
               waitMs: args.waitSeconds * 1000,
               signal: extra.signal,
               ...(args.since ? { since: args.since } : {}),
               ...(args.cursor ? { cursor: args.cursor } : {}),
               ...(args.limit ? { limit: args.limit } : {}),
             })
-          : client.recent(args.driveId, args.since, args.limit, args.cursor),
+          : client.recent(drive(args.driveId), args.since, args.limit, args.cursor),
       ),
   );
   server.registerTool(
@@ -357,16 +399,16 @@ export function createMcpServer(client: AgentDriveClient) {
     {
       description: 'Create an expiring encrypted share link for a remote file.',
       inputSchema: {
-        driveId: id,
+        driveId: id.optional(),
         path,
         versionId: z.string().optional(),
         expiresAt: z.string().datetime().optional(),
       },
-      annotations: { openWorldHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async (args) =>
       safely(() =>
-        client.createShare(args.driveId, args.path, {
+        client.createShare(drive(args.driveId), args.path, {
           ...(args.versionId ? { versionId: args.versionId } : {}),
           ...(args.expiresAt ? { expiresAt: args.expiresAt } : {}),
         }),
@@ -388,6 +430,8 @@ export async function runMcp() {
       process.env.AGENT_DRIVE_KEY?.trim() ||
       saved.driveKeys?.[driveId],
   });
-  const server = createMcpServer(client);
+  const server = createMcpServer(client, (driveId) =>
+    resolveDriveId(driveId, saved, connection.apiUrl),
+  );
   await server.connect(new StdioServerTransport());
 }

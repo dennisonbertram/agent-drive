@@ -4,7 +4,9 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
 [
   {
     "annotations": {
+      "destructiveHint": false,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Copy a remote file or version to a new path.",
     "inputSchema": {
@@ -30,7 +32,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
         "destinationPath",
       ],
@@ -42,6 +43,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
     "annotations": {
       "destructiveHint": true,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Soft-delete a remote file.",
     "inputSchema": {
@@ -60,7 +62,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
       ],
       "type": "object",
@@ -69,9 +70,11 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
   },
   {
     "annotations": {
+      "destructiveHint": false,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
-    "description": "Download and fully decrypt a file. Use outputPath for large or binary data; otherwise returns small printable UTF-8 text.",
+    "description": "Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -80,6 +83,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "string",
         },
         "outputPath": {
+          "minLength": 1,
           "type": "string",
         },
         "path": {
@@ -91,7 +95,35 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
+        "path",
+        "outputPath",
+      ],
+      "type": "object",
+    },
+    "name": "download",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
         "path",
       ],
       "type": "object",
@@ -135,16 +167,15 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "string",
         },
       },
-      "required": [
-        "driveId",
-      ],
       "type": "object",
     },
     "name": "list",
   },
   {
     "annotations": {
+      "destructiveHint": true,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Move a remote file to a new path.",
     "inputSchema": {
@@ -167,7 +198,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
         "destinationPath",
       ],
@@ -179,6 +209,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
     "annotations": {
       "destructiveHint": true,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Encrypt and upload a text or local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.",
     "inputSchema": {
@@ -218,7 +249,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
       ],
       "type": "object",
@@ -256,9 +286,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "integer",
         },
       },
-      "required": [
-        "driveId",
-      ],
       "type": "object",
     },
     "name": "recent",
@@ -267,6 +294,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
     "annotations": {
       "destructiveHint": true,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Restore the current file or a selected version.",
     "inputSchema": {
@@ -288,7 +316,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
       ],
       "type": "object",
@@ -332,16 +359,15 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "string",
         },
       },
-      "required": [
-        "driveId",
-      ],
       "type": "object",
     },
     "name": "search",
   },
   {
     "annotations": {
+      "destructiveHint": false,
       "openWorldHint": true,
+      "readOnlyHint": false,
     },
     "description": "Create an expiring encrypted share link for a remote file.",
     "inputSchema": {
@@ -365,7 +391,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
       ],
       "type": "object",
@@ -399,7 +424,6 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
         },
       },
       "required": [
-        "driveId",
         "path",
       ],
       "type": "object",
