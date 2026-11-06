@@ -1,0 +1,47 @@
+[
+  {
+    "id": "F-009-01",
+    "story_id": "STORY-009",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Copy accuracy",
+    "score": "warn",
+    "description": "llms.txt tells the agent to say 'There is nothing else for the human to choose', but the /connect page shows an optional 'Let this agent add other agents to its drives' checkbox and an 'Add to an existing drive instead' link. A human who has been told there is nothing to choose may stop to wonder whether the checkbox is required.",
+    "expected": "Say 'nothing is required beyond Approve; the checkbox and drive link are optional'.",
+    "actual": "Copy says there is nothing to choose.",
+    "screenshot": "screenshots/step-6-connect.png",
+    "suggested_fix": "Reword llms.txt step 2, and mark the checkbox as optional on the page.",
+    "files_likely_involved": [
+      "apps/web/app/llms.txt/route.ts",
+      "apps/web/app/(app)/connect/connect.tsx"
+    ]
+  },
+  {
+    "id": "F-009-02",
+    "story_id": "STORY-009",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Component consistency / layout shift",
+    "score": "warn",
+    "description": "In the landing hero the main Copy button is an orange solid button that changes width (~70px to ~82px) when it becomes 'Copied', moving its left edge by about 12px; the second copy control right below is a small outlined 'COPY' chip. Two different copy button styles in one block.",
+    "expected": "Fixed-width copy button; one copy style.",
+    "actual": "Width shift on click; two styles.",
+    "screenshot": "screenshots/step-1-copy.png",
+    "suggested_fix": "Give the button a min-width wide enough for 'Copied'; reuse one Copy component.",
+    "files_likely_involved": ["apps/web/app/(marketing)/page.tsx", "apps/web/app/globals.css"]
+  },
+  {
+    "id": "F-009-03",
+    "story_id": "STORY-009",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Spacing consistency",
+    "score": "warn",
+    "description": "Delegate checkbox help text is about 3px above the Approve button on /connect (same as F-006-01).",
+    "expected": "12-16px gap.",
+    "actual": "About 3px.",
+    "screenshot": "screenshots/step-6-connect.png",
+    "suggested_fix": "Add margin above the primary button.",
+    "files_likely_involved": ["apps/web/app/(app)/connect/connect.tsx", "apps/web/app/globals.css"]
+  }
+]

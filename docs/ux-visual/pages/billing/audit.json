@@ -1,0 +1,306 @@
+{
+  "1440x900/default": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 1708,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 1410,
+          "bottom": 1453
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 6, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 26, 28, 32, 44, 48],
+        "offScale": [6, 7, 10, 13, 14, 18, 22, 26],
+        "nearDupes": [
+          [4, 6],
+          [6, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "14px",
+          "11px",
+          "52px",
+          "16px",
+          "32px",
+          "13px",
+          "20px",
+          "12px",
+          "15px",
+          "44px",
+          "28px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "14px/400": 1,
+          "14px/500": 6,
+          "11px/500": 14,
+          "52px/500": 1,
+          "16px/400": 1,
+          "32px/500": 3,
+          "13px/400": 90,
+          "20px/500": 2,
+          "12px/500": 3,
+          "15px/400": 4,
+          "44px/500": 3,
+          "28px/500": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [
+          [568, 570],
+          [936, 938]
+        ]
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Settings\"",
+          "w": 49,
+          "h": 21
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "768x1024/default": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 2436,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 2240,
+          "bottom": 2283
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [4, 6, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28, 32, 44],
+        "offScale": [6, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 6],
+          [6, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "14px",
+          "11px",
+          "38px",
+          "16px",
+          "23px",
+          "13px",
+          "20px",
+          "12px",
+          "15px",
+          "44px",
+          "28px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "14px/400": 1,
+          "14px/500": 6,
+          "11px/500": 14,
+          "38px/500": 1,
+          "16px/400": 1,
+          "23px/500": 3,
+          "13px/400": 90,
+          "20px/500": 2,
+          "12px/500": 3,
+          "15px/400": 4,
+          "44px/500": 3,
+          "28px/500": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": [[417, 419]]
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Settings\"",
+          "w": 49,
+          "h": 21
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "390x844/default": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 4547,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [
+        {
+          "el": "button.button.primary \"Save spending controls\"",
+          "top": 2811,
+          "bottom": 2854
+        }
+      ],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "p.billing-caption \"Storage and observed transfers\"",
+          "w": 300,
+          "h": 129,
+          "fillPct": 0,
+          "pctOfViewport": 12
+        }
+      ],
+      "spacing": {
+        "observed": [3, 4, 6, 7, 8, 10, 12, 13, 14, 16, 18, 20, 22, 24, 28],
+        "offScale": [3, 6, 7, 10, 13, 14, 18, 22],
+        "nearDupes": [
+          [4, 6],
+          [6, 7],
+          [7, 8],
+          [8, 10],
+          [10, 12],
+          [12, 13],
+          [13, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": [
+          "17px",
+          "13px",
+          "11px",
+          "32px",
+          "16px",
+          "22px",
+          "20px",
+          "12px",
+          "15px",
+          "44px",
+          "14px",
+          "28px"
+        ],
+        "sizes": {
+          "17px/600": 1,
+          "13px/400": 75,
+          "13px/500": 17,
+          "11px/500": 14,
+          "32px/500": 1,
+          "16px/400": 1,
+          "22px/500": 3,
+          "20px/500": 2,
+          "12px/500": 3,
+          "15px/400": 4,
+          "44px/500": 3,
+          "14px/500": 5,
+          "28px/500": 1,
+          "12px/400": 2
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 114,
+          "h": 20
+        },
+        {
+          "el": "a \"Settings\"",
+          "w": 46,
+          "h": 20
+        },
+        {
+          "el": "a \"AGENT DRIVE\"",
+          "w": 86,
+          "h": 15
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [
+        {
+          "el": "tr \"AGENTRETAINED STORAGEOBSERVED \"",
+          "spillPx": 470
+        }
+      ],
+      "wrappedControls": []
+    }
+  }
+}

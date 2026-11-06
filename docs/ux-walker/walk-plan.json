@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-11-06T15:00:00Z",
+  "url": "http://localhost:3500",
+  "total_stories": 97,
+  "walking": 27,
+  "skipping": 70,
+  "re_verifying": 0,
+  "note": "Core stories for the owner's goals (sign-up, setup, console as a cloud drive, download, versions/trash, sharing, second agent, keys, billing). Machine heavily loaded: three lanes, one walker agent per lane, each in its own agent-browser session. Report only: no quick fixes, no GitHub issues.",
+  "lanes": {
+    "A-signup-setup": [
+      "STORY-001",
+      "STORY-002",
+      "STORY-003",
+      "STORY-006",
+      "STORY-007",
+      "STORY-009",
+      "STORY-010",
+      "STORY-012"
+    ],
+    "B-drive-download-versions": [
+      "STORY-017",
+      "STORY-018",
+      "STORY-019",
+      "STORY-022",
+      "STORY-024",
+      "STORY-026",
+      "STORY-029",
+      "STORY-049",
+      "STORY-050"
+    ],
+    "C-share-agents-keys-billing": [
+      "STORY-042",
+      "STORY-044",
+      "STORY-046",
+      "STORY-056",
+      "STORY-057",
+      "STORY-062",
+      "STORY-065",
+      "STORY-066",
+      "STORY-072",
+      "STORY-073"
+    ]
+  }
+}

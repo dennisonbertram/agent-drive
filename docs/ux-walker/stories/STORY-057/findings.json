@@ -1,0 +1,50 @@
+[
+  {
+    "id": "F-STORY-057-01",
+    "story_id": "STORY-057",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Feedback / state sync",
+    "score": "warn",
+    "description": "A /connect page opened before the agent runs grant never updates; it keeps showing the new-drive form (including 'Add to an existing drive instead'). The owner must reload to see the offer. If they approve the stale page the result is a brand-new drive, not the drive the agent offered.",
+    "expected": "The page picks up the offer (polling or refresh on approve) or warns that the request changed, as it does for changed offers.",
+    "actual": "step-3a-stale-page.png shows no 'Offered by' text after the grant.",
+    "screenshot": "screenshots/step-3a-stale-page.png",
+    "suggested_fix": "Poll the pairing request every few seconds while unapproved, or have Approve revalidate and return 'The request changed'.",
+    "files_likely_involved": [
+      "apps/web/app/connect/connect-form.tsx",
+      "apps/web/app/api/connect/route.ts"
+    ]
+  },
+  {
+    "id": "F-STORY-057-02",
+    "story_id": "STORY-057",
+    "severity": "medium",
+    "category": "hierarchy",
+    "criterion": "Importance encoding",
+    "score": "warn",
+    "description": "The permissions the owner is approving (drive, read/write, write path) sit in a grey run-on sentence with the same weight as boilerplate. When the offer changes, the notice 'The request changed; review it again.' is the same neutral box and the changed value is not highlighted, so a widened offer (for example read to read+write) looks just like a narrowed one.",
+    "expected": "Show drive, access and write path as labelled rows (like AGENT, MACHINE); highlight what changed.",
+    "actual": "step-3-offered.png and var-changed.png",
+    "screenshot": "screenshots/var-changed.png",
+    "suggested_fix": "Add DRIVE / ACCESS / WRITES rows to the details table; style the changed notice as a warning.",
+    "files_likely_involved": ["apps/web/app/connect/connect-form.tsx", "apps/web/app/globals.css"]
+  },
+  {
+    "id": "F-STORY-057-03",
+    "story_id": "STORY-057",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Information stated once / format",
+    "score": "warn",
+    "description": "The CLI prints the request time as raw ISO UTC ('made 2026-11-06T19:04:11.325Z') while the page shows the same moment as '11/6/2026, 2:04:11 PM' local time, so the owner cannot easily match the two. Also the offer says 'drive research-bot', which is ambiguous when the agent and the drive share a name.",
+    "expected": "Same time format (or a relative 'a minute ago') in both places; label 'Drive: research-bot'.",
+    "actual": "As described.",
+    "screenshot": "screenshots/step-3-offered.png",
+    "suggested_fix": "Format time as local in the CLI, or show the UTC value with zone on the page.",
+    "files_likely_involved": [
+      "packages/agent-drive/src/commands/grant.ts",
+      "apps/web/app/connect/connect-form.tsx"
+    ]
+  }
+]
