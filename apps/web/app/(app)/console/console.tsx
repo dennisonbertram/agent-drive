@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type FocusEvent,
   type FormEvent,
   type ReactNode,
 } from 'react';
@@ -114,13 +115,17 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return data as T;
 }
 
-function ConnectAgentPanel({ open }: { open: boolean }) {
+function useAgentInstruction() {
   const origin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
     () => 'https://agentdrive.xyz',
   );
-  const instruction = `Set up Agent Drive: ${origin}/llms.txt`;
+  return `Set up Agent Drive: ${origin}/llms.txt`;
+}
+
+function ConnectAgentPanel({ open }: { open: boolean }) {
+  const instruction = useAgentInstruction();
   const snippets = [
     ['Claude Code', 'claude mcp add agent-drive -- agent-drive mcp'],
     [
@@ -237,11 +242,12 @@ function Dialog({
     const opener = document.activeElement as HTMLElement | null;
     dialog?.showModal();
     // Land on the first field, or the Copy button of a secret receipt, not on Close.
-    dialog
-      ?.querySelector<HTMLElement>(
+    (
+      dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
+      dialog?.querySelector<HTMLElement>(
         'input:not([type=checkbox]):not([type=file]):not([readonly]), select, .copy-button, .version-row button',
       )
-      ?.focus();
+    )?.focus();
     return () => {
       dialog?.close();
       // Give focus back to whatever opened the dialog, unless it has left the page.
@@ -311,6 +317,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     file.path.toLowerCase().includes(filter.toLowerCase()),
   );
   const drive = drives.find((item) => item.id === selected);
+  const agentInstruction = useAgentInstruction();
   const origin =
     typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
@@ -528,20 +535,40 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setKeyInput(candidate.key);
   }
 
+  // Saves the recovery file and records only the method; the key never leaves this page.
+  async function backUpDriveKey(driveId: string, key: string) {
+    save(
+      new Blob([JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2)], {
+        type: 'application/json',
+      }),
+      `agent-drive-${driveId}.key.json`,
+    );
+    let recorded: { keyBackupAt: string; keyBackupMethod: string };
+    try {
+      recorded = await api(`drives/${driveId}/key-backup`, 'POST', { method: 'file' });
+    } catch {
+      throw new Error(
+        'Recovery file downloaded, but the backup was not recorded. Use Download recovery file to try again.',
+      );
+    }
+    // Patch this drive from the response so a failing list or usage call cannot hide the backup.
+    setDrives((current) =>
+      current.map((item) =>
+        item.id === driveId
+          ? {
+              ...item,
+              key_backup_at: recorded.keyBackupAt,
+              key_backup_method: recorded.keyBackupMethod,
+            }
+          : item,
+      ),
+    );
+    setNotice('Recovery file downloaded. Store it in a password manager.');
+  }
+
   async function downloadRecoveryFile() {
     const key = driveKeys[selected];
-    if (!key) return;
-    save(
-      new Blob(
-        [JSON.stringify({ format: 'agent-drive-key-v1', driveId: selected, key }, null, 2)],
-        { type: 'application/json' },
-      ),
-      `agent-drive-${selected}.key.json`,
-    );
-    // Only the method is reported; the key never leaves this page.
-    await api(`drives/${selected}/key-backup`, 'POST', { method: 'file' });
-    await refresh();
-    setNotice('Recovery file saved. Store it in a password manager or another secure location.');
+    if (key) await backUpDriveKey(selected, key);
   }
 
   const errorBanner = error && (
@@ -710,9 +737,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               >
                 Refresh
               </button>
-              {tab === 'Files' && (
+              {tab === 'Files' && drives.length > 0 && (
                 <button
-                  className={`button ${drives.length ? 'primary' : 'secondary'}`}
+                  className="button primary"
                   disabled={busy || !ready}
                   onClick={() => open('drive')}
                 >
@@ -758,25 +785,37 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               {tab === 'Files' && !drives.length && (
                 <section className="onboarding panel">
                   <BrandLogo className="onboarding-logo" />
-                  <p className="eyebrow">A LITTLE SETUP. A LASTING WORKSPACE.</p>
+                  <p className="eyebrow">CONNECT YOUR AGENT</p>
                   <h2>Give your first agent a home.</h2>
                   <p>
-                    Create a drive, save your encryption key, and connect an agent. You control the
-                    keys from the very first byte.
+                    Paste this line into your agent. It installs the CLI and gives you a link; open
+                    it and click Approve. The agent sets up its own encrypted drive.
                   </p>
-                  <button className="button primary" onClick={() => open('drive')}>
-                    Create your first drive ↗
-                  </button>
-                  <div className="setup-steps">
-                    <span>
-                      01 <strong>Create a drive</strong>
-                    </span>
-                    <span>
-                      02 <strong>Save your key</strong>
-                    </span>
-                    <span>
-                      03 <strong>Connect an agent</strong>
-                    </span>
+                  <div className="onboarding-command">
+                    <code>{agentInstruction}</code>
+                    <CopyButton
+                      text={agentInstruction}
+                      label="Copy agent instruction"
+                      caption="Copy"
+                      className="button primary"
+                    />
+                  </div>
+                  <ol className="onboarding-steps">
+                    <li>
+                      <i>1</i> Paste one line into your agent.
+                    </li>
+                    <li>
+                      <i>2</i> The agent shows a pairing code.
+                    </li>
+                    <li>
+                      <i>3</i> You approve it once.
+                    </li>
+                  </ol>
+                  <div className="onboarding-alt">
+                    <p>Prefer to set up a drive yourself?</p>
+                    <button className="button secondary" onClick={() => open('drive')}>
+                      New drive
+                    </button>
                   </div>
                 </section>
               )}
@@ -787,7 +826,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
                       data-testid="key-backup-status"
                     >
-                      <span className={`led ${drive.key_backup_at ? 'dim' : 'on'}`} aria-hidden />
+                      <span className={`led ${drive.key_backup_at ? 'ok' : 'on'}`} aria-hidden />
                       <span className="keyline-text" title={backupText}>
                         {drive.key_backup_at ? (
                           backupText
@@ -1354,6 +1393,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   maxLength={128}
                   placeholder="Research workspace"
                   autoFocus
+                  {...(drives.length === 0
+                    ? {
+                        defaultValue: 'my-drive',
+                        onFocus: (event: FocusEvent<HTMLInputElement>) =>
+                          event.currentTarget.select(),
+                      }
+                    : {})}
                 />
               </label>
               <button className="button primary" disabled={busy}>
@@ -1364,60 +1410,36 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           {modal === 'driveReceipt' && driveReceipt && (
             <div className="form-stack">
               <p>
-                This key decrypts your drive. Save a recovery copy before continuing. It is not sent
-                to the service or saved in browser storage.
+                This key decrypts your drive. Without it nobody, including us, can open this drive.
+                It is not sent to the service or saved in browser storage.
               </p>
-              <label>
-                Drive key
-                <textarea data-testid="drive-key" readOnly value={driveReceipt.key} />
-              </label>
-              <CopyButton text={driveReceipt.key} label="Copy drive key" />
-              <button
-                className="button secondary"
-                onClick={() =>
-                  save(
-                    new Blob(
-                      [
-                        JSON.stringify(
-                          {
-                            format: 'agent-drive-key-v1',
-                            driveId: driveReceipt.id,
-                            key: driveReceipt.key,
-                          },
-                          null,
-                          2,
-                        ),
-                      ],
-                      { type: 'application/json' },
-                    ),
-                    `agent-drive-${driveReceipt.id}.key.json`,
-                  )
-                }
-              >
-                Save recovery key
-              </button>
+              <details>
+                <summary>Show drive key</summary>
+                <label>
+                  Drive key
+                  <textarea data-testid="drive-key" readOnly value={driveReceipt.key} />
+                </label>
+                <CopyButton text={driveReceipt.key} label="Copy drive key" />
+              </details>
               <p className="warning-copy">
                 The recovery file contains a secret in plaintext. Store it in a password manager or
-                another secure location. Losing this key means losing access to file contents.
+                another secure location.
               </p>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={saved}
-                  onChange={(event) => setSaved(event.target.checked)}
-                />{' '}
-                I saved my drive key securely
-              </label>
               <button
                 className="button primary"
-                disabled={!saved || busy}
-                onClick={() => {
-                  setDriveReceipt(null);
-                  setModal(null);
-                  setTab('Files');
-                }}
+                data-autofocus
+                onClick={() =>
+                  void act(async () => {
+                    const receipt = driveReceipt;
+                    // The file is in the user's hands first; the dialog closes even if recording fails.
+                    setDriveReceipt(null);
+                    setModal(null);
+                    setTab('Files');
+                    await backUpDriveKey(receipt.id, receipt.key);
+                  })
+                }
               >
-                Continue to drive
+                Download recovery file and continue
               </button>
             </div>
           )}

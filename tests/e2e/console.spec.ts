@@ -108,31 +108,47 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     });
     expect(login.status()).toBe(200);
     await page.goto('/console');
-    // Onboarding has exactly one primary action.
-    await expect(page.getByRole('button', { name: 'Create your first drive' })).toBeVisible({
+    // First run: one primary action (copy the agent instruction), one drive-creation control.
+    await expect(page.getByRole('button', { name: 'Copy agent instruction' })).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.locator('.button.primary:visible')).toHaveCount(1);
+    await expect(page.locator('.button.primary:visible')).toHaveAccessibleName(
+      'Copy agent instruction',
+    );
+    await expect(page.getByRole('button', { name: '+ New drive' })).toHaveCount(0);
+    const firstRun = await page.evaluate(() => ({
+      panel: document.querySelector('.onboarding')!.getBoundingClientRect().height,
+      overflow: document.scrollingElement!.scrollHeight - window.innerHeight,
+      height: window.innerHeight,
+    }));
+    expect(firstRun.panel / firstRun.height).toBeGreaterThanOrEqual(0.35);
+    expect(firstRun.overflow).toBeLessThanOrEqual(0);
     // Closing a dialog returns focus to the button that opened it.
-    const opener = page.getByRole('button', { name: '+ New drive' });
+    const opener = page.getByRole('button', { name: 'New drive', exact: true });
     await opener.click();
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await expect(opener).toBeFocused();
-    await page.getByRole('button', { name: 'Create your first drive' }).click();
+    await opener.click();
     await page.getByLabel('Drive name').fill('Browser acceptance');
     await page.getByRole('button', { name: 'Create drive', exact: true }).click();
     const driveKey = await page.getByTestId('drive-key').inputValue();
     expect(driveKey.length).toBe(43);
     const recoveryDownload = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Save recovery key' }).click();
+    const backupPost = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().endsWith('/key-backup'),
+    );
+    await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
     const recovery = await recoveryDownload;
     const backup = JSON.parse(await readFile((await recovery.path())!, 'utf8')) as {
       driveId: string;
       key: string;
     };
     expect(backup.key === driveKey).toBe(true);
-    await page.getByLabel('I saved my drive key securely').check();
-    await page.getByRole('button', { name: 'Continue to drive' }).click();
+    expect((await backupPost).postDataJSON()).toEqual({ method: 'file' });
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // F19: saving the recovery file from the receipt records the backup.
+    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
     const driveId = await page.getByTestId('drive-id').innerText();
     expect(backup.driveId).toBe(driveId);
 
@@ -476,15 +492,32 @@ test('console files: recovery download stays on an empty drive, and a failed rel
     });
     expect(login.status()).toBe(200);
     await page.goto('/console');
-    await page.getByRole('button', { name: 'Create your first drive' }).click({ timeout: 30_000 });
-    await page.getByLabel('Drive name').fill('Empty drive');
-    await page.getByRole('button', { name: 'Create drive', exact: true }).click();
-    await page.getByLabel('I saved my drive key securely').check();
-    await page.getByRole('button', { name: 'Continue to drive' }).click();
+    await page.getByRole('button', { name: 'New drive', exact: true }).click({ timeout: 30_000 });
+    // First drive: the name is prefilled; Enter creates it.
+    await expect(page.getByLabel('Drive name')).toHaveValue('my-drive');
+    await page.getByLabel('Drive name').press('Enter');
+    // The backup POST fails once: the dialog still closes, the error is plain, and retry works.
+    let failBackup = true;
+    await page.route('**/key-backup', (route) =>
+      failBackup
+        ? route.fulfill({
+            status: 500,
+            contentType: 'application/json',
+            body: JSON.stringify({ error: { message: 'Backup unavailable.' } }),
+          })
+        : route.continue(),
+    );
+    await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'the backup was not recorded' }),
+    ).toBeVisible();
     // No files, key loaded: the backup warning and recovery download remain available.
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
-    await expect(page.getByTestId('key-backup-status')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Download recovery file' })).toBeVisible();
+    await expect(page.getByTestId('key-backup-status')).toContainText('hasn’t been backed up');
+    failBackup = false;
+    await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
 
     // The files list loaded once; a later reload of the cached scope fails.
     await page.route('**/api/console/drives/*/list*', (route) =>
@@ -546,6 +579,7 @@ test('console files: a slow list shows skeleton, then Still loading with Retry',
   context,
   baseURL,
 }) => {
+  test.setTimeout(60_000);
   const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
   try {
     const login = await context.request.post('/api/test-session', {
@@ -557,22 +591,20 @@ test('console files: a slow list shows skeleton, then Still loading with Retry',
       data: { name: 'Slow drive' },
       headers: { Origin: baseURL! },
     });
-    await page.clock.install();
-    let held = false;
-    await page.route('**/api/console/drives/*/list*', (route) => {
-      if (held) return route.continue();
-      held = true;
-      // Never fulfilled: this is the stalled request.
-      return undefined;
-    });
+    // Hold every list request: React strict mode may start more than one in development.
+    let hold = true;
+    await page.route('**/api/console/drives/*/list*', (route) =>
+      hold ? undefined : route.continue(),
+    );
     await page.goto('/console');
     await expect(page.locator('.list-state[data-state="loading"]')).toBeVisible({
       timeout: 30_000,
     });
-    await page.clock.fastForward(10_000);
-    await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible();
-    // Let real time run again so Playwright's stability checks (which use animation frames) work.
-    await page.clock.resume();
+    // The slow state appears after 10 s of real time (a fake clock made this test flaky in dev).
+    await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible({
+      timeout: 20_000,
+    });
+    hold = false;
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
   } finally {

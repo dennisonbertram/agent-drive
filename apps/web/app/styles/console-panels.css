@@ -271,13 +271,19 @@ dialog .banner.info {
 }
 
 /* ---- onboarding / empty guidance ---- */
-.onboarding {
+/* First run fills the rest of the content area; flex none is overridden on purpose. */
+.console-content > .onboarding {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  padding: 44px 28px 0;
+  padding: 32px 28px;
 }
 .onboarding-logo {
   display: block;
-  margin: 0 auto 22px;
+  margin: 0 auto 18px;
 }
 .onboarding h2 {
   font: 500 28px/1.1 var(--sans, 'Inter Tight', system-ui, sans-serif);
@@ -285,20 +291,61 @@ dialog .banner.info {
   margin: 12px 0;
 }
 .onboarding > p:not(.eyebrow) {
-  max-width: 420px;
-  margin: 0 auto 24px;
+  max-width: 460px;
+  margin: 0 auto 22px;
   font-size: 14px;
   color: var(--muted, #6b6963);
 }
-.onboarding .setup-steps {
-  margin-top: 40px;
-  border-top: 1px solid var(--line-strong, #111);
-  font: 400 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+.onboarding-command {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--code-bg, #111);
+  color: var(--code-ink, #fff);
+  text-align: left;
+}
+.onboarding-command code {
+  min-width: 0;
+  font: 400 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+.onboarding-command .button {
+  flex: none;
+  min-height: 34px;
+}
+.onboarding-steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 28px;
+  margin: 26px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13.5px;
+  color: var(--ink-2, #3b3a37);
+}
+.onboarding-steps i {
+  margin-right: 6px;
+  font: 500 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  font-style: normal;
   color: var(--muted, #6b6963);
 }
-.onboarding .setup-steps strong {
-  font-weight: 500;
-  color: var(--ink, #111);
+.onboarding-alt {
+  width: min(460px, 100%);
+  margin-top: 30px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-strong, #111);
+}
+.onboarding-alt p {
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  color: var(--muted, #6b6963);
+}
+.keyline .led.ok {
+  background: var(--ok, #1a7f37);
 }
 .console-content .empty h2,
 .console-content .empty h3 {
@@ -505,8 +552,11 @@ dialog .check-label input {
   .console-content .entity-info {
     min-width: 160px;
   }
-  .onboarding {
-    padding: 30px 18px 0;
+  .console-content > .onboarding {
+    padding: 28px 18px;
+  }
+  .onboarding-command {
+    flex-wrap: wrap;
   }
   .onboarding h2 {
     font-size: 24px;
