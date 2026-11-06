@@ -1,18 +1,51 @@
-# ux-visual inventory — T1 "Rack" rollout (branch feat/t1-rack-design)
+# UI inventory (ux-visual run 2, 2026-11-06)
 
-Design system: tokens + primitives in `apps/web/app/globals.css` (`:root`: --bg --panel --al1..3 --ink --muted --line --line-soft --sig --sig-text --sig-dark --smoke --sans --mono; `.button.primary/.secondary`, `.led`, `.eyebrow`, `.badge`, inputs, focus). Area stylesheets: `apps/web/app/styles/{landing,console,console-panels,connect,share,account}.css`. Fonts: Space Grotesk + IBM Plex Mono (`app/layout.tsx`). Approved reference: `docs/design/t1-rack-reference.html`.
-Rules: one signal orange for LEDs/readouts/primary action only; smoked glass only on hardware objects/nav; content on solid surfaces; encryption is small print; real product facts only.
+Sources: `pages/*/findings.md`, `pages/inventory-notes.md`, and the code in `apps/web/app`. Server `http://localhost:3500`, seeded user `e2e_uxreview` (drives research-bot with 29 files, nightly-builds with 3 files) plus one fresh user for empty states. Viewports: 1440x900, 768x1024, 390x844 (connect and a few marketing shots also have 375x812 and 1920x1080). Earlier-run material is in `archive-t1/`.
 
-| Page (slug)       | Route                                                           | Layout                  | States                                                                                                                                                                                     |
-| ----------------- | --------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| landing           | `/`                                                             | marketing               | default; reduced motion                                                                                                                                                                    |
-| pricing           | `/pricing`                                                      | marketing               | checkout disabled (local)                                                                                                                                                                  |
-| console-files     | `/console`                                                      | console shell           | onboarding (no drives), empty drive, populated drive, key not loaded, key loaded, backup reminder shown/hidden, loading, filter, 2+ drives in bay strip                                    |
-| console-secondary | `/console` tabs                                                 | console shell           | Agents (empty/list), API keys (empty/list/revoked), Usage, Trash (empty/with item), dialogs: New drive, Load drive key, New agent, New API key, API key reveal, drive key reveal, Versions |
-| account           | `/console/billing`, `/console/settings`, `/sign-in`, `/sign-up` | console sub-page / auth | default, destructive area; Clerk not configured (fallback panel)                                                                                                                           |
-| connect           | `/connect`                                                      | standalone card         | code entry, bad format, not found/expired, waiting (new drive), reconnect, approved, denied, error                                                                                         |
-| share             | `/s/[id]#key`                                                   | standalone card         | ready, loading, missing key, wrong key, not found, expired, revoked                                                                                                                        |
+## Layouts
 
-Viewports: 1440x900, 1920x1080, 768x1024, 375x812.
-Shared dev server: http://localhost:3230 (do not start another `next dev` in this worktree; Next allows one per app dir).
-Sign-in: in the agent-browser session, open http://localhost:3230/ then run `fetch('/api/test-session',{method:'POST',headers:{'Authorization':'Bearer '+SECRET,'content-type':'application/json'},body:JSON.stringify({userId:'e2e_<your-slug>_<n>'})})`; SECRET is the contents of /private/tmp/claude-501/-Users-dennison-develop-agent-drive/72e5153f-f1c9-4e4b-819b-255bec507e75/scratchpad/uxv-secret (read it with cat; never print it in reports). Use a fresh e2e\_ id per account. Create data through the UI or the CLI (`packages/agent-drive`, built with `pnpm --filter agent-drive build`; see tests/e2e/\*.spec.ts for how the tests seed drives, files, agents, keys and shares). Synthetic data only.
+| Layout | Code | Used by |
+|---|---|---|
+| Marketing frame (header nav, footer, hairline sections) | `app/(app)/page.tsx`, `app/(app)/pricing/`, `styles/landing.css` | `/`, `/pricing` (two different headers) |
+| Auth frame (brand above one 440px card) | `app/(app)/sign-in/`, `sign-up/`, `styles/account.css` | `/sign-in`, `/sign-up` |
+| Connect card (440px card, top-anchored) | `app/(app)/connect/`, `styles/connect.css` | `/connect` |
+| Console shell (sidebar, breadcrumb bar, drive strip, panel; mobile top bar with menu) | `app/(app)/console/console.tsx` (1,580 lines), `styles/console.css`, `console-panels.css` | `/console` (5 tabs) |
+| Account pages (header with nav, stacked sections) | `console/billing/billing-client.tsx`, `console/settings/settings-client.tsx`, `styles/account.css` | `/console/billing`, `/console/settings` |
+| Share card (single centered card) | `app/s/[id]/share-client.tsx`, `styles/share.css` | `/s/<id>#k=<key>` |
+| Plain text | `app/llms.txt/route.ts` | `/llms.txt` |
+
+## Pages, states reached, and where the evidence lives
+
+| Page | States reached | Not reached | Findings file |
+|---|---|---|---|
+| `/` landing | home at 3 viewports, scroll series, hover and focus | none | `pages/landing/` |
+| `/pricing` | main at 3 viewports | paid checkout enabled, "Coming soon" interaction | `pages/pricing/` |
+| `/sign-in`, `/sign-up` | "not configured" fallback card at 3 viewports | **real Clerk forms** (Clerk not configured locally), error states, social buttons | `pages/auth/` |
+| `/connect` | entry, format error, invalid code, review new, existing drive (and its 2 error states), offer from grant, approved, denied, approve error, rate-limited, reconnect, waiting-new-drive, long names, 375/768/1440/1920 | real device-approval with a real CLI over a slow network | `pages/connect/` |
+| `/llms.txt` | fetched as text, read in full | rendering in a browser | `pages/llms/` |
+| `/s/<id>` | ready, missing key, bad key format, wrong key, revoked, not found, loading, decrypting at 3 viewports | expired, completed download, "Try again"/unavailable, long file name, large-file progress | `pages/share/` |
+| `/console` Files | drive with key not loaded, key loaded, filtered, filter no-match, list error (forced), empty drive, one-drive vs two-drive, 3 viewports | loading state (flashes too fast), drive with 1,000+ files, upload progress | `pages/console/` |
+| `/console` Trash | populated, empty | restore notice, Trash stuck on loading (seen only in ux-flow) | `pages/console/` |
+| `/console` Agents, API keys, Usage | populated, empty (API keys, Usage), 3 viewports | revoke result, key rotate | `pages/console/` |
+| `/console` dialogs | New drive, New agent, New API key, key load (and error), Versions (single and multi), receipt | confirm dialogs (revoke uses native `confirm()`) | `pages/console/` |
+| `/console` first visit | onboarding (no drives), new-drive dialog | none | `pages/console/` |
+| `/console/settings` | default (25 audit rows, delete forms) at 3 viewports | audit empty or error, deletion submitted, "When is data actually removed?" expanded | `pages/settings/` |
+| `/console/billing` | default at 3 viewports | paid checkout enabled, spending-control validation errors, export result, empty usage | `pages/billing/` |
+
+## Component groups and components
+
+Console shell: sidebar nav (7 items for an empty account), mobile top bar plus "Files" menu, breadcrumb bar, drive strip (name, ID, Copy, file count tile), key banner ("Key backed up" / "not backed up"), key badge ("KEY REQUIRED" / "KEY LOADED"), Load key / Forget button, Download recovery file button.
+Files and Trash list: panel header, filter input, 5-column table (path, size or deleted, author or recovery, modified, actions), mobile card rows, row actions (Download, Versions, Trash, Restore), "Load older events" style footer ("29 loaded"), empty states, error box.
+Dialogs: New drive, New agent, New API key, key load, Versions, receipt (key plus checkbox plus Continue).
+Agents, API keys, Usage: agent rows with "Revoke access", key rows, usage-by-author table.
+Onboarding: first-visit panel with step list and Connect panel (`ConnectAgentPanel`).
+Connect: brand mark, mono tag and LED, code input, banners (info, format error), facts table, delegate checkbox and hint, existing-drive form (drive select, key input, file input, "read only" checkbox, writes path), offer banner, approved card.
+Marketing: header nav, hero with command panel and Copy chip, flow diagram ("The problem"), "Drive activity" table, "Connecting" mock approval card, 3-column feature text, plan table, "How usage works", footer.
+Auth: brand, fallback card (heading, sentence).
+Share: brand, share card (head, LED, window, details, fault, paste form), Download button, pill tags.
+Account pages: header nav (Billing, Settings, Back to files), summary tiles, plan cards, spending-controls form, usage-by-agent table with CSV export, audit log table with "Load older events", destructive panel (Delete one drive, Delete your account, Deletion requests, details disclosure).
+Shared primitives: buttons (primary orange, secondary outline, disabled grey, text link), pills and tags, native checkbox, native file input, data table, banner, details disclosure, 2 px focus ring.
+
+## Gaps in the inventory (surfaces that exist in code but were not audited)
+
+See "Coverage check" in `problems.md`.
