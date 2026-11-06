@@ -1,265 +1,166 @@
-# Topic: Sign-up, sign-in and first console load
+# Topic: Sign-up, sign-in and first console visit
 
-Surfaces: `/sign-up`, `/sign-in` (Clerk `<SignUp>`/`<SignIn>`, path routing, `fallbackRedirectUrl="/console"`), `proxy.ts` (`auth.protect()` on `/console` and `/console/*`), `console/page.tsx` (`redirect('/sign-in')` if no user), console client `api()` (401 -> `window.location.assign('/sign-in')`), `UserButton`. Production uses a Clerk development instance with email verification code. The exact Clerk field labels are Clerk-owned and are not in this repo; those steps are marked "Clerk UI".
+Source: code at main 2870d7a. Sign-in/up are Clerk components (`apps/web/app/(app)/sign-in/[[...sign-in]]`, `sign-up/[[...sign-up]]`), themed by `appearance.ts`. Redirects are in `console/page.tsx` and `connect/page.tsx`. First-visit UI is `console/console.tsx`. Clerk's own screens (email code, password, reset) are not in this repo, so their wording is not recorded here.
 
-## STORY-001: First-time sign-up with emailed code and first console load
-
-**Type**: long
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Maya Okafor, developer creating a workspace for her research agent with maya.okafor@example.com
-**Goal**: Get from landing to an empty, ready console
-**Preconditions**: Anonymous; Clerk dev instance configured
-**Ideal path**: 4 — click CTA, enter email, enter code, land on console
-**Alternate paths**: Landing nav "Sign in" -> Clerk sign-up link; /pricing "Start with Free"; direct /sign-up; GitHub OAuth button (if enabled in Clerk)
-
+## STORY-001: Visitor reads the landing page, then signs up through the pricing page
+**Type**: medium
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Priya Nair, a developer who runs Claude Code on a laptop and saw a link to agentdrive.xyz in a thread.
+**Goal**: Create an account to try the Free plan.
+**Preconditions**: Signed out, Clerk configured, no account.
+**Ideal path**: 2 — one visible "Sign up" action on the landing page, then one Clerk form that lands in the console.
+**Alternate paths**: Landing "Console" link (redirects to `/sign-in`, then the Clerk form has its own sign-up link); pricing "Start with Free" (`/sign-up`); typing `/sign-up` directly; `/connect?code=` link from an agent (redirects to `/sign-in`).
 ### Steps
-
-1. On https://agent-drive.vercel.app click "Create your workspace ↗" → /sign-up shows brand "a/ agent drive" above the Clerk sign-up card
-2. Enter email address and any required fields (Clerk UI) → Continue
-3. Clerk asks for a verification code (Clerk UI) → Check inbox
-4. Switch to email, find the 6-digit code, copy it → Back to tab
-5. Paste the code (Clerk UI) → Account created, session cookie set
-6. Browser goes to `/console` (fallbackRedirectUrl) → Page is rendered with `key={userId}`; sidebar "Personal workspace / OPERATOR CONSOLE", UserButton with "Your account"
-7. Main area shows "Opening your workspace…" / "Loading your drives and access settings." → Client fetches drives, agents, keys, usage in parallel
-8. First load provisions the Agent Drive account behind the scenes (no confirmation message) → Panel changes
-9. Files tab shows onboarding "Give your first agent a home." with eyebrow "A LITTLE SETUP. A LASTING WORKSPACE." and button "Create your first drive ↗" → Steps strip "01 Create a drive / 02 Save your key / 03 Connect an agent"
-10. Sees badge "CLIENT-SIDE ENCRYPTED" and sidebar "Keys stay with you." → Reassured; nav count next to Files shows 0
-
+1. Open `/`. Nav shows Docs, Pricing, llms.txt, Sign in, Console. The hero shows "Give this to your agent" with `Set up Agent Drive: https://agentdrive.xyz/llms.txt` and a Copy button → no "Sign up" or "Get started" button exists anywhere in the nav or hero (gap).
+2. Click "Sign in" hoping it also covers new users → Clerk `SignIn` form on `/sign-in`, with Clerk's own "Sign up" link.
+3. Go back, click "Pricing" instead, scan the Free / Developer / Team cards → Free card has "Start with Free".
+4. Click "Start with Free" → `/sign-up`, Clerk `SignUp` form with the orange primary color from `appearance.ts`.
+5. Complete the Clerk form → redirected to `/console` (`signUpFallbackRedirectUrl`).
+6. Console shows "Opening your workspace…" then the empty-account onboarding (see the first-visit story) → the account row is created on this first authenticated console load.
 ### Variations
-
-- Maya mistypes the code: Clerk shows its own error (Clerk UI) and lets her retry or request a new code.
-- Email arrives slowly; she waits on the code step and may request a resend (Clerk UI).
-- Sign-up with GitHub if Clerk has the provider on: skips the code.
-
+- Priya clicks "Console" first: she is bounced to `/sign-in` and has to find the sign-up link in the Clerk card.
+- She skips the sign-up and pastes the line into her agent; the agent prints a link that asks her to sign in first (see first-run-setup topic).
 ### Edge Cases
+- The sign-up step happens before she has seen the console, so the only promise of what the product is before signing up comes from the landing page and pricing.
+- The same "Sign in" and "Console" links appear twice on the landing page (top nav at line ~89 and footer at ~411), and "Sign in" and "Console" both lead to the same sign-in form when signed out.
 
-- She closes the tab at the code step and later visits /sign-up again; Clerk resumes or restarts (Clerk behavior).
-- Dev instance: Clerk may show a "Development mode" badge to the user (Clerk behavior, unverified).
-- No welcome or explanation of "Personal workspace"; the empty state is the first onboarding.
-
-## STORY-002: Returning user signs in from the landing page
-
+## STORY-002: Returning owner signs in and lands in the console
 **Type**: short
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Tomas Berg, existing user on a new laptop
-**Goal**: Reach the console with existing files
-**Preconditions**: Account exists; signed out
-**Ideal path**: 3 — Sign in, enter email and code, land on console
-**Alternate paths**: "Open console" on landing (redirects to /sign-in); direct /console; direct /sign-in
-
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Marcus Webb, an existing user returning after two weeks.
+**Goal**: Open his files.
+**Preconditions**: Account with one drive; signed out (cookie cleared).
+**Ideal path**: 2 — click Sign in, authenticate, land in the console.
+**Alternate paths**: Go straight to `/console` (server redirect to `/sign-in`); Clerk keeps a live session so `/console` opens directly.
 ### Steps
-
-1. Click "Sign in" in the landing nav → /sign-in with Clerk card and a link to /sign-up (signUpUrl)
-2. Enter email and complete the verification step (Clerk UI) → Redirect to /console
-3. Console shows "Opening your workspace…" then "Drives & files" with the selected drive and file table → Drive key is NOT loaded; badge "Key required for downloads"
-
+1. Open `/` and click "Sign in" → `/sign-in` with the Clerk `SignIn` card.
+2. Enter credentials → redirect to `/console` (`fallbackRedirectUrl`).
+3. Console shows "Opening your workspace…" ("Loading your drives and access settings.") → then the Files tab for his first drive.
+4. Look for his files; the Download button is disabled with the tooltip "Load your drive key first" → he must paste a drive key again (covered in the download topic).
 ### Variations
-
-- Clerk may ask for a new emailed code on an unrecognized device (Clerk setting).
-
+- Bookmarked `/console` while signed out: redirect to `/sign-in` with no `redirect_url`, so he lands on `/console` afterwards, which is the same place anyway.
+- Opens `/console/billing` or `/console/settings` signed out: those pages also require sign-in (same redirect).
 ### Edge Cases
+- Deep links to a tab, drive or file do not exist; tab and drive are client state, so after signing in he always starts at Files for the first drive.
+- He is signed in as a different Clerk account than the one that approved his agents: the console shows an empty onboarding and none of his agents (hesitation: "Where did my files go?"). The `/connect` page shows the email in "Account" to help him notice this.
 
-- Sign-in on a new browser does not restore drive keys (they live in page memory only) so downloads need "Load drive key" each session.
-
-## STORY-003: Unauthenticated deep link to billing, then sign-in
-
+## STORY-003: Brand-new account sees the first-visit onboarding
 **Type**: medium
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Priya Raman, who bookmarked https://agent-drive.vercel.app/console/billing
-**Goal**: Reach "Billing & limits" after being logged out
-**Preconditions**: Existing account, session expired or cleared
-**Ideal path**: 2 — sign in, land on billing
-**Alternate paths**: Go to /console then click sidebar "Billing & limits"
-
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Lena Fischer, just finished the Clerk sign-up, has not touched an agent yet.
+**Goal**: Understand what to do next and get a first drive.
+**Preconditions**: New account, zero drives, zero agents.
+**Ideal path**: 3 — create a drive, save the key, continue (or skip the console entirely and paste the agent line).
+**Alternate paths**: The "Connect an agent" panel on the Agents tab (copy the llms.txt line, no drive needed first); the sidebar "Connect an agent" button in the empty Files state; paste the line into an agent, which creates the drive during `/connect` approval.
 ### Steps
-
-1. Open /console/billing → Middleware `auth.protect()` redirects to /sign-in (Clerk adds a redirect URL for the original page)
-2. Sign in with email and code → Expected return to billing; if the redirect param is dropped, `fallbackRedirectUrl` sends her to /console instead (unverified which)
-3. If on /console, click "Billing & limits" in sidebar → /console/billing shows "Billing & limits"
-
+1. Land on `/console` → brief "Opening your workspace…", then the Files tab shows the onboarding card: eyebrow "A LITTLE SETUP. A LASTING WORKSPACE.", heading "Give your first agent a home.", button "Create your first drive ↗", and the steps "01 Create a drive / 02 Save your key / 03 Connect an agent".
+2. Lena reads "Create a drive, save your encryption key, and connect an agent" and wonders whether she or the agent should create the drive; the agent line is not on this card (gap: the card does not mention the paste-one-line route that the landing page promised).
+3. Click "Create your first drive ↗" → dialog with "Drive name" (max 128) and button "Create drive".
+4. Type "Research notes" and click "Create drive" → drive-key receipt dialog (key generated in the browser).
+5. Read the receipt; "Save recovery key" downloads `agent-drive-<id>.key.json`; the checkbox "I saved my drive key securely" unlocks "Continue to drive". The dialog cannot be closed until acknowledged.
+6. Click "Continue to drive" → the drives strip shows "Research notes" with its size and file count; the Files tab shows "Ready for your first file." with the "Connect an agent" button.
+7. Click "Connect an agent" → jumps to the API keys tab, which says "Create an agent first." (gap: the button label promises the agent setup panel but lands on the key-creation guard; the paste-one-line panel lives on the Agents tab).
+8. Open the Agents tab → "Connect an agent" panel with the copyable line and "Read what your agent will see (llms.txt)".
 ### Variations
-
-- Same flow for /console/settings ("Activity & deletion").
-
+- Lena closes the browser before ticking "I saved my drive key securely": the drive exists, the key is gone from her browser, and the key-backup banner will stay red (see the key-lifecycle topic).
+- Free plan reaches its 3-drive limit: "Create drive" fails with a plan-limit error.
 ### Edge Cases
+- The same "connect an agent" information appears in three places with different destinations: onboarding card step 03 (text only), Files empty state button (goes to API keys), Agents tab panel (the real instructions).
+- Drive creation here and device-login drive creation produce two different kinds of drive ("Research notes" with a browser-made key vs. one auto-made for an agent whose key is on the agent's machine); nothing on the onboarding card explains the difference.
 
-- Page-level guards (`redirect('/sign-in')`) lose the original target if middleware is bypassed (unconfigured or test mode).
-- /api/console/\* is not page-protected by middleware; unauthenticated calls return 401 from the handler instead of a redirect.
-
-## STORY-004: Session expires while the console is open
-
-**Type**: medium
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Jonas Weber, who left the Usage tab open overnight
-**Goal**: Continue working without losing work
-**Preconditions**: Console open, Clerk session expired
-**Ideal path**: 2 — sign in again, resume
-**Alternate paths**: none found
-
-### Steps
-
-1. Click "Refresh" on the console → `api()` receives HTTP 401
-2. Page does `window.location.assign('/sign-in')` immediately → Whole page navigates; error text "Your session expired. Sign in again." is thrown but the page is already leaving, so it is barely seen
-3. Sign in with email and code → /console reloads
-4. Console reopens at the Files tab; any in-memory drive key is gone → Must "Load drive key" again
-
-### Variations
-
-- Session expires while the "Create a drive" receipt modal is open: the `beforeunload` warning is registered, so the browser may prompt before navigation; losing the unsaved drive key is the severe case.
-- Expires while the API-key receipt is open: the secret shown once is lost.
-
-### Edge Cases
-
-- No toast tells the user why they were signed out.
-- Unsaved modal input is discarded.
-
-## STORY-005: Sign out via UserButton and sign back in
-
+## STORY-004: Visitor opens a sign-in page on an installation with no Clerk
 **Type**: short
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Aisha Rahman, using a shared lab computer
-**Goal**: End her session safely
-**Preconditions**: Signed in, drive key loaded
-**Ideal path**: 2 — open account menu, Sign out
-**Alternate paths**: Closing the tab discards in-memory drive keys but keeps the Clerk session
-
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Tomas Rivera, self-hosting Agent Drive for a weekend project without Clerk keys.
+**Goal**: Sign in to the console.
+**Preconditions**: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` unset or placeholder, test auth off.
+**Ideal path**: 1 — a clear message with the fix, since no human sign-in can exist.
+**Alternate paths**: development test auth (`AGENT_DRIVE_TEST_AUTH=1`, `POST /api/test-session` from loopback with a bearer secret) gives a signed cookie.
 ### Steps
-
-1. Click the avatar next to "Your account" at the sidebar bottom (Clerk `UserButton`) → Menu opens with manage account and Sign out (Clerk UI)
-2. Choose Sign out → Clerk signs out; destination is Clerk's default after sign out (likely the landing page, unverified)
-3. Press browser Back → /console redirects to /sign-in rather than showing cached data
-
+1. Open `/sign-in` → panel "Sign in": "Sign-in is not configured on this installation. Configure the Agent Drive Clerk instance to enable human access."
+2. Try `/sign-up` → panel "Create your workspace": "Sign-up is not configured on this installation. Configure the Agent Drive Clerk instance to enable human access."
+3. Open `/console` → `consoleUserId()` returns null, so it redirects to `/sign-in` and shows the same panel (a redirect loop is avoided because the sign-in page does not redirect back).
+4. Open `/connect?code=ABCD-EFGH` → redirected to `/sign-in?redirect_url=%2Fconnect%3Fcode%3DABCD-EFGH` and the same panel; the agent's login can never be approved.
 ### Variations
-
-- Aisha clicks the brand "a/ agent drive" instead; this goes to landing but she stays signed in (landing shows "Sign in" even though a session exists).
-
+- Dev with test auth: console shows the avatar letter "T" and "Local test session" instead of the Clerk `UserButton`; `/connect` shows "Local test session" as Account.
 ### Edge Cases
+- No "Back to home" or doc link in the panel; the BrandMark is the only way out.
+- Test auth requested but misconfigured (secret under 32 characters or not development): fails closed, `consoleUserId()` is null and the user sees the same "not configured" panel even though Clerk keys might exist (`clerkConfigured()` is false whenever test mode is requested).
 
-- Landing and pricing are not session-aware: after sign-in they still offer "Sign in" and "Create your workspace".
+## STORY-005: Session expires while the console is open
+**Type**: medium
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Aisha Khan, leaves the console tab open overnight with a half-typed API key label.
+**Goal**: Continue working the next morning.
+**Preconditions**: Signed in earlier; Clerk session has lapsed.
+**Ideal path**: 2 — sign in again and return to what she was doing.
+**Alternate paths**: reload the page (server redirect to `/sign-in`).
+### Steps
+1. Return to the open console tab → the page still shows the old Files list from client state.
+2. Click the "Agents" tab or "Retry" → the console `api()` call gets 401, throws "Your session expired. Sign in again." and also runs `window.location.assign('/sign-in')`.
+3. Land on `/sign-in` (no `redirect_url`) and sign in → `/console`, back at the Files tab of the first drive.
+4. Her loaded key (kept only in page memory) is gone, along with the tab, drive selection and unsent dialog text (gap: no "return to where you were").
+### Variations
+- Session lapses while a dialog is open (for example creating an API key): the create call returns 401 and the page navigates away, losing the dialog. An API key may already have been created on the server before the response was lost only if the 401 came afterwards, which the code does not suggest; she checks the API keys list after signing in.
+- The same 401 on `/connect`: it redirects to `/sign-in` without keeping the code (the page's own `api()` calls `assign('/sign-in')`, not the `redirect_url` form), so she must reopen the original link.
+### Edge Cases
+- The error text appears only briefly because the redirect starts at once; she may only see a flash.
+- Only the initial server render of `/connect` keeps `?code=`; mid-page expiry loses it (inconsistent with the first load).
 
-## STORY-006: Signed-in user hits /sign-in or /sign-up again
+## STORY-006: Agent-printed approval link sends a signed-out human through sign-in
+**Type**: medium
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Diego Alvarez, signed out of his laptop browser, clicks the link his terminal agent printed.
+**Goal**: Approve the agent without losing the pairing code.
+**Preconditions**: Agent ran `agent-drive login`, link `https://agentdrive.xyz/connect?code=BKQD-MWRT` printed; Diego is signed out.
+**Ideal path**: 2 — sign in, land on the approval page with the code filled in.
+**Alternate paths**: new user: use the Clerk sign-up link from the sign-in card (Clerk then decides the redirect, see edge cases); the CLI opens the browser itself when stdout is a terminal and `CI` is unset.
+### Steps
+1. Open the link → server runs `consoleUserId()`, gets null, redirects to `/sign-in?redirect_url=%2Fconnect%3Fcode%3DBKQD-MWRT`.
+2. Sign in with Clerk → returns to `/connect?code=BKQD-MWRT`.
+3. `/connect` loads the request and shows "Connect <agent>?" with the code, Agent, Machine, Account (his email), Requested time.
+4. Compare the code with the terminal and click "Approve agent" → "Approved".
+### Variations
+- Diego is signed in under a personal email but intended the work account: the "Account" row shows the email, so he can notice; there is no sign-out or switch-account control on the page itself (gap).
+- The agent code expires after 10 minutes (600 s) while he signs in: the page shows the "This code is wrong, expired, or already used. Run agent-drive login in your agent to get a new one." banner.
+### Edge Cases
+- A brand-new user following this link gets the Clerk sign-in card first; if he uses the Clerk "Sign up" link, whether `redirect_url` survives depends on Clerk, and the sign-up page here sets only the `/console` fallback. If it is lost he lands on an empty console and the code is still pending (not verifiable from this repo, flag for browser testing).
+- A new user who reaches `/console` instead of `/connect` sees the "Give your first agent a home." onboarding with no hint that an agent is waiting for approval (gap).
 
+## STORY-007: Signed-in owner finds sign-out and account controls
 **Type**: short
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Lena Fischer, who clicks the landing "Sign in" while already logged in
-**Goal**: Get to the console
-**Preconditions**: Active Clerk session
-**Ideal path**: 1 — one click
-**Alternate paths**: "Open console" button on landing goes directly to /console
-
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Hana Sato, on a shared office laptop who wants to end her session.
+**Goal**: Sign out.
+**Preconditions**: Signed in with Clerk.
+**Ideal path**: 2 — open the account menu, click sign out.
+**Alternate paths**: none found in this app (no sign-out link on billing or settings pages).
 ### Steps
-
-1. On landing click "Sign in" → /sign-in loads; Clerk detects an existing session and redirects to `/console` (fallbackRedirectUrl) rather than showing a form (Clerk behavior)
-2. Console opens → Same flow as the loading state
-
+1. In the console sidebar, look at the bottom → profile row with the Clerk `UserButton` and the text "Your account".
+2. Click the avatar → Clerk's menu (manage account, sign out; wording from Clerk).
+3. Choose sign out → Clerk ends the session; the next `/console` visit redirects to `/sign-in`.
+4. She then opens the sidebar link "Billing & limits" earlier in the day on a small screen: the sidebar is behind a toggle (narrow layout), so the profile row is hidden until she opens it.
 ### Variations
-
-- Clerk shows "already signed in" messaging instead of redirecting (Clerk behavior, unverified).
-
+- Test-auth mode: the row shows an avatar "T" and "Local test session" with no sign-out control.
+- On `/console/billing` and `/console/settings`: no profile row or sign-out is described in the console shell for these pages (not verified; flag for browser check).
 ### Edge Cases
+- Console memory (loaded drive key) is not cleared on sign-out by the app itself; Clerk navigation reloads the page, which clears it.
+- There is no in-app password, email or notification preference page; all of it is delegated to Clerk.
 
-- Two landing buttons ("Sign in" and "Open console") both lead to the console for signed-in users.
-
-## STORY-007: Self-hosted install without Clerk keys
-
+## STORY-008: Console is unreachable on first load
 **Type**: short
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Ravi Shah, evaluating a self-hosted build
-**Goal**: Sign in
-**Preconditions**: Clerk env vars missing or placeholder
-**Ideal path**: 2 — it cannot succeed; clear message
-**Alternate paths**: none found
-
+**Topic**: Sign-up, sign-in and first console visit
+**Persona**: Owen Brooks, on hotel wifi that drops the API request.
+**Goal**: Open his workspace.
+**Preconditions**: Signed in; `/api/console/*` fails (network or 5xx).
+**Ideal path**: 1 — one visible retry action.
+**Alternate paths**: browser refresh.
 ### Steps
-
-1. Visit /sign-in → Panel h1 "Sign in", "Sign-in is not configured on this installation. Configure the Agent Drive Clerk instance to enable human access."
-2. Visit /sign-up → Panel h1 "Create your workspace", "Sign-up is not configured on this installation. ..."
-3. Visit /console → Redirects to /sign-in, same panel; no link out to docs
-
+1. Open `/console` → "Opening your workspace…" / "Loading your drives and access settings."
+2. The load fails → panel changes to "Workspace unavailable": "Check the connection, then refresh to try again." and an error banner with the message.
+3. He looks for a Retry button → none on this panel (gap; the file list has "Retry" for files only). He refreshes the page.
+4. The workspace loads → Files tab.
 ### Variations
-
-- Test-auth builds (`AGENT_DRIVE_TEST_AUTH=1`, development only) accept a signed cookie; the console shows "Local test session" instead of `UserButton`.
-
+- Failure is a 401 instead: he is redirected to sign-in with "Your session expired. Sign in again."
 ### Edge Cases
-
-- Test auth requested outside development fails closed: `consoleUserId()` returns null, so the user is redirected to /sign-in.
-
-## STORY-008: First console load fails (workspace unavailable)
-
-**Type**: medium
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Sofia Marin on hotel Wi-Fi right after signing up
-**Goal**: Reach the onboarding screen
-**Preconditions**: New session; the `/api/console/*` calls fail or time out
-**Ideal path**: 2 — Refresh, success
-**Alternate paths**: Reload the whole page
-
-### Steps
-
-1. Land on /console → "Opening your workspace…" panel
-2. A request fails → Panel heading becomes "Workspace unavailable" with "Check the connection, then refresh to try again."; an error banner also appears above with the error message
-3. Click header "Refresh" → Re-runs the same four fetches
-4. Succeeds → Onboarding "Give your first agent a home." appears
-
-### Variations
-
-- Sofia reloads the browser instead; `/console` re-renders the same states.
-
-### Edge Cases
-
-- The "+ New drive" button is disabled until `ready`, so she cannot start before load succeeds.
-- Error text may be generic ("The request could not be completed.") if the server gives no message.
-
-## STORY-009: Mobile sign-up and first console view
-
-**Type**: medium
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Kenji Watanabe on a 390px phone, getting the verification code from his mail app
-**Goal**: Sign up and see the console
-**Preconditions**: Anonymous, narrow viewport
-**Ideal path**: 4 — CTA, email, code, console
-**Alternate paths**: none found
-
-### Steps
-
-1. Tap "Create your workspace" → Clerk card on /sign-up
-2. Enter email, leave the browser to open the mail app, copy the code → Returns; the page may reload; Clerk keeps the in-progress sign-up (Clerk behavior)
-3. Paste code → Redirect to /console
-4. Console at <=760px: sidebar collapses to the top (`.workspace-label`, `.nav-label`, `.privacy-note` hidden); the profile avatar is pinned top-right and the "Your account" label hidden → Tabs Files/Agents/API keys/Usage/Trash scroll or wrap
-5. Sees onboarding "Give your first agent a home." → Taps "Create your first drive ↗"
-
-### Variations
-
-- Landscape tablet 760-1100 px uses the two-column shell with different widths.
-
-### Edge Cases
-
-- The "Keys stay with you." reassurance is hidden on mobile.
-- Creating a drive that downloads a recovery key file on mobile browsers may behave differently (checked in the provisioning topic).
-
-## STORY-010: Account-switching or wrong-account sign-in
-
-**Type**: medium
-**Topic**: Sign-up, sign-in and first console load
-**Persona**: Dev Patel, who has two emails (work and personal) and signs in with the wrong one
-**Goal**: Reach the console that holds his drives
-**Preconditions**: Two Clerk identities; drives live under the work one
-**Ideal path**: 4 — sign out, sign in with the right account
-**Alternate paths**: UserButton may offer "Add account"/switch (Clerk setting)
-
-### Steps
-
-1. Sign in with the personal email → Console loads
-2. Files tab shows onboarding "Give your first agent a home." (empty) → Dev thinks his data is gone
-3. Click "Usage" and "Agents" tabs → Also empty
-4. Realizes the wrong email; open UserButton → Sign out (Clerk UI)
-5. Sign in with work email and code → Console shows his drives
-
-### Variations
-
-- GitHub OAuth was used the first time and email the second; they may map to different accounts (Clerk linking behavior, unverified).
-
-### Edge Cases
-
-- The console never displays the signed-in email; only "Your account" and "Personal workspace", so he must open the UserButton menu to find out.
-- Because first load auto-provisions, the wrong-account visit silently created a second empty Agent Drive account.
+- Failure after drives load but before usage loads: Usage and strip stats may be missing while the Files tab still works (not verified).
