@@ -124,7 +124,7 @@ export async function runSmoke({ url, localTestAuth = false, headless = false, r
     report.checks.push({ name: 'signup and workspace', passed: true });
 
     stage = 'console provisioning';
-    await page.getByRole('button', { name: 'Create your first drive' }).click();
+    await page.getByRole('button', { name: 'New drive', exact: true }).click();
     await page.getByLabel('Drive name').fill(driveName);
     const driveCreated = page.waitForResponse(
       (response) =>
@@ -136,8 +136,11 @@ export async function runSmoke({ url, localTestAuth = false, headless = false, r
     driveId = (await driveResponse.json()).id;
     requireCheck(typeof driveId === 'string');
     const driveKey = await page.getByTestId('drive-key').inputValue();
-    await page.getByLabel('I saved my drive key securely').check();
-    await page.getByRole('button', { name: 'Continue to drive' }).click();
+    const recoveryDownload = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
+    await recoveryDownload;
+    await page.getByRole('button', { name: 'I saved it' }).click();
+    await page.getByTestId('drive-id').waitFor();
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
     await page.getByRole('button', { name: 'Create your first agent' }).click();
     await page.getByLabel('Agent name').fill('Release smoke agent');
