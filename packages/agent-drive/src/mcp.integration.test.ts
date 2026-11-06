@@ -98,7 +98,7 @@ async function fixtureObjectKeys() {
   return keys;
 }
 
-function processEnv(token: string, key?: string) {
+function processEnv(token: string, key?: string, configFile = 'mcp-config.json') {
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string',
@@ -111,18 +111,18 @@ function processEnv(token: string, key?: string) {
     ...inherited,
     AGENT_DRIVE_API_URL: apiUrl,
     AGENT_DRIVE_API_KEY: token,
-    AGENT_DRIVE_CONFIG: join(tempRoot, 'mcp-config.json'),
+    AGENT_DRIVE_CONFIG: join(tempRoot, configFile),
     AGENT_DRIVE_MACHINE: 'mcp-test-machine',
     ...(key ? { [driveKeyEnvironmentName(driveId)]: key } : {}),
   };
 }
 
-async function openMcp(token: string, key?: string) {
+async function openMcp(token: string, key?: string, configFile?: string) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve('packages/agent-drive/dist/cli.js'), 'mcp'],
     cwd: process.cwd(),
-    env: processEnv(token, key),
+    env: processEnv(token, key, configFile),
     stderr: 'pipe',
   });
   let stderr = '';
@@ -213,6 +213,36 @@ afterAll(async () => {
 });
 
 describe('MCP product tools over stdio', () => {
+  it('defaults driveId to the only drive saved for the API origin', async () => {
+    await writeFile(
+      join(tempRoot, 'default-drive.json'),
+      JSON.stringify({
+        driveKeys: { [driveId]: driveKey },
+        driveKeyOrigins: { [driveId]: new URL(apiUrl).origin },
+      }),
+      { mode: 0o600 },
+    );
+    const mcp = await openMcp(scopedToken, undefined, 'default-drive.json');
+    try {
+      const put = await call(mcp.client, 'put', {
+        path: '/mcp/default-drive.txt',
+        text: 'no driveId given',
+      });
+      expect(put.value).not.toHaveProperty('error');
+      const got = await call(mcp.client, 'get', { path: '/mcp/default-drive.txt' });
+      expect(got.value).toMatchObject({ data: { text: 'no driveId given' } });
+      const none = await openMcp(scopedToken, driveKey);
+      try {
+        const missing = await call(none.client, 'list', {});
+        expect(missing.result.isError).toBe(true);
+        expect(JSON.stringify(missing.value)).toContain('driveId');
+      } finally {
+        await none.client.close();
+      }
+    } finally {
+      await mcp.client.close();
+    }
+  }, 60_000);
   it('lists and exercises all tools with encrypted file and safe error behavior', async () => {
     const marker = `MCP-PLAINTEXT-${randomUUID()}-${randomBytes(8).toString('hex')}`;
     const mcp = await openMcp(scopedToken, driveKey);

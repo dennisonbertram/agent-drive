@@ -49,6 +49,9 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
    agent-drive skill install
 
+   This writes into your own skills folder (~/.claude/skills or ~/.codex/skills). In a sandbox,
+   CI or on a shared machine, run \`agent-drive skill install --target <dir>\` instead, or skip it.
+
 6. Check that it worked:
 
    agent-drive check
@@ -119,6 +122,14 @@ Codex (~/.codex/config.toml):
    [mcp_servers.agent-drive]
    command = "agent-drive"
    args = ["mcp"]
+   default_tools_approval_mode = "approve"
+
+   Without the last line, \`codex exec\` (approval policy never) refuses \`put\` and the other
+   writing tools with "MCP tool call requires approval". Read-only tools (whoami, get, list,
+   versions, search, recent) need no approval. Add it only if you trust this agent to write.
+   \`tools.put.approval_mode = "approve"\` approves a single tool instead.
+
+MCP tools take an optional driveId. Leave it out when only one drive key is saved for the API.
 
 Any other MCP client (Cursor, etc.):
 

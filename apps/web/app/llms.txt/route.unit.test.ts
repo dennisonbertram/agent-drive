@@ -18,6 +18,7 @@ describe('GET /llms.txt', () => {
     expect(body).not.toContain('agent-drive whoami');
     expect(body).toContain('claude mcp add agent-drive -- agent-drive mcp');
     expect(body).toContain('[mcp_servers.agent-drive]');
+    expect(body).toContain('default_tools_approval_mode = "approve"');
     expect(body).toContain('Back up your credentials');
     expect(body).toContain('agent-drive credentials export --to');
     expect(body).toContain('agent-drive credentials export --stdout |');
@@ -28,6 +29,8 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('gh secret set AGENT_DRIVE_CREDENTIALS');
     expect(body).toContain('vercel env add AGENT_DRIVE_CREDENTIALS production');
     expect(body).toContain('agent-drive skill install');
+    expect(body).toContain('agent-drive skill install --target <dir>');
+    expect(body).toContain('~/.claude/skills or ~/.codex/skills');
     expect(body).toContain('## Sandboxes');
     expect(body).toContain('## Several agents on one drive');
     expect(body).toContain('agent-drive credentials issue --name <agent> --write-path');
