@@ -2,10 +2,13 @@
 
 import '../../styles/connect.css';
 
-import { useEffect, useState } from 'react';
-import { decodeDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
+import { useEffect, useRef, useState } from 'react';
+import {
+  decodeDriveKey,
+  DriveCryptoError,
+} from '../../../../../packages/agent-drive/src/crypto.ts';
 import { driveKeyFromBundle, BUNDLE_PREFIX } from '@/src/console/credentials-bundle';
-import { parseRecoveryFile, sealDriveKey } from '@/src/device/seal';
+import { parseRecoveryFile, sealDriveKey, type SealedKey } from '@/src/device/seal';
 
 type Drive = { id: string; name: string };
 type DeviceRequest = {
@@ -62,6 +65,27 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   return data as T;
 }
 
+// Letters only, uppercase, at most 8, hyphen after the fourth: "bcdf ghjk" becomes "BCDF-GHJK".
+function formatCode(value: string) {
+  const raw = value
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '')
+    .slice(0, 8);
+  return raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
+}
+
+// Raised while reading or checking the key in the browser, before anything is posted.
+class KeyError extends Error {}
+
+const BAD_KEY =
+  'This is not a valid drive key. Paste the key from the console, or choose a recovery file or credentials bundle.';
+const DEFAULT_SCOPES = ['read', 'write', 'delete', 'share'];
+const capitalize = (scopes: string[]) => {
+  const text = scopes.join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+const MAX_REFETCHES = 10;
+
 function normalizeCode(value: string) {
   const raw = value.toUpperCase().replace(/[^A-Z]/g, '');
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
@@ -82,8 +106,11 @@ export default function Connect({
   const loginCommand = <code className="connect-cmd">agent-drive login</code>;
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<{ name: string; access: string; drive: string } | null>(null);
   const [formError, setFormError] = useState('');
+  const [fieldError, setFieldError] = useState<{ field: 'key' | 'folder'; message: string } | null>(
+    null,
+  );
   const [delegate, setDelegate] = useState(false);
   // Add to an existing drive (docs/agent-login.md section 12). The key lives only in this state.
   const [accountDrives, setAccountDrives] = useState<Drive[]>([]);
@@ -95,12 +122,19 @@ export default function Connect({
   const [readOnly, setReadOnly] = useState(false);
   const [folder, setFolder] = useState('');
   const [notice, setNotice] = useState('');
+  const busyRef = useRef(false);
+  const refetches = useRef(0);
+  const refetchStopped = useRef(false);
 
   async function load(raw: string) {
     const code = normalizeCode(raw);
     setProblem(null);
     setNotice('');
     setRequest(null);
+    if (!code) {
+      setProblem({ kind: 'error', message: 'Enter the code your agent printed.' });
+      return;
+    }
     if (!codePattern.test(code)) {
       setProblem({ kind: 'error', message: 'Enter the code in the form XXXX-XXXX.' });
       return;
@@ -133,6 +167,7 @@ export default function Connect({
     setKeyText('');
     setKeyFile(null);
     setFileInputKey((n) => n + 1);
+    setFieldError(null);
   }
 
   async function loadDrives() {
@@ -160,35 +195,104 @@ export default function Connect({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The agent may offer a drive while this page is open (`agent-drive grant` in another
+  // terminal). Look again when the user comes back to the window, not on a timer.
+  // ponytail: every console device call shares a 30 per 10 minute budget with Approve and the
+  // delegating agent, so no polling: at most MAX_REFETCHES focus refetches, stopped at expiry or
+  // on any error.
+  const shownCode = request?.user_code;
+  const shownRevision = request?.offerRevision ?? 0;
+  const shownExpiry = request?.expires_at;
+  useEffect(() => {
+    if (!shownCode || !shownExpiry || done) return;
+    let inFlight = false;
+    async function onFocus() {
+      if (
+        inFlight ||
+        busyRef.current ||
+        refetchStopped.current ||
+        refetches.current >= MAX_REFETCHES ||
+        Date.now() >= Date.parse(shownExpiry!)
+      )
+        return;
+      inFlight = true;
+      refetches.current += 1;
+      try {
+        const found = await api<DeviceRequest>(`device/${encodeURIComponent(shownCode!)}`);
+        if ((found.offerRevision ?? 0) !== shownRevision && !busyRef.current) {
+          setRequest(found);
+          setExisting(false);
+          clearKey();
+          setNotice(
+            found.offer
+              ? `${found.offer.agentName} offered a drive for this login. Review it before you approve.`
+              : 'The request changed; review it again.',
+          );
+        }
+      } catch {
+        refetchStopped.current = true;
+      } finally {
+        inFlight = false;
+      }
+    }
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [shownCode, shownRevision, shownExpiry, done]);
+
+  // Bring a field error into view and put the cursor where the fix goes.
+  useEffect(() => {
+    if (!fieldError) return;
+    const id = fieldError.field === 'key' ? 'connect-key-error' : 'connect-folder-error';
+    document.getElementById(id)?.scrollIntoView({ block: 'center' });
+    document.getElementById(fieldError.field === 'key' ? 'connect-key' : 'connect-folder')?.focus();
+  }, [fieldError]);
+
   async function approve() {
     if (!request) return;
     setFormError('');
+    setFieldError(null);
     setBusy(true);
+    busyRef.current = true;
     try {
       // The revision binds this approval to the offer (or lack of one) the page showed.
       const offerRevision = request.offerRevision ?? 0;
       let body: unknown = delegate ? { delegate: true, offerRevision } : { offerRevision };
+      let scopes: string[] = request.offer?.scopes ?? request.scopes ?? DEFAULT_SCOPES;
+      let driveLabel = request.offer
+        ? `the drive ${request.offer.drive.name}`
+        : (request.drives ?? []).length > 0
+          ? (request.drives ?? []).map((d) => d.name).join(', ')
+          : 'its new drive';
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
-        const pasted = keyText.trim();
-        const text = keyFile ? await keyFile.text() : pasted;
-        if (!text) throw new Error('Paste the drive key or choose a recovery file.');
-        if (keyFile && keyFile.size > 16_384)
-          throw new Error('This is not a valid drive key file.');
-        const key = text.trim().startsWith(BUNDLE_PREFIX)
-          ? driveKeyFromBundle(text, driveId)
-          : keyFile
-            ? parseRecoveryFile(text, driveId)
-            : text.trim();
-        decodeDriveKey(key);
-        if (!request.public_key) throw new Error('This request has no agent key. Start again.');
-        const sealed = await sealDriveKey(request.public_key, driveId, key);
+        let sealed: SealedKey;
+        try {
+          const pasted = keyText.trim();
+          const text = keyFile ? await keyFile.text() : pasted;
+          if (!text) throw new Error('Paste the drive key or choose a recovery file.');
+          if (keyFile && keyFile.size > 16_384)
+            throw new Error('This is not a valid drive key file.');
+          const key = text.trim().startsWith(BUNDLE_PREFIX)
+            ? driveKeyFromBundle(text, driveId)
+            : keyFile
+              ? parseRecoveryFile(text, driveId)
+              : text.trim();
+          decodeDriveKey(key);
+          if (!request.public_key) throw new Error('This request has no agent key. Start again.');
+          sealed = await sealDriveKey(request.public_key, driveId, key);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '';
+          throw new KeyError(
+            error instanceof DriveCryptoError || /base64url|key length/i.test(message)
+              ? BAD_KEY
+              : message || BAD_KEY,
+          );
+        }
+        scopes = readOnly ? ['read'] : DEFAULT_SCOPES;
+        driveLabel = `the drive ${accountDrives.find((d) => d.id === driveId)?.name ?? ''}`.trim();
         body = {
           driveIds: [driveId],
-          scopes: [
-            ...(readOnly ? ['read'] : ['read', 'write', 'delete', 'share']),
-            ...(delegate ? ['delegate'] : []),
-          ],
+          scopes: [...scopes, ...(delegate ? ['delegate'] : [])],
           sealedDriveKeys: { [driveId]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
           offerRevision,
@@ -196,9 +300,14 @@ export default function Connect({
       }
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
       clearKey();
-      setDone(true);
+      setDone({
+        name: request.client_name,
+        access: scopes.includes('write') ? 'read and write' : 'read',
+        drive: driveLabel,
+      });
     } catch (error) {
-      if (
+      if (error instanceof KeyError) setFieldError({ field: 'key', message: error.message });
+      else if (
         error instanceof HttpError &&
         error.status === 409 &&
         error.message === 'The request changed; reload the page.'
@@ -207,8 +316,23 @@ export default function Connect({
         clearKey();
         await load(request.user_code);
         setNotice('The request changed; review it again.');
-      } else setFormError(error instanceof Error ? error.message : 'Approval failed.');
+      } else if (
+        error instanceof HttpError &&
+        error.status === 400 &&
+        error.message.startsWith('writePaths')
+      )
+        setFieldError({
+          field: 'folder',
+          message:
+            'Enter a folder that starts with / and does not end with /, for example /inbox/agent.',
+        });
+      else if (error instanceof HttpError && error.status === 404)
+        setFormError(
+          'This request expired or was already used. Run `agent-drive login` in your agent to get a new code.',
+        );
+      else setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -220,8 +344,15 @@ export default function Connect({
           <span className="connect-led on" aria-hidden="true" />
           Paired
         </span>
-        <h1>Approved</h1>
-        <p>Approved. Return to your agent; it will finish setup on its own.</p>
+        <h1>{done.name} is connected</h1>
+        <p>
+          {done.name} can now {done.access} {done.drive}. Return to your agent; it will finish setup
+          on its own.
+        </p>
+        <p>It appears in the console under Agents once setup finishes.</p>
+        <a className="button secondary" href="/console">
+          Open console
+        </a>
       </section>
     );
 
@@ -234,19 +365,8 @@ export default function Connect({
         </span>
         <h1>Connect an agent</h1>
         <p>Enter the code your agent printed after running {loginCommand}.</p>
-        {problem && (
-          <div role="alert" className={`banner ${problem.kind === 'missing' ? 'info' : 'error'}`}>
-            {problem.kind === 'missing' ? (
-              <>
-                This code is wrong, expired, or already used. Run {loginCommand} in your agent to
-                get a new one.
-              </>
-            ) : (
-              problem.message
-            )}
-          </div>
-        )}
         <form
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             void load(codeInput);
@@ -256,14 +376,26 @@ export default function Connect({
             Code from your agent
             <input
               value={codeInput}
-              onChange={(event) => setCodeInput(event.target.value)}
+              onChange={(event) => setCodeInput(formatCode(event.target.value))}
               placeholder="XXXX-XXXX"
               autoComplete="off"
               autoCapitalize="characters"
+              autoFocus={!initialCode}
               spellCheck={false}
-              required
             />
           </label>
+          {problem && (
+            <div role="alert" className="banner error">
+              {problem.kind === 'missing' ? (
+                <>
+                  This code is wrong, expired, or already used. Run {loginCommand} in your agent to
+                  get a new code.
+                </>
+              ) : (
+                problem.message
+              )}
+            </div>
+          )}
           <button className="button primary connect-approve" disabled={loading}>
             {loading ? 'Looking up…' : 'Continue'}
           </button>
@@ -272,45 +404,72 @@ export default function Connect({
     );
 
   const reconnect = request.drives ?? [];
+  const offer = request.offer;
+  const previous = request.scopes;
+  const facts: [string, string][] = [];
+  if (request.machine) facts.push(['Machine', request.machine]);
+  facts.push(['Account', account]);
+  if (!existing) {
+    const writes = offer ? offer.writePaths : (request.write_paths ?? []);
+    facts.push([
+      'Drive',
+      offer
+        ? offer.drive.name
+        : reconnect.length
+          ? reconnect.map((d) => d.name).join(', ')
+          : 'New encrypted drive',
+    ]);
+    facts.push(['Access', capitalize(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES))]);
+    facts.push(['Writes', writes.length ? writes.join(', ') : 'Anywhere in the drive']);
+  }
+  if (offer) facts.push(['Offered by', offer.agentName]);
+  if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
+  const explain = existing
+    ? 'Your browser seals the key to this agent’s login; Agent Drive never sees it.'
+    : offer
+      ? `${offer.agentName} sealed the drive key for this login; Agent Drive never sees it.`
+      : reconnect.length > 0 || previous
+        ? `It reconnects to the drive it used before${previous ? ' and keeps its previous permissions' : ''}.`
+        : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.';
+  const keyInvalid = fieldError?.field === 'key';
+  const folderInvalid = fieldError?.field === 'folder';
   return (
     <section className="panel connect-card">
-      <div className="connect-code-box">
-        <span className="connect-tag">
-          <span className="connect-led on" aria-hidden="true" />
-          Pairing code
-        </span>
-        <span className="connect-code" aria-label={`Code ${request.user_code}`}>
-          {request.user_code}
-        </span>
-        <p>
-          Check that this matches your agent’s terminal. If it does not, close this page; unapproved
-          requests expire on their own.
-        </p>
-      </div>
+      <span className="connect-tag">
+        <span className="connect-led on" aria-hidden="true" />
+        Pairing request
+      </span>
       <h1>Connect {request.client_name}?</h1>
+      {notice && (
+        <div role="status" className="banner info">
+          {notice}
+        </div>
+      )}
       <dl className="connect-facts">
-        <dt>Agent</dt>
-        <dd>{request.client_name}</dd>
-        {request.machine && (
-          <>
-            <dt>Machine</dt>
-            <dd>{request.machine}</dd>
-          </>
-        )}
-        <dt>Account</dt>
-        <dd>{account}</dd>
-        <dt>Requested</dt>
-        <dd>{new Date(request.created_at).toLocaleString()}</dd>
+        {facts.map(([term, value]) => (
+          <div key={term} className="connect-fact">
+            <dt>{term}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
       </dl>
-      {existing ? (
+      <p className="connect-explain">{explain}</p>
+      {!existing &&
+        !offer &&
+        request.creates_drive &&
+        !request.scopes &&
+        accountDrives.length > 0 && (
+          <button
+            type="button"
+            className="button secondary connect-branch"
+            onClick={() => setExisting(true)}
+          >
+            Add to an existing drive instead
+          </button>
+        )}
+      {existing && (
         <div className="connect-existing">
-          <p className="banner info">
-            You are giving {request.client_name}
-            {request.machine ? ` on ${request.machine}` : ''} the key to this drive. Your browser
-            seals the key to this agent’s login; Agent Drive never sees it. Approve only if the code
-            above matches the terminal you trust.
-          </p>
-          <label>
+          <label className="cf-drive">
             Drive
             <select
               value={driveId}
@@ -326,48 +485,75 @@ export default function Connect({
               ))}
             </select>
           </label>
-          <label>
-            Drive key or credentials bundle (adcred1.…)
+          <label className="cf-key">
+            Drive key
             <input
+              id="connect-key"
               type="password"
               autoComplete="off"
+              placeholder="Paste the drive key or an adcred1… bundle"
               value={keyText}
+              aria-invalid={keyInvalid || undefined}
+              aria-describedby={keyInvalid ? 'connect-key-error' : undefined}
+              className={keyInvalid ? 'invalid' : undefined}
               onChange={(event) => setKeyText(event.target.value)}
             />
           </label>
-          <label>
-            Or choose a recovery file or credentials bundle
+          <label className="cf-file">
+            Or choose a file
             <input
               key={fileInputKey}
               type="file"
+              aria-invalid={keyInvalid || undefined}
+              aria-describedby={keyInvalid ? 'connect-key-error' : undefined}
+              className={keyInvalid ? 'invalid' : undefined}
               onChange={(event) => setKeyFile(event.target.files?.[0] ?? null)}
             />
           </label>
-          <p className="connect-note">
-            A recovery file or bundle is checked against the selected drive. A pasted raw key cannot
-            be checked here; a wrong key gives the agent a drive it cannot read.
-          </p>
-          <label className="connect-check">
+          {keyInvalid ? (
+            <p className="connect-field-error cf-note" role="alert" id="connect-key-error">
+              {fieldError.message}
+            </p>
+          ) : (
+            <p className="connect-hint cf-note">
+              A recovery file or bundle is checked against the drive. A pasted key cannot be checked
+              here.
+            </p>
+          )}
+          <label className="connect-check cf-check">
             <input
               type="checkbox"
               checked={readOnly}
               onChange={(event) => setReadOnly(event.target.checked)}
-            />{' '}
+            />
             Read only
           </label>
-          <label>
+          <label className="cf-folder">
             Only allow writes under (optional)
             <input
+              id="connect-folder"
               value={folder}
               onChange={(event) => setFolder(event.target.value)}
               placeholder="/inbox/x"
               autoComplete="off"
               spellCheck={false}
+              aria-invalid={folderInvalid || undefined}
+              aria-describedby={folderInvalid ? 'connect-folder-error' : undefined}
+              className={folderInvalid ? 'invalid' : undefined}
             />
           </label>
+          {folderInvalid && (
+            <p
+              className="connect-field-error cf-folder-error"
+              role="alert"
+              id="connect-folder-error"
+            >
+              {fieldError.message}
+            </p>
+          )}
           <button
             type="button"
-            className="connect-link"
+            className="button secondary connect-branch cf-back"
             onClick={() => {
               setExisting(false);
               clearKey();
@@ -376,56 +562,36 @@ export default function Connect({
             Use a new drive instead
           </button>
         </div>
-      ) : request.offer ? (
-        <p className="banner info">
-          Offered by {request.offer.agentName}: drive {request.offer.drive.name},{' '}
-          {request.offer.scopes.join(', ')}
-          {request.offer.writePaths.length
-            ? `, writes under ${request.offer.writePaths.join(', ')}`
-            : ''}
-          . That agent sealed the drive key for this login; Agent Drive never sees it.
-        </p>
-      ) : (
-        <p className="banner info">
-          {reconnect.length > 0
-            ? `Reconnects to: ${reconnect.map((d) => d.name).join(', ')}`
-            : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.'}
-          {request.scopes
-            ? ` Keeps its previous permissions (${request.scopes.join(', ')}${request.write_paths?.length ? `; writes under ${request.write_paths.join(', ')}` : ''}).`
-            : ''}
-        </p>
       )}
-      {!existing &&
-        !request.offer &&
-        request.creates_drive &&
-        !request.scopes &&
-        accountDrives.length > 0 && (
-          <button type="button" className="connect-link" onClick={() => setExisting(true)}>
-            Add to an existing drive instead
-          </button>
-        )}
-      <label className="connect-delegate">
-        <input
-          type="checkbox"
-          checked={delegate}
-          onChange={(event) => setDelegate(event.target.checked)}
-        />{' '}
-        Let this agent add other agents to its drives
-        <small>
-          It can hand another agent the key and permissions it holds itself, never more, and it
-          cannot pass this permission on. You still approve each new agent here.
-        </small>
-      </label>
-      {notice && (
-        <div role="status" className="banner info">
-          {notice}
-        </div>
-      )}
+      <details className="connect-more">
+        <summary>Optional: let this agent connect other agents</summary>
+        <label className="connect-delegate">
+          <input
+            type="checkbox"
+            checked={delegate}
+            onChange={(event) => setDelegate(event.target.checked)}
+          />
+          <span>
+            Let this agent add other agents to its drives
+            <small>
+              It can hand another agent the key and permissions it holds itself, never more, and it
+              cannot pass this permission on. You still approve each new agent here.
+            </small>
+          </span>
+        </label>
+      </details>
       {formError && (
         <div role="alert" className="banner error">
           {formError}
         </div>
       )}
+      <div className="connect-code-line">
+        <span>Does this code match your terminal?</span>
+        <span className="connect-code" aria-label={`Code ${request.user_code}`}>
+          {request.user_code}
+        </span>
+        <small>If it does not, close this page; the request expires on its own.</small>
+      </div>
       <div className="connect-actions">
         <button
           className="button primary connect-approve"
