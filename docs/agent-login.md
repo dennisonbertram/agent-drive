@@ -210,7 +210,7 @@ failed unseal is reported per drive and does not abort login.
 ## 6. Agent-facing docs
 
 - `GET /llms.txt` (route, uses the public origin): what Agent Drive is, then setup by runtime.
-  - Local agents: install, `agent-drive login --name "<your name>"`, tell the human to open the
+  - Local agents: install, `agent-drive login --name "<your name>"` (plus `--api <origin>/api` when the origin is not https://agentdrive.xyz), tell the human to open the
     printed link, then `agent-drive whoami`.
   - Sandboxes: `npx` form; if the site is unreachable, stop and tell the human.
   - Hosted assistants: not supported; explain why.

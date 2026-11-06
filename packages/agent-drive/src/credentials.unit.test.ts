@@ -363,6 +363,17 @@ describe('enforcement and reporting', () => {
     });
     expect(warn).toHaveLength(2);
   });
+
+  it('stays silent when the key is not allowed to report (read-only key, HTTP 403)', async () => {
+    const warn: string[] = [];
+    const denied = vi.fn(async () => new Response('', { status: 403 }));
+    await reportKeyBackup('https://x.test/api', 'tok', [D1], 'env', {
+      fetch: denied as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    expect(denied).toHaveBeenCalledTimes(1);
+    expect(warn).toEqual([]);
+  });
 });
 
 void runCheck;

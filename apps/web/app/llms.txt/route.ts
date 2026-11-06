@@ -1,5 +1,9 @@
+const PUBLIC_ORIGIN = 'https://agentdrive.xyz';
+
 export function GET(request: Request) {
   const origin = new URL(request.url).origin;
+  // The CLI defaults to the public API, so any other origin must be passed to `login`.
+  const api = origin === PUBLIC_ORIGIN ? '' : ` --api ${origin}/api`;
   const cli = `${origin}/cli/agent-drive.tgz`;
   const body = `# Agent Drive
 
@@ -16,13 +20,13 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
    No global installs allowed (sandbox)? Run it with npx instead, for example:
 
-   npx -y ${cli} login --name "<your agent name>"
+   npx -y ${cli} login --name "<your agent name>"${api}
 
    Use the same \`npx -y ${cli}\` prefix for every command below.
 
 2. Connect:
 
-   agent-drive login --name "<your agent name>"
+   agent-drive login --name "<your agent name>"${api}
 
    It prints a link and a code. Tell the human: "Open this link (you must be signed in to
    Agent Drive), check that the code matches the one I printed, and click Approve." There is
@@ -76,7 +80,7 @@ approve again for each run.
 
 ## Adding another agent to your drive
 
-Run \`agent-drive login\` on the new agent's machine. If the human has the drive's recovery file
+Run \`agent-drive login${api}\` on the new agent's machine. If the human has the drive's recovery file
 or credentials bundle, they choose "Add to an existing drive instead" on the approval page,
 pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
 never sees it. They can make the new agent read-only or limit its writes to one folder.

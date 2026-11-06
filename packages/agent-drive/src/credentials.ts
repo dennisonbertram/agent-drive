@@ -339,6 +339,8 @@ export async function reportKeyBackup(
         body: JSON.stringify({ method }),
         signal: AbortSignal.timeout(5000),
       });
+      // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
+      if (response.status === 403) continue;
       if (!response.ok) throw new Error(String(response.status));
     } catch {
       warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);

@@ -29,6 +29,7 @@ import {
   driveKeyEnvironmentName,
   machineName,
   resolveLoginApiUrl,
+  resolveDriveId,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
@@ -83,6 +84,14 @@ function parse(raw: string[]) {
   });
 }
 
+/** What `get --output` prints: no presigned URL and no wrapped key. */
+export function publicVersion(version: object) {
+  const safe: Record<string, unknown> = { ...version };
+  delete safe.wrappedKey;
+  delete safe.downloadUrl;
+  return safe;
+}
+
 function output(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
@@ -116,6 +125,11 @@ async function stdinText() {
 async function connect(args: ReturnType<typeof parse>) {
   const connection = await resolveConnection();
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
+  try {
+    args.values.drive ??= [resolveDriveId(undefined, connection.config, connection.apiUrl)];
+  } catch (error) {
+    missingDrive = error instanceof Error ? error.message : undefined;
+  }
   const drive = args.values.drive?.[0];
   const driveKey = drive
     ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
@@ -128,9 +142,12 @@ async function connect(args: ReturnType<typeof parse>) {
   });
 }
 
+// Set by connect() when no --drive was given and no single default exists.
+let missingDrive: string | undefined;
+
 function requiredDrive(args: ReturnType<typeof parse>) {
   const id = args.values.drive?.[0];
-  if (!id) throw new Error('A --drive ID is required.');
+  if (!id) throw new Error(missingDrive ?? 'A --drive ID is required.');
   return id;
 }
 
@@ -523,7 +540,7 @@ async function run(command: string, raw: string[]) {
     );
     if (args.values.output) {
       await writeFile(args.values.output, result.bytes, { mode: 0o600 });
-      return output(result.version);
+      return output(publicVersion(result.version));
     }
     if (result.bytes.byteLength > 1024 * 1024)
       throw new Error('Binary or large output requires --output.');
