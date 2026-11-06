@@ -10,6 +10,7 @@ Message: agents save files to their drive natively, and the files survive the sa
 - Inter Tight for text (headings weight 500, tight negative letter-spacing), JetBrains Mono for labels, paths, codes and commands.
 - Small uppercase mono labels (`.tag` in the reference) above headings and groups.
 - Buttons: 1px black border, 6px radius, a 2px solid black drop shadow underneath; press moves down 1px. Primary action is signal orange with black text. One primary per screen.
+- Status colours: `--danger` (#b42318) for errors, `--ok` (#1a7f37) for confirmed-good status. Status only, never decoration; orange stays for the primary action and the LED.
 - Signal orange only for the primary action and the small status LED. Orange text on white uses `--sig-dark`.
 - Dark code panels (`#111`, white mono text) for commands the user copies.
 - Tables and lists: hairline row dividers, mono for paths and sizes, no zebra striping.
@@ -18,7 +19,7 @@ Message: agents save files to their drive natively, and the files survive the sa
 ## Tokens (contract; the base agent defines these on :root)
 
 Use only these names, always with the fallback so your page renders before the base merges:
-`var(--bg,#fff) var(--panel,#fff) var(--paper-2,#f6f5f2) var(--ink,#111) var(--ink-2,#3b3a37) var(--muted,#6b6963) var(--line,rgba(17,17,17,.16)) var(--line-strong,#111) var(--sig,#ff4a1c) var(--sig-dark,#b8360c) var(--code-bg,#111) var(--code-ink,#fff) var(--code-muted,#a8a69f) var(--sans,'Inter Tight',system-ui,sans-serif) var(--mono,'JetBrains Mono',ui-monospace,Menlo,monospace)`.
+`var(--bg,#fff) var(--panel,#fff) var(--paper-2,#f6f5f2) var(--ink,#111) var(--ink-2,#3b3a37) var(--muted,#6b6963) var(--line,rgba(17,17,17,.16)) var(--line-strong,#111) var(--sig,#ff4a1c) var(--sig-dark,#b8360c) var(--danger,#b42318) var(--ok,#1a7f37) var(--code-bg,#111) var(--code-ink,#fff) var(--code-muted,#a8a69f) var(--sans,'Inter Tight',system-ui,sans-serif) var(--mono,'JetBrains Mono',ui-monospace,Menlo,monospace)`.
 
 Old T1 token names (`--al1`, `--al2`, `--al3`, `--smoke`, `--sig-text`, `--line-soft`, `--text-2`, `--accent`, `--link`) stay defined by the base agent as aliases for one release so nothing breaks, but do not use them in new rules; replace them in the files you own.
 

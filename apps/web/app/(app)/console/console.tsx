@@ -19,6 +19,7 @@ import {
 import { validateDownloadUrl } from '@/src/share/url';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
+import { ListState } from './list-state';
 import '../../styles/console.css';
 import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
 
@@ -89,19 +90,26 @@ type ModalName =
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const result = await fetch(`/api/console/${path}`, {
-    method,
-    credentials: 'same-origin',
-    cache: 'no-store',
-    ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
+  let result: Response;
+  try {
+    result = await fetch(`/api/console/${path}`, {
+      method,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      ...(body === undefined
+        ? {}
+        : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+  } catch {
+    throw new Error('Could not reach Agent Drive. Check your connection and try again.');
+  }
   if (result.status === 401) {
     window.location.assign('/sign-in');
     throw new Error('Your session expired. Sign in again.');
   }
-  const data = await result.json();
+  const data = await result.json().catch(() => {
+    throw new Error('Agent Drive returned an unexpected response. Try again.');
+  });
   if (!result.ok) throw new Error(data.error?.message ?? 'The request could not be completed.');
   return data as T;
 }
@@ -178,6 +186,18 @@ function size(bytes: number) {
 
 function date(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
+}
+
+function deletedOn(value?: string) {
+  return value
+    ? new Date(value).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '—';
 }
 
 function modifiedAt(value?: string) {
@@ -272,6 +292,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
   const [filter, setFilter] = useState('');
+  const [slowScope, setSlowScope] = useState('');
+  const filterRef = useRef<HTMLInputElement>(null);
   const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
     scope: string;
@@ -295,6 +317,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
   const loaded = filePage?.scope === fileScope;
+  const failed = fileFailure?.scope === fileScope;
+  const listStatus = failed
+    ? 'error'
+    : loaded
+      ? 'ready'
+      : slowScope === fileScope
+        ? 'slow'
+        : 'loading';
   const backupText = drive?.key_backup_at
     ? `Key backed up ${new Date(drive.key_backup_at).toLocaleDateString()} (${drive.key_backup_method})`
     : 'This drive’s key hasn’t been backed up. If the agent’s machine is lost, these files can’t be opened. Ask the agent to run agent-drive credentials export';
@@ -338,6 +368,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => {
       active = false;
     };
+  }, [selected, tab, fileScope]);
+  useEffect(() => {
+    // A drive switch, tab switch or Retry changes fileScope, which restarts this timer.
+    if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
+    const timer = setTimeout(() => setSlowScope(fileScope), 10_000);
+    return () => clearTimeout(timer);
   }, [selected, tab, fileScope]);
   useEffect(() => {
     if (!navOpen) return;
@@ -433,8 +469,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       credentials: 'omit',
       redirect: 'error',
       cache: 'no-store',
-    });
-    if (!response.ok) throw new Error('The encrypted file could not be downloaded.');
+    }).catch(() => null);
+    if (!response?.ok) throw new Error('The encrypted file could not be downloaded.');
     const bytes = await decryptFile(
       new Uint8Array(await response.arrayBuffer()),
       metadata.wrappedKey,
@@ -551,9 +587,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 {['▤', '⌘', '⚿', '▥', '⌫'][index]}
               </span>
               {item}
-              {item === 'Files' && tab === 'Files' && selected && filePage?.scope === fileScope && (
-                <span className="nav-count">{fileItems.length}</span>
-              )}
             </button>
           ))}
           <Link className="nav-item" href="/console/billing">
@@ -638,11 +671,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <div className="heading-text">
               <h1>{tab === 'Files' ? 'Drives & files' : tab}</h1>
               <p
-                role="status"
-                className={notice ? 'notice-slot' : 'heading-sub'}
-                title={notice || undefined}
+                role={error && !modal ? 'alert' : 'status'}
+                className={
+                  error && !modal ? 'notice-slot error' : notice ? 'notice-slot' : 'heading-sub'
+                }
+                title={(error && !modal ? error : notice) || undefined}
               >
-                {notice ? (
+                {error && !modal ? (
+                  <>
+                    <span className="notice-text">{error}</span>
+                    <button type="button" className="notice-dismiss" onClick={() => setError('')}>
+                      Dismiss
+                    </button>
+                  </>
+                ) : notice ? (
                   <>
                     <span className="notice-text">{notice}</span>
                     <button type="button" className="notice-dismiss" onClick={() => setNotice('')}>
@@ -693,7 +735,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
             </div>
           </div>
-          {!modal && errorBanner}
           {!ready ? (
             <section className={`panel empty ${error ? '' : 'loading'}`}>
               <h2>{error ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
@@ -702,6 +743,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   ? 'Check the connection, then refresh to try again.'
                   : 'Loading your drives and access settings.'}
               </p>
+              {error && (
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => void act(refresh)}
+                >
+                  Try again
+                </button>
+              )}
             </section>
           ) : (
             <>
@@ -770,7 +820,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   {tab === 'Files' && drive && !loaded && (
                     <div className="banner keyline keyline-reserve" aria-hidden />
                   )}
-                  <section className="panel file-panel">
+                  <section className={`panel file-panel ${tab === 'Trash' ? 'trash' : ''}`}>
                     <div className="panel-toolbar">
                       <h2>
                         {tab === 'Trash' ? 'Deleted files' : 'All files'}{' '}
@@ -806,23 +856,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <input
                           aria-label="Filter loaded files"
                           placeholder="Filter loaded files…"
+                          ref={filterRef}
                           value={filter}
                           disabled={!fileItems.length}
                           onChange={(event) => setFilter(event.target.value)}
                         />
                       </div>
                     </div>
-                    {fileFailure?.scope === fileScope && (
-                      <div className="empty" role="alert">
-                        <h3>Could not load files.</h3>
-                        <p>{fileFailure.message}</p>
-                        <button
-                          className="button secondary"
-                          onClick={() => setFileRefresh((value) => value + 1)}
-                        >
-                          Retry
-                        </button>
-                      </div>
+                    {listStatus !== 'ready' && (
+                      <ListState
+                        status={listStatus}
+                        message={fileFailure?.message}
+                        onRetry={() => setFileRefresh((value) => value + 1)}
+                      />
                     )}
                     {shownFiles.length > 0 && (
                       <div className="table-scroll table-stack">
@@ -836,8 +882,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               >
                                 {tab === 'Trash' ? 'DELETED' : 'SIZE'}
                               </th>
-                              <th role="columnheader">{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
-                              <th role="columnheader">MODIFIED</th>
+                              {tab !== 'Trash' && (
+                                <>
+                                  <th role="columnheader">AUTHOR</th>
+                                  <th role="columnheader">MODIFIED</th>
+                                </>
+                              )}
                               <th role="columnheader">
                                 <span className="sr-only">Actions</span>
                               </th>
@@ -858,29 +908,27 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 </td>
                                 <td role="cell" data-label={tab === 'Trash' ? 'Deleted' : 'Size'}>
                                   {tab === 'Trash'
-                                    ? date(file.deletedAt)
+                                    ? deletedOn(file.deletedAt)
                                     : size(Number(file.ciphertext_size ?? 0))}
                                 </td>
-                                <td
-                                  role="cell"
-                                  data-label={tab === 'Trash' ? 'Recovery' : 'Author'}
-                                >
-                                  {tab === 'Trash' ? (
-                                    'Versions preserved'
-                                  ) : (
-                                    <span className="author">
-                                      <span className="led dim" aria-hidden />
-                                      {authorLabel(
-                                        agents.find((agent) => agent.id === file.agent_id)?.name ??
-                                          file.agent_id ??
-                                          '',
-                                      )}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="modified" role="cell" data-label="Modified">
-                                  {modifiedAt(file.created_at)}
-                                </td>
+                                {tab !== 'Trash' && (
+                                  <>
+                                    <td role="cell" data-label="Author">
+                                      <span className="author">
+                                        <span className="led dim" aria-hidden />
+                                        {authorLabel(
+                                          agents.find((agent) => agent.id === file.agent_id)
+                                            ?.name ??
+                                            file.agent_id ??
+                                            '',
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td className="modified" role="cell" data-label="Modified">
+                                      {modifiedAt(file.created_at)}
+                                    </td>
+                                  </>
+                                )}
                                 <td className="actions" role="cell">
                                   <div className="row-actions">
                                     {tab === 'Trash' ? (
@@ -945,12 +993,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {!loaded && fileFailure?.scope !== fileScope && (
-                      <div className="empty loading">
-                        <h3>Loading files…</h3>
-                      </div>
-                    )}
-                    {loaded && !fileItems.length && fileFailure?.scope !== fileScope && (
+                    {listStatus === 'ready' && !fileItems.length && (
                       <div className="empty">
                         <h3>
                           {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}
@@ -973,9 +1016,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         )}
                       </div>
                     )}
-                    {loaded && fileItems.length > 0 && !shownFiles.length && (
+                    {listStatus === 'ready' && fileItems.length > 0 && !shownFiles.length && (
                       <div className="empty">
-                        <h3>No loaded files match “{filter}”.</h3>
+                        <h3>{`No ${filePage?.nextCursor ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            setFilter('');
+                            filterRef.current?.focus();
+                          }}
+                        >
+                          Clear filter
+                        </button>
                       </div>
                     )}
                     {filePage?.scope === fileScope && filePage.nextCursor && (

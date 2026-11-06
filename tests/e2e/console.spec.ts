@@ -330,6 +330,52 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     expect(desktop.page).toBeLessThanOrEqual(0);
     expect(desktop.table).toBeGreaterThan(0);
 
+    // Filtering: zero matches offer Clear filter, and one match pins the footer to the panel bottom.
+    const filter = page.getByLabel('Filter loaded files');
+    await filter.fill('zzz');
+    await expect(page.getByRole('heading', { name: 'No files match “zzz”.' })).toBeVisible();
+    await page.getByRole('button', { name: 'Clear filter' }).click();
+    await expect(filter).toHaveValue('');
+    await expect(filter).toBeFocused();
+    await expect(page.locator('.file-panel tbody tr')).toHaveCount(14);
+    await filter.fill('draft-13');
+    await expect(page.locator('.file-panel tbody tr')).toHaveCount(1);
+    const oneMatch = await page.evaluate(() => ({
+      panel: document.querySelector('.file-panel')!.getBoundingClientRect().bottom,
+      footer: document.querySelector('.file-panel .panel-footer')!.getBoundingClientRect().bottom,
+    }));
+    expect(oneMatch.panel - oneMatch.footer).toBeLessThanOrEqual(24);
+    await filter.fill('');
+    await expect(page.locator('.nav-count')).toHaveCount(0);
+
+    // Trash: three useful columns, full dates, and Restore stays reachable on a tablet.
+    for (const index of [0, 1])
+      await post(`drives/${drive.id}/delete`, {
+        path: `/notes/2026-q3-roadmap-and-planning-draft-${index}.md`,
+      });
+    for (const width of [1440, 768]) {
+      await page.setViewportSize({ width, height: width === 1440 ? 900 : 1024 });
+      await openFiles();
+      await page.getByRole('button', { name: 'Trash', exact: true }).first().click();
+      await expect(page.locator('.file-panel tbody tr')).toHaveCount(2);
+      expect(
+        await page.locator('.file-panel th').evaluateAll((a) => a.map((e) => e.textContent)),
+      ).toEqual(['FILE PATH', 'DELETED', 'Actions']);
+      await expect(page.getByText('Versions preserved')).toHaveCount(0);
+      const clipped = await page
+        .locator('.file-panel td:nth-child(2)')
+        .evaluateAll((cells) => cells.filter((c) => c.scrollWidth > c.clientWidth).length);
+      expect(clipped, `DELETED clipped at ${width}`).toBe(0);
+      await expect(
+        page.locator('.file-panel tbody tr').first().getByRole('button', { name: 'Restore' }),
+      ).toBeVisible();
+    }
+    for (const index of [0, 1])
+      await post(`drives/${drive.id}/restore`, {
+        path: `/notes/2026-q3-roadmap-and-planning-draft-${index}.md`,
+      });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     // Phone: row actions are reachable without sideways scrolling.
     await page.setViewportSize({ width: 375, height: 812 });
     await openFiles();
@@ -453,6 +499,82 @@ test('console files: recovery download stays on an empty drive, and a failed rel
     await expect(page.getByText('Could not load files.')).toHaveCount(1);
     await expect(page.getByText('Listing is unavailable.')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: a failed refresh is reported in plain words and moves nothing', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await context.request.post('/api/console/drives', {
+      data: { name: 'Refresh drive' },
+      headers: { Origin: baseURL! },
+    });
+    await page.goto('/console');
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible({
+      timeout: 30_000,
+    });
+    const before = (await page.locator('.file-panel').boundingBox())!;
+    await page.route('**/api/console/**', (route) => route.abort('failed'));
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    const refreshAlert = page.getByRole('alert').filter({ hasText: 'Could not reach Agent Drive' });
+    await expect(refreshAlert).toBeVisible();
+    await expect(page.getByText('Failed to fetch')).toHaveCount(0);
+    // The last loaded list stays visible under the message.
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    const after = (await page.locator('.file-panel').boundingBox())!;
+    expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(2);
+    await page.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(refreshAlert).toHaveCount(0);
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: a slow list shows skeleton, then Still loading with Retry', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await context.request.post('/api/console/drives', {
+      data: { name: 'Slow drive' },
+      headers: { Origin: baseURL! },
+    });
+    await page.clock.install();
+    let held = false;
+    await page.route('**/api/console/drives/*/list*', (route) => {
+      if (held) return route.continue();
+      held = true;
+      // Never fulfilled: this is the stalled request.
+      return undefined;
+    });
+    await page.goto('/console');
+    await expect(page.locator('.list-state[data-state="loading"]')).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.clock.fastForward(10_000);
+    await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible();
+    // Let real time run again so Playwright's stability checks (which use animation frames) work.
+    await page.clock.resume();
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
   } finally {
     await cleanupUser(userId);
   }
