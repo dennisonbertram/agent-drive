@@ -613,7 +613,7 @@
 
 /* ---------- sign-in / sign-up ---------- */
 .auth-page {
-  min-height: 100vh;
+  min-height: calc(100vh - 61px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -718,10 +718,6 @@
   .settings-page .billing-card {
     padding: 20px;
   }
-  .pricing-page .billing-header {
-    flex-wrap: wrap;
-    padding: 18px 0;
-  }
 }
 @media (max-width: 620px) {
   .billing-heading {
@@ -745,9 +741,6 @@
     gap: 16px;
     font-size: 13px;
   }
-  .billing-links a[href='/llms.txt'] {
-    display: none;
-  }
 }
 
 /* Global .primary is the button fill; table title cells must not inherit it. */
@@ -765,4 +758,21 @@
   border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
   color: var(--muted, #6b6963);
   box-shadow: none;
+}
+
+.auth-links {
+  margin: 0;
+  color: var(--muted, #6b6963);
+  font-size: 14px;
+  text-align: center;
+}
+.auth-links a {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink, #111);
+}
+@media (max-width: 760px) {
+  .auth-links a {
+    min-height: 44px;
+  }
 }

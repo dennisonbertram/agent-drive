@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { headers } from 'next/headers';
-import { BrandMark } from '../brand-mark';
+import { SiteHeader } from '../site-header';
 import { billingRates, GIB, PLANS } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
@@ -79,18 +79,7 @@ export default async function Home() {
   ] as const;
   return (
     <main className="landing" id="top">
-      <header className="l-nav">
-        <div className="l-wrap">
-          <BrandMark />
-          <nav className="l-links" aria-label="Main">
-            <a href="/llms.txt">Docs</a>
-            <Link href="/pricing">Pricing</Link>
-            <a href="/llms.txt">llms.txt</a>
-            <Link href="/sign-in">Sign in</Link>
-            <Link href="/console">Console</Link>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="l-hero">
         <div className="l-wrap l-g">
@@ -398,7 +387,12 @@ export default async function Home() {
       <section className="l-final">
         <div className="l-wrap">
           <h2>Give your agent a drive.</h2>
-          <SetupPanel instruction={instruction} label="Copy agent instruction again" />
+          <div className="l-final-row">
+            <SetupPanel instruction={instruction} label="Copy agent instruction again" />
+            <Link className="l-btn" href="/sign-up">
+              Create a free account
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -406,7 +400,6 @@ export default async function Home() {
         <div className="l-wrap">
           <nav aria-label="Footer">
             <Link href="/pricing">Pricing</Link>
-            <a href="/llms.txt">llms.txt</a>
             <a href="/llms.txt">Docs</a>
             <Link href="/sign-in">Sign in</Link>
             <Link href="/console">Console</Link>
