@@ -325,7 +325,18 @@ test.describe('agent device login', () => {
     // Issue through a capturing proxy; the issuer's own config is untouched.
     const proxy = await startCaptureProxy(baseURL!);
     const issued = await cli(
-      ['credentials', 'issue', '--name', 'sandbox-b', '--write-path', '/outputs', '--stdout'],
+      // --drive: the proxy is another origin, so the saved key is not a default for it.
+      [
+        'credentials',
+        'issue',
+        '--name',
+        'sandbox-b',
+        '--drive',
+        driveId,
+        '--write-path',
+        '/outputs',
+        '--stdout',
+      ],
       { ...envA, AGENT_DRIVE_API_URL: `${proxy.url}/api` },
     );
     await proxy.close();
