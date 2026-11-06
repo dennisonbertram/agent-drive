@@ -118,7 +118,7 @@ issue` for a sandbox with no browser.
 - `agent-drive skill install [--target claude|codex|DIR]` copies the packaged `SKILL.md` to
   `~/.claude/skills/agent-drive/` and `~/.codex/skills/agent-drive/` when those directories exist
   (or to the target), and prints the paths written. With none found it prints the packaged file's
-  location.
+  location. It writes into the agent's own skills folder, so in a sandbox, CI or on a shared machine use `--target DIR` or skip it.
 
 On reconnect, `login` sends the saved API key as a bearer header only when the saved API URL has the
 same origin as the login URL. The config records each drive key's origin in `driveKeyOrigins`. Keys
@@ -133,3 +133,33 @@ The drive defaults to the only drive key in config. A private manifest in `<conf
 keyed by server, drive, prefix, and relative path, lets later runs skip unchanged files by SHA-256.
 Symlinks are skipped, and one failing file does not stop the rest. It prints
 `backup uploaded=N unchanged=N failed=N` and exits 1 if any file failed.
+
+## MCP server
+
+`agent-drive mcp` serves `whoami`, `put`, `get` (inline text up to 64 KiB, read-only), `download` (writes a new local file at `outputPath`, never overwrites), `list`, `move`, `copy`, `delete`, `versions`,
+`restore`, `search`, `recent` and `share`. `driveId` is optional: it defaults to the only drive key
+saved for the current API origin (same rule as the CLI's `--drive`); with several, the error lists
+the configured IDs. Tools carry MCP annotations. `whoami`, `get`, `list`, `versions`, `search` and
+`recent` have `readOnlyHint: true`. `put`, `move`, `delete` and `restore` have `readOnlyHint: false`
+and `destructiveHint: true`; `copy`, `share` and `download` have `readOnlyHint: false` and
+`destructiveHint: false`.
+
+Codex asks for approval before any tool that is not read-only. Under `codex exec` the approval
+policy is `never`, so the call fails with "MCP tool call requires approval, but approval policy is
+never". Approve the tools the agent needs, one by one, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.agent-drive]
+command = "agent-drive"
+args = ["mcp"]
+[mcp_servers.agent-drive.tools.put]
+approval_mode = "approve"
+[mcp_servers.agent-drive.tools.download]
+approval_mode = "approve"
+```
+
+`default_tools_approval_mode = "approve"` under the server approves every tool, including `delete`,
+`move`, `restore` and `share`; use it only as an explicit opt-in.
+Verified with codex-cli 0.166.0 (`gpt-6-luna`, `--sandbox workspace-write`): `put` and `get`
+completed with `default_tools_approval_mode="approve"`, and `put` passed approval with
+`tools.put.approval_mode="approve"`. `download` was not run under Codex.
