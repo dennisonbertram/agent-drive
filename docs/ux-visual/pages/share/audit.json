@@ -14,53 +14,44 @@
           "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
           "w": 1440,
           "h": 900,
-          "fillPct": 9,
+          "fillPct": 6,
           "pctOfViewport": 100
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 9, 10, 12, 14, 16, 22, 24, 28, 48],
+        "offScale": [9, 10, 14, 22],
         "nearDupes": [
+          [8, 9],
+          [9, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "16px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
+          "11px/500": 3,
+          "22px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
+          "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"48,254 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:49 PM\"",
-          "ratio": 2.11
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -68,79 +59,7 @@
       "pageOverflowX": 0,
       "unevenRows": [],
       "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1440x900/ready-longname": {
-    "layout": {
-      "viewport": {
-        "width": 1440,
-        "height": 900,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1440,
-          "h": 900,
-          "fillPct": 11,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"3,041 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:50 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
+      "wrappedControls": ["button.button.primary \"Download\""]
     }
   },
   "1440x900/missing-key": {
@@ -163,34 +82,39 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
+          [8, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [20, 22],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -198,7 +122,7 @@
       "pageOverflowX": 0,
       "unevenRows": [],
       "overflowSpills": [],
-      "wrappedControls": []
+      "wrappedControls": ["button.button \"Use link\""]
     }
   },
   "1440x900/bad-key-format": {
@@ -221,34 +145,161 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
+          [8, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [20, 22],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "1440x900/wrong-key": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 1440,
+          "h": 900,
+          "fillPct": 6,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "1440x900/revoked": {
+    "layout": {
+      "viewport": {
+        "width": 1440,
+        "height": 900,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 1440,
+          "h": 900,
+          "fillPct": 5,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [10, 12],
+          [12, 14],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 1,
+          "20px/500": 1,
+          "14px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -279,208 +330,35 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
           [10, 12],
           [12, 14],
-          [14, 16]
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
           "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "20px/500": 1,
+          "14px/400": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1440x900/expired": {
-    "layout": {
-      "viewport": {
-        "width": 1440,
-        "height": 900,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1440,
-          "h": 900,
-          "fillPct": 5,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1440x900/revoked-onload": {
-    "layout": {
-      "viewport": {
-        "width": 1440,
-        "height": 900,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1440,
-          "h": 900,
-          "fillPct": 5,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1440x900/wrong-key": {
-    "layout": {
-      "viewport": {
-        "width": 1440,
-        "height": 900,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1440,
-          "h": 900,
-          "fillPct": 6,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -511,34 +389,35 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
           [10, 12],
           [12, 14],
-          [14, 16]
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
           "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "22px/500": 1,
+          "14px/400": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Checking this share link…\"",
-          "ratio": 2.11
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -549,11 +428,11 @@
       "wrappedControls": []
     }
   },
-  "1920x1080/ready": {
+  "1440x900/decrypting": {
     "layout": {
       "viewport": {
-        "width": 1920,
-        "height": 1080,
+        "width": 1440,
+        "height": 900,
         "pageScrollY": 0,
         "pageScrollX": 0
       },
@@ -562,185 +441,46 @@
       "deadSpace": [
         {
           "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 5,
+          "w": 1440,
+          "h": 900,
+          "fillPct": 6,
           "pctOfViewport": 100
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 9, 10, 12, 14, 16, 22, 24, 28, 48],
+        "offScale": [9, 10, 14, 22],
         "nearDupes": [
+          [8, 9],
+          [9, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "16px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"48,254 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:49 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/ready-longname": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 7,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"3,041 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:50 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/missing-key": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 4,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "11px/500": 3,
+          "22px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -748,355 +488,7 @@
       "pageOverflowX": 0,
       "unevenRows": [],
       "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/bad-key-format": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 4,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/not-found": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 3,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/expired": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 3,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/revoked-onload": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 3,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/wrong-key": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 4,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "1920x1080/loading": {
-    "layout": {
-      "viewport": {
-        "width": 1920,
-        "height": 1080,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 1920,
-          "h": 1080,
-          "fillPct": 3,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Checking this share link…\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
+      "wrappedControls": ["button.button.primary \"Decrypting…\""]
     }
   },
   "768x1024/ready": {
@@ -1109,50 +501,49 @@
       },
       "offscreenPrimary": [],
       "scrollers": [],
-      "deadSpace": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 768,
+          "h": 1024,
+          "fillPct": 10,
+          "pctOfViewport": 100
+        }
+      ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 9, 10, 12, 14, 16, 22, 24, 28, 48],
+        "offScale": [9, 10, 14, 22],
         "nearDupes": [
+          [8, 9],
+          [9, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "16px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
+          "11px/500": 3,
+          "22px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
+          "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"48,254 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:49 PM\"",
-          "ratio": 2.11
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -1160,71 +551,7 @@
       "pageOverflowX": 0,
       "unevenRows": [],
       "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "768x1024/ready-longname": {
-    "layout": {
-      "viewport": {
-        "width": 768,
-        "height": 1024,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "10px", "22px", "15px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "10px/500": 2,
-          "22px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"3,041 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:50 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
+      "wrappedControls": ["button.button.primary \"Download\""]
     }
   },
   "768x1024/missing-key": {
@@ -1247,34 +574,39 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
+          [8, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [20, 22],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -1282,7 +614,7 @@
       "pageOverflowX": 0,
       "unevenRows": [],
       "overflowSpills": [],
-      "wrappedControls": []
+      "wrappedControls": ["button.button \"Use link\""]
     }
   },
   "768x1024/bad-key-format": {
@@ -1305,34 +637,161 @@
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
+          [8, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [20, 22],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "768x1024/wrong-key": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 768,
+          "h": 1024,
+          "fillPct": 10,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [8, 10, 12, 14, 16, 20, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [20, 22],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "768x1024/revoked": {
+    "layout": {
+      "viewport": {
+        "width": 768,
+        "height": 1024,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 768,
+          "h": 1024,
+          "fillPct": 8,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
+        "nearDupes": [
+          [10, 12],
+          [12, 14],
+          [22, 24]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 1,
+          "20px/500": 1,
+          "14px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -1358,213 +817,40 @@
           "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
           "w": 768,
           "h": 1024,
-          "fillPct": 9,
+          "fillPct": 8,
           "pctOfViewport": 100
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
           [10, 12],
           [12, 14],
-          [14, 16]
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
           "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "20px/500": 1,
+          "14px/400": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "768x1024/expired": {
-    "layout": {
-      "viewport": {
-        "width": 768,
-        "height": 1024,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 768,
-          "h": 1024,
-          "fillPct": 9,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "768x1024/revoked-onload": {
-    "layout": {
-      "viewport": {
-        "width": 768,
-        "height": 1024,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 768,
-          "h": 1024,
-          "fillPct": 9,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "768x1024/wrong-key": {
-    "layout": {
-      "viewport": {
-        "width": 768,
-        "height": 1024,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
-          "w": 768,
-          "h": 1024,
-          "fillPct": 10,
-          "pctOfViewport": 100
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -1590,39 +876,40 @@
           "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
           "w": 768,
           "h": 1024,
-          "fillPct": 7,
+          "fillPct": 6,
           "pctOfViewport": 100
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 24, 28, 56],
-        "offScale": [10, 14],
+        "observed": [10, 12, 14, 22, 24, 28, 48],
+        "offScale": [10, 14, 22],
         "nearDupes": [
           [10, 12],
           [12, 14],
-          [14, 16]
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "19px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "12px"],
         "sizes": {
           "17px/600": 1,
           "11px/500": 1,
-          "19px/500": 1,
-          "13px/400": 1,
+          "22px/500": 1,
+          "14px/400": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Checking this share link…\"",
-          "ratio": 2.11
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -1633,75 +920,11 @@
       "wrappedControls": []
     }
   },
-  "375x812/ready": {
+  "768x1024/decrypting": {
     "layout": {
       "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "10px", "19px", "15px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "10px/500": 2,
-          "19px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"48,254 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:49 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/ready-longname": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
+        "width": 768,
+        "height": 1024,
         "pageScrollY": 0,
         "pageScrollX": 0
       },
@@ -1709,414 +932,321 @@
       "scrollers": [],
       "deadSpace": [
         {
-          "el": "h1.share-label \"a-very-long-synthetic-file-nam\"",
-          "w": 287,
-          "h": 129,
-          "fillPct": 0,
-          "pctOfViewport": 12
-        }
-      ],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "10px", "19px", "15px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "10px/500": 2,
-          "19px/500": 2,
-          "15px/600": 1,
-          "12px/400": 2
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "span \"TRANSFER SIZE\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"3,041 encrypted bytes\"",
-          "ratio": 2.11
-        },
-        {
-          "el": "span \"LINK EXPIRES\"",
-          "ratio": 2.38
-        },
-        {
-          "el": "strong \"11/11/2026, 4:55:50 PM\"",
-          "ratio": 2.11
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/missing-key": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/bad-key-format": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/not-found": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/expired": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/revoked-onload": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for a new share\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/wrong-key": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [],
-      "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
-        "nearDupes": [
-          [10, 12],
-          [12, 14],
-          [14, 16]
-        ]
-      },
-      "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
-        "sizes": {
-          "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
-          "12px/400": 1
-        }
-      },
-      "alignment": {
-        "nearMissEdges": []
-      },
-      "smallTargets": [],
-      "lowContrast": [
-        {
-          "el": "p.share-msg \"Ask the sender for the complet\"",
-          "ratio": 1.19
-        }
-      ],
-      "overlaps": [],
-      "fixedOverlays": []
-    },
-    "geometry": {
-      "pageOverflowX": 0,
-      "unevenRows": [],
-      "overflowSpills": [],
-      "wrappedControls": []
-    }
-  },
-  "375x812/loading": {
-    "layout": {
-      "viewport": {
-        "width": 375,
-        "height": 812,
-        "pageScrollY": 0,
-        "pageScrollX": 0
-      },
-      "offscreenPrimary": [],
-      "scrollers": [],
-      "deadSpace": [
-        {
-          "el": "div.share-window \"Checking this share link…\"",
-          "w": 287,
-          "h": 132,
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 768,
+          "h": 1024,
           "fillPct": 10,
-          "pctOfViewport": 12
+          "pctOfViewport": 100
         }
       ],
       "spacing": {
-        "observed": [10, 12, 14, 16, 20, 36],
-        "offScale": [10, 14],
+        "observed": [8, 9, 10, 12, 14, 16, 22, 24, 28, 48],
+        "offScale": [9, 10, 14, 22],
         "nearDupes": [
+          [8, 9],
+          [9, 10],
           [10, 12],
           [12, 14],
-          [14, 16]
+          [14, 16],
+          [22, 24]
         ]
       },
       "type": {
-        "distinctFontSizes": ["17px", "11px", "13px", "12px"],
+        "distinctFontSizes": ["17px", "11px", "22px", "14px", "16px", "12px"],
         "sizes": {
           "17px/600": 1,
-          "11px/500": 1,
-          "17px/500": 1,
-          "13px/400": 1,
+          "11px/500": 3,
+          "22px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
           "12px/400": 1
         }
       },
       "alignment": {
         "nearMissEdges": []
       },
-      "smallTargets": [],
-      "lowContrast": [
+      "smallTargets": [
         {
-          "el": "p.share-msg \"Checking this share link…\"",
-          "ratio": 2.11
+          "el": "a.brand \"Agent Drive\"",
+          "w": 512,
+          "h": 20
         }
       ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button.primary \"Decrypting…\""]
+    }
+  },
+  "390x844/ready": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [8, 9, 10, 12, 14, 16, 18, 20, 32],
+        "offScale": [9, 10, 14, 18],
+        "nearDupes": [
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "21px", "14px", "16px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 3,
+          "21px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button.primary \"Download\""]
+    }
+  },
+  "390x844/missing-key": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [8, 10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "390x844/bad-key-format": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [8, 10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "390x844/wrong-key": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [8, 10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [8, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 2,
+          "20px/500": 1,
+          "14px/400": 1,
+          "14px/500": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button \"Use link\""]
+    }
+  },
+  "390x844/revoked": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 1,
+          "20px/500": 1,
+          "14px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
       "overlaps": [],
       "fixedOverlays": []
     },
@@ -2125,6 +1255,176 @@
       "unevenRows": [],
       "overflowSpills": [],
       "wrappedControls": []
+    }
+  },
+  "390x844/not-found": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "20px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 1,
+          "20px/500": 1,
+          "14px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "390x844/loading": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [
+        {
+          "el": "main.share-shell \"Agent DriveENCRYPTED FILE TRAN\"",
+          "w": 390,
+          "h": 844,
+          "fillPct": 11,
+          "pctOfViewport": 100
+        }
+      ],
+      "spacing": {
+        "observed": [10, 12, 14, 16, 18, 20, 32],
+        "offScale": [10, 14, 18],
+        "nearDupes": [
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "21px", "14px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 1,
+          "21px/500": 1,
+          "14px/400": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": []
+    }
+  },
+  "390x844/decrypting": {
+    "layout": {
+      "viewport": {
+        "width": 390,
+        "height": 844,
+        "pageScrollY": 0,
+        "pageScrollX": 0
+      },
+      "offscreenPrimary": [],
+      "scrollers": [],
+      "deadSpace": [],
+      "spacing": {
+        "observed": [8, 9, 10, 12, 14, 16, 18, 20, 32],
+        "offScale": [9, 10, 14, 18],
+        "nearDupes": [
+          [8, 9],
+          [9, 10],
+          [10, 12],
+          [12, 14],
+          [14, 16],
+          [16, 18],
+          [18, 20]
+        ]
+      },
+      "type": {
+        "distinctFontSizes": ["17px", "11px", "21px", "14px", "16px", "12px"],
+        "sizes": {
+          "17px/600": 1,
+          "11px/500": 3,
+          "21px/500": 1,
+          "14px/500": 2,
+          "16px/600": 1,
+          "12px/400": 1
+        }
+      },
+      "alignment": {
+        "nearMissEdges": []
+      },
+      "smallTargets": [
+        {
+          "el": "a.brand \"Agent Drive\"",
+          "w": 358,
+          "h": 20
+        }
+      ],
+      "lowContrast": [],
+      "overlaps": [],
+      "fixedOverlays": []
+    },
+    "geometry": {
+      "pageOverflowX": 0,
+      "unevenRows": [],
+      "overflowSpills": [],
+      "wrappedControls": ["button.button.primary \"Decrypting…\""]
     }
   }
 }

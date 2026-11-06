@@ -1,44 +1,30 @@
-# UX Visual Report — 2026-11-03
+# ux-visual report (run 2): decisions only, implementation in /ux-auto-improve
 
-Target: https://agent-drive.vercel.app (production). Round 1 merged in PR #33 and deployed.
+Date: 2026-11-06. Scope: Phases 0 to 5. Phases 6 to 8 (implement, verify, before/after) were not run here. External MUSE Wonder and Gemini Argon judges and second opinions were skipped in this run; all findings rest on one inspector per page.
 
-## Scope and coverage
+## Surfaces audited
 
-| Surface                                                      | Viewports measured                     | How                                                                                                                                 |
-| ------------------------------------------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Landing, pricing, share page                                 | 1440×900, 1920×1080, 768×1024, 375×812 | Headless agent-browser, layout-audit.js + geometry-audit.js, MUSE Wonder and Gemini Argon second opinions (Argon failed on pricing) |
-| Console Files, API keys, Usage, Billing, Activity & deletion | 1131×959 only                          | User's signed-in Chrome; the window could not be resized, so tablet and phone were **not measured** for signed-in pages             |
+/ (landing), /pricing, auth fallback card (/sign-in, /sign-up), /connect (all states), /s/<id> (8 states), /console Files, Trash, Agents, API keys, Usage, dialogs and first visit, /console/settings, /console/billing, /llms.txt. Viewports 1440, 768 and 390 (1920 and 375 only for connect, landing and pricing). 89 inspector findings.
 
-Run was scaled down from the skill's full panel: one consolidator wrote all proposals, and the lead judged them with `solution-rubric.md` instead of three internal and two external judges per cluster.
+## Findings by severity
 
-## Clusters implemented (PR #33)
+- P0: none.
+- P1 clusters (carried): C01, C02, C03, C04, C05, C06, C07, C08. P1 deferred: C11, C12, C14 (folded into C04), C15.
+- P2 clusters (deferred): C09, C10, C13, C16, C17, C18.
+  (Counts per cluster are in `problems.md`; the 89 findings are placed in 18 clusters except A-5 and A-6.)
 
-| Cluster              | Decision                                         | Before                                                               | After (measured on production)                                                                  |
-| -------------------- | ------------------------------------------------ | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| VC-1 Contrast        | Text-colour tokens                               | 9 console selectors at 1.56–4.27:1                                   | Console Files: 0 text elements below 4.5:1 (disabled controls excluded); landing and pricing: 0 |
-| VC-2 Type scale      | Six size tokens, 12px minimum                    | 11 sizes on Files, smallest 8.6px; ~25 sizes in CSS                  | Files: 5 sizes (12, 13, 15, 20, 32px); landing and pricing minimum 12px                         |
-| VC-3 Settings scroll | Remove inner scroller                            | Wheel over the audit log never reached "Delete your data"            | No inner scrollers; 20 wheel ticks over the log reach "Delete your data"                        |
-| VC-4 Landing CLI     | Wrapping command + Copy                          | Command clipped at 375px (scrollWidth 407 vs 327)                    | Fits at 375px (224 = 224; page 375); e2e phone check passes                                     |
-| VC-5 Pricing wording | "Downloads not charged" when egress is unmetered | Cards listed a download allowance while the table said "Not charged" | All plan cards read "Downloads not charged"                                                     |
+## Clusters and decisions
 
-## Deferred (filed)
+See `decisions/README.md` for one line per cluster and the build order C02 -> C06 -> C05 -> C04 -> C03 -> C08 -> C07 -> C01. Full documents: `decisions/C01.md` to `decisions/C08.md`.
 
-- #34 VC-6 Share link error page is a dead end (P1)
-- #35 VC-7 Landing hero composition and missing trust links (P1/P2)
-- #36 VC-8 Interactive targets under 24px (P2)
-- #37 VC-9 Page frames differ between public pages, Billing, and Settings (P2)
-- #38 VC-10 Display type details (P2)
-- #39 VC-11 Spacing scale, list styling, card rhythm (P3)
+## Deferred
 
-## Still open
+C09 operator language, C10 vocabulary and filler copy (C07 and C05 wording must match one term), C11 share page states, C12 billing and usage, C13 type, spacing and touch targets, C14 (covered by C04), C15 settings audit log, C16 marketing and docs polish, C17 agents and API keys as one table, C18 settings permanent actions. Also deferred: "Remember on this device" (C05), inline preview and folder tree (C04 phase 2), upload.
 
-- Billing page plan cards still say "monthly download allowance"; VC-5 covered `/pricing` only.
-- A "Recommended" label and moving the highlighted plan need owner copy decisions.
-- Console layout at tablet and phone widths has not been measured.
-- The Copy button was not clicked in a browser; its failure path is code-reviewed only.
+## Coverage gaps
 
-## Excellent as is
+Real Clerk forms and appearance (A-5); console loading states; download completion on console and share; many drives, folders and 1,000+ files; billing with checkout, settings error states; revoke and rotate after-action states; dark mode and print (not in inventory); keyboard and screen-reader pass limited to focus rings and tab order; no wide or 375 console shots; no second opinions. F19 needs a real-browser check.
 
-- One clear primary action per console screen; calm, restrained palette.
-- Empty states with a single call to action.
-- No horizontal overflow at any measured viewport.
+## Verification status
+
+Nothing implemented or verified in this run. No before/after screenshots exist.

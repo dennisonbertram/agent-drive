@@ -1,0 +1,44 @@
+[
+  {
+    "id": "F-012-01",
+    "story_id": "STORY-012",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Interactive sizing / theme consistency",
+    "score": "warn",
+    "description": "The delegate checkbox is a 13x13px native control in default browser blue, far below the 44px touch guideline and out of style with the black/orange UI. The help text under it is indented differently (x=445) from the label text (x=468).",
+    "expected": "A styled checkbox of at least 20px and help text aligned with the label text.",
+    "actual": "13px default checkbox; misaligned help text.",
+    "screenshot": "screenshots/step-1-ticked.png",
+    "suggested_fix": "Style the checkbox (accent-color or custom) and indent the help text to the label.",
+    "files_likely_involved": ["apps/web/app/(app)/connect/connect.tsx", "apps/web/app/globals.css"]
+  },
+  {
+    "id": "F-012-02",
+    "story_id": "STORY-012",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "When an agent approved without the delegate box runs `agent-drive grant`, the CLI says 'The API key needs the delegate scope. Run agent-drive login again to reconnect, or ask the owner for a key with that scope.' It never names the 'Let this agent add other agents to its drives' checkbox, so a re-approval without the box repeats the failure.",
+    "expected": "Tell the agent to ask the owner to approve again with the delegate checkbox ticked.",
+    "actual": "Generic reconnect advice.",
+    "screenshot": null,
+    "suggested_fix": "Name the checkbox in the CLI error text.",
+    "files_likely_involved": ["packages/agent-drive/src/cli.ts", "apps/web/app/llms.txt/route.ts"]
+  },
+  {
+    "id": "F-012-03",
+    "story_id": "STORY-012",
+    "severity": "low",
+    "category": "disclosure",
+    "criterion": "Secondary features",
+    "score": "warn",
+    "description": "Nothing on /connect marks the delegate checkbox as optional or says that leaving it off is the safe default. It sits in the main flow between the drive-mode link and the primary button (see also F-009-01).",
+    "expected": "Label it optional or put it under an Advanced disclosure.",
+    "actual": "Unlabelled optional control in the main flow.",
+    "screenshot": "screenshots/step-1-ticked.png",
+    "suggested_fix": "Mark it optional or collapse it.",
+    "files_likely_involved": ["apps/web/app/(app)/connect/connect.tsx"]
+  }
+]

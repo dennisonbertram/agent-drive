@@ -1,36 +1,49 @@
-# C05-C Convention: section menu in the top bar (Vercel / GitHub mobile web) plus a faded drive strip
+# C05 / C: Convention (password-manager and vault unlock)
 
-Mock: `mock-C.html`, `mock-C.png` (375x812, menu open). Content closed starts at y=159.
+Pairs with C04/C (breadcrumb header, "+ New", row hover actions).
 
-## Conventions followed
+## What best-in-class products do
 
-- Vercel dashboard mobile and GitHub mobile web both collapse the section navigation behind one labelled control in the top bar that opens a full-width list with the current page marked. Linear mobile makes the current view's name the header control. We take that: the header button shows the CURRENT section name and a caret.
-- Drive switching stays a horizontal chip row like segmented/pill scrollers in Vercel's project picker and GitHub's repo tabs, with a fade and snap.
+- Cryptomator and Proton Drive keep the file list visible when a vault is locked and put a single "Unlock" action at the top; unlocking is one step with the secret and a clear lock state.
+- 1Password and Bitwarden show a lock icon that is also the control: click to unlock, click again to lock. They offer "remember this device" and an idle auto-lock.
+- Box and Dropbox show a password prompt only when you open a protected link, never as a disabled control.
 
 ## Change
 
-- Phone sidebar becomes a one-row bar: brand mark, `Usage ▾` menu button (44px, `aria-expanded`, `aria-haspopup`), avatar.
-- The menu is an anchored panel (disclosure; closes on select, Escape, outside tap) listing all 7 sections at 44px with the existing icons, file count on Files, current row inverted (existing `.nav-item.active`), and a divider before Billing & limits and Activity & deletion (they are links, the first five are in-page tabs).
-- Breadcrumb/topbar hidden on phone; the menu button replaces tab+breadcrumb (h1 stays).
-- Bay strip stays: edge-fade mask, `scroll-snap`, `scrollIntoView` of the selected bay on load and change (from A).
+1. One lock control in the page header, left of "+ New" (C04/C): a lock button with text. Locked: red "Locked" with a closed-lock icon. Unlocked: green "Unlocked" with an open-lock icon. Click toggles: locked opens the unlock dialog; unlocked locks immediately and toasts "Locked. Click Download to unlock." This is the only key signal: no banner, no badge, no Load/Forget button.
+2. Backup state is folded into the lock button's tooltip and the Recent/Files empty copy only when needed: if not backed up, the lock button shows a small red dot and its menu (long-press or the chevron) contains "Download recovery file". When backed up, that item is absent and the menu says "Recovery file saved Nov 6".
+3. Download is always an enabled button (visible on hover and always on touch). Locked click opens the unlock dialog (Cryptomator style): title "Unlock research-bot", one big "Choose recovery file" button, "Paste a key" disclosure, "Remember on this device" checkbox with the sentence "Anyone using this browser profile can open this drive."
+4. A valid choice unlocks and starts the pending download without another click. Error line reserved, plain text.
+5. Row busy label; toast "Saved <name>".
+6. Remember on this device: same WebCrypto/IndexedDB mechanism as A (non-extractable AES-GCM key, `remembered-key.ts`). Idle auto-lock after 15 minutes if not remembered (1Password convention).
+7. Tokens `--ok`, `--danger`; disabled text without opacity.
 
-## Before / after
+## Before / after (1440)
 
-Before: ~320px header. After: closed header 52px + strip 64px, eyebrow at y=159. Seven labelled destinations in one vertical list, no horizontal scrolling for navigation.
+```
+ research-bot v / inbox / x     [Filter]  [(lock) Locked]  [ + New v ]
+ ...  2026-11-01.jsonl   Nov 6   577 B     [Download] ...      <- always active
+```
 
-## Files and selectors
+At 390 the lock button is an icon with the label "Locked" kept visible (the word is required, not just color), placed in the single header row beside the breadcrumb; the dialog is full width.
 
-- `console.css` 760px block: `.sidebar nav` becomes `display:none` unless `.sidebar[data-open]`, positioned absolute under the bar (`top:60px; left:8px; right:8px; flex-direction:column`), `.nav-item` min-height 44px, restore `.nav-icon` and `.nav-count`; new `.nav-toggle`; `.bay-strip` mask and snap.
-- `console.tsx`: add `const [navOpen,setNavOpen]=useState(false)`, a `.nav-toggle` button (label `{tab}`), close on item click, Escape and outside click; the same `scrollIntoView` effect for the bay. The nav markup is unchanged; the same `<nav>` serves desktop and phone, so no duplicate list.
-- Billing and settings pages keep their own header; apply the same toggle later through a shared component (deferred, same as in A).
+## Files touched
 
-## Effort and risk
+`console.tsx` (download, loadKeyFile, header, remove banner and badge), `console.css`/`console-panels.css`, new `lock-button` (add to the design system), `remembered-key.ts`, `globals.css`. Effort: M.
 
-Medium (about 3 to 4 hours). Risks: a hamburger-style menu costs one tap to switch sections (vs zero in A/B); requires open/close state, focus return and Escape handling; the drive strip still scrolls (but its first item is the selected one and the fade shows more).
+## Risks
 
-## Acceptance
+- A toggle that both shows state and acts can be misread; the label states the state ("Locked") and the toast confirms the action.
+- Auto-lock can interrupt long browsing; remembered devices skip it.
+- Same Remember storage trade-off as A (XSS or profile access exposes the key; the server never sees it).
+- "Lock" language differs from the product's existing "key" language (C1). Use "Locked/Unlocked" in the chip and "recovery file" for the file; keep "key" only in the paste field.
 
-- All 7 reachable and labelled: yes, one tap, full labels, no `$`.
-- Selected drive fully visible: yes via scrollIntoView and snap; name ellipsised only above 120px, raise `.bay` width to 176.
-- No clipped labels: yes in the menu; bay name ellipsis is the only truncation.
-- Content at or above y=260: yes (159).
+## Acceptance criteria
+
+1. No disabled Download; one prompt with file first: items 3.
+2. File choice loads and downloads; paste in disclosure: items 3-4.
+3. 0 px shift, plain error: item 4.
+4. Busy and toast: item 5.
+5. One signal, green/red, recovery download shown only when not backed up: items 1-2.
+6. Remember on this device: item 6.
+7. Contrast: item 7.
