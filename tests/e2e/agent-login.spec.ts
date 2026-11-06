@@ -882,8 +882,10 @@ test.describe('agent device login', () => {
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('The request changed; review it again.')).toBeVisible();
     await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
+    await expect(page.locator('.connect-facts')).toContainText('No writes');
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByText(/can now read the drive/)).toBeVisible();
     const resultB = await b.login.done;
     expect(resultB.status, resultB.stderr).toBe(0);
     const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
@@ -1077,6 +1079,8 @@ test.describe('agent device login', () => {
     await page.getByRole('button', { name: 'Continue' }).click();
     const banner = page.locator('.banner.error[role="alert"]');
     await expect(banner).toBeVisible();
+    await expect(input).toHaveAttribute('aria-invalid', 'true');
+    await expect(input).toHaveAttribute('aria-describedby', 'connect-code-error');
     expect((await input.boundingBox())!.y).toBe(before);
     await input.fill('');
     await page.getByRole('button', { name: 'Continue' }).click();

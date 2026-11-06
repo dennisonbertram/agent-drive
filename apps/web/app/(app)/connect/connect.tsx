@@ -86,6 +86,19 @@ const capitalize = (scopes: string[]) => {
 };
 const MAX_REFETCHES = 10;
 
+// "read", "write only", "read, write and delete": what was actually granted.
+function describeScopes(scopes: string[]) {
+  const list = scopes.filter((scope) => scope !== 'delegate');
+  if (list.length === 0) return 'read';
+  if (list.length === 1) return list[0] === 'read' ? 'read' : `${list[0]} only`;
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+
+function describeWrites(scopes: string[], paths: string[]) {
+  if (!scopes.includes('write')) return 'No writes';
+  return paths.length ? `Only under ${paths.join(', ')}` : 'Anywhere in the drive';
+}
+
 function normalizeCode(value: string) {
   const raw = value.toUpperCase().replace(/[^A-Z]/g, '');
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
@@ -125,9 +138,12 @@ export default function Connect({
   const busyRef = useRef(false);
   const refetches = useRef(0);
   const refetchStopped = useRef(false);
+  // Bumped when the shown request changes or an approval starts; older refetches are ignored.
+  const generation = useRef(0);
 
   async function load(raw: string) {
     const code = normalizeCode(raw);
+    generation.current += 1;
     setProblem(null);
     setNotice('');
     setRequest(null);
@@ -216,10 +232,16 @@ export default function Connect({
       )
         return;
       inFlight = true;
+      const startedAt = generation.current;
       refetches.current += 1;
       try {
         const found = await api<DeviceRequest>(`device/${encodeURIComponent(shownCode!)}`);
-        if ((found.offerRevision ?? 0) !== shownRevision && !busyRef.current) {
+        if (
+          startedAt === generation.current &&
+          (found.offerRevision ?? 0) !== shownRevision &&
+          !busyRef.current
+        ) {
+          generation.current += 1;
           setRequest(found);
           setExisting(false);
           clearKey();
@@ -251,6 +273,7 @@ export default function Connect({
     if (!request) return;
     setFormError('');
     setFieldError(null);
+    generation.current += 1;
     setBusy(true);
     busyRef.current = true;
     try {
@@ -302,7 +325,7 @@ export default function Connect({
       clearKey();
       setDone({
         name: request.client_name,
-        access: scopes.includes('write') ? 'read and write' : 'read',
+        access: describeScopes(scopes),
         drive: driveLabel,
       });
     } catch (error) {
@@ -381,11 +404,13 @@ export default function Connect({
               autoComplete="off"
               autoCapitalize="characters"
               autoFocus={!initialCode}
+              aria-invalid={problem ? true : undefined}
+              aria-describedby={problem ? 'connect-code-error' : undefined}
               spellCheck={false}
             />
           </label>
           {problem && (
-            <div role="alert" className="banner error">
+            <div role="alert" id="connect-code-error" className="banner error">
               {problem.kind === 'missing' ? (
                 <>
                   This code is wrong, expired, or already used. Run {loginCommand} in your agent to
@@ -420,7 +445,10 @@ export default function Connect({
           : 'New encrypted drive',
     ]);
     facts.push(['Access', capitalize(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES))]);
-    facts.push(['Writes', writes.length ? writes.join(', ') : 'Anywhere in the drive']);
+    facts.push([
+      'Writes',
+      describeWrites(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES), writes),
+    ]);
   }
   if (offer) facts.push(['Offered by', offer.agentName]);
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);

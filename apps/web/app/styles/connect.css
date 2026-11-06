@@ -407,23 +407,23 @@
   .connect-existing .cf-folder {
     grid-area: 1 / 2;
   }
-  .connect-existing .cf-key {
-    grid-area: 2 / 1 / 3 / -1;
+  .connect-existing .cf-folder-error {
+    grid-area: 2 / 2;
   }
-  .connect-existing .cf-file {
+  .connect-existing .cf-key {
     grid-area: 3 / 1 / 4 / -1;
   }
-  .connect-existing .cf-note {
+  .connect-existing .cf-file {
     grid-area: 4 / 1 / 5 / -1;
   }
+  .connect-existing .cf-note {
+    grid-area: 5 / 1 / 6 / -1;
+  }
   .connect-existing .cf-check {
-    grid-area: 5 / 1;
+    grid-area: 6 / 1;
   }
   .connect-existing .cf-back {
-    grid-area: 5 / 2;
+    grid-area: 6 / 2;
     margin: 0 0 8px;
-  }
-  .connect-existing .cf-folder-error {
-    grid-area: 6 / 1 / 7 / -1;
   }
 }
