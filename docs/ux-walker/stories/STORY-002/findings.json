@@ -1,44 +1,5 @@
 [
-  {
-    "id": "F-002-01",
-    "story_id": "STORY-002",
-    "severity": "medium",
-    "category": "consistency",
-    "criterion": "Labels/copy",
-    "score": "warn",
-    "description": "Team card prints '1024 GiB' for storage and downloads instead of '1 TiB'.",
-    "expected": "Human-friendly unit (1 TiB).",
-    "actual": "'1024 GiB stored ciphertext' and '1024 GiB monthly downloads included'.",
-    "screenshot": "STORY-002/screenshots/step-2.png",
-    "suggested_fix": "Format sizes >= 1024 GiB as TiB.",
-    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
-  },
-  {
-    "id": "F-002-02",
-    "story_id": "STORY-002",
-    "severity": "low",
-    "category": "disclosure",
-    "criterion": "Happy path clarity",
-    "score": "warn",
-    "description": "The Free card does not say what happens at the limit; 'Free accounts stop at their included allowances' appears only in the fine print below. Also the 'Not charged' downloads row sits beside a caption about measuring downloads, which reads as contradictory.",
-    "expected": "Free-card line about the hard stop; short note why downloads are listed but not charged.",
-    "actual": "Information only in the 'How usage works' block.",
-    "screenshot": "STORY-002/screenshots/step-3.png",
-    "suggested_fix": "Add 'Stops at limit' to the Free card; reword the download caption.",
-    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
-  },
-  {
-    "id": "F-002-03",
-    "story_id": "STORY-002",
-    "severity": "low",
-    "category": "consistency",
-    "criterion": "Spacing consistency / navigation",
-    "score": "warn",
-    "description": "Header and content column on /pricing are wider (x 76-1204) than the landing (x 98-1182), so the logo jumps when navigating between pages; header nav also changes (Quickstart + Sign in vs Pricing + Sign in) so there is no way back to Pricing/Home label parity.",
-    "expected": "Same container width and nav across public pages.",
-    "actual": "Logo shifts 22px horizontally between / and /pricing.",
-    "screenshot": "STORY-002/screenshots/step-2.png",
-    "suggested_fix": "Share one container width and header component.",
-    "files_likely_involved": ["apps/web/app/pricing/page.tsx", "apps/web/app/page.tsx"]
-  }
+{"id":"F-002-01","story_id":"STORY-002","severity":"low","category":"flow","criterion":"Decision load","score":"warn","description":"On sign-in the console opens on 'nightly-builds' (first alphabetically) rather than the owner's main or most recently used drive. Deep links and remembered selection do not exist, so every return visit starts at the same arbitrary drive.","expected":"Open the last-used drive (remember in localStorage) or the most recently active one.","actual":"First drive in the list is selected every time.","screenshot":"screenshots/step-3-console.png","suggested_fix":"Persist selected drive id client-side and restore it on load.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
+{"id":"F-002-02","story_id":"STORY-002","severity":"low","category":"hierarchy","criterion":"Information stated once","score":"warn","description":"The same 'drive key needed' state is shown by a chip, a Load drive key button and one disabled Download button per row. The reason for the disabled buttons is only in a hover title, invisible on touch devices.","expected":"One clear prompt; disabled row buttons that explain themselves or are replaced with a single 'Load key to download' action.","actual":"Five elements say the same thing; the per-row reason is tooltip only.","screenshot":"screenshots/step-3-console.png","suggested_fix":"Hide or merge the per-row disabled Downloads until a key is loaded, or make a click open the key loader.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
+{"id":"F-002-03","story_id":"STORY-002","severity":"low","category":"visual","criterion":"Theme consistency","score":"warn","description":"The healthy 'Key backed up 11/6/2026 (file)' status uses a red/orange dot, the same colour used for warnings.","expected":"Green or neutral dot for a satisfied state.","actual":"Red-orange dot.","screenshot":"screenshots/step-3-console.png","suggested_fix":"Use a success colour for backed-up state.","files_likely_involved":["apps/web/app/(app)/console/console.tsx","apps/web/app/globals.css"]}
 ]

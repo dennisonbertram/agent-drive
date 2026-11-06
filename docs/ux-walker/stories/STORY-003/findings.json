@@ -1,47 +1,7 @@
 [
-  {
-    "id": "F-003-01",
-    "story_id": "STORY-003",
-    "severity": "medium",
-    "category": "happy-path",
-    "criterion": "Labels/copy",
-    "score": "warn",
-    "description": "Anonymous visitors see 'Manage your plan' on the Developer and Team cards; both link to /console/billing without the chosen plan, so clicking sends a signed-out visitor to sign-in with no plan context.",
-    "expected": "Label like 'Choose Developer' / 'Sign in to upgrade' and plan carried through sign-in.",
-    "actual": "Both buttons go to /console/billing and, signed out, to Clerk sign-in.",
-    "screenshot": "STORY-003/screenshots/step-1.png",
-    "suggested_fix": "Use signed-out labels ('Start with Developer') and pass ?plan=developer through sign-up.",
-    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
-  },
-  {
-    "id": "F-003-02",
-    "story_id": "STORY-003",
-    "severity": "low",
-    "category": "hierarchy",
-    "criterion": "Primary CTA",
-    "score": "warn",
-    "description": "Developer card is highlighted (green border/tint) but its button is the secondary white style, while only Free has the green primary button, so the highlighted plan and the primary action disagree.",
-    "expected": "Highlighted plan carries the primary button, or no plan is highlighted.",
-    "actual": "Free: green button; Developer (highlighted) and Team: white buttons.",
-    "screenshot": "STORY-003/screenshots/step-1.png",
-    "suggested_fix": "Align emphasis between card highlight and button style.",
-    "files_likely_involved": ["apps/web/app/pricing/page.tsx"]
-  },
-  {
-    "id": "F-003-03",
-    "story_id": "STORY-003",
-    "severity": "high",
-    "category": "consistency",
-    "criterion": "Theme consistency / navigation",
-    "score": "fail",
-    "description": "Clicking 'Manage your plan' ends on a Clerk-hosted page (dominant-aardvark-1062.accounts.dev) that is dark with a purple button and no Agent Drive logo, unlike the in-app light, branded /sign-in and /sign-up pages. The user leaves the agent-drive domain unexpectedly.",
-    "expected": "Redirect to the app's own /sign-in (light, branded, same domain).",
-    "actual": "Redirect URL is https://dominant-aardvark-1062.accounts.dev/sign-in?redirect_url=...",
-    "screenshot": "STORY-003/screenshots/step-2.png",
-    "suggested_fix": "Set Clerk signInUrl (NEXT_PUBLIC_CLERK_SIGN_IN_URL) so auth.protect() redirects to /sign-in on the app domain.",
-    "files_likely_involved": [
-      "apps/web/middleware.ts",
-      "apps/web/app/sign-in/[[...sign-in]]/page.tsx"
-    ]
-  }
+{"id":"F-003-01","story_id":"STORY-003","severity":"medium","category":"flow","criterion":"One way per task","score":"warn","description":"The onboarding card only offers 'Create your first drive'. The paste-one-line route the landing page promised is not mentioned, and steps 01/02/03 are not clickable. A new user cannot tell whether they or the agent should create the drive.","expected":"Show both routes on the first-visit card, or put the llms.txt copy line on it.","actual":"Only the browser drive creation button; the agent line is found two tabs away.","screenshot":"screenshots/step-1.png","suggested_fix":"Add the copyable 'Set up Agent Drive: ...' line under the primary button, or a 'Connect an agent instead' secondary link.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
+{"id":"F-003-02","story_id":"STORY-003","severity":"medium","category":"happy-path","criterion":"Feedback / Labels","score":"warn","description":"Right after the user ticks 'I saved my drive key securely' and continues, the Files tab shows a banner saying the drive key has not been backed up. The two statements look contradictory. The command inside the banner is truncated to 'agent-dr...'.","expected":"Banner wording that distinguishes 'recovery file not recorded' from the browser save just done, or no alarm banner until an agent exists; the command visible or wrapped.","actual":"Red-dot banner 'This drive's key hasn't been backed up...' with the clipped command.","screenshot":"screenshots/step-6-drive.png","suggested_fix":"Mark the key backed up when the user downloads or acknowledges the recovery key, or reword the banner; wrap the code.","files_likely_involved":["apps/web/app/(app)/console/console.tsx","apps/web/app/globals.css"]},
+{"id":"F-003-03","story_id":"STORY-003","severity":"low","category":"flow","criterion":"One way per task / Redundancy","score":"warn","description":"The 'Connect an agent' paste-line panel is rendered identically on both the Agents and API keys tabs, while the Files empty-state 'Connect an agent' button sends the user to API keys (a tab about keys) rather than Agents.","expected":"One home for the panel; the button lands there.","actual":"Two copies of the panel; button targets API keys.","screenshot":"screenshots/step-7-apikeys.png","suggested_fix":"Keep the panel on Agents only and retarget the button.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
+{"id":"F-003-04","story_id":"STORY-003","severity":"low","category":"layout","criterion":"Text fit & wrap","score":"warn","description":"At 390px the llms.txt URL in the dark code block wraps mid-word as 'llms.t / xt'.","expected":"Break at the slash or allow the line to scroll horizontally.","actual":"Break inside 'llms.txt'.","screenshot":"screenshots/mobile-check.png","suggested_fix":"Use overflow-wrap:anywhere only after path separators or reduce font size on small screens.","files_likely_involved":["apps/web/app/globals.css"]},
+{"id":"F-003-05","story_id":"STORY-003","severity":"suggestion","category":"hierarchy","criterion":"Primary action","score":"warn","description":"The key receipt dialog gives the key a tall black block (about 75px for a one-line key) and a tiny Copy button, while Save recovery key is full width. Two orange primaries (+ New agent and Create your first agent) compete on the empty Agents tab.","expected":"Compact key display with prominent copy; one primary on the empty Agents tab.","actual":"As described.","screenshot":"screenshots/step-4-receipt.png","suggested_fix":"Tighten the key box; demote + New agent when the empty state has its own CTA.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]}
 ]
