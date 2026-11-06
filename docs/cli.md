@@ -19,7 +19,7 @@ your change, then retry with --if-version ID."; `trashed` says to restore the fi
 Use `--overwrite` for an unconditional replacement, or `--if-version ID` for an optimistic
 conditional replacement; these flags are mutually exclusive. `get REMOTE --drive ID
 --output FILE` writes only after authenticated decryption succeeds; without `--output`, only
-small valid UTF-8 files are printed. With `--output`, `get` prints the version's metadata (id, path, size, author, timestamps) but never the presigned download URL or the wrapped file key.
+small valid UTF-8 files are printed. No CLI or MCP output shows the presigned download URL or the wrapped file key (`downloadUrl`, `wrappedKey`); versions print id, path, size, author and timestamps.
 Every drive command defaults `--drive` to the only drive key saved for the current API origin; with none or several it fails and lists the configured ids.
 Inline text output rejects binary control bytes while allowing tabs and line breaks. `ls` and
 `search` accept `--agent`, `--machine`, `--user`, and `--tag`; `recent` accepts `--since`, `--cursor`, and `--wait SECONDS` (1 to 300; polls every 2 seconds for the next event, one metered operation per poll).

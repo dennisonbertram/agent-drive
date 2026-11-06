@@ -658,3 +658,15 @@ export class AgentDriveClient {
     return suffix ? `${path}?${suffix}` : path;
   }
 }
+
+/** Drops the presigned download URL and the wrapped file key from anything an agent is shown. */
+export function publicOutput<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => publicOutput(item)) as T;
+  if (value && typeof value === 'object')
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== 'wrappedKey' && key !== 'downloadUrl')
+        .map(([key, item]) => [key, publicOutput(item)]),
+    ) as T;
+  return value;
+}

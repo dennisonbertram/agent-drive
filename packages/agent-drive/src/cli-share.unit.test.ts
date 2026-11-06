@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseShareExpiry, publicVersion } from './cli.js';
+import { parseShareExpiry } from './cli.js';
+import { publicOutput } from './client.js';
 
 describe('share expiry parsing', () => {
   it('parses supported durations', () => {
@@ -18,9 +19,9 @@ describe('share expiry parsing', () => {
   });
 });
 
-describe('get output', () => {
+describe('public output', () => {
   it('drops the presigned download URL and the wrapped key, keeps the rest', () => {
-    const shown = publicVersion({
+    const shown = publicOutput({
       id: 'v1',
       path: '/a.md',
       ciphertextSize: 5,

@@ -762,8 +762,10 @@ test.describe('agent device login', () => {
     test.setTimeout(240_000);
     await newUser(context);
     const envA = cliEnv(baseURL!, root, 'granter', `m-${randomBytes(3).toString('hex')}`);
-    const a = await startLogin(envA, 'granter-bot');
-    await approve(page, a.path, 'granter-bot', a.code, true);
+    // Unique per run: the offers query below counts rows by agent name in a shared database.
+    const granter = `granter-${Date.now().toString(36)}`;
+    const a = await startLogin(envA, granter);
+    await approve(page, a.path, granter, a.code, true);
     expect((await a.login.done).status).toBe(0);
     const configA = await readConfig(envA);
     const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
@@ -795,7 +797,7 @@ test.describe('agent device login', () => {
 
     // The human sees who offered what, and approves once.
     await page.goto(b.path);
-    await expect(page.getByText('Offered by granter-bot', { exact: false })).toBeVisible();
+    await expect(page.getByText(`Offered by ${granter}`, { exact: false })).toBeVisible();
     await expect(page.getByText('writes under /inbox/b')).toBeVisible();
     await expect(
       page.getByRole('button', { name: 'Add to an existing drive instead' }),
@@ -843,7 +845,7 @@ test.describe('agent device login', () => {
     }
     const stored = await database.query<{ row: string }>(
       'SELECT o.sealed_key::text || o.scopes::text AS row FROM device_offers o JOIN agents g ON g.id = o.offered_by_agent_id WHERE g.name = $1',
-      ['granter-bot'],
+      [granter],
     );
     expect(stored.rows).toHaveLength(1);
     expect(stored.rows[0]!.row).not.toContain(driveKey);

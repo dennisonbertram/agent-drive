@@ -2,7 +2,7 @@ import { open, readFile, rm } from 'node:fs/promises';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { AgentDriveApiError, AgentDriveClient } from './client.js';
+import { AgentDriveApiError, AgentDriveClient, publicOutput } from './client.js';
 import { conflictHint } from './check.js';
 import { resolveConnection, driveKeyEnvironmentName, machineName } from './config.js';
 import { reportEnvBackups } from './credentials.js';
@@ -35,7 +35,8 @@ const filters = {
 class McpInputError extends Error {}
 
 function response(data: unknown, untrusted = false) {
-  const value = untrusted ? { untrusted: true, trustNotice, data } : data;
+  const shown = publicOutput(data);
+  const value = untrusted ? { untrusted: true, trustNotice, data: shown } : shown;
   return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
 }
 
@@ -106,13 +107,6 @@ async function safely(action: () => Promise<unknown>, untrusted = true) {
   }
 }
 
-function publicVersion(version: Record<string, unknown>) {
-  const safe = { ...version };
-  delete safe.wrappedKey;
-  delete safe.downloadUrl;
-  return safe;
-}
-
 function printableText(bytes: Uint8Array) {
   if (bytes.byteLength > 64 * 1024)
     throw new McpInputError('Large or binary files require outputPath.');
@@ -176,7 +170,7 @@ export function createMcpServer(client: AgentDriveClient) {
           ...(args.description !== undefined ? { description: args.description } : {}),
           ...(args.userId ? { userId: args.userId } : {}),
         });
-        return publicVersion(version as unknown as Record<string, unknown>);
+        return version;
       }),
   );
   server.registerTool(
@@ -215,7 +209,7 @@ export function createMcpServer(client: AgentDriveClient) {
           text = printableText(result.bytes);
         }
         return {
-          version: publicVersion(result.version as unknown as Record<string, unknown>),
+          version: result.version,
           ...(text !== undefined ? { text } : {}),
           ...(args.outputPath ? { outputPath: args.outputPath } : {}),
         };
@@ -304,7 +298,7 @@ export function createMcpServer(client: AgentDriveClient) {
         const result = await client.restore(args.driveId, args.path, args.versionId, args.userId);
         return {
           ...result,
-          version: publicVersion(result.version as unknown as Record<string, unknown>),
+          version: result.version,
         };
       }),
   );

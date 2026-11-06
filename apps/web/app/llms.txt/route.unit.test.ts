@@ -44,6 +44,8 @@ describe('GET /llms.txt', () => {
     expect(other).toContain('login --name "<your agent name>" --api http://localhost:3100/api');
     expect(other).toContain('npx -y http://localhost:3100/cli/agent-drive.tgz login --name');
     expect(other).toContain('agent-drive login --api http://localhost:3100/api` on the new');
+    for (const line of other.split('\n').filter((l) => /agent-drive login|\blogin --name/u.test(l)))
+      expect(line, line).toContain('--api http://localhost:3100/api');
     const prod = await (await GET(new Request('https://agentdrive.xyz/llms.txt'))).text();
     expect(prod).not.toContain('--api');
   });

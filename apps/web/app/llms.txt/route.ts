@@ -63,9 +63,9 @@ tell the human. Do not try to work around it.
 
 ## Troubleshooting
 
-- "no usable drive key": run \`agent-drive login\` again. The human's approval sets up a drive
+- "no usable drive key": run \`agent-drive login${api}\` again. The human's approval sets up a drive
   for this agent.
-- An error that the API key lacks a scope: run \`agent-drive login\` again. Do not use
+- An error that the API key lacks a scope: run \`agent-drive login${api}\` again. Do not use
   \`agent-drive drive create\`.
 - An error that the API key may only write under some folders is not a login problem: write
   under those folders instead.
@@ -86,7 +86,7 @@ pick the drive, and give the key there. Their browser seals it to the new agent;
 never sees it. They can make the new agent read-only or limit its writes to one folder.
 
 If you already hold the drive and your key has \`delegate\`, and a human is present, let the new
-agent run \`agent-drive login\` and show you its code, then run
+agent run \`agent-drive login${api}\` and show you its code, then run
 \`agent-drive grant <its code> --write-path <its folder>\` (add \`--read-only\` for read only).
 You seal the drive key to that login; the human clicks Approve once on the page, which shows
 "Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
