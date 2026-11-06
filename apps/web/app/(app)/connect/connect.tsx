@@ -428,9 +428,9 @@ export default function Connect({
     ? 'Your browser seals the key to this agent’s login; Agent Drive never sees it.'
     : offer
       ? `${offer.agentName} sealed the drive key for this login; Agent Drive never sees it.`
-      : reconnect.length > 0 || previous
+      : reconnect.length > 0
         ? `It reconnects to the drive it used before${previous ? ' and keeps its previous permissions' : ''}.`
-        : 'This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.';
+        : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
   const keyInvalid = fieldError?.field === 'key';
   const folderInvalid = fieldError?.field === 'folder';
   return (

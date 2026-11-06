@@ -752,6 +752,9 @@ test.describe('agent device login', () => {
     await page.goto(again.path);
     await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
     await expect(page.getByText(/keeps its previous permissions/)).toBeVisible();
+    await expect(page.locator('.connect-facts')).toContainText('New encrypted drive');
+    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
     await expect(
       page.getByRole('button', { name: 'Add to an existing drive instead' }),
     ).toHaveCount(0);
