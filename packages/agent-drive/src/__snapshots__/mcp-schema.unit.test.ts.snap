@@ -70,10 +70,11 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
   },
   {
     "annotations": {
+      "destructiveHint": false,
       "openWorldHint": true,
-      "readOnlyHint": true,
+      "readOnlyHint": false,
     },
-    "description": "Download and fully decrypt a file. Use outputPath for large or binary data; otherwise returns small printable UTF-8 text.",
+    "description": "Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -82,6 +83,36 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "string",
         },
         "outputPath": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string",
+        },
+        "versionId": {
+          "type": "string",
+        },
+      },
+      "required": [
+        "path",
+        "outputPath",
+      ],
+      "type": "object",
+    },
+    "name": "download",
+  },
+  {
+    "annotations": {
+      "openWorldHint": true,
+      "readOnlyHint": true,
+    },
+    "description": "Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.",
+    "inputSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "driveId": {
+          "minLength": 1,
           "type": "string",
         },
         "path": {

@@ -114,15 +114,15 @@ async function safely(action: () => Promise<unknown>, untrusted = true) {
 
 function printableText(bytes: Uint8Array) {
   if (bytes.byteLength > 64 * 1024)
-    throw new McpInputError('Large or binary files require outputPath.');
+    throw new McpInputError('Large or binary files require the download tool.');
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
-    throw new McpInputError('Binary or non-UTF-8 files require outputPath.');
+    throw new McpInputError('Binary or non-UTF-8 files require the download tool.');
   }
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
-    throw new McpInputError('Binary files require outputPath.');
+    throw new McpInputError('Binary files require the download tool.');
   }
   return text;
 }
@@ -199,13 +199,8 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
     'get',
     {
       description:
-        'Download and fully decrypt a file. Use outputPath for large or binary data; otherwise returns small printable UTF-8 text.',
-      inputSchema: {
-        driveId: id.optional(),
-        path,
-        versionId: z.string().optional(),
-        outputPath: z.string().optional(),
-      },
+        'Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.',
+      inputSchema: { driveId: id.optional(), path, versionId: z.string().optional() },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
@@ -215,26 +210,40 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
           args.path,
           args.versionId ? { versionId: args.versionId } : {},
         );
-        let text: string | undefined;
-        if (args.outputPath) {
-          const handle = await open(args.outputPath, 'wx', 0o600);
-          try {
-            await handle.chmod(0o600);
-            await handle.writeFile(result.bytes);
-          } catch (error) {
-            await handle.close();
-            await rm(args.outputPath, { force: true });
-            throw error;
-          }
+        return { version: result.version, text: printableText(result.bytes) };
+      }),
+  );
+  server.registerTool(
+    'download',
+    {
+      description:
+        'Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.',
+      inputSchema: {
+        driveId: id.optional(),
+        path,
+        outputPath: z.string().min(1),
+        versionId: z.string().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    async (args) =>
+      safely(async () => {
+        const result = await client.get(
+          drive(args.driveId),
+          args.path,
+          args.versionId ? { versionId: args.versionId } : {},
+        );
+        const handle = await open(args.outputPath, 'wx', 0o600);
+        try {
+          await handle.chmod(0o600);
+          await handle.writeFile(result.bytes);
+        } catch (error) {
           await handle.close();
-        } else {
-          text = printableText(result.bytes);
+          await rm(args.outputPath, { force: true });
+          throw error;
         }
-        return {
-          version: result.version,
-          ...(text !== undefined ? { text } : {}),
-          ...(args.outputPath ? { outputPath: args.outputPath } : {}),
-        };
+        await handle.close();
+        return { version: result.version, outputPath: args.outputPath };
       }),
   );
   server.registerTool(

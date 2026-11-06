@@ -251,6 +251,7 @@ describe('MCP product tools over stdio', () => {
       expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
         'copy',
         'delete',
+        'download',
         'get',
         'list',
         'move',
@@ -362,12 +363,27 @@ describe('MCP product tools over stdio', () => {
       ).not.toBe(true);
       const inlineBinary = await call(mcp.client, 'get', { driveId, path: '/mcp/binary.bin' });
       expect(inlineBinary.value).toMatchObject({ error: { code: 'invalid_input' } });
-      expect(JSON.stringify(inlineBinary.value)).toContain('outputPath');
+      expect(JSON.stringify(inlineBinary.value)).toContain('download');
       expect(
-        (await call(mcp.client, 'get', { driveId, path: '/mcp/binary.bin', outputPath: localOut }))
-          .result.isError,
+        (
+          await call(mcp.client, 'download', {
+            driveId,
+            path: '/mcp/binary.bin',
+            outputPath: localOut,
+          })
+        ).result.isError,
       ).not.toBe(true);
       expect(await readFile(localOut)).toEqual(binary);
+      const again = await call(mcp.client, 'download', {
+        driveId,
+        path: '/mcp/binary.bin',
+        outputPath: localOut,
+      });
+      expect(again.result.isError).toBe(true);
+      expect(await readFile(localOut)).toEqual(binary);
+      const ignored = join(tempRoot, 'get-must-not-write.out');
+      await call(mcp.client, 'get', { driveId, path: '/mcp/marker.txt', outputPath: ignored });
+      await expect(readFile(ignored)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(
         (
           await call(mcp.client, 'copy', {
@@ -480,7 +496,7 @@ describe('MCP product tools over stdio', () => {
     const wrong = await openMcp(scopedToken, generateDriveKey());
     try {
       const output = join(tempRoot, 'wrong-key.out');
-      const result = await call(wrong.client, 'get', {
+      const result = await call(wrong.client, 'download', {
         driveId,
         path: '/mcp/marker.txt',
         outputPath: output,

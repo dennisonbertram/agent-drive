@@ -89,7 +89,7 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 
 ## MCP tools
 
-`whoami`, `put` (text or `localPath`), `get` (small text, or `outputPath`), `list`, `move`,
+`whoami`, `put` (text or `localPath`), `get` (small text inline), `download` (new local file at `outputPath`, never overwrites), `list`, `move`,
 `copy`, `delete`, `versions`, `restore`, `search`, `recent`, `share`. `driveId` is optional when exactly one drive key is saved for the current API; otherwise pass it (`whoami` lists the IDs).
 
 ## Working with other agents on one drive

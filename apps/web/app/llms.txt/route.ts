@@ -122,12 +122,17 @@ Codex (~/.codex/config.toml):
    [mcp_servers.agent-drive]
    command = "agent-drive"
    args = ["mcp"]
-   default_tools_approval_mode = "approve"
 
-   Without the last line, \`codex exec\` (approval policy never) refuses \`put\` and the other
-   writing tools with "MCP tool call requires approval". Read-only tools (whoami, get, list,
-   versions, search, recent) need no approval. Add it only if you trust this agent to write.
-   \`tools.put.approval_mode = "approve"\` approves a single tool instead.
+   [mcp_servers.agent-drive.tools.put]
+   approval_mode = "approve"
+   [mcp_servers.agent-drive.tools.download]
+   approval_mode = "approve"
+
+   Under \`codex exec\` (approval policy never), tools that are not read-only (put, download,
+   move, copy, delete, restore, share) are refused with "MCP tool call requires approval" until
+   approved. Read-only tools (whoami, get, list, versions, search, recent) need no approval.
+   Approve per tool as above. \`default_tools_approval_mode = "approve"\` approves every tool,
+   including delete, move, restore and share; use it only if you accept that.
 
 MCP tools take an optional driveId. Leave it out when only one drive key is saved for the API.
 
