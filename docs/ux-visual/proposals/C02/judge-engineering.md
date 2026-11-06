@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Inline StateBlock | 4 | 4 | 3 | 4 | 3 | 5 | 45 |
-| B ListState + useListLoad | 5 | 4 | 5 | 5 | 4 | 3 | 54 |
-| C Convention | 3 | 3 | 3 | 3 | 4 | 3 | 38 |
+| Option                    | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| ------------------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Inline StateBlock       | 4        | 4          | 3           | 4         | 3      | 5           | 45       |
+| B ListState + useListLoad | 5        | 4          | 5           | 5         | 4      | 3           | 54       |
+| C Convention              | 3        | 3          | 3           | 3         | 4      | 3           | 38       |
 
 - B fixes the false empty state at its cause: one `status` value cannot be both error and empty. A fixes it by condition ordering and stops calling `setError` for list failures, which is correct but leaves Agents, API keys and Usage hand-rolled (A "Effort and risk"). Owner goals reward consistent states across every list.
 - B's risk is real: it edits all five tabs in a 1,580-line file that C03 and C04 also edit. B says land it first, and I agree. C04-B's list-state sharing means C02-B is the natural base; C04-A needs the same status values anyway.

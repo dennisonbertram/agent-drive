@@ -1,4 +1,5 @@
 # STORY-018 walk report (lane B)
+
 Seeded user e2e_uxreview. Result: PASS (story behaves as written; gaps confirmed).
 
 1. Selected research-bot, loaded its key (via recovery bundle file, see STORY-026), typed "jsonl" in the filter (screenshots/step-0-filter-typed.png).
@@ -9,6 +10,7 @@ Seeded user e2e_uxreview. Result: PASS (story behaves as written; gaps confirmed
 6. Mobile 390x844 (mobile-check.png): drive strip scrolls horizontally, third tile clipped at the edge (expected, scrollable); cards stack; no page overflow.
 
 ## Flow log
+
 - Steps: 1 click to switch (ideal 1). No hesitation.
 - The "Key backed up ... (file)" banner never names which drive it refers to; after a switch it looks identical.
 - Drive meta, drive id, and key state each appear in the strip, card header and banner.

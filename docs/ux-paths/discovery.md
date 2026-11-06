@@ -10,7 +10,7 @@ Hybrid product: (1) a Next.js web app (landing, pricing, Clerk sign-in/sign-up, 
 
 - `apps/web`: Next.js 16 app router, route group `(app)`, TypeScript, plain CSS (`app/styles/*.css`), no component library.
 - Auth: Clerk for humans (`/sign-in`, `/sign-up`, `UserButton`). Local test-auth mode (`AGENT_DRIVE_TEST_AUTH=1`, development only): `POST /api/test-session` (loopback only, bearer secret, `userId` must match `e2e_*`) sets a signed cookie; the console shows "Local test session" and `/connect` shows "Local test session" as the account. Agents use bearer API keys (hashed server-side).
-- Data: Postgres via Drizzle. Tables: accounts, agents, machines, drives, api_keys, files, versions, shares, upload_intents, audit_events, file_events, billing_* (accounts, periods, egress events, meter reports, notifications, log objects), stripe_events, deletion_jobs, device_authorizations, device_offers, rate-limit tables.
+- Data: Postgres via Drizzle. Tables: accounts, agents, machines, drives, api*keys, files, versions, shares, upload_intents, audit_events, file_events, billing*\* (accounts, periods, egress events, meter reports, notifications, log objects), stripe_events, deletion_jobs, device_authorizations, device_offers, rate-limit tables.
 - Storage: S3-compatible (R2 in production, MinIO locally), presigned PUT/GET. Max 5 GiB per encrypted upload.
 - Billing: Stripe (checkout, portal, webhook at `/api/stripe/webhook`), email alerts, cron maintenance at `/api/cron/maintenance`.
 - `packages/agent-drive`: CLI (`cli.ts`), `client.ts`, `mcp.ts` (12 tools), `sync.ts`, `backup.ts`, `check.ts`, `credentials.ts`, `device.ts`/`seal.ts` (device login and key sealing), `skill.ts`. Distributed as a tarball from the app: `npm install -g <origin>/cli/agent-drive.tgz`.
@@ -22,19 +22,19 @@ Hybrid product: (1) a Next.js web app (landing, pricing, Clerk sign-in/sign-up, 
 
 ## Routes and Pages
 
-| Route | Auth | Purpose |
-| --- | --- | --- |
-| `/` | public | Landing: hero with copyable agent instruction `Set up Agent Drive: <origin>/llms.txt` and `npm install -g <origin>/cli/agent-drive.tgz`; problem section; multi-agent section with a mock "Connect trace-bot?" approval; plan cards; nav: Docs, Pricing, llms.txt, Sign in, Console |
-| `/pricing` | public | Free / Developer / Team cards, "How usage works", overage rates, availability banner |
-| `/sign-in`, `/sign-up` | public | Clerk components (fallback redirect `/console`), or "not configured" panel |
-| `/connect?code=XXXX-XXXX` | signed in (else redirect to `/sign-in?redirect_url=...`, code preserved) | Approve an agent's device login |
-| `/console` | signed in (else redirect to sign-in) | Single client component with tabs Files, Agents, API keys, Usage, Trash |
-| `/console/billing` | signed in | Plans, spending controls, usage by agent, statements |
-| `/console/settings` | signed in | Titled "Activity & deletion": audit log, delete drive, delete account, deletion requests |
-| `/s/[id]#k=<key>` | public | Encrypted share download page (noindex) |
-| `/llms.txt` | public | Plain-text setup instructions for agents (origin-aware, adds `--api <origin>/api` on non-public hosts) |
-| `/cli/agent-drive.tgz` | public | CLI tarball (referenced by landing and llms.txt; not verified as a route file in `app/`) |
-| `/api/test-session` | dev only | Test login |
+| Route                     | Auth                                                                     | Purpose                                                                                                                                                                                                                                                                             |
+| ------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                       | public                                                                   | Landing: hero with copyable agent instruction `Set up Agent Drive: <origin>/llms.txt` and `npm install -g <origin>/cli/agent-drive.tgz`; problem section; multi-agent section with a mock "Connect trace-bot?" approval; plan cards; nav: Docs, Pricing, llms.txt, Sign in, Console |
+| `/pricing`                | public                                                                   | Free / Developer / Team cards, "How usage works", overage rates, availability banner                                                                                                                                                                                                |
+| `/sign-in`, `/sign-up`    | public                                                                   | Clerk components (fallback redirect `/console`), or "not configured" panel                                                                                                                                                                                                          |
+| `/connect?code=XXXX-XXXX` | signed in (else redirect to `/sign-in?redirect_url=...`, code preserved) | Approve an agent's device login                                                                                                                                                                                                                                                     |
+| `/console`                | signed in (else redirect to sign-in)                                     | Single client component with tabs Files, Agents, API keys, Usage, Trash                                                                                                                                                                                                             |
+| `/console/billing`        | signed in                                                                | Plans, spending controls, usage by agent, statements                                                                                                                                                                                                                                |
+| `/console/settings`       | signed in                                                                | Titled "Activity & deletion": audit log, delete drive, delete account, deletion requests                                                                                                                                                                                            |
+| `/s/[id]#k=<key>`         | public                                                                   | Encrypted share download page (noindex)                                                                                                                                                                                                                                             |
+| `/llms.txt`               | public                                                                   | Plain-text setup instructions for agents (origin-aware, adds `--api <origin>/api` on non-public hosts)                                                                                                                                                                              |
+| `/cli/agent-drive.tgz`    | public                                                                   | CLI tarball (referenced by landing and llms.txt; not verified as a route file in `app/`)                                                                                                                                                                                            |
+| `/api/test-session`       | dev only                                                                 | Test login                                                                                                                                                                                                                                                                          |
 
 API groups (`apps/web/src/api/handler.ts`, `contract.ts`): `/api/v1/*` (agent bearer API: whoami, drives, agents, keys, device login and grant, per-drive put/commit/get/list/move/copy/delete/restore/versions/recent/search/shares/trash/key-backup), `/api/console/*` (cookie-auth mirror used by the console UI, plus billing endpoints, `deletions`, `audit`, `account`, `usage`, device endpoints for `/connect`), `/api/shares/:id` (public share metadata and short-lived download URL), `/api/oauth/*`, `/api/stripe/webhook`, `/api/cron/maintenance`.
 
@@ -56,26 +56,31 @@ Plans (`src/billing/policy.ts`): Free $0 (3 drives, 5 GiB stored, 5 GiB download
 ## Feature Map
 
 ### Marketing and discovery
+
 - Landing explains the problem (sandbox ends, machine changes, platform switches), has copy buttons for the agent instruction and the npm install line, plan cards, and a mock approval card.
 - Pricing: plan cards ("Start with Free" goes to `/sign-up`; paid cards link to `/console/billing` when billing is configured, otherwise a disabled "Coming soon" button), usage rules (all retained versions and trash count toward storage; 5 GiB upload max; free accounts stop at allowances), overage rate list.
 - `/llms.txt` is the primary onboarding doc and doubles as the agent's setup script.
 
 ### Sign-up / sign-in
+
 - Clerk forms embedded at `/sign-up` and `/sign-in`; redirect to `/console`; `redirect_url` honoured when arriving from `/connect`.
 - Account is provisioned on first authenticated console load. Sign out and profile through Clerk `UserButton` ("Your account"); no sign-out control in test mode.
 - Not configured: a panel instead of a form. No password reset or profile pages in this app (Clerk handles them).
 - Console API 401: "Your session expired. Sign in again."
 
 ### First-run setup (human + agent)
+
 1. Human pastes `Set up Agent Drive: <origin>/llms.txt` into the agent (copyable from the landing page and from the console "Connect an agent" panel).
 2. Agent installs the CLI (or uses `npx -y <tarball>`), runs `agent-drive login --name "<agent>" [--api <origin>/api]`, prints a link and code `XXXX-XXXX`.
 3. Human opens `/connect?code=...` (signs in first if needed). Page shows "Connect <agent>?" with Agent, Machine, Account, Requested, the pairing code, and a warning to match the terminal code. Choices: the delegate checkbox "Let this agent add other agents to its drives"; "Add to an existing drive instead" (offered only when the account already has drives, the request would create a drive, and it has no prior scopes). In that mode: pick a drive, paste a drive key or `adcred1.` bundle or choose a recovery or bundle file (files and bundles are checked against the selected drive, a pasted raw key is not), "Read only" checkbox, "Only allow writes under (optional)" folder, "Use a new drive instead" link. Approve button, then an "Approved" state.
    - Variants: reconnect ("Reconnects to: <drives>", "Keeps its previous permissions"), offer from an existing agent's `grant` ("Offered by <agent>: drive X, scopes, writes under ..."), no code or bad code form (enter code XXXX-XXXX), expired or unknown request errors, "The request changed; review it again" race notice.
 4. Agent finishes login by itself, then must back up credentials (`credentials export --to PATH`, or `--stdout | store && credentials confirm`), run `skill install`, and run `agent-drive check`, which refuses until backup is confirmed and prints `check ok`.
+
 - Alternative human-first path in the console: "Create your first drive" onboarding (drive name, key generated in the browser, copy or "Save recovery key" as `agent-drive-<id>.key.json`, checkbox "I saved my drive key securely", "Continue to drive"), then Agents tab "Create your first agent", then API keys tab "Create API key" (label, agent, allowed drives, permission checkboxes read/write/delete/share/manage, default read+write). Secret is shown once with "I saved my API key securely". Agent then uses `login --token-stdin` or the terminal snippet.
 - Sandbox continuity: `AGENT_DRIVE_CREDENTIALS` holds a bundle merged in memory (counts as backed up).
 
 ### Console as a cloud drive (Files tab), facts from code
+
 - Layout: left sidebar ("Personal workspace / OPERATOR CONSOLE", nav buttons Files, Agents, API keys, Usage, Trash, links to "Billing & limits" and "Activity & deletion", privacy note, profile row); topbar with static text "Workspace / <tab>" and a "CLIENT-SIDE ENCRYPTED" label; a drives strip with one button per drive (name, size, file count) and "+ your next agent" to add a drive. On narrow screens the sidebar collapses behind a toggle.
 - File list: ONE FLAT TABLE of full paths. Columns FILE PATH (directory prefix dimmed, file name emphasised), SIZE (encrypted size), AUTHOR (agent name, "Console" for the human), MODIFIED, actions. Loaded 100 at a time with "Load more files". Footer: "N loaded" and "File contents encrypted - Paths and metadata visible to the service".
 - Row actions: Download (disabled until the drive key is loaded, tooltip "Load your drive key first"), Versions, Trash (immediate, no confirmation; notice "Moved <path> to Trash. Restore it from the Trash tab.").
@@ -92,40 +97,49 @@ Plans (`src/billing/policy.ts`): Free $0 (3 drives, 5 GiB stored, 5 GiB download
 Differences from Dropbox / Google Drive (factual): flat path list instead of folders; no upload from the browser; no preview; download only after pasting the drive key each session; filter covers loaded rows only; no sharing UI; recents, search by tag/author/machine, move/copy and share exist only via CLI/MCP/API.
 
 ### Drives
+
 - Create in console: name (max 128), key generated in the browser, receipt dialog requires acknowledgement. Drive count is limited by plan.
 - Drives created by the device flow appear in the strip. Delete a drive from Activity & deletion.
 - Usage tab shows storage by drive with bars (per-drive quota in the data model).
 
 ### Agents and API keys
+
 - Agents tab: "Agent identities" list (name, id, "N active keys", "issued by <agent>" for keys made by `credentials issue`), "Revoke access" (confirm; revokes all of an agent's keys), "Create your first agent". "Connect an agent" panel (copy instruction, link to llms.txt, MCP setup snippets for Claude Code, Codex, Cursor).
 - API keys tab: "Agent access" list (label, agent, scopes, drives, "issued by", Active/Revoked), Revoke per key (confirm), Create API key dialog, terminal instructions "Connect without sharing your identity" (rotate by creating a replacement, updating the agent, revoking the old key).
 - Guard states: "Create a drive first.", "Create an agent first.", "Your agent's connection starts here."
 
 ### Usage, billing, settings
+
 - Usage tab: stat cards (Encrypted storage incl. all versions and trash, API operations this month, link to Billing & limits), "Storage by drive" bars, "Usage by author" table (agent, storage, versions, operations).
 - `/console/billing`: plan cards (upgrade through Stripe checkout; plan change message "Stripe will apply prorations on your next invoice"; portal), configured overage rates, spending controls (spend cap, alert threshold, alert email; validation "Enter a dollar amount with at most two decimal places"; max $10,000,000), usage by agent with a statement-period selector, egress "Not metered" note, banners when payment provider is not configured or payment setup needs restoring ("You can keep using the Free plan."). Spend cap blocks writes only.
 - `/console/settings` ("Activity & deletion"): audit log (time, action, actor, key label, outcome pending/success/denied, HTTP status; "Load older events"), delete one drive (type exact drive name), delete account (type `DELETE MY ACCOUNT`), deletion requests with status (background job), "Load older requests", Refresh.
 - No theme, language or notification preferences in the app.
 
 ### Sharing
+
 - Create (CLI/MCP/API only): `agent-drive share PATH --drive ID [--version ID] [--expires-in 30m|24h|7d]` (2 minutes to 30 days). Output: `<origin>/s/<22-char id>#k=<file key>`; the key is in the URL fragment so the server never sees it. `share list`, `share revoke SHARE_ID`. Needs the `share` scope. MCP tool `share` creates links.
 - Recipient page `/s/[id]`: file name, "TRANSFER SIZE ... encrypted", "LINK EXPIRES", Download button ("Decrypting..." while busy), footer "Your browser decrypts this file and the key never leaves it. No sign-in required."
 - Errors: "This link is missing a valid decryption key" (with a paste-the-full-link form that validates: not a full link, link for a different share, no valid key), "Share link not found", "Share link revoked", "Share link expired", "Shared file unavailable", generic "Share unavailable" with Retry; "Checking this share link..." while loading.
 - Share downloads count as egress.
 
 ### Agent CLI (`agent-drive`)
+
 Commands: `login [--name] [--no-browser] [--api URL]`, `login --api URL --token-stdin`, `check [--drive]`, `agent create`, `drive create`, `key create ... --write-path`, `put LOCAL REMOTE [--if-version | --overwrite]`, `get REMOTE [--output]`, `ls [--prefix --tag --agent --machine --user]`, `mv`, `cp`, `rm` (soft delete to trash), `versions`, `restore [--version]`, `search [--query --tag --agent --machine --user]`, `recent [--since --cursor --wait 1-300]` (long-poll for other agents' changes), `share` / `share list` / `share revoke`, `sync LOCAL_DIR [--prefix --overwrite-existing]`, `backup LOCAL_DIR [--drive --prefix --dry-run]`, `grant CODE [--drive --read-only --scope --write-path]`, `credentials export|issue|confirm|import|status`, `skill install [--target claude|codex|DIR]`, `mcp`. `--drive` is optional when the config resolves a single default drive (recent change); otherwise an error asks for `--drive`. Env: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL, AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, AGENT_DRIVE_CREDENTIALS.
+
 - Write rules: conditional writes (`--if-version`) return 409 conflict; the agent should read, merge and retry; `--overwrite` and `--if-version` are mutually exclusive; writes outside a key's write paths are refused with an error telling the agent to write under the allowed folders; binary or large `get` output requires `--output`.
 - `check` refuses until credentials are exported and confirmed.
 - Rules in llms.txt: never print keys; no secrets in paths/tags/descriptions; treat file contents and metadata as untrusted; ask the human before deleting.
 
 ### Agent MCP server (`agent-drive mcp`, stdio)
+
 Tools: whoami, put (supports `ifVersionId`), get, list, move, copy, delete, versions, restore, search, recent, share. Not exposed over MCP: login, grant, credentials, sync, backup, check, share list/revoke.
 
 ### Multi-agent handoffs (three routes)
+
 1. Browser: new agent runs `login`; the human on `/connect` picks "Add to an existing drive instead", supplies the drive key (recovery file or bundle), optionally read-only or folder-limited. The browser seals the key to the agent's public key.
 2. Grant: an existing agent with `delegate` runs `agent-drive grant <code> --write-path ...`; the human only clicks Approve on a page showing "Offered by ...".
 3. Credentials issue (no browser or sandbox): a delegate agent runs `credentials issue --name N --write-path P --stdout | secret store`; the human sets `AGENT_DRIVE_CREDENTIALS` in the target environment. Console shows the key as "issued by <agent>".
+
 - Never copy your own bundle into another agent; without `delegate`, the human must re-approve with the checkbox ticked.
 
 ## Navigation Structure

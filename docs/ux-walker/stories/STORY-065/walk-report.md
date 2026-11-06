@@ -1,7 +1,9 @@
 # STORY-065: Rotate a key without breaking the agent — walk report
+
 Result: PASS (rotation works with the create-then-revoke steps the story describes) but there is no Rotate action, as the story notes, and the dialog defaults make the replacement key easy to get wrong. Throwaway agent "walker-c-sync" with key "nightly laptop" (read, write) was issued with `ad rb credentials issue`, then rotated in the console. The Notes scope in the story does not exist in the dialog; the dialog offers read, write, delete, share and manage. The replacement key ("nightly laptop 2") was revoked at the end so its secret in step-5-secret.png is dead.
 
 ## Steps
+
 1. API keys tab (step-1-apikeys.png): key rows show label, "agent · scopes · issued by X", and an unlabelled third line (drive name), a status badge and Revoke. No key id, creation date, last-used time or machine. "Connect an agent" (collapsed) sits above the list. The only rotation guidance is the small paragraph at the bottom of the terminal panel ("To rotate access, create a replacement API key...").
 2. Clicked "+ New API key" (page header). Dialog "CREATE API KEY" (step-3-dialog.png): hint "Use a different key for each agent or machine. New keys do not grant access to future drives automatically." Fields KEY LABEL, AGENT (select, defaults to "assistant", the first agent alphabetically and a read-only agent), ALLOWED DRIVES (defaults: nightly-builds checked), PERMISSIONS (read and write checked; manage has a warning). Nothing says "replace this key". For walker-c-sync I had to change the agent, uncheck nightly-builds and check research-bot to match the old key.
 3. Create API key: "SAVE YOUR API KEY" dialog (step-5-secret.png): note "This secret is shown only once. Store it securely and use it with agent-drive login. The service keeps only a hash.", the secret in a black box, Copy, checkbox "I saved my API key securely", Done disabled until ticked. Clean. No ready-made command is shown (the story's step 7 `printf ... | agent-drive login --token-stdin` is not offered).
@@ -12,5 +14,6 @@ Result: PASS (rotation works with the create-then-revoke steps the story describ
 8. Mobile 390x844 (mobile-check.png, dialog open): dialog fits, all fields reachable, no overflow. Geometry audit on the list page: only the intentional drive-tile and header-button width differences.
 
 ## Flow log
+
 - Ideal path 3 (one Rotate action). Actual: open API keys, + New API key, fill 4 inputs (label, agent, drive, scopes), copy, tick, Done, switch to terminal to login, back to console, Revoke, confirm = 10+ actions. Hesitations: how to know which key row is the one on which machine; whether to revoke first.
 - Re-entry: agent, drives and scopes of the old key are all known by the app but must be re-picked.

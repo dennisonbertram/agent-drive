@@ -1,4 +1,33 @@
 [
- {"id":"F-019-01","story_id":"STORY-019","severity":"high","category":"happy-path","criterion":"Primary CTA / expected navigation","score":"fail","description":"There is no way to browse by folder: no folder rows, tree or breadcrumb. The dim directory text in each row looks navigable but is inert.","expected":"Clicking a directory segment (or a folder row) narrows the list to that folder, with a breadcrumb to go back up.","actual":"Click and double-click do nothing; only a substring filter exists.","screenshot":"screenshots/step-2-click-dir.png","suggested_fix":"Make each path segment a button that sets the filter to that prefix, and show a clearable breadcrumb chip above the table.","files_likely_involved":["apps/web/app/(app)/console/console.tsx","apps/web/app/(app)/console/console.css"]},
- {"id":"F-019-02","story_id":"STORY-019","severity":"medium","category":"flow","criterion":"Filter semantics","score":"warn","description":"The filter is a substring match on loaded rows only. Rows beyond the first 100 are invisible to it until 'Load more files' is clicked; the user must know to do that.","expected":"A path-prefix filter that queries the server (the list API supports prefix).","actual":"/reports/q3/ returned 'No loaded files match' until Load more was clicked.","screenshot":"screenshots/step-1-flat.png","suggested_fix":"Pass the typed prefix to the list API when it starts with '/'.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]}
+  {
+    "id": "F-019-01",
+    "story_id": "STORY-019",
+    "severity": "high",
+    "category": "happy-path",
+    "criterion": "Primary CTA / expected navigation",
+    "score": "fail",
+    "description": "There is no way to browse by folder: no folder rows, tree or breadcrumb. The dim directory text in each row looks navigable but is inert.",
+    "expected": "Clicking a directory segment (or a folder row) narrows the list to that folder, with a breadcrumb to go back up.",
+    "actual": "Click and double-click do nothing; only a substring filter exists.",
+    "screenshot": "screenshots/step-2-click-dir.png",
+    "suggested_fix": "Make each path segment a button that sets the filter to that prefix, and show a clearable breadcrumb chip above the table.",
+    "files_likely_involved": [
+      "apps/web/app/(app)/console/console.tsx",
+      "apps/web/app/(app)/console/console.css"
+    ]
+  },
+  {
+    "id": "F-019-02",
+    "story_id": "STORY-019",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Filter semantics",
+    "score": "warn",
+    "description": "The filter is a substring match on loaded rows only. Rows beyond the first 100 are invisible to it until 'Load more files' is clicked; the user must know to do that.",
+    "expected": "A path-prefix filter that queries the server (the list API supports prefix).",
+    "actual": "/reports/q3/ returned 'No loaded files match' until Load more was clicked.",
+    "screenshot": "screenshots/step-1-flat.png",
+    "suggested_fix": "Pass the typed prefix to the list API when it starts with '/'.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
 ]

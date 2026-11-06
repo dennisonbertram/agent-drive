@@ -1,4 +1,5 @@
 # STORY-029 walk report (lane B)
+
 Result: PASS with findings. Banner explains the problem, but the human's quickest fix is hidden until the key is loaded, and the visible command belongs to the agent's machine.
 
 Data: user e2e_walkerb_new. Drive "Research workspace" (human-created, one file, unbacked) and drive "agent-made" (created through the real device-flow login /connect by a CLI agent, unbacked). Agent steps used an isolated AGENT_DRIVE_CONFIG.
@@ -11,6 +12,7 @@ Data: user e2e_walkerb_new. Drive "Research workspace" (human-created, one file,
 6. Mobile 390x844 (mobile-check.png): banner wraps to full text, buttons below; fine. Geometry audit: only intentional unequal widths.
 
 ## Flow log
+
 - Ideal 2 steps; the quickest path for a human who has the key is: Load drive key (3 actions) then Download recovery file = 4 actions, and nothing in the banner tells her that.
 - Hesitation: "Ask the agent to run" is addressed to someone else; the Copy button invites pasting into her own terminal (wrong machine).
 - Not verified: the copied clipboard text; banner dimming (LED colour is orange in both states).

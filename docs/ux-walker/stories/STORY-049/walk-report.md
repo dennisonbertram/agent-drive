@@ -1,4 +1,5 @@
 # STORY-049 walk report (lane B)
+
 Data: user e2e_walkerb, drive walkb-bot, throwaway file /reports/2026-11-04-draft.md (2 versions written by the agent). Result: PASS (goal in 2 clicks after the file was in Trash), with display findings.
 
 0. Precondition: filtered "draft" in Files, clicked the row's "Trash": file moved at once with no confirmation, header notice "Moved /reports/2026-11-04-draft.md to Trash. Restore it from the Trash tab." (screenshots/pre-2-trash-dialog.png). After the move the filter shows "No loaded files match “draft”." with a "Load more files" button, which wrongly suggests more matches may exist.
@@ -10,6 +11,7 @@ Data: user e2e_walkerb, drive walkb-bot, throwaway file /reports/2026-11-04-draf
 6. Mobile 390x844 (mobile-check.png, taken on the Trash tab): fits; the restore notice sits as a bottom bar and the dev tools badge overlaps its text in dev mode (dev-only artifact). The Trash tab still shows the "KEY REQUIRED FOR DOWNLOADS / Load drive key" controls though nothing here downloads.
 
 ## Flow log
+
 - Ideal 2; actual 2 (Trash tab, Restore) plus 1 to confirm in Files. No hesitation.
 - Trash has no confirm and no Undo link in the notice (the notice tells where to restore; fine because it is recoverable).
 - Author and time appear in Files rows, Versions dialog and Usage by author with no link between them.

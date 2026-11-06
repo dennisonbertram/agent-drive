@@ -1,7 +1,72 @@
 [
- {"id":"F-029-01","story_id":"STORY-029","severity":"medium","category":"flow","criterion":"Happy-path clarity","score":"warn","description":"The banner tells the human to ask the agent to run a command and offers a Copy button for it, but the human's own fix ('Download recovery file') is shown only after the key is loaded, with no hint. Copying the command to her own terminal does nothing useful.","expected":"Banner offers both routes: 'Ask your agent to run X' and 'Load your key and save a recovery file'.","actual":"Only the agent route is explained; the file route appears as an unexplained extra button after a key load.","screenshot":"screenshots/step-1-banner.png","suggested_fix":"Add a second line or a 'Back up now' button that opens the Load drive key dialog.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-029-02","story_id":"STORY-029","severity":"medium","category":"layout","criterion":"Overflow/clipping","score":"warn","description":"When the 'Download recovery file' button is present, the banner text is truncated with an ellipsis exactly where the command appears ('Ask the agent to run agent-dr…'); the full text is only in a tooltip.","expected":"Banner wraps to two lines so the whole command is visible.","actual":"scrollWidth 887 > clientWidth 736, text cut.","screenshot":"screenshots/var-banner-with-download-btn.png","suggested_fix":"Allow wrapping (white-space: normal) on the banner text.","files_likely_involved":["apps/web/app/(app)/console/console.css"]},
- {"id":"F-029-03","story_id":"STORY-029","severity":"low","category":"visual","criterion":"Status colour","score":"warn","description":"The 'Key backed up' info line keeps an orange-red LED identical to the warning state, so healthy and unhealthy look alike.","expected":"Dim or green LED for backed up.","actual":"Orange-red dot next to 'Key backed up 11/6/2026 (stdout)'.","screenshot":"screenshots/step-4-after-refresh.png","suggested_fix":"Use the idle LED colour for the backed-up state.","files_likely_involved":["apps/web/app/(app)/console/console.css"]},
- {"id":"F-029-04","story_id":"STORY-029","severity":"low","category":"flow","criterion":"State freshness","score":"warn","description":"After the agent confirms the backup, the console banner stays red until the human clicks Refresh; the list does not poll.","expected":"Banner updates on tab focus or after a short poll.","actual":"Unchanged until Refresh (confirmed).","screenshot":"screenshots/step-3-before-refresh.png","suggested_fix":"Refetch on window focus.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-029-05","story_id":"STORY-029","severity":"low","category":"error-handling","criterion":"Copy gives the real command","score":"warn","description":"The copy text is 'agent-drive credentials export' without --to PATH or --stdout, which the CLI requires; the agent must add the flag itself.","expected":"A complete command such as 'agent-drive credentials export --to PATH'.","actual":"Banner text lacks the required argument (clipboard content itself not read; the visible text is used).","screenshot":"screenshots/step-1-banner.png","suggested_fix":"Include '--to <path>' in banner and copy text.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]}
+  {
+    "id": "F-029-01",
+    "story_id": "STORY-029",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Happy-path clarity",
+    "score": "warn",
+    "description": "The banner tells the human to ask the agent to run a command and offers a Copy button for it, but the human's own fix ('Download recovery file') is shown only after the key is loaded, with no hint. Copying the command to her own terminal does nothing useful.",
+    "expected": "Banner offers both routes: 'Ask your agent to run X' and 'Load your key and save a recovery file'.",
+    "actual": "Only the agent route is explained; the file route appears as an unexplained extra button after a key load.",
+    "screenshot": "screenshots/step-1-banner.png",
+    "suggested_fix": "Add a second line or a 'Back up now' button that opens the Load drive key dialog.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-029-02",
+    "story_id": "STORY-029",
+    "severity": "medium",
+    "category": "layout",
+    "criterion": "Overflow/clipping",
+    "score": "warn",
+    "description": "When the 'Download recovery file' button is present, the banner text is truncated with an ellipsis exactly where the command appears ('Ask the agent to run agent-dr…'); the full text is only in a tooltip.",
+    "expected": "Banner wraps to two lines so the whole command is visible.",
+    "actual": "scrollWidth 887 > clientWidth 736, text cut.",
+    "screenshot": "screenshots/var-banner-with-download-btn.png",
+    "suggested_fix": "Allow wrapping (white-space: normal) on the banner text.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.css"]
+  },
+  {
+    "id": "F-029-03",
+    "story_id": "STORY-029",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Status colour",
+    "score": "warn",
+    "description": "The 'Key backed up' info line keeps an orange-red LED identical to the warning state, so healthy and unhealthy look alike.",
+    "expected": "Dim or green LED for backed up.",
+    "actual": "Orange-red dot next to 'Key backed up 11/6/2026 (stdout)'.",
+    "screenshot": "screenshots/step-4-after-refresh.png",
+    "suggested_fix": "Use the idle LED colour for the backed-up state.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.css"]
+  },
+  {
+    "id": "F-029-04",
+    "story_id": "STORY-029",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "State freshness",
+    "score": "warn",
+    "description": "After the agent confirms the backup, the console banner stays red until the human clicks Refresh; the list does not poll.",
+    "expected": "Banner updates on tab focus or after a short poll.",
+    "actual": "Unchanged until Refresh (confirmed).",
+    "screenshot": "screenshots/step-3-before-refresh.png",
+    "suggested_fix": "Refetch on window focus.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-029-05",
+    "story_id": "STORY-029",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Copy gives the real command",
+    "score": "warn",
+    "description": "The copy text is 'agent-drive credentials export' without --to PATH or --stdout, which the CLI requires; the agent must add the flag itself.",
+    "expected": "A complete command such as 'agent-drive credentials export --to PATH'.",
+    "actual": "Banner text lacks the required argument (clipboard content itself not read; the visible text is used).",
+    "screenshot": "screenshots/step-1-banner.png",
+    "suggested_fix": "Include '--to <path>' in banner and copy text.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
 ]

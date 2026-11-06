@@ -1,4 +1,5 @@
 # STORY-024 walk report (lane B)
+
 Fresh user e2e_walkerb_new (no drives). Result: PASS with friction (the goal was reached: empty console -> drive -> key saved -> agent connected -> file visible), 7 screens/dialogs.
 
 1. /console (screenshots/step-1-empty.png): "Give your first agent a home." with orange "Create your first drive ↗" and a 01/02/03 strip. The top-right "+ New drive" button does the same thing (two CTAs for one action). The 01/02/03 strip is plain text, not links. Geometry audit: only intentional unequal widths.
@@ -12,6 +13,7 @@ Fresh user e2e_walkerb_new (no drives). Result: PASS with friction (the goal was
 9. Mobile 390x844 (mobile-check.png): clean, banner shows its full text on phone (it is clipped to one line on desktop), no overflow.
 
 ## Flow log
+
 - Ideal 5 steps (create drive, save key, paste instruction, agent puts file, see it). Actual: 12 actions: create-first-drive, name+Create, Save recovery key, tick, Continue, Connect an agent, Create agent, name+Create, New API key, label+Create, tick+Done (+ agent side) , Files.
 - Hesitations: (a) receipt dialog gives no feedback after Save recovery key; (b) after "Connect an agent" the user lands on "Create an agent first", a detour; (c) the collapsed instruction card.
 - The drive created here is human-first, but the pasted instruction in the card says the agent "sets up its own encrypted drive", so the two paths are not obviously the same thing (the agent device flow makes a new drive rather than using this one).

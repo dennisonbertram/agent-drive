@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Minimal | 5 | 5 | 4 | 4 | 4 | 5 | 54 |
-| B Shell | 5 | 3 | 5 | 5 | 4 | 3 | 52 |
-| C Hamburger sheet | 4 | 2 | 4 | 4 | 4 | 2 | 42 |
+| Option            | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| ----------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Minimal         | 5        | 5          | 4           | 4         | 4      | 5           | 54       |
+| B Shell           | 5        | 3          | 5           | 5         | 4      | 3           | 52       |
+| C Hamburger sheet | 4        | 2          | 4           | 4         | 4      | 2           | 42       |
 
 - A meets all six criteria with one server component, `<details>` and no JS. It deletes more CSS than it adds (A "Files and tokens").
 - B is the better structure but moves `/`, `/pricing`, `/sign-in`, `/sign-up` into a route group. Every relative import and the Clerk catch-all routes are at risk (B "Risks"). The gain is mainly the auth-page frame, which A's one-line cross-link already covers.

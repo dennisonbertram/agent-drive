@@ -1,6 +1,58 @@
 [
- {"id":"F-050-01","story_id":"STORY-050","severity":"medium","category":"flow","criterion":"Result stays visible after an action","score":"warn","description":"After a restore the file list reloads to the first 100 rows while the filter text stays, so the file that was just restored disappears behind 'No loaded files match' until 'Load more files' is clicked again.","expected":"The restored row stays visible (or the list keeps all loaded pages) so the user can reopen Versions to confirm.","actual":"Empty state with filter 'design' right after restoring design.md.","screenshot":"screenshots/step-3-after-restore.png","suggested_fix":"Keep loaded pages on reload, or refresh only the affected row.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-050-02","story_id":"STORY-050","severity":"medium","category":"happy-path","criterion":"Information needed to decide","score":"warn","description":"The Versions dialog gives no way to tell which version is the good one: no content preview or diff, timestamps to the second only, size as the only hint. Downloading each version to compare requires loading the key and is not available from the dialog.","expected":"A per-version Download or Preview (when the key is loaded) next to Restore.","actual":"Only 'Restore this version'.","screenshot":"screenshots/step-1b-versions-dialog.png","suggested_fix":"Add a Download button per version when the key is loaded; show relative time ('2 min before current').","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-050-03","story_id":"STORY-050","severity":"low","category":"flow","criterion":"Redundant manual steps","score":"warn","description":"Version IDs are shown in monospace text with no Copy button (the drive ID has one), though the story's CLI alternative needs the ID.","expected":"Copy button beside each version id.","actual":"Selection by hand only.","screenshot":"screenshots/step-4-versions-after.png","suggested_fix":"Reuse the drive-id Copy control.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-050-04","story_id":"STORY-050","severity":"low","category":"error-handling","criterion":"Destructive-looking action has no confirmation","score":"warn","description":"'Restore this version' acts immediately with no confirmation and no indication which version is being restored in the notice ('Restored as a new version.').","expected":"Notice names the restored version/time, e.g. 'Restored the 2:08:12 PM version (82 B)'.","actual":"Generic notice that does not say which one.","screenshot":"screenshots/step-3-after-restore.png","suggested_fix":"Include date and size in the notice.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]}
+  {
+    "id": "F-050-01",
+    "story_id": "STORY-050",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Result stays visible after an action",
+    "score": "warn",
+    "description": "After a restore the file list reloads to the first 100 rows while the filter text stays, so the file that was just restored disappears behind 'No loaded files match' until 'Load more files' is clicked again.",
+    "expected": "The restored row stays visible (or the list keeps all loaded pages) so the user can reopen Versions to confirm.",
+    "actual": "Empty state with filter 'design' right after restoring design.md.",
+    "screenshot": "screenshots/step-3-after-restore.png",
+    "suggested_fix": "Keep loaded pages on reload, or refresh only the affected row.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-050-02",
+    "story_id": "STORY-050",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Information needed to decide",
+    "score": "warn",
+    "description": "The Versions dialog gives no way to tell which version is the good one: no content preview or diff, timestamps to the second only, size as the only hint. Downloading each version to compare requires loading the key and is not available from the dialog.",
+    "expected": "A per-version Download or Preview (when the key is loaded) next to Restore.",
+    "actual": "Only 'Restore this version'.",
+    "screenshot": "screenshots/step-1b-versions-dialog.png",
+    "suggested_fix": "Add a Download button per version when the key is loaded; show relative time ('2 min before current').",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-050-03",
+    "story_id": "STORY-050",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Redundant manual steps",
+    "score": "warn",
+    "description": "Version IDs are shown in monospace text with no Copy button (the drive ID has one), though the story's CLI alternative needs the ID.",
+    "expected": "Copy button beside each version id.",
+    "actual": "Selection by hand only.",
+    "screenshot": "screenshots/step-4-versions-after.png",
+    "suggested_fix": "Reuse the drive-id Copy control.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-050-04",
+    "story_id": "STORY-050",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Destructive-looking action has no confirmation",
+    "score": "warn",
+    "description": "'Restore this version' acts immediately with no confirmation and no indication which version is being restored in the notice ('Restored as a new version.').",
+    "expected": "Notice names the restored version/time, e.g. 'Restored the 2:08:12 PM version (82 B)'.",
+    "actual": "Generic notice that does not say which one.",
+    "screenshot": "screenshots/step-3-after-restore.png",
+    "suggested_fix": "Include date and size in the notice.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  }
 ]

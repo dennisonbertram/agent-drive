@@ -1,6 +1,58 @@
 [
- {"id":"F-017-01","story_id":"STORY-017","severity":"low","category":"consistency","criterion":"Same fact shown with two different values","score":"warn","description":"Sidebar Files badge shows the number of loaded rows (100) while the drive strip shows the real total (114 files).","expected":"Badge shows the drive's total (114) or is clearly labelled as loaded rows.","actual":"Badge says 100 until 'Load more files' is clicked, then 114.","screenshot":"screenshots/step-3-prefilter-100.png","suggested_fix":"Use the usage total for the badge, or drop the badge.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-017-02","story_id":"STORY-017","severity":"medium","category":"happy-path","criterion":"Search covers the whole data set","score":"warn","description":"The filter only matches the file path of rows already loaded; it ignores the AUTHOR and MODIFIED columns, and a drive of thousands of files needs many Load more clicks before a miss means anything.","expected":"Searching 'trace-bot' or a date finds matching files across the whole drive (server-side search exists for agents).","actual":"'trace-bot' returns 'No loaded files match' even though the drive has files by that author.","screenshot":"screenshots/step-variation-author.png","suggested_fix":"Wire the filter to the existing search endpoint, or at least match the author column.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-017-03","story_id":"STORY-017","severity":"low","category":"visual","criterion":"Hierarchy / status colour","score":"warn","description":"A positive state ('Key backed up ... (file)') is shown with a red/orange LED dot, the same colour used for warnings and the primary button.","expected":"Neutral or green indicator for a healthy state.","actual":"Red-orange dot beside a reassuring message.","screenshot":"screenshots/step-1.png","suggested_fix":"Dim LED for backed-up state, red only for missing backup.","files_likely_involved":["apps/web/app/(app)/console/console.tsx"]},
- {"id":"F-017-04","story_id":"STORY-017","severity":"low","category":"layout","criterion":"Spacing","score":"warn","description":"The files card keeps a blank band (about 55px) under the footer line when few rows are shown, and the card height jumps when the filter changes the row count.","expected":"Card height fits content.","actual":"Empty padding under the footer row; card resizes on every keystroke.","screenshot":"screenshots/step-5-found.png","suggested_fix":"Remove the min-height reserve under the footer.","files_likely_involved":["apps/web/app/(app)/console/console.css"]}
+  {
+    "id": "F-017-01",
+    "story_id": "STORY-017",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Same fact shown with two different values",
+    "score": "warn",
+    "description": "Sidebar Files badge shows the number of loaded rows (100) while the drive strip shows the real total (114 files).",
+    "expected": "Badge shows the drive's total (114) or is clearly labelled as loaded rows.",
+    "actual": "Badge says 100 until 'Load more files' is clicked, then 114.",
+    "screenshot": "screenshots/step-3-prefilter-100.png",
+    "suggested_fix": "Use the usage total for the badge, or drop the badge.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-017-02",
+    "story_id": "STORY-017",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Search covers the whole data set",
+    "score": "warn",
+    "description": "The filter only matches the file path of rows already loaded; it ignores the AUTHOR and MODIFIED columns, and a drive of thousands of files needs many Load more clicks before a miss means anything.",
+    "expected": "Searching 'trace-bot' or a date finds matching files across the whole drive (server-side search exists for agents).",
+    "actual": "'trace-bot' returns 'No loaded files match' even though the drive has files by that author.",
+    "screenshot": "screenshots/step-variation-author.png",
+    "suggested_fix": "Wire the filter to the existing search endpoint, or at least match the author column.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-017-03",
+    "story_id": "STORY-017",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Hierarchy / status colour",
+    "score": "warn",
+    "description": "A positive state ('Key backed up ... (file)') is shown with a red/orange LED dot, the same colour used for warnings and the primary button.",
+    "expected": "Neutral or green indicator for a healthy state.",
+    "actual": "Red-orange dot beside a reassuring message.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Dim LED for backed-up state, red only for missing backup.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.tsx"]
+  },
+  {
+    "id": "F-017-04",
+    "story_id": "STORY-017",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Spacing",
+    "score": "warn",
+    "description": "The files card keeps a blank band (about 55px) under the footer line when few rows are shown, and the card height jumps when the filter changes the row count.",
+    "expected": "Card height fits content.",
+    "actual": "Empty padding under the footer row; card resizes on every keystroke.",
+    "screenshot": "screenshots/step-5-found.png",
+    "suggested_fix": "Remove the min-height reserve under the footer.",
+    "files_likely_involved": ["apps/web/app/(app)/console/console.css"]
+  }
 ]

@@ -1,4 +1,5 @@
 # STORY-019 walk report (lane B) - "(gap)" story
+
 Data: user e2e_walkerb, drive walkb-bot (114 files incl. /reports/q3/{summary,detail}.md, /reports/q4/summary.md, /inbox/...). Result: FAIL (no folder navigation exists; confirmed gap; filter workaround works).
 
 1. Files tab (screenshots/step-1-flat.png): flat list, each row shows dim directory + bold name. No folder rows, tree or breadcrumb ("Workspace / Files" is the only crumb).
@@ -8,6 +9,7 @@ Data: user e2e_walkerb, drive walkb-bot (114 files incl. /reports/q3/{summary,de
 5. Mobile 390x844 (mobile-check.png): same as 017, stacked cards, no overflow. Geometry audit clean (only intentional unequal widths).
 
 ## Flow log
+
 - Ideal path 2 clicks; actually unreachable. Workaround: Load more + type a path = 3-4 actions plus knowing the exact path.
 - Hesitation: clicking the dir text (it looks like a link/breadcrumb) is the natural first try; dead.
 - Right-click not exercised in detail (browser default menu per catalog).

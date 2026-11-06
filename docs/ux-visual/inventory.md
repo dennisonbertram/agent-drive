@@ -4,33 +4,33 @@ Sources: `pages/*/findings.md`, `pages/inventory-notes.md`, and the code in `app
 
 ## Layouts
 
-| Layout | Code | Used by |
-|---|---|---|
-| Marketing frame (header nav, footer, hairline sections) | `app/(app)/page.tsx`, `app/(app)/pricing/`, `styles/landing.css` | `/`, `/pricing` (two different headers) |
-| Auth frame (brand above one 440px card) | `app/(app)/sign-in/`, `sign-up/`, `styles/account.css` | `/sign-in`, `/sign-up` |
-| Connect card (440px card, top-anchored) | `app/(app)/connect/`, `styles/connect.css` | `/connect` |
-| Console shell (sidebar, breadcrumb bar, drive strip, panel; mobile top bar with menu) | `app/(app)/console/console.tsx` (1,580 lines), `styles/console.css`, `console-panels.css` | `/console` (5 tabs) |
-| Account pages (header with nav, stacked sections) | `console/billing/billing-client.tsx`, `console/settings/settings-client.tsx`, `styles/account.css` | `/console/billing`, `/console/settings` |
-| Share card (single centered card) | `app/s/[id]/share-client.tsx`, `styles/share.css` | `/s/<id>#k=<key>` |
-| Plain text | `app/llms.txt/route.ts` | `/llms.txt` |
+| Layout                                                                                | Code                                                                                               | Used by                                 |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Marketing frame (header nav, footer, hairline sections)                               | `app/(app)/page.tsx`, `app/(app)/pricing/`, `styles/landing.css`                                   | `/`, `/pricing` (two different headers) |
+| Auth frame (brand above one 440px card)                                               | `app/(app)/sign-in/`, `sign-up/`, `styles/account.css`                                             | `/sign-in`, `/sign-up`                  |
+| Connect card (440px card, top-anchored)                                               | `app/(app)/connect/`, `styles/connect.css`                                                         | `/connect`                              |
+| Console shell (sidebar, breadcrumb bar, drive strip, panel; mobile top bar with menu) | `app/(app)/console/console.tsx` (1,580 lines), `styles/console.css`, `console-panels.css`          | `/console` (5 tabs)                     |
+| Account pages (header with nav, stacked sections)                                     | `console/billing/billing-client.tsx`, `console/settings/settings-client.tsx`, `styles/account.css` | `/console/billing`, `/console/settings` |
+| Share card (single centered card)                                                     | `app/s/[id]/share-client.tsx`, `styles/share.css`                                                  | `/s/<id>#k=<key>`                       |
+| Plain text                                                                            | `app/llms.txt/route.ts`                                                                            | `/llms.txt`                             |
 
 ## Pages, states reached, and where the evidence lives
 
-| Page | States reached | Not reached | Findings file |
-|---|---|---|---|
-| `/` landing | home at 3 viewports, scroll series, hover and focus | none | `pages/landing/` |
-| `/pricing` | main at 3 viewports | paid checkout enabled, "Coming soon" interaction | `pages/pricing/` |
-| `/sign-in`, `/sign-up` | "not configured" fallback card at 3 viewports | **real Clerk forms** (Clerk not configured locally), error states, social buttons | `pages/auth/` |
-| `/connect` | entry, format error, invalid code, review new, existing drive (and its 2 error states), offer from grant, approved, denied, approve error, rate-limited, reconnect, waiting-new-drive, long names, 375/768/1440/1920 | real device-approval with a real CLI over a slow network | `pages/connect/` |
-| `/llms.txt` | fetched as text, read in full | rendering in a browser | `pages/llms/` |
-| `/s/<id>` | ready, missing key, bad key format, wrong key, revoked, not found, loading, decrypting at 3 viewports | expired, completed download, "Try again"/unavailable, long file name, large-file progress | `pages/share/` |
-| `/console` Files | drive with key not loaded, key loaded, filtered, filter no-match, list error (forced), empty drive, one-drive vs two-drive, 3 viewports | loading state (flashes too fast), drive with 1,000+ files, upload progress | `pages/console/` |
-| `/console` Trash | populated, empty | restore notice, Trash stuck on loading (seen only in ux-flow) | `pages/console/` |
-| `/console` Agents, API keys, Usage | populated, empty (API keys, Usage), 3 viewports | revoke result, key rotate | `pages/console/` |
-| `/console` dialogs | New drive, New agent, New API key, key load (and error), Versions (single and multi), receipt | confirm dialogs (revoke uses native `confirm()`) | `pages/console/` |
-| `/console` first visit | onboarding (no drives), new-drive dialog | none | `pages/console/` |
-| `/console/settings` | default (25 audit rows, delete forms) at 3 viewports | audit empty or error, deletion submitted, "When is data actually removed?" expanded | `pages/settings/` |
-| `/console/billing` | default at 3 viewports | paid checkout enabled, spending-control validation errors, export result, empty usage | `pages/billing/` |
+| Page                               | States reached                                                                                                                                                                                                       | Not reached                                                                               | Findings file     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------- |
+| `/` landing                        | home at 3 viewports, scroll series, hover and focus                                                                                                                                                                  | none                                                                                      | `pages/landing/`  |
+| `/pricing`                         | main at 3 viewports                                                                                                                                                                                                  | paid checkout enabled, "Coming soon" interaction                                          | `pages/pricing/`  |
+| `/sign-in`, `/sign-up`             | "not configured" fallback card at 3 viewports                                                                                                                                                                        | **real Clerk forms** (Clerk not configured locally), error states, social buttons         | `pages/auth/`     |
+| `/connect`                         | entry, format error, invalid code, review new, existing drive (and its 2 error states), offer from grant, approved, denied, approve error, rate-limited, reconnect, waiting-new-drive, long names, 375/768/1440/1920 | real device-approval with a real CLI over a slow network                                  | `pages/connect/`  |
+| `/llms.txt`                        | fetched as text, read in full                                                                                                                                                                                        | rendering in a browser                                                                    | `pages/llms/`     |
+| `/s/<id>`                          | ready, missing key, bad key format, wrong key, revoked, not found, loading, decrypting at 3 viewports                                                                                                                | expired, completed download, "Try again"/unavailable, long file name, large-file progress | `pages/share/`    |
+| `/console` Files                   | drive with key not loaded, key loaded, filtered, filter no-match, list error (forced), empty drive, one-drive vs two-drive, 3 viewports                                                                              | loading state (flashes too fast), drive with 1,000+ files, upload progress                | `pages/console/`  |
+| `/console` Trash                   | populated, empty                                                                                                                                                                                                     | restore notice, Trash stuck on loading (seen only in ux-flow)                             | `pages/console/`  |
+| `/console` Agents, API keys, Usage | populated, empty (API keys, Usage), 3 viewports                                                                                                                                                                      | revoke result, key rotate                                                                 | `pages/console/`  |
+| `/console` dialogs                 | New drive, New agent, New API key, key load (and error), Versions (single and multi), receipt                                                                                                                        | confirm dialogs (revoke uses native `confirm()`)                                          | `pages/console/`  |
+| `/console` first visit             | onboarding (no drives), new-drive dialog                                                                                                                                                                             | none                                                                                      | `pages/console/`  |
+| `/console/settings`                | default (25 audit rows, delete forms) at 3 viewports                                                                                                                                                                 | audit empty or error, deletion submitted, "When is data actually removed?" expanded       | `pages/settings/` |
+| `/console/billing`                 | default at 3 viewports                                                                                                                                                                                               | paid checkout enabled, spending-control validation errors, export result, empty usage     | `pages/billing/`  |
 
 ## Component groups and components
 

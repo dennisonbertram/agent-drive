@@ -1,5 +1,44 @@
 [
- {"id":"F-STORY-042-01","story_id":"STORY-042","severity":"low","category":"error-handling","criterion":"Feedback after action","score":"warn","description":"After Download the page gives no confirmation. The button returns to its normal state and the card is unchanged, so on a phone (where downloads are easy to miss) the recipient cannot tell whether the file was saved. The 'Decrypting…' label was not observable for a small file.","expected":"A short 'Downloaded summary.pdf' state (or the button becoming 'Download again') once the save is triggered.","actual":"Button label and card identical before and after the click (step-2-busy.png, step-2-after.png).","screenshot":"screenshots/step-2-after.png","suggested_fix":"Show a success line under the button after the blob is saved; keep the busy label for at least a moment.","files_likely_involved":["apps/web/app/s/[id]/share-viewer.tsx"]},
- {"id":"F-STORY-042-02","story_id":"STORY-042","severity":"low","category":"happy-path","criterion":"Labels/copy","score":"warn","description":"TRANSFER SIZE shows the ciphertext size ('439 B encrypted'), which is not the size of the file the recipient will get (398 B). The only explanation is the footer, which does not mention size or that the file opens normally after download.","expected":"Show the decrypted file size, or explain that the file will open normally after download.","actual":"'439 B encrypted' with no explanation.","screenshot":"screenshots/step-1.png","suggested_fix":"Show plaintext size (the share record can carry it) or relabel as 'Download size'.","files_likely_involved":["apps/web/app/s/[id]/share-viewer.tsx"]},
- {"id":"F-STORY-042-03","story_id":"STORY-042","severity":"suggestion","category":"visual","criterion":"Information stated once / emphasis","score":"warn","description":"An orange ringed dot at the top right of the card has no label or tooltip and its meaning (status? decoration?) is unclear.","expected":"Either a labelled status or no dot.","actual":"Unlabelled dot.","screenshot":"screenshots/step-1.png","suggested_fix":"Remove or label it.","files_likely_involved":["apps/web/app/s/[id]/share-viewer.tsx"]}
+  {
+    "id": "F-STORY-042-01",
+    "story_id": "STORY-042",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Feedback after action",
+    "score": "warn",
+    "description": "After Download the page gives no confirmation. The button returns to its normal state and the card is unchanged, so on a phone (where downloads are easy to miss) the recipient cannot tell whether the file was saved. The 'Decrypting…' label was not observable for a small file.",
+    "expected": "A short 'Downloaded summary.pdf' state (or the button becoming 'Download again') once the save is triggered.",
+    "actual": "Button label and card identical before and after the click (step-2-busy.png, step-2-after.png).",
+    "screenshot": "screenshots/step-2-after.png",
+    "suggested_fix": "Show a success line under the button after the blob is saved; keep the busy label for at least a moment.",
+    "files_likely_involved": ["apps/web/app/s/[id]/share-viewer.tsx"]
+  },
+  {
+    "id": "F-STORY-042-02",
+    "story_id": "STORY-042",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "TRANSFER SIZE shows the ciphertext size ('439 B encrypted'), which is not the size of the file the recipient will get (398 B). The only explanation is the footer, which does not mention size or that the file opens normally after download.",
+    "expected": "Show the decrypted file size, or explain that the file will open normally after download.",
+    "actual": "'439 B encrypted' with no explanation.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Show plaintext size (the share record can carry it) or relabel as 'Download size'.",
+    "files_likely_involved": ["apps/web/app/s/[id]/share-viewer.tsx"]
+  },
+  {
+    "id": "F-STORY-042-03",
+    "story_id": "STORY-042",
+    "severity": "suggestion",
+    "category": "visual",
+    "criterion": "Information stated once / emphasis",
+    "score": "warn",
+    "description": "An orange ringed dot at the top right of the card has no label or tooltip and its meaning (status? decoration?) is unclear.",
+    "expected": "Either a labelled status or no dot.",
+    "actual": "Unlabelled dot.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Remove or label it.",
+    "files_likely_involved": ["apps/web/app/s/[id]/share-viewer.tsx"]
+  }
 ]

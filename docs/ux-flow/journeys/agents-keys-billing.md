@@ -6,13 +6,13 @@ Ideal path: one screen answers "who can reach what"; revoke is one click; rotate
 
 ## Friction Scorecard
 
-| Task | Steps actual | Steps ideal | Notes |
-|---|---|---|---|
-| Review who can access what | 2 tabs (01, 05) and still no full answer | 1 | Neither lists drives or write paths. API keys shows scopes (research-bot: read, write, delete, share, delegate). |
-| Revoke old-laptop | 0 (already revoked) | 1 | Agents row still shows "0 ACTIVE KEYS" with an enabled "Revoke access" button (01). |
-| Revoke an agent (trace-a) | 2 (click, native confirm) | 2 | Row stays; badge becomes 0 ACTIVE KEYS; no notice (02). |
-| Rotate a key (trace-b) | 11: API keys tab, New API key, label, agent, drives, Create, copy, tick "I saved", Done, find old row, Revoke, confirm | 3 | No rotate action. Dialog defaults to agent assistant and drive nightly-builds (03). |
-| Usage versus plan | 3 screens: Usage (07), Billing (08), Pricing (09) | 1 | The allowance appears only on Billing ("5.0 GiB included"). |
+| Task                       | Steps actual                                                                                                           | Steps ideal | Notes                                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| Review who can access what | 2 tabs (01, 05) and still no full answer                                                                               | 1           | Neither lists drives or write paths. API keys shows scopes (research-bot: read, write, delete, share, delegate). |
+| Revoke old-laptop          | 0 (already revoked)                                                                                                    | 1           | Agents row still shows "0 ACTIVE KEYS" with an enabled "Revoke access" button (01).                              |
+| Revoke an agent (trace-a)  | 2 (click, native confirm)                                                                                              | 2           | Row stays; badge becomes 0 ACTIVE KEYS; no notice (02).                                                          |
+| Rotate a key (trace-b)     | 11: API keys tab, New API key, label, agent, drives, Create, copy, tick "I saved", Done, find old row, Revoke, confirm | 3           | No rotate action. Dialog defaults to agent assistant and drive nightly-builds (03).                              |
+| Usage versus plan          | 3 screens: Usage (07), Billing (08), Pricing (09)                                                                      | 1           | The allowance appears only on Billing ("5.0 GiB included").                                                      |
 
 Hesitations (measured): I clicked "Revoke access" on the wrong agent (research-bot instead of trace-a) because the nine rows have identical buttons. Only the confirm text named the agent, and I dismissed it. Confirmations are native browser `confirm()` dialogs, which screenshots cannot capture.
 
@@ -39,6 +39,7 @@ Environment note: during this run a console API call took 5 to 10 minutes (the s
 4. Pricing and the Billing plan cards share one component and one set of words.
 
 Concrete changes, in priority order:
+
 - Show drive and write path per agent and per key row.
 - Add Replace key, and default the New key dialog from where the owner came from.
 - Show the plan allowance on the Usage tab.

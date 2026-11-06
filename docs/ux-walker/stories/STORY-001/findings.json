@@ -1,6 +1,67 @@
 [
-{"id":"F-001-01","story_id":"STORY-001","severity":"medium","category":"happy-path","criterion":"Primary CTA","score":"fail","description":"The landing page has no Sign up / Get started control. The only prominent action is Copy for the agent line. A visitor who wants an account must guess that Sign in covers sign-up, or go to Pricing.","expected":"A visible 'Sign up' or 'Start free' action in the header and hero (or the pricing teaser on the landing page).","actual":"Header: Docs, Pricing, llms.txt, Sign in, Console. The landing pricing teaser has only 'See full pricing'. Start with Free exists only on /pricing.","screenshot":"screenshots/step-1.png","suggested_fix":"Add 'Start free' to the header and put a 'Start with Free' button in the landing pricing teaser.","files_likely_involved":["apps/web/app/(marketing)/page.tsx","apps/web/app/(marketing)/pricing/page.tsx"]},
-{"id":"F-001-02","story_id":"STORY-001","severity":"high","category":"layout","criterion":"Responsive behavior / Navigation","score":"fail","description":"At 390px width the landing page header shows only the logo. Docs, Pricing, llms.txt, Sign in and Console all have zero width and there is no menu button, so a phone visitor cannot sign in or reach pricing without scrolling to the footer.","expected":"A collapsed menu, or at least Sign in visible, in the header on narrow screens.","actual":"Header nav is hidden; links exist only in the footer (~5,500px down).","screenshot":"screenshots/mobile-check.png","suggested_fix":"Show Sign in (and Pricing) in the mobile header, or add a menu toggle.","files_likely_involved":["apps/web/app/(marketing)/page.tsx","apps/web/app/globals.css"]},
-{"id":"F-001-03","story_id":"STORY-001","severity":"low","category":"flow","criterion":"Dead ends","score":"warn","description":"The not-configured /sign-in and /sign-up cards have no link to each other, to the home page or to docs. (Only seen because Clerk is unset locally; a real deployment shows Clerk's form.)","expected":"At least a link back home and between sign-in and sign-up.","actual":"Text-only card with the small logo as the only exit.","screenshot":"screenshots/step-2-signin.png","suggested_fix":"Add 'Back to home' and cross-links to the fallback cards.","files_likely_involved":["apps/web/app/(auth)/sign-in/[[...sign-in]]/page.tsx","apps/web/app/(auth)/sign-up/[[...sign-up]]/page.tsx"]},
-{"id":"F-001-04","story_id":"STORY-001","severity":"low","category":"consistency","criterion":"Component consistency","score":"warn","description":"Header navigation differs between the landing page and /pricing: landing has Docs and a plain 'Console' link; pricing has no Docs and an outlined 'Open console' button. Price formatting also differs ($0 vs $0.00).","expected":"One header and one price format across marketing pages.","actual":"Two different headers and number formats.","screenshot":"screenshots/step-3-pricing.png","suggested_fix":"Share one marketing header component and one price formatter.","files_likely_involved":["apps/web/app/(marketing)/page.tsx","apps/web/app/(marketing)/pricing/page.tsx"]}
+  {
+    "id": "F-001-01",
+    "story_id": "STORY-001",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Primary CTA",
+    "score": "fail",
+    "description": "The landing page has no Sign up / Get started control. The only prominent action is Copy for the agent line. A visitor who wants an account must guess that Sign in covers sign-up, or go to Pricing.",
+    "expected": "A visible 'Sign up' or 'Start free' action in the header and hero (or the pricing teaser on the landing page).",
+    "actual": "Header: Docs, Pricing, llms.txt, Sign in, Console. The landing pricing teaser has only 'See full pricing'. Start with Free exists only on /pricing.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Add 'Start free' to the header and put a 'Start with Free' button in the landing pricing teaser.",
+    "files_likely_involved": [
+      "apps/web/app/(marketing)/page.tsx",
+      "apps/web/app/(marketing)/pricing/page.tsx"
+    ]
+  },
+  {
+    "id": "F-001-02",
+    "story_id": "STORY-001",
+    "severity": "high",
+    "category": "layout",
+    "criterion": "Responsive behavior / Navigation",
+    "score": "fail",
+    "description": "At 390px width the landing page header shows only the logo. Docs, Pricing, llms.txt, Sign in and Console all have zero width and there is no menu button, so a phone visitor cannot sign in or reach pricing without scrolling to the footer.",
+    "expected": "A collapsed menu, or at least Sign in visible, in the header on narrow screens.",
+    "actual": "Header nav is hidden; links exist only in the footer (~5,500px down).",
+    "screenshot": "screenshots/mobile-check.png",
+    "suggested_fix": "Show Sign in (and Pricing) in the mobile header, or add a menu toggle.",
+    "files_likely_involved": ["apps/web/app/(marketing)/page.tsx", "apps/web/app/globals.css"]
+  },
+  {
+    "id": "F-001-03",
+    "story_id": "STORY-001",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "The not-configured /sign-in and /sign-up cards have no link to each other, to the home page or to docs. (Only seen because Clerk is unset locally; a real deployment shows Clerk's form.)",
+    "expected": "At least a link back home and between sign-in and sign-up.",
+    "actual": "Text-only card with the small logo as the only exit.",
+    "screenshot": "screenshots/step-2-signin.png",
+    "suggested_fix": "Add 'Back to home' and cross-links to the fallback cards.",
+    "files_likely_involved": [
+      "apps/web/app/(auth)/sign-in/[[...sign-in]]/page.tsx",
+      "apps/web/app/(auth)/sign-up/[[...sign-up]]/page.tsx"
+    ]
+  },
+  {
+    "id": "F-001-04",
+    "story_id": "STORY-001",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Component consistency",
+    "score": "warn",
+    "description": "Header navigation differs between the landing page and /pricing: landing has Docs and a plain 'Console' link; pricing has no Docs and an outlined 'Open console' button. Price formatting also differs ($0 vs $0.00).",
+    "expected": "One header and one price format across marketing pages.",
+    "actual": "Two different headers and number formats.",
+    "screenshot": "screenshots/step-3-pricing.png",
+    "suggested_fix": "Share one marketing header component and one price formatter.",
+    "files_likely_involved": [
+      "apps/web/app/(marketing)/page.tsx",
+      "apps/web/app/(marketing)/pricing/page.tsx"
+    ]
+  }
 ]

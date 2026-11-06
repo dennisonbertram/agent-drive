@@ -1,2 +1,3 @@
 # /llms.txt as plain text (short note)
+
 `curl localhost:3500/llms.txt`: 200, `text/plain; charset=utf-8`, cache 300s, 140 lines / 6.7KB. Reads well as a numbered runbook (set up, install, connect, human approves, back up credentials, install skill, check; then Troubleshooting, Sandboxes). Own, measured: longest line is 251 chars (the credentials/confirm sentence in "Sandboxes" and long one-line pipes), which wrap badly in narrow terminals; step 3 ("The human approves (step 2)") repeats step 2; URLs use the request origin (localhost:3500), correct. No P0/P1. P3: wrap prose at about 100 chars and drop the duplicate step 3.

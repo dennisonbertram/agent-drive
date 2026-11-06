@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Dialog + one chip | 5 | 4 | 4 | 4 | 3 | 4 | 49 |
-| B Sheet + switcher tile | 3 | 2 | 3 | 4 | 4 | 1 | 36 |
-| C Lock toggle | 4 | 3 | 3 | 3 | 4 | 3 | 41 |
+| Option                  | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| ----------------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Dialog + one chip     | 5        | 4          | 4           | 4         | 3      | 4           | 49       |
+| B Sheet + switcher tile | 3        | 2          | 3           | 4         | 4      | 1           | 36       |
+| C Lock toggle           | 4        | 3          | 3           | 3         | 4      | 3           | 41       |
 
 - A reuses the existing `unlock` Dialog, `loadKeyFile` and a `pendingDownload` ref. B only works if C04-B ships (Sheet, switcher tile) and adds drop-anywhere and an idle lock. C introduces "Locked/Unlocked" as a second vocabulary beside "key"/"recovery file" (C "Risks") and makes a state label act as a toggle.
 - "Remember on this device", checked against the code: the drive key today lives only in React state (`driveKeys`, console.tsx:260). All three proposals persist it as AES-GCM ciphertext in IndexedDB with a non-extractable wrapping `CryptoKey` in the same store. Be clear about what that buys. The wrapping key sits next to the ciphertext, and any script on the console origin can still ask it to decrypt, so XSS and anyone with the browser profile get the drive key either way. It only avoids a plaintext key in devtools storage. I found no Content-Security-Policy in `apps/web`, so XSS exposure is not reduced by headers. A's wording ("protects against someone reading browser storage without the page") overstates the protection.

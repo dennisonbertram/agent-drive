@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Reorder + shrink | 5 | 4 | 4 | 4 | 4 | 5 | 52 |
-| B Decision card, sticky bar | 4 | 3 | 3 | 5 | 4 | 2 | 44 |
-| C OAuth consent layout | 4 | 4 | 4 | 4 | 4 | 4 | 48 |
+| Option                      | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| --------------------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Reorder + shrink          | 5        | 4          | 4           | 4         | 4      | 5           | 52       |
+| B Decision card, sticky bar | 4        | 3          | 3           | 5         | 4      | 2           | 44       |
+| C OAuth consent layout      | 4        | 4          | 4           | 4         | 4      | 4           | 48       |
 
 - A is a reorder inside `connect.tsx` and `connect.css`, no new component, and meets all eleven criteria on paper. B adds radio cards, a sticky footer inside a scrolling card (keyboard-open risk on phones) and a Deny button. C is a middle path.
 - Security detail: the pairing code check is the anti-phishing step. A's text moves the code under the heading, but its ASCII layout puts "Code ... matches your terminal?" below Approve and the existing-drive button. Approving before reading the code defeats the point. B (footer) and C (line directly above the buttons) place it correctly.

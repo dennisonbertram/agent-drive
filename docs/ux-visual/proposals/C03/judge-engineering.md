@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Toast + overflow + confirm | 5 | 4 | 4 | 4 | 3 | 4 | 49 |
-| B Selection + action bar + drawer | 3 | 2 | 3 | 4 | 4 | 1 | 36 |
-| C Drive/Gmail convention | 5 | 4 | 5 | 4 | 4 | 4 | 53 |
+| Option                            | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| --------------------------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Toast + overflow + confirm      | 5        | 4          | 4           | 4         | 3      | 4           | 49       |
+| B Selection + action bar + drawer | 3        | 2          | 3           | 4         | 4      | 1           | 36       |
+| C Drive/Gmail convention          | 5        | 4          | 5           | 4         | 4      | 4           | 53       |
 
 - A and C are the same design; C is the cleaner statement and keeps both Download and the kebab visible (no hover-only). A has the better implementation notes: optimistic trash with rollback, Undo capturing the drive id in the closure, `ConfirmDialog` built on the existing `Dialog` (console.tsx:203).
 - B depends on C04's selection model, adds bulk Undo with N API calls and partial failure, and introduces a drawer. It is L effort for a criterion set that A and C meet with M.

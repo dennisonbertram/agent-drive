@@ -1,4 +1,5 @@
 # STORY-017 walk report (lane B, session ux-walker-b)
+
 Data: throwaway user e2e_walkerb, drive "walkb-bot" (114 synthetic files, 5 in /inbox/trace-bot/2026-11-0N.jsonl). Seeded research-bot (26 files) used for the first check.
 Result: PASS (goal reachable; with minor findings).
 
@@ -9,6 +10,7 @@ Result: PASS (goal reachable; with minor findings).
 5. Mobile 390x844 (mobile-check.png): rows turn into stacked cards with SIZE/AUTHOR/MODIFIED labels, no overflow, buttons wrap fine.
 
 ## Flow log
+
 - Steps used: 3 (ideal 3). No hesitation except: filter placeholder says "Filter loaded files…" which is correct and sufficient.
 - Sidebar "Files" count badge says 100 while the drive strip says 114 files and the footer says "of 114" after loading; the badge then becomes 114 after Load more. Same fact, two numbers.
 - Drive ID, drive file count, author and modified time are repeated across screens (info, no new finding).

@@ -6,11 +6,11 @@ Ideal path (STORY-056): 4 steps. Ideal overall: the owner says "give agent X acc
 
 ## Friction Scorecard (measured)
 
-| Route | Owner steps | Agent-side steps | Owner decisions | Secrets owner handles | Dead ends |
-|---|---|---|---|---|---|
-| A. Browser "Add to an existing drive" | 6: open link (01), click "Add to an existing drive instead" (02), pick drive, load recovery file, optional read-only / write path, Approve (05) | 1 (`login`) | 5: drive, key source, read-only, write path, delegate checkbox | Yes: must find and upload the recovery file | Approved screen (05) has no link to the console or Agents |
-| B. `grant` | 2: open link (06), Approve | 2 (`login`, then research-bot runs `grant CODE --write-path /outputs`) | 2: delegate checkbox, approve | None | Same Approved screen |
-| C. `credentials issue` | 0 | 1 (`credentials issue --name trace-c --write-path /outputs --to FILE`) | 0 | None (file is mode 600) | Owner sees nothing until they open Agents or API keys; no approval |
+| Route                                 | Owner steps                                                                                                                                     | Agent-side steps                                                       | Owner decisions                                                | Secrets owner handles                       | Dead ends                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
+| A. Browser "Add to an existing drive" | 6: open link (01), click "Add to an existing drive instead" (02), pick drive, load recovery file, optional read-only / write path, Approve (05) | 1 (`login`)                                                            | 5: drive, key source, read-only, write path, delegate checkbox | Yes: must find and upload the recovery file | Approved screen (05) has no link to the console or Agents          |
+| B. `grant`                            | 2: open link (06), Approve                                                                                                                      | 2 (`login`, then research-bot runs `grant CODE --write-path /outputs`) | 2: delegate checkbox, approve                                  | None                                        | Same Approved screen                                               |
+| C. `credentials issue`                | 0                                                                                                                                               | 1 (`credentials issue --name trace-c --write-path /outputs --to FILE`) | 0                                                              | None (file is mode 600)                     | Owner sees nothing until they open Agents or API keys; no approval |
 
 - Re-entry: route A makes the owner supply a secret (screen 02: "Drive key or credentials bundle", "Or choose a recovery file"). The seeded recovery file was on disk; in real use it may be lost.
 - Hesitation: route A, screen 01. The banner says "This agent gets its own encrypted drive", and the way out is a small underlined link. An owner who wants the existing drive reads the banner as the only option.
@@ -35,6 +35,7 @@ Ideal path (STORY-056): 4 steps. Ideal overall: the owner says "give agent X acc
 4. The Approved screen links to "View trace-bot in Agents".
 
 Concrete changes:
+
 - Make the existing-drive choice a visible control on screen 01 (a drive select above the banner), not a link under a banner about new drives.
 - Do not ask for the drive key when the console already has it loaded in this browser.
 - Preselect the most recently used drive, not the alphabetically first.

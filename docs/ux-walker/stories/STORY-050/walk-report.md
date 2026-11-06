@@ -1,4 +1,5 @@
 # STORY-050 walk report (lane B)
+
 Data: user e2e_walkerb, drive walkb-bot, throwaway /notes/design.md with 3 versions written by the agent (67 B, 82 B, 97 B). Result: PASS for the rollback itself; findings on where the user lands afterwards and on choosing the right version.
 
 1. Files, filter "design" (needed "Load more files" first, the path sorts after the first 100 rows), clicked "Versions" (step-1b-versions-dialog.png): dialog "Version history", path, text "Restore creates a new current version. Existing history stays intact.", three rows with date, size, author, version id; newest marked "· Current" with no button; the others have "Restore this version". Geometry audit: clean.
@@ -11,6 +12,7 @@ Data: user e2e_walkerb, drive walkb-bot, throwaway /notes/design.md with 3 versi
 Environment note (not a product finding): one browser call hung for about 2 minutes while loading the key and the page fell back to about:blank; reopening /console and redoing the step worked. Cause not determined (machine load).
 
 ## Flow log
+
 - Ideal 3; actual: filter (+1 Load more) + Versions + Restore = 4-5 actions, then another Load more + Versions to confirm (2 more).
 - Hesitation: choosing which version to restore without any preview; user must load the key, download each candidate, and compare, or use the CLI.
 - Same data (author/time/size) appears in Files row, Versions dialog and Usage by author.

@@ -2,11 +2,11 @@
 
 Scores 1-5 per criterion (effort/risk: 5 = lowest risk). Weighted total uses rubric weights (x3, x2, x2, x2, x2, x1; max 60).
 
-| Option | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
-|---|---|---|---|---|---|---|---|
-| A Table + hierarchy | 4 | 4 | 4 | 4 | 3 | 4 | 46 |
-| B Tree + details pane | 3 | 2 | 3 | 4 | 4 | 1 | 36 |
-| C Drive/Dropbox model | 4 | 3 | 3 | 4 | 5 | 3 | 45 |
+| Option                | Criteria | Simplicity | Consistency | Usability | Visual | Effort/risk | Weighted |
+| --------------------- | -------- | ---------- | ----------- | --------- | ------ | ----------- | -------- |
+| A Table + hierarchy   | 4        | 4          | 4           | 4         | 3      | 4           | 46       |
+| B Tree + details pane | 3        | 2          | 3           | 4         | 4      | 1           | 36       |
+| C Drive/Dropbox model | 4        | 3          | 3           | 4         | 5      | 3           | 45       |
 
 - Folder derivation over paged lists, checked against `handler.ts` (list at ~1540): the API returns full paths ordered by `path`, 100 per page (`MAX_PAGE_SIZE`), cursor paging, and `prefix` is a recursive `LIKE`, not one level. So folder rows and counts can only be derived client-side from loaded rows. A states this ("100+", Modified sort over loaded rows only). It is honest but incomplete: sorting by Modified on a partly loaded drive silently gives a wrong order.
 - Mitigation for any option: pure `file-tree.ts` (A and C both plan it, with a unit test), load pages up to a cap (say 1,000), pass `prefix` when inside a folder to narrow the fetch, and show "Showing first 1,000" when capped. Counts and Modified sort are labeled as over loaded items. Recent uses the `recent` event stream (seq cursor, includes put/copy/move) and must dedupe by path, as A says.

@@ -2,17 +2,17 @@
 
 ## Run Summary
 
-| Metric | Value |
-|--------|-------|
-| Target URL | http://localhost:3500 |
-| Run mode | Focused: 27 core stories (sign-up, setup, drive, download, versions/trash, sharing, agents, keys, billing), three parallel lanes |
-| Stories in catalog | 97 |
-| Stories walked | 27 |
-| Stories skipped | 70 (not in this run's core set; no prior history) |
-| Stories re-verified | 0 |
-| Overall pass rate | 22/27 (81%) |
-| Duration | TBD (not recorded) |
-| Mode | Report only. No quick fixes were applied and no GitHub issues were filed. The /ux-auto-improve rounds will implement the findings. |
+| Metric              | Value                                                                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Target URL          | http://localhost:3500                                                                                                              |
+| Run mode            | Focused: 27 core stories (sign-up, setup, drive, download, versions/trash, sharing, agents, keys, billing), three parallel lanes   |
+| Stories in catalog  | 97                                                                                                                                 |
+| Stories walked      | 27                                                                                                                                 |
+| Stories skipped     | 70 (not in this run's core set; no prior history)                                                                                  |
+| Stories re-verified | 0                                                                                                                                  |
+| Overall pass rate   | 22/27 (81%)                                                                                                                        |
+| Duration            | TBD (not recorded)                                                                                                                 |
+| Mode                | Report only. No quick fixes were applied and no GitHub issues were filed. The /ux-auto-improve rounds will implement the findings. |
 
 Counts below were recomputed from the 27 `findings.json` files, not taken from the lane reports (which miscounted). Directories for STORY-004, 008, 032, 033, 034 and 088 also exist under `stories/` but are not part of this run's plan and are not counted.
 
@@ -20,31 +20,31 @@ Counts below were recomputed from the 27 `findings.json` files, not taken from t
 
 ### By Severity
 
-| Severity | Count | Quick Fixed | Issue Filed | Deferred |
-|----------|-------|-------------|-------------|----------|
-| Critical | 0 | 0 | 0 | 0 |
-| High | 6 | 0 | 0 | 6 |
-| Medium | 37 | 0 | 0 | 37 |
-| Low | 57 | 0 | 0 | 57 |
-| Suggestion | 7 | - | - | 7 |
-| **Total** | **107** | **0** | **0** | **107** |
+| Severity   | Count   | Quick Fixed | Issue Filed | Deferred |
+| ---------- | ------- | ----------- | ----------- | -------- |
+| Critical   | 0       | 0           | 0           | 0        |
+| High       | 6       | 0           | 0           | 6        |
+| Medium     | 37      | 0           | 0           | 37       |
+| Low        | 57      | 0           | 0           | 57       |
+| Suggestion | 7       | -           | -           | 7        |
+| **Total**  | **107** | **0**       | **0**       | **107**  |
 
 High findings: F-001-02 (landing nav missing on phones), F-019-01 (no folder browsing), F-022-01 (no Recent view or sort), F-024-01 (saving recovery file does not clear the backup banner), F-STORY-046-01 (no human share-link UI), F-STORY-065-01 (no Rotate key action).
 
 ### By Category
 
-| Category | Count | Examples |
-|----------|-------|---------|
-| Flow | 26 | Selected drive/tab not in URL; Connect-an-agent path takes about 12 actions |
-| Error Handling | 17 | Trash gives no warning that share links die; revoke notice off-screen |
-| Happy Path | 14 | No folders, no Recent view, no human share UI |
-| Consistency | 13 | Usage vs Billing disagree (KB vs KiB, names); header nav differs by page |
-| Hierarchy | 9 | Permissions in a run-on grey sentence; "Approved" shown three times |
-| Layout | 8 | Mobile header nav has zero width; truncated Trash columns |
-| Visual | 8 | Healthy "Key backed up" status uses a red/orange dot |
-| Simplicity | 5 | Audit log and API operations dominated by the console's own reads |
-| Disclosure | 4 | llms.txt says nothing for the human to choose; connect card collapsed |
-| Accessibility | 3 | 13px default-blue checkbox; "Revoke access" buttons not distinguishable |
+| Category       | Count | Examples                                                                    |
+| -------------- | ----- | --------------------------------------------------------------------------- |
+| Flow           | 26    | Selected drive/tab not in URL; Connect-an-agent path takes about 12 actions |
+| Error Handling | 17    | Trash gives no warning that share links die; revoke notice off-screen       |
+| Happy Path     | 14    | No folders, no Recent view, no human share UI                               |
+| Consistency    | 13    | Usage vs Billing disagree (KB vs KiB, names); header nav differs by page    |
+| Hierarchy      | 9     | Permissions in a run-on grey sentence; "Approved" shown three times         |
+| Layout         | 8     | Mobile header nav has zero width; truncated Trash columns                   |
+| Visual         | 8     | Healthy "Key backed up" status uses a red/orange dot                        |
+| Simplicity     | 5     | Audit log and API operations dominated by the console's own reads           |
+| Disclosure     | 4     | llms.txt says nothing for the human to choose; connect card collapsed       |
+| Accessibility  | 3     | 13px default-blue checkbox; "Revoke access" buttons not distinguishable     |
 
 ## Quick Fixes Applied
 
@@ -76,21 +76,21 @@ One entry per defect that appears in more than one story.
 
 Only stories whose walk report recorded a step count are listed. Others: not recorded.
 
-| Story | Goal | Ideal steps | Actual | Notes |
-|-------|------|-------------|--------|-------|
-| 001 | Reach sign-up from landing | 2 | 3 | No sign-up control; hesitation at the hero |
-| 003 | Create first drive | 3 | 4 clicks plus typing | Extra click is the acknowledgment |
-| 010 | Sign up and approve agent | 3 | 5 if redirect_url is dropped (simulated) | Clerk not configured |
-| 017 | Find a file by name | 3 | 3 | Needed Load more |
-| 024 | Empty console to connected agent | 5 | about 12 | 7 screens or dialogs |
-| 042 | Recipient downloads a shared file | 2 | 2 | |
-| 049 | Restore file from Trash | 2 | 2 | |
-| 057 | Approve an offered drive | 3 | 3 plus 1 reload | Reload only if page was open early |
-| 065 | Replace a leaked key | about 4 | about 10 | No Rotate action; wrong defaults |
-| 056 | Add agent to existing drive | TBD | 6 interactions plus 600px scroll | Key re-entered by hand |
-| 046 | Create a share link in the console | 3 | impossible | No UI |
-| 007 | Sign out | 2 | impossible in test mode | Clerk unset |
-| 002, 006, 012 | Sign in / approve / delegate | 2, 2, 3 | 2, 2, 3 | On target |
+| Story         | Goal                               | Ideal steps | Actual                                   | Notes                                      |
+| ------------- | ---------------------------------- | ----------- | ---------------------------------------- | ------------------------------------------ |
+| 001           | Reach sign-up from landing         | 2           | 3                                        | No sign-up control; hesitation at the hero |
+| 003           | Create first drive                 | 3           | 4 clicks plus typing                     | Extra click is the acknowledgment          |
+| 010           | Sign up and approve agent          | 3           | 5 if redirect_url is dropped (simulated) | Clerk not configured                       |
+| 017           | Find a file by name                | 3           | 3                                        | Needed Load more                           |
+| 024           | Empty console to connected agent   | 5           | about 12                                 | 7 screens or dialogs                       |
+| 042           | Recipient downloads a shared file  | 2           | 2                                        |                                            |
+| 049           | Restore file from Trash            | 2           | 2                                        |                                            |
+| 057           | Approve an offered drive           | 3           | 3 plus 1 reload                          | Reload only if page was open early         |
+| 065           | Replace a leaked key               | about 4     | about 10                                 | No Rotate action; wrong defaults           |
+| 056           | Add agent to existing drive        | TBD         | 6 interactions plus 600px scroll         | Key re-entered by hand                     |
+| 046           | Create a share link in the console | 3           | impossible                               | No UI                                      |
+| 007           | Sign out                           | 2           | impossible in test mode                  | Clerk unset                                |
+| 002, 006, 012 | Sign in / approve / delegate       | 2, 2, 3     | 2, 2, 3                                  | On target                                  |
 
 ## Top 10 Recommendations
 
@@ -118,45 +118,45 @@ Weighted toward the owner's goals: the dashboard should feel like a clear cloud 
 
 ## Still Failing
 
-| Story | Failure Point | Reason | Blocked By |
-|-------|---------------|--------|------------|
-| STORY-001 | Create account from landing | No sign-up control; header nav missing at 390px | Not filed (report only) |
-| STORY-007 | Sign out | No sign-out path (Clerk unset; settings/billing have no account menu) | Environment; not filed |
-| STORY-019 | Browse by folder | No folder navigation | Not filed |
-| STORY-022 | See recent files | No Recent view or sort | Not filed |
-| STORY-046 | Create/revoke a share link as a human | No UI | Not filed |
+| Story     | Failure Point                         | Reason                                                                | Blocked By              |
+| --------- | ------------------------------------- | --------------------------------------------------------------------- | ----------------------- |
+| STORY-001 | Create account from landing           | No sign-up control; header nav missing at 390px                       | Not filed (report only) |
+| STORY-007 | Sign out                              | No sign-out path (Clerk unset; settings/billing have no account menu) | Environment; not filed  |
+| STORY-019 | Browse by folder                      | No folder navigation                                                  | Not filed               |
+| STORY-022 | See recent files                      | No Recent view or sort                                                | Not filed               |
+| STORY-046 | Create/revoke a share link as a human | No UI                                                                 | Not filed               |
 
 ## Story Results Detail
 
-| Story | Status | Findings | Notes |
-|-------|--------|----------|-------|
-| STORY-001 | FAIL | 4 | No sign-up control on landing; header nav vanishes at 390px |
-| STORY-002 | PASS | 3 | Clean apart from default-drive choice |
-| STORY-003 | PASS | 5 | Onboarding works; backup banner contradicts the checkbox just ticked |
-| STORY-006 | PASS | 3 | Code survives sign-in redirect; Approved screen is a dead end |
-| STORY-007 | FAIL | 4 | No sign-out reachable (Clerk unset; billing/settings have no account menu) |
-| STORY-009 | PASS | 3 | Agent bootstrap works; llms.txt says nothing for human to choose, page shows options |
-| STORY-010 | PASS | 2 | Clerk unset; dropped redirect_url simulated |
-| STORY-012 | PASS | 3 | Delegate checkbox unmarked as optional; CLI error does not name the fix |
-| STORY-017 | PASS | 4 | Filter finds file in 3 actions; filters loaded rows only |
-| STORY-018 | PASS | 3 | Switch works; selection not in URL |
-| STORY-019 | FAIL | 2 | No folder navigation exists |
-| STORY-022 | FAIL | 4 | No Recent view or sort |
-| STORY-024 | PASS | 7 | Goal reached in about 12 actions (ideal 5) |
-| STORY-026 | PASS | 3 | Real files decrypted correctly; weak feedback |
-| STORY-029 | PASS | 5 | Banner hides the human fix until key loaded |
-| STORY-049 | PASS | 4 | Restore from Trash in 2 clicks; truncated columns |
-| STORY-050 | PASS | 4 | Rollback works; lands on empty filter result |
-| STORY-042 | PASS | 3 | Recipient download in 2 steps |
-| STORY-044 | PASS | 3 | Error cards lack context |
-| STORY-046 | FAIL | 5 | Humans cannot create, list or revoke share links |
-| STORY-056 | PASS | 7 | Works; 6 interactions plus scroll, key re-entered by hand |
-| STORY-057 | PASS | 3 | Offer flow works; stale page not updated (see Needs verification) |
-| STORY-062 | PASS | 5 | Revoke works; notice off-screen, buttons unlabelled |
-| STORY-065 | PASS | 5 | No Rotate action; dialog defaults wrong |
-| STORY-066 | PASS | 4 | Per-key revoke works; agent-level button unclear |
-| STORY-072 | PASS | 5 | Cannot answer "near my limit?"; Usage vs Billing disagree |
-| STORY-073 | PASS | 4 | Paid plans are dead-end buttons |
+| Story     | Status | Findings | Notes                                                                                |
+| --------- | ------ | -------- | ------------------------------------------------------------------------------------ |
+| STORY-001 | FAIL   | 4        | No sign-up control on landing; header nav vanishes at 390px                          |
+| STORY-002 | PASS   | 3        | Clean apart from default-drive choice                                                |
+| STORY-003 | PASS   | 5        | Onboarding works; backup banner contradicts the checkbox just ticked                 |
+| STORY-006 | PASS   | 3        | Code survives sign-in redirect; Approved screen is a dead end                        |
+| STORY-007 | FAIL   | 4        | No sign-out reachable (Clerk unset; billing/settings have no account menu)           |
+| STORY-009 | PASS   | 3        | Agent bootstrap works; llms.txt says nothing for human to choose, page shows options |
+| STORY-010 | PASS   | 2        | Clerk unset; dropped redirect_url simulated                                          |
+| STORY-012 | PASS   | 3        | Delegate checkbox unmarked as optional; CLI error does not name the fix              |
+| STORY-017 | PASS   | 4        | Filter finds file in 3 actions; filters loaded rows only                             |
+| STORY-018 | PASS   | 3        | Switch works; selection not in URL                                                   |
+| STORY-019 | FAIL   | 2        | No folder navigation exists                                                          |
+| STORY-022 | FAIL   | 4        | No Recent view or sort                                                               |
+| STORY-024 | PASS   | 7        | Goal reached in about 12 actions (ideal 5)                                           |
+| STORY-026 | PASS   | 3        | Real files decrypted correctly; weak feedback                                        |
+| STORY-029 | PASS   | 5        | Banner hides the human fix until key loaded                                          |
+| STORY-049 | PASS   | 4        | Restore from Trash in 2 clicks; truncated columns                                    |
+| STORY-050 | PASS   | 4        | Rollback works; lands on empty filter result                                         |
+| STORY-042 | PASS   | 3        | Recipient download in 2 steps                                                        |
+| STORY-044 | PASS   | 3        | Error cards lack context                                                             |
+| STORY-046 | FAIL   | 5        | Humans cannot create, list or revoke share links                                     |
+| STORY-056 | PASS   | 7        | Works; 6 interactions plus scroll, key re-entered by hand                            |
+| STORY-057 | PASS   | 3        | Offer flow works; stale page not updated (see Needs verification)                    |
+| STORY-062 | PASS   | 5        | Revoke works; notice off-screen, buttons unlabelled                                  |
+| STORY-065 | PASS   | 5        | No Rotate action; dialog defaults wrong                                              |
+| STORY-066 | PASS   | 4        | Per-key revoke works; agent-level button unclear                                     |
+| STORY-072 | PASS   | 5        | Cannot answer "near my limit?"; Usage vs Billing disagree                            |
+| STORY-073 | PASS   | 4        | Paid plans are dead-end buttons                                                      |
 
 Fixed and Issues columns are 0 and none for every story (report only).
 
@@ -171,10 +171,10 @@ Fixed and Issues columns are 0 and none for every story (report only).
 
 ## Run History
 
-| Run | Date | Walked | Passed | Failed | Fixes | Issues |
-|-----|------|--------|--------|--------|-------|--------|
-| 1 | 2026-11-06 | 27 | 22 | 5 | 0 | 0 |
+| Run | Date       | Walked | Passed | Failed | Fixes | Issues |
+| --- | ---------- | ------ | ------ | ------ | ----- | ------ |
+| 1   | 2026-11-06 | 27     | 22     | 5      | 0     | 0      |
 
 ---
 
-*Generated by `/ux-walker` Phase 4 - 2026-11-06*
+_Generated by `/ux-walker` Phase 4 - 2026-11-06_

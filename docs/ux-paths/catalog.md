@@ -8,40 +8,40 @@ Sources: `docs/ux-paths/discovery.md` and the twelve files in `docs/ux-paths/top
 
 ## Summary
 
-| Type | Count |
-|------|-------|
-| Short | 31 |
-| Medium | 49 |
-| Long | 17 |
+| Type      | Count  |
+| --------- | ------ |
+| Short     | 31     |
+| Medium    | 49     |
+| Long      | 17     |
 | **Total** | **97** |
 
 Stories marked "(gap)" in a step or title: 54 of 97 stories carry at least one; 77 gap marks in total.
 
-| Topic | File | Stories | IDs |
-|-------|------|---------|-----|
-| Sign-up, sign-in and first console visit | `topics/signup-signin.md` | 8 | STORY-001 to STORY-008 |
-| First-run agent setup from one pasted line | `topics/first-run-setup.md` | 8 | STORY-009 to STORY-016 |
-| Console as a cloud drive | `topics/console-drive.md` | 8 | STORY-017 to STORY-024 |
-| Download and decrypt in the browser | `topics/download-decrypt.md` | 8 | STORY-025 to STORY-032 |
-| Search, recents and activity | `topics/search-recents.md` | 8 | STORY-033 to STORY-040 |
-| Sharing | `topics/sharing.md` | 7 | STORY-041 to STORY-047 |
-| Trash, versions and restore | `topics/trash-versions.md` | 8 | STORY-048 to STORY-055 |
-| Multi-agent handoffs | `topics/multi-agent.md` | 7 | STORY-056 to STORY-062 |
-| Agents and API keys | `topics/agents-keys.md` | 9 | STORY-063 to STORY-071 |
-| Billing, usage and limits | `topics/billing-usage.md` | 8 | STORY-072 to STORY-079 |
-| Settings and data lifecycle | `topics/settings-lifecycle.md` | 8 | STORY-080 to STORY-087 |
-| Agent CLI/MCP daily use and edge cases | `topics/agent-daily-use.md` | 10 | STORY-088 to STORY-097 |
+| Topic                                      | File                           | Stories | IDs                    |
+| ------------------------------------------ | ------------------------------ | ------- | ---------------------- |
+| Sign-up, sign-in and first console visit   | `topics/signup-signin.md`      | 8       | STORY-001 to STORY-008 |
+| First-run agent setup from one pasted line | `topics/first-run-setup.md`    | 8       | STORY-009 to STORY-016 |
+| Console as a cloud drive                   | `topics/console-drive.md`      | 8       | STORY-017 to STORY-024 |
+| Download and decrypt in the browser        | `topics/download-decrypt.md`   | 8       | STORY-025 to STORY-032 |
+| Search, recents and activity               | `topics/search-recents.md`     | 8       | STORY-033 to STORY-040 |
+| Sharing                                    | `topics/sharing.md`            | 7       | STORY-041 to STORY-047 |
+| Trash, versions and restore                | `topics/trash-versions.md`     | 8       | STORY-048 to STORY-055 |
+| Multi-agent handoffs                       | `topics/multi-agent.md`        | 7       | STORY-056 to STORY-062 |
+| Agents and API keys                        | `topics/agents-keys.md`        | 9       | STORY-063 to STORY-071 |
+| Billing, usage and limits                  | `topics/billing-usage.md`      | 8       | STORY-072 to STORY-079 |
+| Settings and data lifecycle                | `topics/settings-lifecycle.md` | 8       | STORY-080 to STORY-087 |
+| Agent CLI/MCP daily use and edge cases     | `topics/agent-daily-use.md`    | 10      | STORY-088 to STORY-097 |
 
 ## Cross-references and duplicates
 
 Duplicates are kept in the topic files so IDs stay stable. In a walk, run the canonical story and skip the duplicate.
 
-| Duplicate | Canonical | Why |
-|-----------|-----------|-----|
-| STORY-089 (two agents edit one file) | STORY-052 | Same `--if-version` race and merge-retry; 089 uses the CLI default drive, 052 adds the console Versions view. |
-| STORY-090 (restricted agent writes outside folder) | STORY-059 | Same write-path refusal; 059 is the multi-agent view of it. |
-| STORY-091 (read-only agent attempts write or share) | STORY-060 | Same scope refusal; 060 adds `check` behaviour. |
-| STORY-080 (owner reviews what agents did) | STORY-039 | Same audit-log read; 039 adds the Usage-by-author comparison. |
+| Duplicate                                           | Canonical | Why                                                                                                           |
+| --------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------- |
+| STORY-089 (two agents edit one file)                | STORY-052 | Same `--if-version` race and merge-retry; 089 uses the CLI default drive, 052 adds the console Versions view. |
+| STORY-090 (restricted agent writes outside folder)  | STORY-059 | Same write-path refusal; 059 is the multi-agent view of it.                                                   |
+| STORY-091 (read-only agent attempts write or share) | STORY-060 | Same scope refusal; 060 adds `check` behaviour.                                                               |
+| STORY-080 (owner reviews what agents did)           | STORY-039 | Same audit-log read; 039 adds the Usage-by-author comparison.                                                 |
 
 Topic overlaps (different goals, shared screens or commands):
 
@@ -57,53 +57,53 @@ Topic overlaps (different goals, shared screens or commands):
 
 ## Coverage Matrix
 
-| Feature Area | Stories | Gaps |
-|-------------|---------|------|
-| Landing page (hero copy line, npm line, plans, mock approval card) | 001, 009, 073 | Mock 'Connect trace-bot?' card and footer links are only mentioned in passing |
-| Pricing page (plans, usage rules, overage rates, not-configured banner) | 001, 073, 074, 077 |  |
-| Clerk sign-up / sign-in, redirects, UserButton sign-out | 001, 002, 006, 007, 010 |  |
-| Clerk not configured panel | 004 |  |
-| Session expiry (401 'Your session expired') | 005, 079, 087 |  |
-| Account provisioned on first console load; first-visit onboarding | 003, 024 |  |
-| /llms.txt as setup script | 009, 015, 016, 040 |  |
-| Device login and /connect approval (new, reconnect, offer, bad/expired code) | 006, 009, 010, 011, 012, 013, 056, 057 | 'Request changed; review it again' race notice has no story |
-| Delegate checkbox and delegate rules | 012, 057, 061, 071 |  |
-| Credentials export / confirm / check ok; sandbox continuity | 009, 014, 029, 031, 058, 060 |  |
-| Skill install | 009, 097 |  |
-| Console Files tab: flat list, load more, filter, drive strip | 017, 018, 019, 023, 024 |  |
-| Console absent features (folders, upload, preview, recents, sort, share, move) | 019, 020, 021, 022, 038, 046 | Stories document the absence; rename/move/copy in the console has no dedicated story (CLI only: 093) |
-| Create drive and drive-key receipt | 003, 024, 030 |  |
-| Load drive key, Forget key, download and decrypt in browser | 025, 026, 027, 028, 032 |  |
-| Key backup banner and recovery file | 029, 030, 031 |  |
-| Versions dialog, restore as new version | 050, 051 |  |
-| Trash tab, console trash, restore | 048, 049, 054 |  |
-| Conditional writes / --if-version conflicts | 052, 053, 089 |  |
-| CLI put/get/ls/mv/cp, default drive, binary output | 088, 092, 093 |  |
-| sync and backup (dry run) | 094, 095 |  |
-| Search, ls filters, pagination | 033, 034, 035, 040 |  |
-| recent (cursor, --since, --wait long-poll) | 036, 037, 040 |  |
-| Share create (CLI/MCP) with expiry | 041, 047 |  |
-| Share recipient page: success and all error states | 042, 043, 044 |  |
-| Share list and revoke | 045 | MCP cannot list or revoke (047) |
-| Multi-agent: browser add-to-drive, grant, credentials issue | 056, 057, 058 |  |
-| Read-only and write-path limits; 'issued by' | 059, 060, 068, 090, 091 |  |
-| Agents tab: create agent, revoke access, Connect an agent panel (MCP snippets) | 003, 063, 066, 069, 096 | The MCP setup snippets in the panel are only touched by 096 |
-| API keys tab: create key, scopes, receipt, revoke, rotation | 063, 064, 065, 066, 067, 070 |  |
-| Key revoked mid-session; delegate cannot manage keys | 070, 071 |  |
-| Usage tab (storage by drive, usage by author) | 072, 069 |  |
-| Billing page: upgrade through Stripe, portal, spend cap, alert, statements/CSV | 074, 075, 078 |  |
-| Plan limits, spend cap hit, payment banners, 'Not metered' egress | 076, 077, 079 |  |
-| Audit log (Activity & deletion) | 039, 080, 081 |  |
-| Delete drive, delete account, deletion requests | 082, 083, 084, 085, 086 |  |
-| Settings on narrow screens / responsive sidebar | 087 | Only the settings page is checked on a phone; the console sidebar toggle has no dedicated story |
-| MCP server (12 tools) from an editor | 096 |  |
-| Reserved agent `__console__` / reserved-name refusal | 063 (edge), 068 |  |
-| Machines (recorded at login, `ls --machine`) | 034, 069 |  |
-| Tags and descriptions (client/CLI only; not shown in console) | 034, 038 |  |
-| /api/oauth/* | none | No UI or user path found in the discovery; may be internal |
-| /api/test-session (dev-only test auth) | 004 (alt path only) | Intentionally not a user story |
-| Cron maintenance, Stripe webhook, operator CLIs | none | Operator-facing, not user paths |
-| Landing mock approval card interaction | 001 (passing) | Static mock; no step exercises it |
+| Feature Area                                                                   | Stories                                | Gaps                                                                                                 |
+| ------------------------------------------------------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Landing page (hero copy line, npm line, plans, mock approval card)             | 001, 009, 073                          | Mock 'Connect trace-bot?' card and footer links are only mentioned in passing                        |
+| Pricing page (plans, usage rules, overage rates, not-configured banner)        | 001, 073, 074, 077                     |                                                                                                      |
+| Clerk sign-up / sign-in, redirects, UserButton sign-out                        | 001, 002, 006, 007, 010                |                                                                                                      |
+| Clerk not configured panel                                                     | 004                                    |                                                                                                      |
+| Session expiry (401 'Your session expired')                                    | 005, 079, 087                          |                                                                                                      |
+| Account provisioned on first console load; first-visit onboarding              | 003, 024                               |                                                                                                      |
+| /llms.txt as setup script                                                      | 009, 015, 016, 040                     |                                                                                                      |
+| Device login and /connect approval (new, reconnect, offer, bad/expired code)   | 006, 009, 010, 011, 012, 013, 056, 057 | 'Request changed; review it again' race notice has no story                                          |
+| Delegate checkbox and delegate rules                                           | 012, 057, 061, 071                     |                                                                                                      |
+| Credentials export / confirm / check ok; sandbox continuity                    | 009, 014, 029, 031, 058, 060           |                                                                                                      |
+| Skill install                                                                  | 009, 097                               |                                                                                                      |
+| Console Files tab: flat list, load more, filter, drive strip                   | 017, 018, 019, 023, 024                |                                                                                                      |
+| Console absent features (folders, upload, preview, recents, sort, share, move) | 019, 020, 021, 022, 038, 046           | Stories document the absence; rename/move/copy in the console has no dedicated story (CLI only: 093) |
+| Create drive and drive-key receipt                                             | 003, 024, 030                          |                                                                                                      |
+| Load drive key, Forget key, download and decrypt in browser                    | 025, 026, 027, 028, 032                |                                                                                                      |
+| Key backup banner and recovery file                                            | 029, 030, 031                          |                                                                                                      |
+| Versions dialog, restore as new version                                        | 050, 051                               |                                                                                                      |
+| Trash tab, console trash, restore                                              | 048, 049, 054                          |                                                                                                      |
+| Conditional writes / --if-version conflicts                                    | 052, 053, 089                          |                                                                                                      |
+| CLI put/get/ls/mv/cp, default drive, binary output                             | 088, 092, 093                          |                                                                                                      |
+| sync and backup (dry run)                                                      | 094, 095                               |                                                                                                      |
+| Search, ls filters, pagination                                                 | 033, 034, 035, 040                     |                                                                                                      |
+| recent (cursor, --since, --wait long-poll)                                     | 036, 037, 040                          |                                                                                                      |
+| Share create (CLI/MCP) with expiry                                             | 041, 047                               |                                                                                                      |
+| Share recipient page: success and all error states                             | 042, 043, 044                          |                                                                                                      |
+| Share list and revoke                                                          | 045                                    | MCP cannot list or revoke (047)                                                                      |
+| Multi-agent: browser add-to-drive, grant, credentials issue                    | 056, 057, 058                          |                                                                                                      |
+| Read-only and write-path limits; 'issued by'                                   | 059, 060, 068, 090, 091                |                                                                                                      |
+| Agents tab: create agent, revoke access, Connect an agent panel (MCP snippets) | 003, 063, 066, 069, 096                | The MCP setup snippets in the panel are only touched by 096                                          |
+| API keys tab: create key, scopes, receipt, revoke, rotation                    | 063, 064, 065, 066, 067, 070           |                                                                                                      |
+| Key revoked mid-session; delegate cannot manage keys                           | 070, 071                               |                                                                                                      |
+| Usage tab (storage by drive, usage by author)                                  | 072, 069                               |                                                                                                      |
+| Billing page: upgrade through Stripe, portal, spend cap, alert, statements/CSV | 074, 075, 078                          |                                                                                                      |
+| Plan limits, spend cap hit, payment banners, 'Not metered' egress              | 076, 077, 079                          |                                                                                                      |
+| Audit log (Activity & deletion)                                                | 039, 080, 081                          |                                                                                                      |
+| Delete drive, delete account, deletion requests                                | 082, 083, 084, 085, 086                |                                                                                                      |
+| Settings on narrow screens / responsive sidebar                                | 087                                    | Only the settings page is checked on a phone; the console sidebar toggle has no dedicated story      |
+| MCP server (12 tools) from an editor                                           | 096                                    |                                                                                                      |
+| Reserved agent `__console__` / reserved-name refusal                           | 063 (edge), 068                        |                                                                                                      |
+| Machines (recorded at login, `ls --machine`)                                   | 034, 069                               |                                                                                                      |
+| Tags and descriptions (client/CLI only; not shown in console)                  | 034, 038                               |                                                                                                      |
+| /api/oauth/\*                                                                  | none                                   | No UI or user path found in the discovery; may be internal                                           |
+| /api/test-session (dev-only test auth)                                         | 004 (alt path only)                    | Intentionally not a user story                                                                       |
+| Cron maintenance, Stripe webhook, operator CLIs                                | none                                   | Operator-facing, not user paths                                                                      |
+| Landing mock approval card interaction                                         | 001 (passing)                          | Static mock; no step exercises it                                                                    |
 
 Covered: 41 of 45 rows (91%).
 
@@ -149,6 +149,7 @@ Run order for a first full walk: 001, 003, 024, 009, 088, 025, 029, 041 to 044, 
 Full steps: `topics/signup-signin.md`
 
 #### STORY-001: Visitor reads the landing page, then signs up through the pricing page
+
 - Type: medium
 - Persona: Priya Nair, a developer who runs Claude Code on a laptop and saw a link to agentdrive.xyz in a thread.
 - Goal: Create an account to try the Free plan.
@@ -157,6 +158,7 @@ Full steps: `topics/signup-signin.md`
 - Gap marks in steps: 1
 
 #### STORY-002: Returning owner signs in and lands in the console
+
 - Type: short
 - Persona: Marcus Webb, an existing user returning after two weeks.
 - Goal: Open his files.
@@ -164,6 +166,7 @@ Full steps: `topics/signup-signin.md`
 - Alternate paths: Go straight to `/console` (server redirect to `/sign-in`); Clerk keeps a live session so `/console` opens directly.
 
 #### STORY-003: Brand-new account sees the first-visit onboarding
+
 - Type: medium
 - Persona: Lena Fischer, just finished the Clerk sign-up, has not touched an agent yet.
 - Goal: Understand what to do next and get a first drive.
@@ -172,6 +175,7 @@ Full steps: `topics/signup-signin.md`
 - Gap marks in steps: 2
 
 #### STORY-004: Visitor opens a sign-in page on an installation with no Clerk
+
 - Type: short
 - Persona: Tomas Rivera, self-hosting Agent Drive for a weekend project without Clerk keys.
 - Goal: Sign in to the console.
@@ -179,6 +183,7 @@ Full steps: `topics/signup-signin.md`
 - Alternate paths: development test auth (`AGENT_DRIVE_TEST_AUTH=1`, `POST /api/test-session` from loopback with a bearer secret) gives a signed cookie.
 
 #### STORY-005: Session expires while the console is open
+
 - Type: medium
 - Persona: Aisha Khan, leaves the console tab open overnight with a half-typed API key label.
 - Goal: Continue working the next morning.
@@ -187,6 +192,7 @@ Full steps: `topics/signup-signin.md`
 - Gap marks in steps: 1
 
 #### STORY-006: Agent-printed approval link sends a signed-out human through sign-in
+
 - Type: medium
 - Persona: Diego Alvarez, signed out of his laptop browser, clicks the link his terminal agent printed.
 - Goal: Approve the agent without losing the pairing code.
@@ -195,6 +201,7 @@ Full steps: `topics/signup-signin.md`
 - Gap marks in steps: 2
 
 #### STORY-007: Signed-in owner finds sign-out and account controls
+
 - Type: short
 - Persona: Hana Sato, on a shared office laptop who wants to end her session.
 - Goal: Sign out.
@@ -202,6 +209,7 @@ Full steps: `topics/signup-signin.md`
 - Alternate paths: none found in this app (no sign-out link on billing or settings pages).
 
 #### STORY-008: Console is unreachable on first load
+
 - Type: short
 - Persona: Owen Brooks, on hotel wifi that drops the API request.
 - Goal: Open his workspace.
@@ -214,6 +222,7 @@ Full steps: `topics/signup-signin.md`
 Full steps: `topics/first-run-setup.md`
 
 #### STORY-009: Happy path from the landing page to check ok
+
 - Type: long
 - Persona: Priya Nair, running Claude Code in a macOS terminal, already has an account and no drives.
 - Goal: Give Claude Code a drive that survives the session.
@@ -221,6 +230,7 @@ Full steps: `topics/first-run-setup.md`
 - Alternate paths: copy the same line from the console Agents tab "Connect an agent" panel; copy `npm install -g <origin>/cli/agent-drive.tgz` from the landing page and run `agent-drive login` yourself; console-first route via "Create your first drive" and "Create API key" then `login --token-stdin`.
 
 #### STORY-010: Human is signed out when the agent's link arrives
+
 - Type: medium
 - Persona: Jonas Weber, new to Agent Drive, has only pasted the line into Codex.
 - Goal: Approve the agent without creating confusion.
@@ -229,6 +239,7 @@ Full steps: `topics/first-run-setup.md`
 - Gap marks in steps: 1
 
 #### STORY-011: Approving a machine that is not the one he started
+
 - Type: medium
 - Persona: Mei Lin, who pasted the line into two agents (a laptop agent and a cloud VM) within a minute.
 - Goal: Approve only the laptop agent.
@@ -236,6 +247,7 @@ Full steps: `topics/first-run-setup.md`
 - Alternate paths: type the code in `/connect`'s code form; let the other request expire (unapproved requests expire on their own).
 
 #### STORY-012: Delegate checkbox on the first approval
+
 - Type: medium
 - Persona: Carlos Reyes, plans to run one lead agent that will onboard two helper agents later.
 - Goal: Allow the lead agent to add others.
@@ -243,6 +255,7 @@ Full steps: `topics/first-run-setup.md`
 - Alternate paths: approve without the box and later re-approve (`agent-drive login` again, tick the box); `credentials issue` only works with delegate.
 
 #### STORY-013: Agent waits, the code expires, agent retries
+
 - Type: medium
 - Persona: Ravi Patel, got a phone call after pasting the line and came back 15 minutes later.
 - Goal: Finish setup after the delay.
@@ -250,6 +263,7 @@ Full steps: `topics/first-run-setup.md`
 - Alternate paths: none found.
 
 #### STORY-014: Agent in a sandbox forgets to back up credentials
+
 - Type: medium
 - Persona: A coding agent in a disposable cloud container, supervised by Anya Kowalski.
 - Goal: Finish setup so files survive the container.
@@ -258,6 +272,7 @@ Full steps: `topics/first-run-setup.md`
 - Gap marks in steps: 1
 
 #### STORY-015: Self-hosted or staging origin needs --api
+
 - Type: medium
 - Persona: Tomas Rivera, testing a staging deployment at https://staging.agentdrive.example.
 - Goal: Have the agent log in to staging, not production.
@@ -265,6 +280,7 @@ Full steps: `topics/first-run-setup.md`
 - Alternate paths: `AGENT_DRIVE_API_URL` environment variable; `--api` flag typed manually.
 
 #### STORY-016: Hosted chat assistant cannot complete setup
+
 - Type: short
 - Persona: Nadia Hossain, pastes the line into a cloud chat assistant with no shell.
 - Goal: Connect it anyway.
@@ -277,6 +293,7 @@ Full steps: `topics/first-run-setup.md`
 Full steps: `topics/console-drive.md`
 
 #### STORY-017: Find yesterday's trace file in a long flat list
+
 - Type: medium
 - Persona: Priya, a founder whose agent "trace-bot" writes daily logs such as /inbox/trace-bot/2026-11-05.jsonl. She opens the console on her laptop to check one.
 - Goal: Locate /inbox/trace-bot/2026-11-05.jsonl and see who wrote it and when.
@@ -285,6 +302,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 2
 
 #### STORY-018: Switch between drives and notice the filter and key reset
+
 - Type: short
 - Persona: Marcus, who runs two agents on drives "research" and "client-acme".
 - Goal: Look at client-acme's files after working in research.
@@ -293,6 +311,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 1
 
 #### STORY-019: Open a folder like in Dropbox (gap)
+
 - Type: short
 - Persona: Hana, new to Agent Drive, used to Dropbox. Her agent wrote /reports/q3/summary.md and /reports/q4/summary.md.
 - Goal: Click "reports", then "q3", and see only the files in it.
@@ -301,6 +320,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 2
 
 #### STORY-020: Upload a file from the browser (gap)
+
 - Type: short
 - Persona: Tomás, who has a PDF contract he wants his agent to read; he expects to drag it onto the drive.
 - Goal: Put contract.pdf into the drive from the console.
@@ -309,6 +329,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 3
 
 #### STORY-021: Preview a file before downloading (gap)
+
 - Type: short
 - Persona: Aisha, checking whether notes.md in /memory/agent-notes/ is the right version before sending it on.
 - Goal: Read the first lines in the console.
@@ -317,6 +338,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 3
 
 #### STORY-022: See what changed recently (gap)
+
 - Type: medium
 - Persona: Jonas, who left two agents running overnight and wants a "Recent" view like Google Drive.
 - Goal: See which files were added or changed since yesterday.
@@ -325,6 +347,7 @@ Full steps: `topics/console-drive.md`
 - Gap marks in steps: 2
 
 #### STORY-023: Recover from a failed file list
+
 - Type: medium
 - Persona: Elena on hotel Wi-Fi, opening the console while the connection drops.
 - Goal: Get the file list to load.
@@ -332,6 +355,7 @@ Full steps: `topics/console-drive.md`
 - Alternate paths: "Refresh" button in the page heading; full browser reload.
 
 #### STORY-024: Brand-new user with an empty drive
+
 - Type: long
 - Persona: Wei, just signed up, no agent yet.
 - Goal: Get from an empty console to seeing a first file.
@@ -343,6 +367,7 @@ Full steps: `topics/console-drive.md`
 Full steps: `topics/download-decrypt.md`
 
 #### STORY-025: First download of a file with a pasted drive key
+
 - Type: medium
 - Persona: Priya, who has the key in her password manager and wants /reports/q3/summary.md.
 - Goal: Download the decrypted file.
@@ -350,6 +375,7 @@ Full steps: `topics/download-decrypt.md`
 - Alternate paths: CLI `agent-drive get /reports/q3/summary.md --output ./summary.md` (key comes from config); share link page (`/s/id#k=...`) for a single file; MCP `get`.
 
 #### STORY-026: Load the key from a recovery file
+
 - Type: medium
 - Persona: Marcus, who saved agent-drive-drv_8f2a.key.json to his Downloads folder two weeks ago.
 - Goal: Unlock the drive without copying the key text.
@@ -358,6 +384,7 @@ Full steps: `topics/download-decrypt.md`
 - Gap marks in steps: 1
 
 #### STORY-027: Wrong key accepted, then decryption fails
+
 - Type: long
 - Persona: Jonas, who has two drives and two similar-looking keys in his notes.
 - Goal: Download a file and understand why it fails.
@@ -366,6 +393,7 @@ Full steps: `topics/download-decrypt.md`
 - Gap marks in steps: 1
 
 #### STORY-028: Forget the key on a shared computer
+
 - Type: short
 - Persona: Elena, using a hotel business-center PC and about to leave.
 - Goal: Make sure the drive key is gone from the browser.
@@ -374,6 +402,7 @@ Full steps: `topics/download-decrypt.md`
 - Gap marks in steps: 1
 
 #### STORY-029: Key-backup banner on an agent-created drive
+
 - Type: medium
 - Persona: Hana, whose agent trace-bot made the drive through `/connect` but has not run `credentials confirm`.
 - Goal: Understand the red banner and make it go away.
@@ -381,6 +410,7 @@ Full steps: `topics/download-decrypt.md`
 - Alternate paths: agent runs `credentials export --to PATH` then `credentials confirm`; the human loads the key and clicks "Download recovery file".
 
 #### STORY-030: Save a recovery file twice
+
 - Type: medium
 - Persona: Wei, creating a drive in the console and trying to do the right thing.
 - Goal: Back up the key and have the console agree.
@@ -388,6 +418,7 @@ Full steps: `topics/download-decrypt.md`
 - Alternate paths: copy key from the receipt into a password manager (not recorded by the service); "Download recovery file" on the Files tab.
 
 #### STORY-031: Recovery file made with a wrong key
+
 - Type: medium
 - Persona: Aisha, who loads an old key from her notes without testing it.
 - Goal: Create a trustworthy backup.
@@ -396,6 +427,7 @@ Full steps: `topics/download-decrypt.md`
 - Gap marks in steps: 1
 
 #### STORY-032: Download from a restored or large file list
+
 - Type: long
 - Persona: Tomás recovering after his agent's laptop died.
 - Goal: Pull back three files from a drive via the console.
@@ -408,6 +440,7 @@ Full steps: `topics/download-decrypt.md`
 Full steps: `topics/search-recents.md`
 
 #### STORY-033: Agent finds last week's trace files with a text search
+
 - Type: short
 - Persona: A coding agent ("planner-bot") working for Maya Okafor, who asked it to "reopen the notes about the billing migration".
 - Goal: Locate files whose path mentions "billing" without listing the whole drive.
@@ -416,6 +449,7 @@ Full steps: `topics/search-recents.md`
 - Gap marks in steps: 1
 
 #### STORY-034: Agent narrows by tag, author and machine
+
 - Type: medium
 - Persona: "audit-bot", an agent asked by Luis Ferreira to find everything that "trace-bot" wrote from the laptop named `luis-mbp` and tagged `daily`.
 - Goal: Combine attribution filters to get a short list.
@@ -423,6 +457,7 @@ Full steps: `topics/search-recents.md`
 - Alternate paths: `ls --agent ... --machine ... --tag daily` (same filters, without `--query`); MCP `search` with `agentId`, `machine`, `tag`.
 
 #### STORY-035: Agent pages through a large result
+
 - Type: short
 - Persona: "indexer-bot" cataloguing a 2,400-file drive for Priya Nair.
 - Goal: Read every file entry.
@@ -430,6 +465,7 @@ Full steps: `topics/search-recents.md`
 - Alternate paths: MCP `list` with `limit` and `cursor`; `sync` is for local directories, not for listing.
 
 #### STORY-036: Agent waits for a teammate agent's file to appear
+
 - Type: medium
 - Persona: "reviewer-bot" (Codex on Sam Whitfield's desktop) must start only after "writer-bot" on another machine uploads `/handoff/spec-v3.md`.
 - Goal: Block until another agent changes the drive, then read the new file.
@@ -438,6 +474,7 @@ Full steps: `topics/search-recents.md`
 - Gap marks in steps: 1
 
 #### STORY-037: Agent resumes from the last cursor after a restart
+
 - Type: medium
 - Persona: "sync-bot" running overnight for Dana Ruiz, restarted by its supervisor at 03:10.
 - Goal: Process every event once, without replaying or missing any.
@@ -445,6 +482,7 @@ Full steps: `topics/search-recents.md`
 - Alternate paths: `recent --since 2026-11-06T03:00:00Z` (approximate, by transaction start time; may duplicate or skip near the boundary).
 
 #### STORY-038: Human tries to find a file in the console
+
 - Type: medium
 - Persona: Maya Okafor (non-technical owner) wants `/inbox/trace-bot/2026-11-05.jsonl`, which her agent said it saved yesterday. The drive has 1,800 files.
 - Goal: Find and open a specific file by name, and see what changed recently.
@@ -453,6 +491,7 @@ Full steps: `topics/search-recents.md`
 - Gap marks in steps: 3
 
 #### STORY-039: Owner checks the audit log after a suspicious spike
+
 - Type: long
 - Persona: Luis Ferreira got an email alert that API operations hit 80% of the month's allowance on the 6th. He wants to know which agent caused it.
 - Goal: Identify which agent and key made the calls.
@@ -461,6 +500,7 @@ Full steps: `topics/search-recents.md`
 - Gap marks in steps: 1
 
 #### STORY-040: Agent compares search, ls and recent to choose the right tool
+
 - Type: long
 - Persona: A new agent, "notes-bot", set up by Priya Nair using the llms.txt instructions. The instruction file lists only `backup`, `put`, `get`, `ls --prefix` and `share`.
 - Goal: Learn that search and recents exist, and use them for "what changed since I was last here?".
@@ -473,6 +513,7 @@ Full steps: `topics/search-recents.md`
 Full steps: `topics/sharing.md`
 
 #### STORY-041: Agent creates a 24-hour link for a report
+
 - Type: short
 - Persona: "report-bot" for Dana Ruiz, who needs to send a client `/reports/q3-summary.pdf` by email.
 - Goal: Produce a link that works for a day and then dies.
@@ -480,6 +521,7 @@ Full steps: `topics/sharing.md`
 - Alternate paths: MCP `share` tool with `path` and `expiresAt`.
 
 #### STORY-042: Recipient opens a valid link
+
 - Type: short
 - Persona: Tomas Berg, a client with no account, opens Dana's email on his phone.
 - Goal: Download the PDF.
@@ -487,6 +529,7 @@ Full steps: `topics/sharing.md`
 - Alternate paths: none found (no preview, no "open in browser").
 
 #### STORY-043: Recipient has a link with the key cut off
+
 - Type: medium
 - Persona: Tomas copies the link out of a chat app that dropped everything after `#`.
 - Goal: Get the file anyway.
@@ -494,6 +537,7 @@ Full steps: `topics/sharing.md`
 - Alternate paths: Ask Dana for the link again.
 
 #### STORY-044: Recipient finds a link expired or revoked
+
 - Type: medium
 - Persona: Aisha Karim opens a link Dana sent two days ago (24h expiry). Another recipient opens a link Dana revoked this morning.
 - Goal: Understand why it fails and what to do.
@@ -501,6 +545,7 @@ Full steps: `topics/sharing.md`
 - Alternate paths: none found (recipient cannot request a new link from the page).
 
 #### STORY-045: Agent lists shares and revokes one
+
 - Type: medium
 - Persona: "report-bot" after Dana says "I sent the wrong file to the client, turn it off".
 - Goal: Find the share for `/reports/q3-draft.pdf` and revoke it.
@@ -509,6 +554,7 @@ Full steps: `topics/sharing.md`
 - Gap marks in steps: 2
 
 #### STORY-046: Human wants to share a file from the console
+
 - Type: medium
 - Persona: Maya Okafor wants to send a contract PDF from her drive to her lawyer, and expects a "Share" button as in Google Drive.
 - Goal: Create a link for the lawyer.
@@ -517,6 +563,7 @@ Full steps: `topics/sharing.md`
 - Gap marks in steps: 2
 
 #### STORY-047: Agent shares from an MCP session, then checks the audit trail
+
 - Type: long
 - Persona: Claude Code with the Agent Drive MCP server, working for Sam Whitfield, who then asks "who has been downloading that file?".
 - Goal: Create a link through MCP, and let the owner verify share activity.
@@ -529,6 +576,7 @@ Full steps: `topics/sharing.md`
 Full steps: `topics/trash-versions.md`
 
 #### STORY-048: Owner trashes a stale report from the console and sees the notice
+
 - Type: short
 - Persona: Mara Ellis, a solo founder, cleaning up after her agent "report-bot" wrote a wrong file.
 - Goal: Remove /reports/2026-11-04-draft.md from the drive's file list.
@@ -537,6 +585,7 @@ Full steps: `topics/trash-versions.md`
 - Gap marks in steps: 1
 
 #### STORY-049: Owner restores a trashed file from the Trash tab
+
 - Type: short
 - Persona: Mara Ellis, the next morning, realises the "wrong" file was the right one.
 - Goal: Get /reports/2026-11-04-draft.md back.
@@ -544,6 +593,7 @@ Full steps: `topics/trash-versions.md`
 - Alternate paths: CLI `agent-drive restore /reports/2026-11-04-draft.md --drive ID` (needs read and write scopes, not `delete`). Versions dialog per-version "Restore this version" (Trash tab Versions button).
 
 #### STORY-050: Owner rolls back to yesterday's version in the Versions dialog
+
 - Type: medium
 - Persona: Dev Patel, an engineer whose agent "notes-bot" overwrote /notes/design.md with a bad summary.
 - Goal: Make the previous content current again.
@@ -552,6 +602,7 @@ Full steps: `topics/trash-versions.md`
 - Gap marks in steps: 1
 
 #### STORY-051: Agent deletes a file and restores it from the CLI after the human objects
+
 - Type: medium
 - Persona: An agent "build-agent" working for Tomás Rivera; Tomás says "wait, I needed that log".
 - Goal: Delete /logs/run-0412.txt, then bring it back.
@@ -560,6 +611,7 @@ Full steps: `topics/trash-versions.md`
 - Gap marks in steps: 1
 
 #### STORY-052: Two agents race on one file and the loser hits a --if-version conflict
+
 - Type: long
 - Persona: Agents "planner" and "writer" sharing /plan/status.md for the human Ines Okafor.
 - Goal: Update the status file without clobbering the other's change.
@@ -567,6 +619,7 @@ Full steps: `topics/trash-versions.md`
 - Alternate paths: MCP `put` with `ifVersionId`. `sync` and `backup` do their own handling.
 
 #### STORY-053: Conditional write hits a trashed file
+
 - Type: medium
 - Persona: Agent "sync-bot" for Priya Nair, after Priya trashed /data/config.json in the console.
 - Goal: Write a new config.json.
@@ -575,6 +628,7 @@ Full steps: `topics/trash-versions.md`
 - Gap marks in steps: 1
 
 #### STORY-054: Owner looks for a deleted file but cannot find it in a long Trash list
+
 - Type: medium
 - Persona: Hannah Cho, an operator who has 300 files in trash after an agent cleanup run.
 - Goal: Restore /exports/customer-list-2026-10.csv only.
@@ -583,6 +637,7 @@ Full steps: `topics/trash-versions.md`
 - Gap marks in steps: 1
 
 #### STORY-055: Read-only or path-limited agent tries to delete and restore
+
 - Type: medium
 - Persona: Agent "viewer-bot" (read only) and "inbox-bot" (writes under /inbox/x) for Luis Ferreira.
 - Goal: See which destructive actions each limited key may perform.
@@ -594,6 +649,7 @@ Full steps: `topics/trash-versions.md`
 Full steps: `topics/multi-agent.md`
 
 #### STORY-056: Owner adds a second agent to the existing drive in the browser
+
 - Type: long
 - Persona: Mara Ellis, who already has "report-bot" and now installs "trace-bot" on a second laptop.
 - Goal: Give trace-bot access to the drive report-bot uses, without creating a new drive.
@@ -601,6 +657,7 @@ Full steps: `topics/multi-agent.md`
 - Alternate paths: `grant` from an existing delegate agent (next stories); `credentials issue` for sandboxes.
 
 #### STORY-057: Existing agent offers a drive with grant; owner only approves
+
 - Type: long
 - Persona: Agent "report-bot" (has `delegate`) on behalf of Mara Ellis, adding "trace-bot" limited to /traces.
 - Goal: Hand over the drive with minimal human work.
@@ -608,6 +665,7 @@ Full steps: `topics/multi-agent.md`
 - Alternate paths: Browser key paste (previous story); `credentials issue`.
 
 #### STORY-058: Sandbox agent gets credentials with credentials issue
+
 - Type: long
 - Persona: Agent "ci-orchestrator" for Tomás Rivera, creating a key for a GitHub Actions job with no browser.
 - Goal: Give the CI job read and write under /ci/artifacts.
@@ -616,6 +674,7 @@ Full steps: `topics/multi-agent.md`
 - Gap marks in steps: 1
 
 #### STORY-059: Limited agent tries to write outside its folder
+
 - Type: short
 - Persona: trace-bot, limited to /traces, asked by a user to save /reports/q3.md.
 - Goal: Understand why a write was refused and recover.
@@ -623,6 +682,7 @@ Full steps: `topics/multi-agent.md`
 - Alternate paths: owner issues a wider key.
 
 #### STORY-060: Read-only agent runs check and tries to write
+
 - Type: medium
 - Persona: Agent "auditor" added with "Read only" ticked by Luis Ferreira.
 - Goal: Confirm it can read the drive.
@@ -631,6 +691,7 @@ Full steps: `topics/multi-agent.md`
 - Gap marks in steps: 1
 
 #### STORY-061: Delegate cannot pass on delegate or exceed its own rights
+
 - Type: medium
 - Persona: Agent "lead-agent" holding read, write, delegate on /project, trying to over-grant.
 - Goal: Hand a helper broad rights; learn the limits.
@@ -638,6 +699,7 @@ Full steps: `topics/multi-agent.md`
 - Alternate paths: none found.
 
 #### STORY-062: Owner revokes a handed-off agent
+
 - Type: medium
 - Persona: Tomás Rivera, after the CI job leaked its secret in a log.
 - Goal: Cut off ci-job immediately.
@@ -650,6 +712,7 @@ Full steps: `topics/multi-agent.md`
 Full steps: `topics/agents-keys.md`
 
 #### STORY-063: Human creates an agent and a read-only key in the console
+
 - Type: medium
 - Persona: Mara Okafor, a solo developer who wants a read-only "report-reader" agent to pull her notes drive into a dashboard job.
 - Goal: Have a key that can read the drive but not change it.
@@ -657,6 +720,7 @@ Full steps: `topics/agents-keys.md`
 - Alternate paths: CLI `agent create --name report-reader` then `key create --agent ID --drive ID --label L --scope read` (needs a key with `manage`). Device flow `login --name report-reader` then tick "Read only" on /connect only works when adding to an existing drive.
 
 #### STORY-064: Connect the new key to an agent with login --token-stdin
+
 - Type: medium
 - Persona: Mara, now at her server terminal with the secret on her clipboard.
 - Goal: Make the CLI on the server authenticate as report-reader.
@@ -665,6 +729,7 @@ Full steps: `topics/agents-keys.md`
 - Gap marks in steps: 2
 
 #### STORY-065: Rotate a key without breaking the agent
+
 - Type: long
 - Persona: Dev Patel, who pasted a key into a chat transcript by mistake and wants it replaced before his nightly job runs.
 - Goal: Replace the key for agent "nightly-sync" with no failed run.
@@ -673,6 +738,7 @@ Full steps: `topics/agents-keys.md`
 - Gap marks in steps: 3
 
 #### STORY-066: Revoke one leaked key versus revoking the whole agent
+
 - Type: medium
 - Persona: Hana Ito, who sees a coworker's laptop was stolen and knows it held one of two keys for agent "ci-bot".
 - Goal: Cut off the stolen laptop but keep CI running.
@@ -680,6 +746,7 @@ Full steps: `topics/agents-keys.md`
 - Alternate paths: Agents tab "Revoke access" kills both keys; CLI `key revoke ID`.
 
 #### STORY-067: Scope check, "manage" is the dangerous box
+
 - Type: short
 - Persona: Luis Romero, creating a key for a untrusted script and unsure what the checkboxes mean.
 - Goal: Give the script only what it needs: write new notes but not delete or share.
@@ -688,6 +755,7 @@ Full steps: `topics/agents-keys.md`
 - Gap marks in steps: 2
 
 #### STORY-068: Reading "issued by" labels after a sandbox handoff
+
 - Type: medium
 - Persona: Priya Nair, whose main agent "planner" issued credentials for a CI sandbox agent "sandbox-ci" and she now audits what exists.
 - Goal: Confirm who created the sandbox's key and revoke it when the job ends.
@@ -696,6 +764,7 @@ Full steps: `topics/agents-keys.md`
 - Gap marks in steps: 1
 
 #### STORY-069: Wrong agent picked, then the one-agent-two-machines question
+
 - Type: medium
 - Persona: Sam Whitfield, who runs the same assistant on a laptop and a desktop.
 - Goal: Decide between one agent with two keys and two agents; end with attributable history.
@@ -704,6 +773,7 @@ Full steps: `topics/agents-keys.md`
 - Gap marks in steps: 1
 
 #### STORY-070: Key revoked mid-session, agent sees the failure
+
 - Type: short
 - Persona: Tomas Berg, an agent operator watching an agent run `sync` when the owner revokes its key.
 - Goal: Understand why writes stopped and recover.
@@ -711,6 +781,7 @@ Full steps: `topics/agents-keys.md`
 - Alternate paths: Re-run `agent-drive login --name trace-bot` to restart device approval.
 
 #### STORY-071: Delegated agent cannot manage keys
+
 - Type: short
 - Persona: Ines Duarte, an agent developer whose "planner" agent (delegate) tries to list all keys.
 - Goal: Learn what a delegate may do.
@@ -722,6 +793,7 @@ Full steps: `topics/agents-keys.md`
 Full steps: `topics/billing-usage.md`
 
 #### STORY-072: Check usage after a heavy week
+
 - Type: short
 - Persona: Mara Okafor, a solo developer whose agents have been syncing logs and who wants to know if she is near the Free limits.
 - Goal: See how much storage and how many operations she has used.
@@ -730,6 +802,7 @@ Full steps: `topics/billing-usage.md`
 - Gap marks in steps: 2
 
 #### STORY-073: A prospect reads pricing with checkout not configured
+
 - Type: short
 - Persona: Noor Hassan, evaluating Agent Drive for a team, on a self-hosted deployment without Stripe.
 - Goal: Find out what the paid plans cost and subscribe.
@@ -737,6 +810,7 @@ Full steps: `topics/billing-usage.md`
 - Alternate paths: /console/billing when signed in shows the same limitation.
 
 #### STORY-074: Upgrade from Free to Developer through Stripe
+
 - Type: long
 - Persona: Dev Patel, whose agent just got "Your plan allowance would be exceeded" and who is ready to pay $20.
 - Goal: Move to the Developer plan and keep writing.
@@ -744,6 +818,7 @@ Full steps: `topics/billing-usage.md`
 - Alternate paths: Pricing page card "Choose Developer" leads to the same billing page.
 
 #### STORY-075: Set a monthly spend cap and an alert
+
 - Type: medium
 - Persona: Hana Ito, a team lead who fears a runaway agent loop on the Developer plan.
 - Goal: Stop writes at $50 and get an email at $30.
@@ -751,6 +826,7 @@ Full steps: `topics/billing-usage.md`
 - Alternate paths: none found (no CLI or API for humans other than PATCH /api/console/billing/settings).
 
 #### STORY-076: Agent hits the spend cap and tells the human
+
 - Type: long
 - Persona: Tomas Berg's agent "trace-bot", uploading /inbox/trace-bot/2026-11-05.jsonl when the monthly cap is reached.
 - Goal: Understand the failure, still read earlier files, and get the human to raise the cap.
@@ -759,6 +835,7 @@ Full steps: `topics/billing-usage.md`
 - Gap marks in steps: 2
 
 #### STORY-077: Free account hits download and operation limits
+
 - Type: medium
 - Persona: Luis Romero, running a backup restore that fetches many files from a Free account.
 - Goal: Understand why `get` and `share` start failing.
@@ -766,6 +843,7 @@ Full steps: `topics/billing-usage.md`
 - Alternate paths: Console Download button for files draws on the same monthly download allowance.
 
 #### STORY-078: Export a past month's usage as CSV
+
 - Type: medium
 - Persona: Priya Nair, preparing an expense note for October.
 - Goal: Download per-agent usage for last month.
@@ -774,6 +852,7 @@ Full steps: `topics/billing-usage.md`
 - Gap marks in steps: 1
 
 #### STORY-079: Billing page fails to load or the session expires
+
 - Type: short
 - Persona: Noor Hassan, returning to billing after a long day.
 - Goal: Reach billing details; recover from errors.
@@ -786,6 +865,7 @@ Full steps: `topics/billing-usage.md`
 Full steps: `topics/settings-lifecycle.md`
 
 #### STORY-080: Owner reviews what the agents did last night
+
 - Type: short; duplicate of STORY-039
 - Persona: Priya, a solo developer whose two agents (trace-bot, notes-bot) ran overnight, wondering whether anything was refused.
 - Goal: See recent activity and spot failed or denied requests.
@@ -794,6 +874,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 2
 
 #### STORY-081: Owner cannot find file-level history in the audit log
+
 - Type: short
 - Persona: Marcus, who thinks a teammate's agent deleted /inbox/vendor/2026-11-05.jsonl.
 - Goal: Find who deleted a specific file and when.
@@ -802,6 +883,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 1
 
 #### STORY-082: Delete one drive after finishing a project
+
 - Type: medium
 - Persona: Hana, finished a contract; wants the drive "client-acme-q3" gone but keeps her other drive "personal-notes".
 - Goal: Permanently delete one drive.
@@ -810,6 +892,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 2
 
 #### STORY-083: Duplicate drive names make the delete dropdown ambiguous
+
 - Type: short
 - Persona: Tomas, who created two drives both named "scratch" while testing.
 - Goal: Delete only the older "scratch" drive.
@@ -818,6 +901,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 1
 
 #### STORY-084: Delete the whole account
+
 - Type: long
 - Persona: Elena, closing her workspace after moving to another tool; she has a paid Developer plan.
 - Goal: End the account and know when data is really gone.
@@ -826,6 +910,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 1
 
 #### STORY-085: Checking whether the deletion has finished
+
 - Type: medium
 - Persona: Hana, ten minutes after requesting drive deletion, wants proof it is purged.
 - Goal: See the job status.
@@ -834,6 +919,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 2
 
 #### STORY-086: Last drive deleted, then the owner returns to the console
+
 - Type: medium
 - Persona: Jonas, deletes his only drive, then wants a fresh start with a new agent.
 - Goal: Recreate a workspace after deleting the last drive.
@@ -842,6 +928,7 @@ Full steps: `topics/settings-lifecycle.md`
 - Gap marks in steps: 1
 
 #### STORY-087: Settings page on a phone, second session, and signed-out access
+
 - Type: short
 - Persona: Aisha, checking the audit log from her phone while travelling.
 - Goal: Read audit rows on a narrow screen and handle an expired session.
@@ -854,6 +941,7 @@ Full steps: `topics/settings-lifecycle.md`
 Full steps: `topics/agent-daily-use.md`
 
 #### STORY-088: First save of a handoff note with the default drive
+
 - Type: short
 - Persona: An agent named "trace-bot" on a laptop that already passed `login` and `check ok`.
 - Goal: Write /work/triage/handoff.md.
@@ -861,6 +949,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: MCP `put` with `text`; `sync` of a directory.
 
 #### STORY-089: Two agents edit the same file and one loses the race
+
 - Type: medium; duplicate of STORY-052
 - Persona: notes-bot and trace-bot both update /memory/decisions.md.
 - Goal: Update without clobbering the other agent's change.
@@ -868,6 +957,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: MCP `put` with `ifVersionId`; `agent-drive versions` to see the history.
 
 #### STORY-090: Restricted agent writes outside its allowed folder
+
 - Type: medium; duplicate of STORY-059
 - Persona: intake-bot, issued a key with `--write-path /inbox/intake-bot`, saving a scraped export.
 - Goal: Save /inbox/vendor/2026-11-05.jsonl, then recover.
@@ -875,6 +965,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: Ask the owner to re-approve with a wider folder on `/connect`; `whoami` shows `writePaths`.
 
 #### STORY-091: Read-only agent attempts a write or share
+
 - Type: short; duplicate of STORY-060
 - Persona: audit-bot with scopes `read` only.
 - Goal: Upload a summary; then share a link.
@@ -882,6 +973,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: none found.
 
 #### STORY-092: Reading a binary or large file
+
 - Type: short
 - Persona: An agent fetching /outputs/report.pdf and a 3 MB log.
 - Goal: Get the bytes onto local disk.
@@ -889,6 +981,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: MCP `get` with `outputPath` (main) or the `download` tool (fix/mcp-defaults).
 
 #### STORY-093: Reorganising paths with mv and cp
+
 - Type: medium
 - Persona: An agent tidying /work/triage after a task.
 - Goal: Move final files to /outputs and keep a copy of an old version.
@@ -897,6 +990,7 @@ Full steps: `topics/agent-daily-use.md`
 - Gap marks in steps: 1
 
 #### STORY-094: Sync a working directory, then hit a remote conflict
+
 - Type: long
 - Persona: An agent syncing ./out/ to /outputs/run-42 before its sandbox ends; later a second agent edits one file.
 - Goal: Keep the remote copy current without overwriting someone else's edits.
@@ -905,6 +999,7 @@ Full steps: `topics/agent-daily-use.md`
 - Gap marks in steps: 1
 
 #### STORY-095: Back up a workspace with a dry run first
+
 - Type: medium
 - Persona: An agent about to lose its container; the human said "back up everything but be careful".
 - Goal: Preview, then upload ./workdir.
@@ -912,6 +1007,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: `sync` (conflict-checked) instead of backup (overwrites by design).
 
 #### STORY-096: Using the MCP tools from an editor agent
+
 - Type: long
 - Persona: A coding assistant in Cursor connected with `agent-drive mcp` (stdio), keys in the environment.
 - Goal: Read prior decisions, write a result, wait for a teammate agent's change.
@@ -919,6 +1015,7 @@ Full steps: `topics/agent-daily-use.md`
 - Alternate paths: CLI equivalents; login, grant, credentials, sync, backup, check, share list and revoke are not exposed over MCP.
 
 #### STORY-097: Installing the skill on a fresh machine
+
 - Type: short
 - Persona: An agent in a clean container with neither ~/.claude nor ~/.codex.
 - Goal: Get the SKILL.md in place so future sessions use the drive proactively.
@@ -929,25 +1026,25 @@ Full steps: `topics/agent-daily-use.md`
 
 What a Dropbox or Google Drive user expects, what the console does today, and the stories that mark it "(gap)". This feeds the dashboard redesign. Most items are CLI/MCP-only features, not missing capabilities of the product.
 
-| Dropbox habit | Today in the console | Stories | Where it exists today |
-|---|---|---|---|
-| Folders, folder navigation, breadcrumbs | One flat table of full paths; topbar crumb is "Workspace / Files" | 019, 017, 018 | CLI `ls --prefix`, MCP `list` |
-| Upload from the browser, drag and drop, "+ New" | No upload; "+ New drive" sits where Upload would be; no hint that uploads are CLI-only | 020, 024 | CLI `put`, `sync`, `backup`; MCP `put` |
-| Preview or thumbnail before download | Download only; Versions dialog shows metadata, no content | 021, 050 | CLI `get` (text prints) |
-| Recents / activity feed | None in the console | 022, 038, 080, 081 | CLI `recent`, MCP `recent`; audit log shows action names only |
-| Sharing from the file row | No Share action, no shares page | 046, 045, 047 | CLI/MCP `share`; list and revoke CLI only |
-| Search (server-side, by tag, author, date) | "Filter loaded files" matches path text on already-loaded rows only; does not match AUTHOR; no content search (content is encrypted) | 017, 038, 033 | CLI/MCP `search`, `ls` filters |
-| Sort by name, size, modified | Column headers are not clickable | 038, 017 | None |
-| Rename, move, copy | No console control | 093 | CLI/MCP `mv`, `cp`; no prefix move |
-| Multi-select, bulk restore or delete, download all / zip | One row at a time | 054, 032 | None |
-| Open a file without a key step | Download disabled until the drive key is pasted each session; key lost on reload; no "forget all" | 025, 026, 027, 028 | CLI uses stored key |
-| Deep links to a tab, drive or file; return to where you were after sign-in | Tab and drive are client state; sign-in returns to Files | 002, 005, 079, 087 | `/connect` only |
-| Trash that can be listed and bulk-restored | Trash tab exists; `ls` cannot list trash; delete has no confirmation | 048, 051, 054 | Trash tab |
-| Version preview and compare | Metadata only | 050 | None |
-| Account area: sign out, switch account, close account | Sign-out via Clerk UserButton only; no pointer to deletion from Billing | 007, 006, 084 | Settings |
-| Notifications (email on deletion done, cap reached) | Only spend alert email; no in-app cap indicator, no deletion completion notice | 076, 085 | None |
-| Rename/describe agents and drives | Not possible | 054, 083 (duplicate names) | None |
-| Mobile-friendly console | Sidebar collapses behind a toggle; only the settings page checked | 087 | n/a |
+| Dropbox habit                                                              | Today in the console                                                                                                                 | Stories                    | Where it exists today                                         |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------- |
+| Folders, folder navigation, breadcrumbs                                    | One flat table of full paths; topbar crumb is "Workspace / Files"                                                                    | 019, 017, 018              | CLI `ls --prefix`, MCP `list`                                 |
+| Upload from the browser, drag and drop, "+ New"                            | No upload; "+ New drive" sits where Upload would be; no hint that uploads are CLI-only                                               | 020, 024                   | CLI `put`, `sync`, `backup`; MCP `put`                        |
+| Preview or thumbnail before download                                       | Download only; Versions dialog shows metadata, no content                                                                            | 021, 050                   | CLI `get` (text prints)                                       |
+| Recents / activity feed                                                    | None in the console                                                                                                                  | 022, 038, 080, 081         | CLI `recent`, MCP `recent`; audit log shows action names only |
+| Sharing from the file row                                                  | No Share action, no shares page                                                                                                      | 046, 045, 047              | CLI/MCP `share`; list and revoke CLI only                     |
+| Search (server-side, by tag, author, date)                                 | "Filter loaded files" matches path text on already-loaded rows only; does not match AUTHOR; no content search (content is encrypted) | 017, 038, 033              | CLI/MCP `search`, `ls` filters                                |
+| Sort by name, size, modified                                               | Column headers are not clickable                                                                                                     | 038, 017                   | None                                                          |
+| Rename, move, copy                                                         | No console control                                                                                                                   | 093                        | CLI/MCP `mv`, `cp`; no prefix move                            |
+| Multi-select, bulk restore or delete, download all / zip                   | One row at a time                                                                                                                    | 054, 032                   | None                                                          |
+| Open a file without a key step                                             | Download disabled until the drive key is pasted each session; key lost on reload; no "forget all"                                    | 025, 026, 027, 028         | CLI uses stored key                                           |
+| Deep links to a tab, drive or file; return to where you were after sign-in | Tab and drive are client state; sign-in returns to Files                                                                             | 002, 005, 079, 087         | `/connect` only                                               |
+| Trash that can be listed and bulk-restored                                 | Trash tab exists; `ls` cannot list trash; delete has no confirmation                                                                 | 048, 051, 054              | Trash tab                                                     |
+| Version preview and compare                                                | Metadata only                                                                                                                        | 050                        | None                                                          |
+| Account area: sign out, switch account, close account                      | Sign-out via Clerk UserButton only; no pointer to deletion from Billing                                                              | 007, 006, 084              | Settings                                                      |
+| Notifications (email on deletion done, cap reached)                        | Only spend alert email; no in-app cap indicator, no deletion completion notice                                                       | 076, 085                   | None                                                          |
+| Rename/describe agents and drives                                          | Not possible                                                                                                                         | 054, 083 (duplicate names) | None                                                          |
+| Mobile-friendly console                                                    | Sidebar collapses behind a toggle; only the settings page checked                                                                    | 087                        | n/a                                                           |
 
 ## Redundancy Candidates
 
