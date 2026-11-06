@@ -584,3 +584,24 @@ dialog .check-label input {
 .agent-panel .agent-give {
   box-shadow: none;
 }
+
+/* ---- save confirmation (receipt and key line) ---- */
+.receipt-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.receipt-confirm h3 {
+  margin: 0;
+  font: 500 16px var(--sans, 'Inter Tight', system-ui, sans-serif);
+}
+.receipt-confirm p {
+  margin: 0;
+}
+.keyline-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}

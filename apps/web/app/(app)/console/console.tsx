@@ -299,6 +299,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [fileRefresh, setFileRefresh] = useState(0);
   const [filter, setFilter] = useState('');
   const [slowScope, setSlowScope] = useState('');
+  // Stage of the key receipt, and the drive whose key-line download awaits "I saved it".
+  const [receiptSaved, setReceiptSaved] = useState(false);
+  const [keylineConfirm, setKeylineConfirm] = useState('');
+  // Backups recorded in this page, so a refresh that started earlier cannot hide them.
+  const recordedBackups = useRef<Record<string, { at: string; method: string }>>({});
   const filterRef = useRef<HTMLInputElement>(null);
   const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
@@ -344,7 +349,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       all<ApiKey>('keys'),
       api<Usage>('usage'),
     ]);
-    setDrives(nextDrives);
+    setDrives(
+      nextDrives.map((item) => {
+        const recorded = recordedBackups.current[item.id];
+        return recorded && !item.key_backup_at
+          ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
+          : item;
+      }),
+    );
     setAgents(nextAgents);
     setApiKeys(nextKeys);
     setUsage(nextUsage);
@@ -380,7 +392,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     // A drive switch, tab switch or Retry changes fileScope, which restarts this timer.
     if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
     const timer = setTimeout(() => setSlowScope(fileScope), 10_000);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // Leaving a scope forgets that it was slow, so coming back starts a fresh 10 s.
+      setSlowScope('');
+    };
   }, [selected, tab, fileScope]);
   useEffect(() => {
     if (!navOpen) return;
@@ -459,6 +475,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
     setDriveReceipt({ id: created.id, key });
+    setReceiptSaved(false);
     setSaved(false);
     setModal('driveReceipt');
     await refresh();
@@ -535,22 +552,29 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setKeyInput(candidate.key);
   }
 
-  // Saves the recovery file and records only the method; the key never leaves this page.
-  async function backUpDriveKey(driveId: string, key: string) {
+  function saveRecoveryFile(driveId: string, key: string) {
     save(
       new Blob([JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2)], {
         type: 'application/json',
       }),
       `agent-drive-${driveId}.key.json`,
     );
+  }
+
+  // Called only after the user confirms the file saved. Records the method; the key never leaves this page.
+  async function recordBackup(driveId: string) {
     let recorded: { keyBackupAt: string; keyBackupMethod: string };
     try {
       recorded = await api(`drives/${driveId}/key-backup`, 'POST', { method: 'file' });
     } catch {
       throw new Error(
-        'Recovery file downloaded, but the backup was not recorded. Use Download recovery file to try again.',
+        'The backup was not recorded. Use Download recovery file, then I saved it, to try again.',
       );
     }
+    recordedBackups.current[driveId] = {
+      at: recorded.keyBackupAt,
+      method: recorded.keyBackupMethod,
+    };
     // Patch this drive from the response so a failing list or usage call cannot hide the backup.
     setDrives((current) =>
       current.map((item) =>
@@ -563,12 +587,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           : item,
       ),
     );
-    setNotice('Recovery file downloaded. Store it in a password manager.');
-  }
-
-  async function downloadRecoveryFile() {
-    const key = driveKeys[selected];
-    if (key) await backUpDriveKey(selected, key);
+    setNotice('Recovery file saved. Store it in a password manager.');
   }
 
   const errorBanner = error && (
@@ -845,13 +864,38 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             label="Copy credentials export command"
                           />
                         )}
-                        {hasKey && (
+                        {hasKey && keylineConfirm !== selected && (
                           <button
                             className="button secondary"
-                            onClick={() => void act(downloadRecoveryFile)}
+                            onClick={() => {
+                              saveRecoveryFile(selected, driveKeys[selected]!);
+                              setKeylineConfirm(selected);
+                            }}
                           >
                             Download recovery file
                           </button>
+                        )}
+                        {hasKey && keylineConfirm === selected && (
+                          <span className="keyline-confirm" role="group" aria-label="Confirm save">
+                            Did the file save?
+                            <button
+                              className="button primary"
+                              onClick={() =>
+                                void act(async () => {
+                                  setKeylineConfirm('');
+                                  await recordBackup(selected);
+                                })
+                              }
+                            >
+                              I saved it
+                            </button>
+                            <button
+                              className="button secondary"
+                              onClick={() => saveRecoveryFile(selected, driveKeys[selected]!)}
+                            >
+                              Download again
+                            </button>
+                          </span>
                         )}
                       </span>
                     </div>
@@ -1425,22 +1469,48 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 The recovery file contains a secret in plaintext. Store it in a password manager or
                 another secure location.
               </p>
-              <button
-                className="button primary"
-                data-autofocus
-                onClick={() =>
-                  void act(async () => {
-                    const receipt = driveReceipt;
-                    // The file is in the user's hands first; the dialog closes even if recording fails.
-                    setDriveReceipt(null);
-                    setModal(null);
-                    setTab('Files');
-                    await backUpDriveKey(receipt.id, receipt.key);
-                  })
-                }
-              >
-                Download recovery file and continue
-              </button>
+              {!receiptSaved ? (
+                <button
+                  className="button primary"
+                  data-autofocus
+                  onClick={() => {
+                    saveRecoveryFile(driveReceipt.id, driveReceipt.key);
+                    setReceiptSaved(true);
+                  }}
+                >
+                  Download recovery file and continue
+                </button>
+              ) : (
+                <div className="receipt-confirm" role="group" aria-label="Confirm save">
+                  <h3>Did the recovery file save?</h3>
+                  <p>
+                    Without it nobody, including us, can open this drive. Check your downloads
+                    before you continue.
+                  </p>
+                  <button
+                    className="button primary"
+                    autoFocus
+                    onClick={() =>
+                      void act(async () => {
+                        const receipt = driveReceipt;
+                        setDriveReceipt(null);
+                        setReceiptSaved(false);
+                        setModal(null);
+                        setTab('Files');
+                        await recordBackup(receipt.id);
+                      })
+                    }
+                  >
+                    I saved it
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => saveRecoveryFile(driveReceipt.id, driveReceipt.key)}
+                  >
+                    Download again
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {modal === 'unlock' && (

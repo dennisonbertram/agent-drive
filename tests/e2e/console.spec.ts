@@ -135,6 +135,10 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     const driveKey = await page.getByTestId('drive-key').inputValue();
     expect(driveKey.length).toBe(43);
     const recoveryDownload = page.waitForEvent('download');
+    let backupPosts = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/key-backup')) backupPosts += 1;
+    });
     const backupPost = page.waitForRequest(
       (request) => request.method() === 'POST' && request.url().endsWith('/key-backup'),
     );
@@ -145,6 +149,11 @@ test('new human workspace → encrypted CLI upload → browser download, restore
       key: string;
     };
     expect(backup.key === driveKey).toBe(true);
+    // The backup is recorded only after the user confirms the file saved.
+    await expect(page.getByRole('heading', { name: 'Did the recovery file save?' })).toBeVisible();
+    expect(backupPosts).toBe(0);
+    await expect(page.getByRole('dialog')).toHaveCount(1);
+    await page.getByRole('button', { name: 'I saved it' }).click();
     expect((await backupPost).postDataJSON()).toEqual({ method: 'file' });
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // F19: saving the recovery file from the receipt records the backup.
@@ -508,15 +517,19 @@ test('console files: recovery download stays on an empty drive, and a failed rel
         : route.continue(),
     );
     await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
+    await page.getByRole('button', { name: 'I saved it' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(
-      page.getByRole('alert').filter({ hasText: 'the backup was not recorded' }),
+      page.getByRole('alert').filter({ hasText: 'The backup was not recorded' }),
     ).toBeVisible();
     // No files, key loaded: the backup warning and recovery download remain available.
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
     await expect(page.getByTestId('key-backup-status')).toContainText('hasn’t been backed up');
     failBackup = false;
     await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
+    // The key line also records the backup only after "I saved it".
+    await expect(page.getByTestId('key-backup-status')).toContainText('hasn’t been backed up');
+    await page.getByRole('button', { name: 'I saved it' }).click();
     await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
 
     // The files list loaded once; a later reload of the cached scope fails.
@@ -607,6 +620,80 @@ test('console files: a slow list shows skeleton, then Still loading with Retry',
     hold = false;
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: a stale refresh cannot hide a recorded backup', async ({ page, context }) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'New drive', exact: true }).click({ timeout: 30_000 });
+    // Hold the drive list that createDrive() refreshes after creation, with its old contents.
+    let armed = true;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/console/drives?limit=100', async (route) => {
+      if (!armed) return route.continue();
+      armed = false;
+      const response = await route.fetch();
+      await released;
+      await route.fulfill({ response });
+    });
+    await page.getByLabel('Drive name').press('Enter');
+    await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
+    await page.getByRole('button', { name: 'I saved it' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The backup was recorded; now the stale refresh lands.
+    await page.waitForTimeout(500);
+    release();
+    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: coming back to a drive restarts the slow-load timer', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(60_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const create = async (name: string) =>
+      (await (
+        await context.request.post('/api/console/drives', {
+          data: { name },
+          headers: { Origin: baseURL! },
+        })
+      ).json()) as { id: string };
+    const a = await create('a-slow');
+    await create('b-fast');
+    // Drive A's list never answers.
+    await page.route(`**/api/console/drives/${a.id}/list*`, () => undefined);
+    await page.goto('/console');
+    await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible({
+      timeout: 25_000,
+    });
+    await page.getByRole('button', { name: /b-fast/ }).click();
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    await page.getByRole('button', { name: /a-slow/ }).click();
+    await expect(page.locator('.list-state[data-state="loading"]')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Still loading files…' })).toHaveCount(0);
   } finally {
     await cleanupUser(userId);
   }

@@ -32,7 +32,7 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
@@ -233,8 +233,17 @@ const nightlyFiles = [
 ];
 
 async function main() {
-  await rm(OUT, { recursive: true, force: true });
+  // Only clear a directory this script created earlier (it holds the marker file).
+  const MARKER = join(OUT, '.console-seed-marker');
+  let existing = [];
+  try {
+    existing = await readdir(OUT);
+  } catch {}
+  if (existing.length && !existing.includes('.console-seed-marker'))
+    throw new Error(`Refusing to use ${OUT}: it exists and was not created by this script.`);
+  if (existing.length) await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
+  await writeFile(MARKER, 'created by scripts/seed-console-fixtures.mjs\n');
   const tmp = await mkdtemp(join(tmpdir(), 'ad-seed-'));
   const state = { baseUrl: BASE_URL, users: {} };
   try {
