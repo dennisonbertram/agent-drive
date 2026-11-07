@@ -1,6 +1,6 @@
 import { open, owned, seal } from './crypto-format.ts';
 
-export { CHUNK_SIZE, encryptedSize } from './crypto-format.ts';
+export { CHUNK_SIZE, encryptedSize, plaintextSize } from './crypto-format.ts';
 
 export class DriveCryptoError extends Error {
   constructor(

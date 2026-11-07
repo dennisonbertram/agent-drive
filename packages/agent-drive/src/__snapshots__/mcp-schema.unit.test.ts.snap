@@ -135,7 +135,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "openWorldHint": true,
       "readOnlyHint": true,
     },
-    "description": "List one page of file metadata in a drive.",
+    "description": "List one page of file metadata in a drive. Optional folder returns that folder's immediate children (files and folder rows with item count, size and newest time); optional sort=modified lists newest first.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -149,6 +149,9 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "minLength": 1,
           "type": "string",
         },
+        "folder": {
+          "type": "string",
+        },
         "limit": {
           "maximum": 100,
           "minimum": 1,
@@ -158,6 +161,13 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
           "type": "string",
         },
         "prefix": {
+          "type": "string",
+        },
+        "sort": {
+          "enum": [
+            "path",
+            "modified",
+          ],
           "type": "string",
         },
         "tag": {

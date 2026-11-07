@@ -39,11 +39,13 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
     ),
   });
   const paths: string[] = [];
+  const queries: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: URL | string) => {
       const path = new URL(String(url)).pathname.replace('/api/v1/', '');
       paths.push(path);
+      queries.push(new URL(String(url)).search);
       return new Response(JSON.stringify(respond(path)), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -58,7 +60,7 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   vi.resetModules();
   await import('./cli.js');
   await vi.waitFor(() => expect(out.length + err.length).toBeGreaterThan(0), { timeout: 3000 });
-  return { out: out.join(''), err: err.join(''), paths };
+  return { out: out.join(''), err: err.join(''), paths, queries };
 }
 
 const one: Saved = { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } };
@@ -72,6 +74,48 @@ describe('drive default at the command level', () => {
     expect(r.out).toContain('"/a.md"');
     expect(r.out).not.toContain('WRAPPED');
     expect(r.out).not.toContain('downloadUrl');
+  });
+
+  it('ls --folder/--sort send delimiter and sort and print folder rows; plain ls sends neither', async () => {
+    const folder = {
+      kind: 'folder',
+      path: '/reports',
+      items: 2,
+      ciphertext_size: '12',
+      created_at: 't',
+    };
+    const r = await cli(['ls', '--folder', '/', '--sort', 'modified', '--limit', '5'], one, () => ({
+      items: [folder, { ...version, id: 'f1', version_id: 'v1', ciphertext_size: 1 }],
+      nextCursor: null,
+    }));
+    expect(r.err).toBe('');
+    expect(r.queries[0]).toContain('delimiter=%2F');
+    expect(r.queries[0]).toContain('prefix=%2F');
+    expect(r.queries[0]).toContain('sort=modified');
+    expect(r.queries[0]).toContain('limit=5');
+    expect(r.out).toContain('"kind":"folder"');
+    expect(r.out).toContain('"items":2');
+    expect(r.out).not.toContain('WRAPPED');
+    const plain = await cli(['ls'], one, () => ({ items: [], nextCursor: null }));
+    expect(plain.queries[0]).not.toContain('delimiter');
+    expect(plain.queries[0]).not.toContain('sort=');
+    const flat = await cli(['ls', '--sort', 'modified', '--prefix', '/a'], one, () => ({
+      items: [],
+      nextCursor: null,
+    }));
+    expect(flat.queries[0]).toContain('sort=modified');
+    expect(flat.queries[0]).toContain('prefix=%2Fa');
+    expect(flat.queries[0]).not.toContain('delimiter');
+    const explicitPath = await cli(['ls', '--sort', 'path', '--prefix', '/a'], one, () => ({
+      items: [],
+      nextCursor: null,
+    }));
+    expect(explicitPath.queries[0]).toBe('?prefix=%2Fa');
+    const both = await cli(['ls', '--folder', '/a', '--prefix', '/b'], one);
+    expect(both.err).toContain('either --folder or --prefix');
+    const bad = await cli(['ls', '--sort', 'size'], one);
+    expect(bad.err).toContain('--sort must be path or modified');
+    expect(bad.paths).toEqual([]);
   });
 
   it('versions hides wrapped keys too', async () => {

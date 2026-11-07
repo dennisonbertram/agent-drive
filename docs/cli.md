@@ -22,7 +22,7 @@ conditional replacement; these flags are mutually exclusive. `get REMOTE --drive
 small valid UTF-8 files are printed. No CLI or MCP output shows the presigned download URL or the wrapped file key (`downloadUrl`, `wrappedKey`); versions print id, path, size, author and timestamps.
 Every drive command defaults `--drive` to the only drive key saved for the current API origin; with none or several it fails and lists the configured ids.
 Inline text output rejects binary control bytes while allowing tabs and line breaks. `ls` and
-`search` accept `--agent`, `--machine`, `--user`, and `--tag`; `recent` accepts `--since`, `--cursor`, and `--wait SECONDS` (1 to 300; polls every 2 seconds for the next event, one metered operation per poll).
+`search` accept `--agent`, `--machine`, `--user`, and `--tag`. `ls --folder PATH` lists that folder's immediate children as files and folder rows (`kind`, `items`, `ciphertextSize`, `createdAt`), and `ls --sort modified` lists newest first (`--sort path` is the default; `--folder` and `--prefix` cannot be combined). The MCP `list` tool takes the same optional `folder` and `sort` parameters. Without them `ls` and `list` behave as before; `recent` accepts `--since`, `--cursor`, and `--wait SECONDS` (1 to 300; polls every 2 seconds for the next event, one metered operation per poll).
 
 Drive creation is idempotent. A newly created drive generates and prints a key once with a backup
 warning. Re-running against an existing drive uses the retained local key and refuses to invent a

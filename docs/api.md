@@ -35,6 +35,15 @@ is `null` when access-log measurement is not configured.
 
 File `list` and `search` accept `agentId`, `machine`, and `user` filters; `list` also accepts a
 literal path `prefix` and optional path query `q`. `%` and `_` in a prefix are treated literally.
+
+`list` also accepts two optional parameters. Without them the response is unchanged. `sort=modified`
+orders newest first by the current version's `created_at` (default `sort=path`). `delimiter=/`
+returns the immediate children of `prefix` (the root when empty): file rows carry `kind: "file"`
+plus the usual fields, and folder rows are `{ kind: "folder", path, items, ciphertext_size,
+created_at }`, where `items` is the number of direct children, `ciphertext_size` is the sum of the
+current versions below the folder, and `created_at` is the newest of them. Filters apply to files
+before grouping. Cursors from one sort or mode are rejected by another with `validation_error`. Any
+other `sort` or `delimiter` value is a `validation_error`.
 `versions`, `recent`, and `search` use the same bounded pagination envelope as other collections.
 A conditional `put` (`ifVersionId`, or `ifVersionId: null` for create-only) that loses returns 409 `conflict`
 with `state` (`exists`, `changed`, `trashed`, or `absent`) and `currentVersionId` (the current or trashed

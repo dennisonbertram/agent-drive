@@ -59,6 +59,8 @@ function parse(raw: string[]) {
       overwrite: { type: 'boolean' },
       'overwrite-existing': { type: 'boolean' },
       prefix: { type: 'string' },
+      folder: { type: 'string' },
+      sort: { type: 'string' },
       description: { type: 'string' },
       user: { type: 'string' },
       machine: { type: 'string' },
@@ -422,6 +424,31 @@ async function run(command: string, raw: string[]) {
     if (!args.positionals[1]) throw new Error('A key ID is required.');
     return output(await client.revokeKey(args.positionals[1]));
   }
+  if (
+    command === 'ls' &&
+    args.values.sort !== undefined &&
+    !['path', 'modified'].includes(args.values.sort)
+  )
+    throw new Error('--sort must be path or modified.');
+  if (command === 'ls' && (args.values.folder !== undefined || args.values.sort === 'modified')) {
+    if (args.values.folder !== undefined && args.values.prefix !== undefined)
+      throw new Error('Use either --folder or --prefix, not both.');
+    return output(
+      await client.browse(requiredDrive(args), {
+        ...(args.values.folder !== undefined ? { folder: args.values.folder } : {}),
+        ...(args.values.prefix !== undefined ? { prefix: args.values.prefix } : {}),
+        ...(args.values.sort ? { sort: args.values.sort as 'path' | 'modified' } : {}),
+        ...(args.values.limit !== undefined ? { limit: Number(args.values.limit) } : {}),
+        ...(args.values.cursor ? { cursor: args.values.cursor } : {}),
+        filters: {
+          ...(args.values.tag?.[0] ? { tag: args.values.tag[0] } : {}),
+          ...(args.values.agent ? { agentId: args.values.agent } : {}),
+          ...(args.values.machine ? { machine: args.values.machine } : {}),
+          ...(args.values.user ? { user: args.values.user } : {}),
+        },
+      }),
+    );
+  }
   if (command === 'ls')
     return output(
       await client.list(
@@ -600,7 +627,7 @@ Commands:
   key revoke ID
   put LOCAL REMOTE --drive ID [--if-version ID | --overwrite]
   get REMOTE --drive ID [--output FILE]
-  ls --drive ID [--prefix PATH] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
+  ls --drive ID [--prefix PATH | --folder PATH] [--sort path|modified] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   mv SOURCE DESTINATION --drive ID
   cp SOURCE DESTINATION --drive ID
   rm PATH --drive ID

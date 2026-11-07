@@ -249,19 +249,40 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
   server.registerTool(
     'list',
     {
-      description: 'List one page of file metadata in a drive.',
-      inputSchema: { driveId: id.optional(), prefix: z.string().optional(), ...page, ...filters },
+      description:
+        "List one page of file metadata in a drive. Optional folder returns that folder's immediate children (files and folder rows with item count, size and newest time); optional sort=modified lists newest first.",
+      inputSchema: {
+        driveId: id.optional(),
+        prefix: z.string().optional(),
+        folder: z.string().optional(),
+        sort: z.enum(['path', 'modified']).optional(),
+        ...page,
+        ...filters,
+      },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
-      safely(() =>
-        client.list(drive(args.driveId), args.prefix, args.limit, args.cursor, {
+      safely(() => {
+        const listFilters = {
           ...(args.tag ? { tag: args.tag } : {}),
           ...(args.agentId ? { agentId: args.agentId } : {}),
           ...(args.machine ? { machine: args.machine } : {}),
           ...(args.user ? { user: args.user } : {}),
-        }),
-      ),
+        };
+        if (args.folder !== undefined || args.sort === 'modified') {
+          if (args.folder !== undefined && args.prefix !== undefined)
+            throw new McpInputError('Use either folder or prefix, not both.');
+          return client.browse(drive(args.driveId), {
+            ...(args.folder !== undefined ? { folder: args.folder } : {}),
+            ...(args.prefix !== undefined ? { prefix: args.prefix } : {}),
+            ...(args.sort ? { sort: args.sort } : {}),
+            ...(args.limit ? { limit: args.limit } : {}),
+            ...(args.cursor ? { cursor: args.cursor } : {}),
+            filters: listFilters,
+          });
+        }
+        return client.list(drive(args.driveId), args.prefix, args.limit, args.cursor, listFilters);
+      }),
   );
   server.registerTool(
     'move',

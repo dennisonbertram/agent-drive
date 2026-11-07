@@ -9,7 +9,7 @@ import { PLANS } from '../billing/policy';
 import { getPool } from '../db/client';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
-import { MAX_QUERY_LENGTH } from './validation';
+import { encodeCursor, MAX_QUERY_LENGTH } from './validation';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import type { RecentFileEvent } from './contract';
 import {
@@ -438,6 +438,317 @@ describe('Phase 1 core API', () => {
     );
     expect(next.items).toHaveLength(1);
     expect(next.nextCursor).toBeNull();
+  });
+
+  it('list delimiter returns immediate children with folder counts, size and newest time', async () => {
+    const f = await fixture('folder-list', 'folder-agent', 'folder-drive', [
+      'read',
+      'write',
+      'delete',
+    ]);
+    const other = (
+      await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id', [
+        f.accountId,
+        'folder-other-agent',
+      ])
+    ).rows[0].id as string;
+    const otherToken = key();
+    await pool.query(
+      `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+       VALUES ($1,$2,'folder-other',$3,$4::uuid[],ARRAY['read','write']::text[])`,
+      [f.accountId, other, tokenHash(otherToken), [f.driveId]],
+    );
+    const sizes: Record<string, number> = {
+      '/a.md': 1,
+      '/reports': 2,
+      '/reports/w45.md': 3,
+      '/reports/2026/q4.md': 4,
+      '/reports/2026/q3.md': 5,
+      '/写真/图 1.png': 6,
+      '/.agent-drive/check.txt': 7,
+      '/reports/old.md': 8,
+    };
+    for (const [path, size] of Object.entries(sizes)) {
+      const t = path === '/reports/2026/q3.md' ? otherToken : f.token;
+      const r = await uploadCommit(t, f.driveId, path, Buffer.alloc(size, 1));
+      expect(r.response.status).toBe(201);
+    }
+    expect(
+      (
+        await request(`/drives/${f.driveId}/delete`, f.token, 'POST', {
+          path: '/reports/old.md',
+        })
+      ).status,
+    ).toBe(200);
+    // Distinct, known times: older paths first.
+    const order = [
+      '/.agent-drive/check.txt',
+      '/写真/图 1.png',
+      '/reports/2026/q3.md',
+      '/reports/2026/q4.md',
+      '/reports/w45.md',
+      '/reports',
+      '/a.md',
+    ];
+    for (const [i, path] of order.entries()) {
+      await pool.query(
+        `UPDATE versions SET created_at = $2::timestamptz
+          WHERE id = (SELECT current_version_id FROM files WHERE drive_id=$1 AND path=$3)`,
+        [f.driveId, `2026-01-0${i + 1}T00:00:00Z`, path],
+      );
+    }
+    const list = async (query: string, token = f.token) =>
+      json(await request(`/drives/${f.driveId}/list?${query}`, token));
+    const label = (row: { kind: string; path: string }) => `${row.kind}:${row.path}`;
+
+    const root = await list('delimiter=%2F');
+    expect(root.items.map(label)).toEqual([
+      'folder:/.agent-drive',
+      'file:/a.md',
+      'file:/reports',
+      'folder:/reports',
+      'folder:/写真',
+    ]);
+    const reports = root.items.find(
+      (r: { kind: string; path: string }) => label(r) === 'folder:/reports',
+    );
+    expect(reports).toMatchObject({ items: 2 });
+    expect(Number(reports.ciphertext_size)).toBe(3 + 4 + 5);
+    expect(new Date(reports.created_at).toISOString()).toBe('2026-01-05T00:00:00.000Z');
+    expect(Object.keys(reports).sort()).toEqual([
+      'ciphertext_size',
+      'created_at',
+      'items',
+      'kind',
+      'path',
+    ]);
+    expect(root.nextCursor).toBeNull();
+
+    const nested = await list('prefix=%2Freports&delimiter=%2F');
+    expect(nested.items.map(label)).toEqual(['folder:/reports/2026', 'file:/reports/w45.md']);
+    expect(nested.items[0]).toMatchObject({ items: 2 });
+    expect(Number(nested.items[0].ciphertext_size)).toBe(9);
+    expect(nested.items[1]).toMatchObject({ kind: 'file', version_id: expect.any(String) });
+
+    for (const sort of ['path', 'modified']) {
+      const all = (await list(`delimiter=%2F&sort=${sort}`)).items.map(label);
+      const walked: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 10; guard += 1) {
+        const pageBody = (await list(
+          `delimiter=%2F&sort=${sort}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        )) as { items: { kind: string; path: string }[]; nextCursor: string | null };
+        expect(pageBody.items).toHaveLength(1);
+        walked.push(label(pageBody.items[0]!));
+        cursor = pageBody.nextCursor;
+        if (!cursor) break;
+      }
+      expect(walked).toEqual(all);
+      expect(new Set(walked).size).toBe(5);
+    }
+    // newest first: /a.md (01-07), /reports file (01-06), /reports folder (01-05), /写真 (01-02), /.agent-drive (01-01)
+    expect((await list('delimiter=%2F&sort=modified')).items.map(label)).toEqual([
+      'file:/a.md',
+      'file:/reports',
+      'folder:/reports',
+      'folder:/写真',
+      'folder:/.agent-drive',
+    ]);
+    // A cursor from the path sort is rejected by the modified sort.
+    const pathCursor = (await list('delimiter=%2F&limit=1')).nextCursor;
+    const wrong = await request(
+      `/drives/${f.driveId}/list?delimiter=%2F&sort=modified&cursor=${encodeURIComponent(pathCursor)}`,
+      f.token,
+    );
+    expect(wrong.status).toBe(400);
+
+    // Filters apply before grouping.
+    const mine = await list(`delimiter=%2F&agentId=${other}`);
+    expect(mine.items.map(label)).toEqual(['folder:/reports']);
+    expect(mine.items[0]).toMatchObject({ items: 1 });
+    expect(Number(mine.items[0].ciphertext_size)).toBe(5);
+  });
+
+  it('list sort=modified without delimiter is newest first and cursor-stable; plain list is unchanged', async () => {
+    const f = await fixture('mod-list', 'mod-agent', 'mod-drive', ['read', 'write']);
+    for (const p of ['/m1.md', '/m2.md', '/m3.md'])
+      await uploadCommit(f.token, f.driveId, p, Buffer.from(p));
+    for (const [i, p] of ['/m2.md', '/m3.md', '/m1.md'].entries())
+      await pool.query(
+        `UPDATE versions SET created_at = $2::timestamptz
+          WHERE id = (SELECT current_version_id FROM files WHERE drive_id=$1 AND path=$3)`,
+        [f.driveId, `2026-02-0${i + 1}T00:00:00Z`, p],
+      );
+    const get = async (query: string) =>
+      json(await request(`/drives/${f.driveId}/list?${query}`, f.token));
+    const first = await get('sort=modified&limit=2');
+    expect(first.items.map((r: { path: string }) => r.path)).toEqual(['/m1.md', '/m3.md']);
+    expect(first.items[0]).not.toHaveProperty('kind');
+    expect(first.items[0]).not.toHaveProperty('cursor_created_at');
+    const second = await get(
+      `sort=modified&limit=2&cursor=${encodeURIComponent(first.nextCursor)}`,
+    );
+    expect(second.items.map((r: { path: string }) => r.path)).toEqual(['/m2.md']);
+    expect(second.nextCursor).toBeNull();
+    // Default response: path order, no new fields.
+    const plain = await get('');
+    expect(plain.items.map((r: { path: string }) => r.path)).toEqual([
+      '/m1.md',
+      '/m2.md',
+      '/m3.md',
+    ]);
+    expect(Object.keys(plain.items[0]).sort()).toEqual(
+      [
+        'agent_id',
+        'ciphertext_size',
+        'created_at',
+        'description',
+        'id',
+        'machine_id',
+        'path',
+        'tags',
+        'user_id',
+        'version_id',
+      ].sort(),
+    );
+    expect(Object.keys(plain).sort()).toEqual(['items', 'nextCursor']);
+    // A path cursor is rejected under sort=modified.
+    const pathPage = await get('limit=1');
+    const rejected = await request(
+      `/drives/${f.driveId}/list?sort=modified&cursor=${encodeURIComponent(pathPage.nextCursor)}`,
+      f.token,
+    );
+    expect(rejected.status).toBe(400);
+    for (const bad of ['delimiter=x', 'sort=size', 'delimiter=%2F%2F']) {
+      expect((await request(`/drives/${f.driveId}/list?${bad}`, f.token)).status).toBe(400);
+    }
+  });
+
+  describe('list cursors and default response', () => {
+    async function seedRow(
+      driveId: string,
+      agentId: string,
+      path: string,
+      createdAt = '2026-03-01T00:00:00Z',
+      ids: { file?: string; version?: string } = {},
+    ) {
+      const file = ids.file ?? randomUUID();
+      const version = ids.version ?? randomUUID();
+      await pool.query('INSERT INTO files (id,drive_id,path) VALUES ($1,$2,$3)', [
+        file,
+        driveId,
+        path,
+      ]);
+      await pool.query(
+        `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id,created_at)
+         VALUES ($1,$2,$3,$4,7,'k',$5,$6)`,
+        [version, file, driveId, `objects/seed/${version}`, agentId, createdAt],
+      );
+      await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [file, version]);
+    }
+    const walk = async (
+      f: { driveId: string; token: string },
+      query: string,
+      limit = 1,
+    ): Promise<string[]> => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 50; guard += 1) {
+        const res = await request(
+          `/drives/${f.driveId}/list?${query}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+          f.token,
+        );
+        expect(res.status).toBe(200);
+        const body = (await json(res)) as {
+          items: { kind?: string; path: string }[];
+          nextCursor: string | null;
+        };
+        for (const item of body.items) seen.push(`${item.kind ?? 'file'}:${item.path}`);
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+      return seen;
+    };
+
+    it('pages through maximum-length ASCII and multi-byte paths without losing rows', async () => {
+      const f = await fixture('cur-long', 'cur-agent', 'cur-drive', ['read']);
+      const ascii = `/${'a'.repeat(1023)}`;
+      const folderAscii = `/${'b'.repeat(500)}/${'c'.repeat(500)}.md`;
+      const unicode = `/${'写'.repeat(1023)}`;
+      const unicodeFolder = `/${'é'.repeat(500)}/${'图'.repeat(400)}.md`;
+      const paths = [ascii, folderAscii, unicode, unicodeFolder, '/small.md'];
+      for (const [i, path] of paths.entries())
+        await seedRow(f.driveId, f.agentId, path, `2026-03-0${i + 1}T00:00:00Z`);
+      const expected = (await walk(f, 'delimiter=%2F', 100)).sort();
+      expect(expected).toHaveLength(5);
+      for (const sort of ['path', 'modified']) {
+        const got = await walk(f, `delimiter=%2F&sort=${sort}`);
+        expect([...got].sort()).toEqual(expected);
+        expect(new Set(got).size).toBe(5);
+      }
+    });
+
+    it('rejects child cursors reused for another folder, another drive or another sort', async () => {
+      const a = await fixture('cur-bind-a', 'cur-agent', 'cur-drive', ['read']);
+      const b = await fixture('cur-bind-b', 'cur-agent', 'cur-drive', ['read']);
+      for (const f of [a, b])
+        for (const path of ['/x/1.md', '/x/2.md', '/y/1.md', '/y/2.md'])
+          await seedRow(f.driveId, f.agentId, path);
+      const first = await json(
+        await request(`/drives/${a.driveId}/list?delimiter=%2F&limit=1`, a.token),
+      );
+      const c = encodeURIComponent(first.nextCursor);
+      expect(
+        (await request(`/drives/${a.driveId}/list?delimiter=%2F&limit=1&cursor=${c}`, a.token))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await request(
+            `/drives/${a.driveId}/list?prefix=%2Fy&delimiter=%2F&limit=1&cursor=${c}`,
+            a.token,
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (await request(`/drives/${b.driveId}/list?delimiter=%2F&limit=1&cursor=${c}`, b.token))
+          .status,
+      ).toBe(400);
+    });
+
+    it('rejects impossible calendar timestamps in cursors with 400', async () => {
+      const f = await fixture('cur-date', 'cur-agent', 'cur-drive', ['read']);
+      const bad = encodeCursor({
+        value: '2026-02-31T00:00:00.000000Z',
+        id: '8fc84b3f-81b5-48b8-b22d-21f14859d0e3',
+      });
+      const res = await request(
+        `/drives/${f.driveId}/list?sort=modified&cursor=${encodeURIComponent(bad)}`,
+        f.token,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('returns the default list response byte for byte, and pages ties on created_at', async () => {
+      const f = await fixture('cur-bytes', 'cur-agent', 'cur-drive', ['read']);
+      const fileId = '11111111-1111-4111-8111-111111111111';
+      const versionId = '22222222-2222-4222-8222-222222222222';
+      await seedRow(f.driveId, f.agentId, '/fixed.md', '2026-03-01T00:00:00Z', {
+        file: fileId,
+        version: versionId,
+      });
+      const text = await (await request(`/drives/${f.driveId}/list`, f.token)).text();
+      expect(text).toBe(
+        `{"items":[{"id":"${fileId}","path":"/fixed.md","version_id":"${versionId}","ciphertext_size":"7","agent_id":"${f.agentId}","machine_id":null,"user_id":null,"tags":[],"description":null,"created_at":"2026-03-01T00:00:00.000Z"}],"nextCursor":null}`,
+      );
+      for (const n of ['t1', 't2', 't3', 't4', 't5'])
+        await seedRow(f.driveId, f.agentId, `/${n}.md`, '2026-04-01T00:00:00Z');
+      const flat = await walk(f, 'sort=modified', 2);
+      expect(new Set(flat).size).toBe(6);
+      expect(flat.at(-1)).toBe('file:/fixed.md');
+      const kids = await walk(f, 'sort=modified&delimiter=%2F', 2);
+      expect(new Set(kids).size).toBe(6);
+    });
   });
 
   it('resumes recent from latestCursor with author names; the seq cursor is authoritative and never skips a late-committing event', async () => {

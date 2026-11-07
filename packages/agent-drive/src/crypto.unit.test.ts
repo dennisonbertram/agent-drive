@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CHUNK_SIZE,
   decryptFile,
+  encryptedSize,
+  plaintextSize,
   decryptWithFileKey,
   encryptFile,
   generateDriveKey,
@@ -99,5 +101,18 @@ describe('permanent encryption format regression guards', () => {
     await expect(decryptWithFileKey(second.ciphertext, firstKey)).rejects.toMatchObject({
       code: 'decryption_failed',
     });
+  });
+});
+
+describe('plaintextSize', () => {
+  it.each([0, 1, CHUNK_SIZE - 1, CHUNK_SIZE, CHUNK_SIZE + 1, 3 * CHUNK_SIZE, 3 * CHUNK_SIZE + 7])(
+    'inverts encryptedSize for %i bytes',
+    (size) => {
+      expect(plaintextSize(encryptedSize(size))).toBe(size);
+    },
+  );
+
+  it('rejects sizes smaller than an empty file', () => {
+    expect(() => plaintextSize(40)).toThrow();
   });
 });

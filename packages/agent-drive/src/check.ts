@@ -7,6 +7,9 @@ import { AgentDriveApiError, type AgentDriveClient } from './client.js';
 export const SCOPE_HINT =
   'Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.';
 
+const DELEGATE_HINT =
+  'Run `agent-drive login` again; on the approval page, tick "Let this agent add other agents to its drives" (under "Optional") before approving.';
+
 /** What a conflict loser should do next; shared by the CLI and the MCP `hint`. */
 export function conflictHint(error: AgentDriveApiError) {
   if (error.code !== 'conflict') return undefined;
@@ -24,7 +27,11 @@ export function apiErrorLines(error: AgentDriveApiError) {
   return [
     error.message,
     conflictHint(error) ?? '',
-    error.code === 'permission_denied' && /scope/iu.test(error.message) ? SCOPE_HINT : '',
+    error.code === 'permission_denied' && /scope/iu.test(error.message)
+      ? /delegate"? scope/iu.test(error.message)
+        ? DELEGATE_HINT
+        : SCOPE_HINT
+      : '',
     error.upgradeUrl ? `Upgrade: ${error.upgradeUrl}` : '',
     error.retryAfter === undefined ? '' : `Retry after: ${error.retryAfter} seconds`,
   ].filter(Boolean);
