@@ -297,7 +297,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await expect(page.locator('.toast')).toContainText('Restored “artifact.bin”.');
     await page.getByRole('button', { name: 'Usage', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Storage by drive' })).toBeVisible();
-    await expect(page.getByText('1 live files · 4 stored versions')).toBeVisible();
+    await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
