@@ -150,16 +150,26 @@ describe('assertDelegation', () => {
     expect(listDelimiter(null)).toBe(false);
     expect(listDelimiter('/')).toBe(true);
     expect(() => listDelimiter('x')).toThrow('delimiter must be /.');
-    const byPath = encodeCursor({ value: '/a/', id: '/a/' });
-    expect(decodeCursor(byPath, 'child', 'path')).toEqual({ value: '/a/', id: '/a/' });
+    const byPath = encodeCursor({ k: '/a/', b: 'abcdefghijklmnop' });
+    expect(decodeCursor(byPath, 'child', 'path')).toEqual({
+      value: '/a/',
+      id: '/a/',
+      bind: 'abcdefghijklmnop',
+    });
     expect(() => decodeCursor(byPath, 'child', 'modified')).toThrow('cursor is invalid.');
-    const byTime = encodeCursor({ value: '2026-01-05T00:00:00.000000Z', id: '/a' });
+    const byTime = encodeCursor({
+      k: '/a',
+      t: '2026-01-05T00:00:00.000000Z',
+      b: 'abcdefghijklmnop',
+    });
     expect(decodeCursor(byTime, 'child', 'modified')?.id).toBe('/a');
     expect(() => decodeCursor(byTime, 'child', 'path')).toThrow('cursor is invalid.');
-    expect(() => decodeCursor(encodeCursor({ value: 'a', id: 'a' }), 'child')).toThrow(ApiError);
+    expect(() => decodeCursor(encodeCursor({ k: 'a', b: 'abcdefghijklmnop' }), 'child')).toThrow(
+      ApiError,
+    );
     expect(() =>
       decodeCursor(
-        encodeCursor({ value: '2026-01-05T00:00:00.000000Z', id: 'x' }),
+        encodeCursor({ k: 'x', t: '2026-01-05T00:00:00.000000Z', b: 'abcdefghijklmnop' }),
         'child',
         'modified',
       ),

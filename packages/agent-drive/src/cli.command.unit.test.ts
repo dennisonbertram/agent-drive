@@ -99,6 +99,18 @@ describe('drive default at the command level', () => {
     const plain = await cli(['ls'], one, () => ({ items: [], nextCursor: null }));
     expect(plain.queries[0]).not.toContain('delimiter');
     expect(plain.queries[0]).not.toContain('sort=');
+    const flat = await cli(['ls', '--sort', 'modified', '--prefix', '/a'], one, () => ({
+      items: [],
+      nextCursor: null,
+    }));
+    expect(flat.queries[0]).toContain('sort=modified');
+    expect(flat.queries[0]).toContain('prefix=%2Fa');
+    expect(flat.queries[0]).not.toContain('delimiter');
+    const explicitPath = await cli(['ls', '--sort', 'path', '--prefix', '/a'], one, () => ({
+      items: [],
+      nextCursor: null,
+    }));
+    expect(explicitPath.queries[0]).toBe('?prefix=%2Fa');
     const both = await cli(['ls', '--folder', '/a', '--prefix', '/b'], one);
     expect(both.err).toContain('either --folder or --prefix');
     const bad = await cli(['ls', '--sort', 'size'], one);

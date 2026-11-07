@@ -5,6 +5,8 @@ export const MAX_BODY_BYTES = 256 * 1024;
 export const MAX_QUERY_LENGTH = 16 * 1024;
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
 export const MAX_PAGE_SIZE = 100;
+// A folder cursor holds one path of up to 1,024 characters (3 bytes each in UTF-8), base64url.
+export const MAX_CHILD_CURSOR = 6144;
 
 export function secureTransportAllowed(protocol: string, environment: string | undefined) {
   return environment !== 'production' || protocol === 'https:';
@@ -187,7 +189,8 @@ export function page(url: URL) {
     throw new ApiError('validation_error', `limit must be between 1 and ${MAX_PAGE_SIZE}.`);
   }
   const cursor = url.searchParams.get('cursor');
-  if (cursor && cursor.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
+  if (cursor && cursor.length > MAX_CHILD_CURSOR)
+    throw new ApiError('validation_error', 'cursor is too long.');
   return { limit: parsed, cursor: cursor ?? undefined };
 }
 
@@ -201,9 +204,10 @@ export function decodeCursor(
   value: string | undefined,
   kind: 'name' | 'path' | 'timestamp' | 'share' | 'seq' | 'child',
   childSort: ListSort = 'path',
-): CursorPayload | undefined {
+): (CursorPayload & { bind?: string }) | undefined {
   if (!value) return undefined;
-  if (value.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
+  if (value.length > (kind === 'child' ? MAX_CHILD_CURSOR : 2048))
+    throw new ApiError('validation_error', 'cursor is too long.');
   try {
     if (kind === 'child') return decodeChildCursor(value, childSort);
     const decoded = Buffer.from(value, 'base64url');
@@ -254,10 +258,18 @@ export function listDelimiter(value: string | null): boolean {
   throw new ApiError('validation_error', 'delimiter must be /.');
 }
 
-// Folder-listing cursor: id is the child key (path, folders end in "/"); value is the key for the
-// path sort or the row's created_at::text for the modified sort. The two never overlap, so a
-// cursor from the other sort fails.
-function decodeChildCursor(value: string, sort: ListSort): CursorPayload {
+// Strict microsecond ISO timestamp as written by the list queries; impossible dates fail.
+export function isoMicros(value: string): boolean {
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u.test(value)) return false;
+  const ms = `${value.slice(0, 23)}Z`;
+  const time = Date.parse(ms);
+  return !Number.isNaN(time) && new Date(time).toISOString() === ms;
+}
+
+// Folder-listing cursor {k: child key, t?: created_at (modified sort), b: binding hash of drive,
+// folder and sort}. The key is stored once. A cursor from the other sort fails here; one from
+// another drive or folder fails the binding check in the handler.
+function decodeChildCursor(value: string, sort: ListSort) {
   const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
   const record = parsed as Record<string, unknown>;
   if (
@@ -265,21 +277,21 @@ function decodeChildCursor(value: string, sort: ListSort): CursorPayload {
     !parsed ||
     typeof parsed !== 'object' ||
     Array.isArray(parsed) ||
-    Object.keys(record).length !== 2 ||
-    typeof record.value !== 'string' ||
-    typeof record.id !== 'string' ||
-    !record.id.startsWith('/') ||
-    record.id.length > 1025 ||
-    record.id.includes('\u0000') ||
-    record.value.length === 0 ||
-    record.value.length > 1025 ||
-    (sort === 'path'
-      ? record.value !== record.id
-      : !/^\d{4}-\d\d-\d\d[ T][\d:.]+Z$/u.test(record.value) ||
-        Number.isNaN(Date.parse(record.value)))
+    Object.keys(record).length !== (sort === 'modified' ? 3 : 2) ||
+    typeof record.k !== 'string' ||
+    !record.k.startsWith('/') ||
+    record.k.length > 1025 ||
+    record.k.includes('\u0000') ||
+    typeof record.b !== 'string' ||
+    !/^[A-Za-z0-9_-]{16}$/u.test(record.b) ||
+    (sort === 'modified' && (typeof record.t !== 'string' || !isoMicros(record.t)))
   )
     throw new Error('invalid cursor');
-  return { value: record.value, id: record.id };
+  return {
+    value: sort === 'modified' ? (record.t as string) : record.k,
+    id: record.k,
+    bind: record.b,
+  };
 }
 
 export function escapedLike(value: string): string {

@@ -269,11 +269,12 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
           ...(args.machine ? { machine: args.machine } : {}),
           ...(args.user ? { user: args.user } : {}),
         };
-        if (args.folder !== undefined || args.sort !== undefined) {
+        if (args.folder !== undefined || args.sort === 'modified') {
           if (args.folder !== undefined && args.prefix !== undefined)
             throw new McpInputError('Use either folder or prefix, not both.');
           return client.browse(drive(args.driveId), {
             ...(args.folder !== undefined ? { folder: args.folder } : {}),
+            ...(args.prefix !== undefined ? { prefix: args.prefix } : {}),
             ...(args.sort ? { sort: args.sort } : {}),
             ...(args.limit ? { limit: args.limit } : {}),
             ...(args.cursor ? { cursor: args.cursor } : {}),

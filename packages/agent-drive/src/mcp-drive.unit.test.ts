@@ -72,6 +72,16 @@ describe('MCP driveId default', () => {
     expect(folder.seen).toEqual([
       'd1 {"folder":"/reports","sort":"modified","limit":5,"filters":{}}',
     ]);
+    const flat = await callList((id) => resolveDriveId(id, one, api), {
+      sort: 'modified',
+      prefix: '/a',
+    });
+    expect(flat.seen).toEqual(['d1 {"prefix":"/a","sort":"modified","filters":{}}']);
+    const explicitPath = await callList((id) => resolveDriveId(id, one, api), {
+      sort: 'path',
+      prefix: '/a',
+    });
+    expect(explicitPath.seen).toEqual(['d1']);
     const both = await callList((id) => resolveDriveId(id, one, api), {
       folder: '/a',
       prefix: '/b',

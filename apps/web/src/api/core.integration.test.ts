@@ -9,7 +9,7 @@ import { PLANS } from '../billing/policy';
 import { getPool } from '../db/client';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
-import { MAX_QUERY_LENGTH } from './validation';
+import { encodeCursor, MAX_QUERY_LENGTH } from './validation';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import type { RecentFileEvent } from './contract';
 import {
@@ -622,6 +622,133 @@ describe('Phase 1 core API', () => {
     for (const bad of ['delimiter=x', 'sort=size', 'delimiter=%2F%2F']) {
       expect((await request(`/drives/${f.driveId}/list?${bad}`, f.token)).status).toBe(400);
     }
+  });
+
+  describe('list cursors and default response', () => {
+    async function seedRow(
+      driveId: string,
+      agentId: string,
+      path: string,
+      createdAt = '2026-03-01T00:00:00Z',
+      ids: { file?: string; version?: string } = {},
+    ) {
+      const file = ids.file ?? randomUUID();
+      const version = ids.version ?? randomUUID();
+      await pool.query('INSERT INTO files (id,drive_id,path) VALUES ($1,$2,$3)', [
+        file,
+        driveId,
+        path,
+      ]);
+      await pool.query(
+        `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id,created_at)
+         VALUES ($1,$2,$3,$4,7,'k',$5,$6)`,
+        [version, file, driveId, `objects/seed/${version}`, agentId, createdAt],
+      );
+      await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [file, version]);
+    }
+    const walk = async (
+      f: { driveId: string; token: string },
+      query: string,
+      limit = 1,
+    ): Promise<string[]> => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 50; guard += 1) {
+        const res = await request(
+          `/drives/${f.driveId}/list?${query}&limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+          f.token,
+        );
+        expect(res.status).toBe(200);
+        const body = (await json(res)) as {
+          items: { kind?: string; path: string }[];
+          nextCursor: string | null;
+        };
+        for (const item of body.items) seen.push(`${item.kind ?? 'file'}:${item.path}`);
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+      return seen;
+    };
+
+    it('pages through maximum-length ASCII and multi-byte paths without losing rows', async () => {
+      const f = await fixture('cur-long', 'cur-agent', 'cur-drive', ['read']);
+      const ascii = `/${'a'.repeat(1023)}`;
+      const folderAscii = `/${'b'.repeat(500)}/${'c'.repeat(500)}.md`;
+      const unicode = `/${'写'.repeat(1023)}`;
+      const unicodeFolder = `/${'é'.repeat(500)}/${'图'.repeat(400)}.md`;
+      const paths = [ascii, folderAscii, unicode, unicodeFolder, '/small.md'];
+      for (const [i, path] of paths.entries())
+        await seedRow(f.driveId, f.agentId, path, `2026-03-0${i + 1}T00:00:00Z`);
+      const expected = (await walk(f, 'delimiter=%2F', 100)).sort();
+      expect(expected).toHaveLength(5);
+      for (const sort of ['path', 'modified']) {
+        const got = await walk(f, `delimiter=%2F&sort=${sort}`);
+        expect([...got].sort()).toEqual(expected);
+        expect(new Set(got).size).toBe(5);
+      }
+    });
+
+    it('rejects child cursors reused for another folder, another drive or another sort', async () => {
+      const a = await fixture('cur-bind-a', 'cur-agent', 'cur-drive', ['read']);
+      const b = await fixture('cur-bind-b', 'cur-agent', 'cur-drive', ['read']);
+      for (const f of [a, b])
+        for (const path of ['/x/1.md', '/x/2.md', '/y/1.md', '/y/2.md'])
+          await seedRow(f.driveId, f.agentId, path);
+      const first = await json(
+        await request(`/drives/${a.driveId}/list?delimiter=%2F&limit=1`, a.token),
+      );
+      const c = encodeURIComponent(first.nextCursor);
+      expect(
+        (await request(`/drives/${a.driveId}/list?delimiter=%2F&limit=1&cursor=${c}`, a.token))
+          .status,
+      ).toBe(200);
+      expect(
+        (
+          await request(
+            `/drives/${a.driveId}/list?prefix=%2Fy&delimiter=%2F&limit=1&cursor=${c}`,
+            a.token,
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        (await request(`/drives/${b.driveId}/list?delimiter=%2F&limit=1&cursor=${c}`, b.token))
+          .status,
+      ).toBe(400);
+    });
+
+    it('rejects impossible calendar timestamps in cursors with 400', async () => {
+      const f = await fixture('cur-date', 'cur-agent', 'cur-drive', ['read']);
+      const bad = encodeCursor({
+        value: '2026-02-31T00:00:00.000000Z',
+        id: '8fc84b3f-81b5-48b8-b22d-21f14859d0e3',
+      });
+      const res = await request(
+        `/drives/${f.driveId}/list?sort=modified&cursor=${encodeURIComponent(bad)}`,
+        f.token,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('returns the default list response byte for byte, and pages ties on created_at', async () => {
+      const f = await fixture('cur-bytes', 'cur-agent', 'cur-drive', ['read']);
+      const fileId = '11111111-1111-4111-8111-111111111111';
+      const versionId = '22222222-2222-4222-8222-222222222222';
+      await seedRow(f.driveId, f.agentId, '/fixed.md', '2026-03-01T00:00:00Z', {
+        file: fileId,
+        version: versionId,
+      });
+      const text = await (await request(`/drives/${f.driveId}/list`, f.token)).text();
+      expect(text).toBe(
+        `{"items":[{"id":"${fileId}","path":"/fixed.md","version_id":"${versionId}","ciphertext_size":"7","agent_id":"${f.agentId}","machine_id":null,"user_id":null,"tags":[],"description":null,"created_at":"2026-03-01T00:00:00.000Z"}],"nextCursor":null}`,
+      );
+      for (const n of ['t1', 't2', 't3', 't4', 't5'])
+        await seedRow(f.driveId, f.agentId, `/${n}.md`, '2026-04-01T00:00:00Z');
+      const flat = await walk(f, 'sort=modified', 2);
+      expect(new Set(flat).size).toBe(6);
+      expect(flat.at(-1)).toBe('file:/fixed.md');
+      const kids = await walk(f, 'sort=modified&delimiter=%2F', 2);
+      expect(new Set(kids).size).toBe(6);
+    });
   });
 
   it('resumes recent from latestCursor with author names; the seq cursor is authoritative and never skips a late-committing event', async () => {

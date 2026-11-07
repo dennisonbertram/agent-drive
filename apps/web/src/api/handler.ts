@@ -13,6 +13,7 @@ import {
   MAX_QUERY_LENGTH,
   optionalString,
   page,
+  isoMicros,
   listDelimiter,
   listSort,
   prefix,
@@ -417,7 +418,7 @@ const isoText = (column: string) =>
 // Flat sort=modified reuses the 'timestamp' cursor; a path cursor must not reach the SQL cast.
 function decodeModifiedCursor(cursor: string | undefined) {
   const decoded = decodeCursor(cursor, 'timestamp');
-  if (decoded && !/^\d{4}-\d\d-\d\d[ T]/u.test(decoded.value))
+  if (decoded && !isoMicros(decoded.value))
     throw new ApiError('validation_error', 'cursor is invalid.');
   return decoded;
 }
@@ -435,7 +436,13 @@ async function listChildren(
   cursor: string | undefined,
 ) {
   const base = p || '/';
+  const bind = createHash('sha256')
+    .update(`${driveId}\0${base}\0${sort}`)
+    .digest('base64url')
+    .slice(0, 16);
   const decoded = decodeCursor(cursor, 'child', sort);
+  if (decoded && decoded.bind !== bind)
+    throw new ApiError('validation_error', 'cursor is invalid.');
   const params: unknown[] = [driveId, `${escapeLikeLiteral(base)}%`, base];
   const filters = appendFileFilters(url, params, true);
   let outer = '';
@@ -500,10 +507,11 @@ async function listChildren(
     ),
     nextCursor:
       rows.rows.length > limit
-        ? encodeCursor({
-            value: sort === 'modified' ? last.cursor_created_at : last.key,
-            id: last.key,
-          })
+        ? encodeCursor(
+            sort === 'modified'
+              ? { k: last.key, t: last.cursor_created_at, b: bind }
+              : { k: last.key, b: bind },
+          )
         : null,
   };
 }

@@ -434,6 +434,7 @@ export class AgentDriveClient {
     driveId: string,
     options: {
       folder?: string;
+      prefix?: string;
       sort?: 'path' | 'modified';
       limit?: number;
       cursor?: string;
@@ -443,6 +444,7 @@ export class AgentDriveClient {
     const page = await this.request<Page<FileEntryWire | FolderEntryWire>>(
       this.pagePath(`drives/${encode(driveId)}/list`, options.limit, options.cursor, {
         ...(options.folder ? { prefix: options.folder, delimiter: '/' } : {}),
+        ...(!options.folder && options.prefix ? { prefix: options.prefix } : {}),
         ...(options.sort ? { sort: options.sort } : {}),
         ...options.filters,
       }),

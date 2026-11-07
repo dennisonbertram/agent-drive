@@ -424,14 +424,19 @@ async function run(command: string, raw: string[]) {
     if (!args.positionals[1]) throw new Error('A key ID is required.');
     return output(await client.revokeKey(args.positionals[1]));
   }
-  if (command === 'ls' && (args.values.folder !== undefined || args.values.sort !== undefined)) {
+  if (
+    command === 'ls' &&
+    args.values.sort !== undefined &&
+    !['path', 'modified'].includes(args.values.sort)
+  )
+    throw new Error('--sort must be path or modified.');
+  if (command === 'ls' && (args.values.folder !== undefined || args.values.sort === 'modified')) {
     if (args.values.folder !== undefined && args.values.prefix !== undefined)
       throw new Error('Use either --folder or --prefix, not both.');
-    if (args.values.sort !== undefined && !['path', 'modified'].includes(args.values.sort))
-      throw new Error('--sort must be path or modified.');
     return output(
       await client.browse(requiredDrive(args), {
         ...(args.values.folder !== undefined ? { folder: args.values.folder } : {}),
+        ...(args.values.prefix !== undefined ? { prefix: args.values.prefix } : {}),
         ...(args.values.sort ? { sort: args.values.sort as 'path' | 'modified' } : {}),
         ...(args.values.limit !== undefined ? { limit: Number(args.values.limit) } : {}),
         ...(args.values.cursor ? { cursor: args.values.cursor } : {}),
