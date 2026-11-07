@@ -427,3 +427,41 @@
     margin: 0 0 8px;
   }
 }
+
+/* one-line summary; the key/value table sits in a closed <details> */
+.connect-shell p.connect-summary {
+  margin: 0 0 12px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.connect-details summary {
+  justify-content: space-between;
+  flex-direction: row-reverse;
+}
+.connect-details summary::before {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.25em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+}
+.connect-details[open] summary::before {
+  content: '';
+  transform: rotate(45deg);
+}
+
+.connect-link {
+  display: block;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--ink-2, #3b3a37);
+  text-decoration: underline;
+  cursor: pointer;
+}
