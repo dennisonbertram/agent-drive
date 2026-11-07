@@ -1751,6 +1751,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
   let copiedKey: string | undefined;
   let result: Row;
+  let undeleted = false;
   try {
     result = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
@@ -1767,6 +1768,24 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       );
       const row = source.rows[0] as Row | undefined;
       if (!row) throw new ApiError('not_found', 'Source file or version not found.');
+      if (restore && row.id === row.current_version_id) {
+        // Restoring the current version is an undelete: no copy, no new version, no quota check.
+        if (row.deleted_at) {
+          await client.query('UPDATE files SET deleted_at = NULL WHERE id = $1', [row.file_id]);
+          await client.query(
+            `INSERT INTO file_events
+              (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
+             VALUES ($1, $2, 'restore', $3, $4, $5, $6, $7)`,
+            [driveId, row.file_id, sourcePath, row.id, auth.agentId, machine, userId],
+          );
+        }
+        const current = await client.query(
+          'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
+          [row.id],
+        );
+        undeleted = true;
+        return current.rows[0] as Row;
+      }
       await enforceWriteBudget(client, auth.accountId, { bytes: BigInt(row.ciphertext_size) });
       const existing = await client.query(
         'SELECT id FROM files WHERE drive_id = $1 AND path = $2',
@@ -1841,7 +1860,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
     if (copiedKey) await deleteObject(copiedKey).catch(() => undefined);
     throw error;
   }
-  return response({ version: rowVersion(result) }, 201);
+  return response({ version: rowVersion(result) }, undeleted ? 200 : 201);
 }
 
 type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
