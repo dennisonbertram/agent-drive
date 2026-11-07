@@ -41,7 +41,7 @@ export function BrandMark({
   return href === null ? (
     <span className={cls}>{body}</span>
   ) : (
-    <Link href={href} className={cls}>
+    <Link href={href} className={cls} aria-label="Agent Drive">
       {body}
     </Link>
   );

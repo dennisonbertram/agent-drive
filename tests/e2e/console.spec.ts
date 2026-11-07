@@ -2463,6 +2463,7 @@ test('console polish: phone search row, account header, Drive ID, Restored toast
     const toast = page.locator('.toast').first();
     await toast.getByRole('button', { name: 'Undo' }).click();
     await expect(toast).toContainText('Restored', { timeout: 15_000 });
+    await expect(page.locator('[data-path="/a.md"]')).toBeVisible();
     await expect(toast.getByRole('button', { name: 'Show file' })).toHaveCount(0);
     // N3: account header fits one short row on phones.
     await page.setViewportSize({ width: 390, height: 844 });
@@ -2470,6 +2471,8 @@ test('console polish: phone search row, account header, Drive ID, Restored toast
     const header = page.locator('.billing-header');
     await expect(header).toBeVisible({ timeout: 30_000 });
     expect((await header.boundingBox())!.height).toBeLessThanOrEqual(64);
+    for (const name of ['Agent Drive', 'Billing & limits', 'Activity & deletion'])
+      await expect(header.getByRole('link', { name, exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       390,
     );
