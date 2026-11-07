@@ -675,3 +675,93 @@ dialog .check-label input {
     min-height: 48px;
   }
 }
+
+/* ---- preview dialog: header and footer fixed, body scrolls ---- */
+dialog.preview[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: min(960px, 100vw - 64px);
+  max-width: none;
+  height: min(80vh, 760px);
+  max-height: none;
+}
+dialog.preview > :not(.dialog-heading) {
+  margin: 0;
+}
+dialog.preview > .dialog-heading + * {
+  margin-top: 0;
+}
+.preview-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.preview-body:focus-visible {
+  outline: 2px solid var(--ink, #111);
+  outline-offset: -2px;
+}
+.preview-text {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink, #111);
+  font: 13px/1.5 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.preview-note {
+  margin: 0;
+  color: var(--muted, #6b6963);
+  min-height: 120px;
+}
+.preview-image {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.preview-pdf {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--line, #ddd);
+}
+.preview-newtab {
+  font-size: 13px;
+}
+.preview-footer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line-strong, #111);
+}
+@media (max-width: 760px) {
+  dialog.preview[open] {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
+  }
+  .preview-body {
+    padding: 16px;
+  }
+  .preview-pdf {
+    min-height: 60dvh;
+  }
+  .preview-footer {
+    padding: 12px 16px;
+  }
+  .preview-footer .button {
+    min-height: 44px;
+  }
+}
