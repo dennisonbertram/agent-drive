@@ -89,6 +89,14 @@ const quotaControlledActions = new Set([
   'drive.restore',
   'share.create',
 ]);
+// Reads the console user makes just by looking at a page. GET audit?consoleReads=0 hides them.
+const consoleReadActions = [
+  'drive.get',
+  'drive.versions',
+  'drive.recent',
+  'drive.search',
+  'drive.trash',
+];
 
 function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex');
@@ -299,6 +307,16 @@ function actionFor(method: string, parts: string[], bearer = false) {
   if (parts.length === 1 && parts[0] === 'session' && method === 'GET')
     return 'console.session.read';
   if (parts.length === 1 && parts[0] === 'usage' && method === 'GET') return 'console.usage.read';
+  if (parts[0] === 'billing') {
+    if (parts.length === 1 && method === 'GET') return 'billing.read';
+    if (parts.length === 2 && parts[1] === 'statements' && method === 'GET')
+      return 'billing.statements.list';
+    if (parts.length === 2 && parts[1] === 'settings' && method === 'PATCH')
+      return 'billing.settings.update';
+    if (parts.length === 2 && parts[1] === 'checkout' && method === 'POST')
+      return 'billing.checkout';
+    if (parts.length === 2 && parts[1] === 'portal' && method === 'POST') return 'billing.portal';
+  }
   if (parts.length === 1 && parts[0] === 'whoami' && method === 'GET') return 'whoami.read';
   if (parts.length === 1 && parts[0] === 'agents' && method === 'GET') return 'agents.list';
   if (parts.length === 1 && parts[0] === 'agents' && method === 'POST') return 'agents.create';
@@ -722,6 +740,12 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
       params.push(decoded.value, decoded.id);
       clause += ` AND (e.created_at, e.id) < ($2::timestamptz, $3::uuid)`;
     }
+    // ponytail: filter runs after the (account_id, created_at) index; a page can scan many console reads
+    if (url.searchParams.get('consoleReads') === '0') {
+      params.push(consoleReadActions);
+      clause += ` AND NOT (e.user_id IS NOT NULL AND (e.action LIKE '%.list' OR e.action LIKE '%.read'
+        OR e.action = ANY($${params.length}::text[])))`;
+    }
     params.push(limit + 1);
     const rows = await getPool().query(
       `SELECT e.id, e.action, e.outcome, e.http_status, e.error_code, e.created_at,
@@ -1010,6 +1034,12 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
       egressBytes: observedEgressConfigured ? String(row.egress_bytes ?? 0) : null,
     }));
     return response({
+      plan: billing.plan,
+      limits: {
+        storageBytes: billing.limits.storageBytes,
+        operations: billing.limits.operations,
+        drives: billing.limits.drives,
+      },
       drives,
       agents,
       storageBytes: drives.reduce((total, drive) => total + drive.storageBytes, 0),

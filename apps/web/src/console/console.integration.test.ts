@@ -492,4 +492,49 @@ describe('Phase 4 console API', () => {
     ).toBe(400);
     expect((await apiRequest('/billing')).status).toBe(401);
   });
+  it('usage includes plan limits', async () => {
+    const usage = await json(await consoleRequest(ownerUserId, '/usage'));
+    expect(usage.plan).toBe('free');
+    expect(usage.limits.storageBytes).toBe(String(5n * 1024n ** 3n));
+    expect(usage.limits.operations).toBe('1000000');
+    expect(usage.limits.drives).toBe('3');
+  });
+
+  it('audit consoleReads=0 hides the console own reads only', async () => {
+    const created = await json(
+      await consoleRequest(ownerUserId, '/keys', 'POST', {
+        agentId: managedAgentId,
+        label: `audit-${suffix}`,
+        driveIds: [ownerDriveId],
+        scopes: ['read'],
+      }),
+    );
+    await consoleRequest(ownerUserId, '/drives');
+    await consoleRequest(ownerUserId, '/drives', 'POST', { name: `audit-drive-${suffix}` });
+    await apiRequest(`/drives/${ownerDriveId}/list`, created.token);
+    const actions = async (query: string) =>
+      (
+        (await json(await consoleRequest(ownerUserId, `/audit?limit=20${query}`))).items as {
+          action: string;
+          userId: string | null;
+        }[]
+      ).map((row) => `${row.action}:${row.userId ? 'console' : 'agent'}`);
+    const filtered = await actions('&consoleReads=0');
+    expect(filtered).not.toContain('drives.list:console');
+    expect(filtered).toContain('drives.create:console');
+    expect(filtered).toContain('drive.list:agent');
+    const all = await actions('');
+    expect(all).toContain('drives.list:console');
+    expect(all).toContain('drives.create:console');
+    expect(all).toContain('drive.list:agent');
+  });
+
+  it('billing routes are named in the audit log', async () => {
+    expect((await consoleRequest(ownerUserId, '/billing')).status).toBe(200);
+    const row = await pool.query(
+      'SELECT action FROM audit_events WHERE account_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1',
+      [ownerAccountId],
+    );
+    expect(row.rows[0].action).toBe('billing.read');
+  });
 });
