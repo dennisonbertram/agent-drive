@@ -15,6 +15,10 @@ async function callList(
       seen.push(drive);
       return { files: [] };
     },
+    browse: async (drive: string, options: unknown) => {
+      seen.push(`${drive} ${JSON.stringify(options)}`);
+      return { items: [], nextCursor: null };
+    },
   } as unknown as AgentDriveClient;
   const server = createMcpServer(stub, resolve);
   const client = new Client({ name: 'drive-test', version: '1.0.0' });
@@ -56,5 +60,24 @@ describe('MCP driveId default', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain('d1, d2');
     expect(result.content[0]!.text).toContain('driveId');
+  });
+  it('list without folder/sort keeps calling plain list; with them it calls browse', async () => {
+    const plain = await callList((id) => resolveDriveId(id, one, api), { prefix: '/a' });
+    expect(plain.seen).toEqual(['d1']);
+    const folder = await callList((id) => resolveDriveId(id, one, api), {
+      folder: '/reports',
+      sort: 'modified',
+      limit: 5,
+    });
+    expect(folder.seen).toEqual([
+      'd1 {"folder":"/reports","sort":"modified","limit":5,"filters":{}}',
+    ]);
+    const both = await callList((id) => resolveDriveId(id, one, api), {
+      folder: '/a',
+      prefix: '/b',
+    });
+    expect(both.result.isError).toBe(true);
+    const bad = await callList((id) => resolveDriveId(id, one, api), { sort: 'size' });
+    expect(bad.result.isError).toBe(true);
   });
 });

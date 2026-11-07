@@ -7,6 +7,8 @@ import {
   encodeCursor,
   escapeLikeLiteral,
   jsonBody,
+  listDelimiter,
+  listSort,
   MAX_BODY_BYTES,
   secureTransportAllowed,
   withinWritePaths,
@@ -139,5 +141,28 @@ describe('assertDelegation', () => {
       expect((error as ApiError).code).toBe('permission_denied');
       expect((error as ApiError).message).toBe(limit);
     }
+  });
+
+  it('validates list sort, delimiter and child cursors', () => {
+    expect(listSort(null)).toBe('path');
+    expect(listSort('modified')).toBe('modified');
+    expect(() => listSort('size')).toThrow('sort must be path or modified.');
+    expect(listDelimiter(null)).toBe(false);
+    expect(listDelimiter('/')).toBe(true);
+    expect(() => listDelimiter('x')).toThrow('delimiter must be /.');
+    const byPath = encodeCursor({ value: '/a/', id: '/a/' });
+    expect(decodeCursor(byPath, 'child', 'path')).toEqual({ value: '/a/', id: '/a/' });
+    expect(() => decodeCursor(byPath, 'child', 'modified')).toThrow('cursor is invalid.');
+    const byTime = encodeCursor({ value: '2026-01-05T00:00:00.000000Z', id: '/a' });
+    expect(decodeCursor(byTime, 'child', 'modified')?.id).toBe('/a');
+    expect(() => decodeCursor(byTime, 'child', 'path')).toThrow('cursor is invalid.');
+    expect(() => decodeCursor(encodeCursor({ value: 'a', id: 'a' }), 'child')).toThrow(ApiError);
+    expect(() =>
+      decodeCursor(
+        encodeCursor({ value: '2026-01-05T00:00:00.000000Z', id: 'x' }),
+        'child',
+        'modified',
+      ),
+    ).toThrow(ApiError);
   });
 });

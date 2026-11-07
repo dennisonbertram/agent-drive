@@ -199,11 +199,13 @@ export type CursorPayload = { value: string; id: string };
 
 export function decodeCursor(
   value: string | undefined,
-  kind: 'name' | 'path' | 'timestamp' | 'share' | 'seq',
+  kind: 'name' | 'path' | 'timestamp' | 'share' | 'seq' | 'child',
+  childSort: ListSort = 'path',
 ): CursorPayload | undefined {
   if (!value) return undefined;
   if (value.length > 2048) throw new ApiError('validation_error', 'cursor is too long.');
   try {
+    if (kind === 'child') return decodeChildCursor(value, childSort);
     const decoded = Buffer.from(value, 'base64url');
     if (decoded.toString('base64url') !== value) throw new Error('non-canonical cursor');
     const parsed: unknown = JSON.parse(decoded.toString('utf8'));
@@ -236,6 +238,48 @@ export function decodeCursor(
   } catch {
     throw new ApiError('validation_error', 'cursor is invalid.');
   }
+}
+
+export type ListSort = 'path' | 'modified';
+
+export function listSort(value: string | null): ListSort {
+  if (value === null || value === 'path') return 'path';
+  if (value === 'modified') return 'modified';
+  throw new ApiError('validation_error', 'sort must be path or modified.');
+}
+
+export function listDelimiter(value: string | null): boolean {
+  if (value === null) return false;
+  if (value === '/') return true;
+  throw new ApiError('validation_error', 'delimiter must be /.');
+}
+
+// Folder-listing cursor: id is the child key (path, folders end in "/"); value is the key for the
+// path sort or the row's created_at::text for the modified sort. The two never overlap, so a
+// cursor from the other sort fails.
+function decodeChildCursor(value: string, sort: ListSort): CursorPayload {
+  const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+  const record = parsed as Record<string, unknown>;
+  if (
+    Buffer.from(value, 'base64url').toString('base64url') !== value ||
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    Object.keys(record).length !== 2 ||
+    typeof record.value !== 'string' ||
+    typeof record.id !== 'string' ||
+    !record.id.startsWith('/') ||
+    record.id.length > 1025 ||
+    record.id.includes('\u0000') ||
+    record.value.length === 0 ||
+    record.value.length > 1025 ||
+    (sort === 'path'
+      ? record.value !== record.id
+      : !/^\d{4}-\d\d-\d\d[ T][\d:.]+Z$/u.test(record.value) ||
+        Number.isNaN(Date.parse(record.value)))
+  )
+    throw new Error('invalid cursor');
+  return { value: record.value, id: record.id };
 }
 
 export function escapedLike(value: string): string {

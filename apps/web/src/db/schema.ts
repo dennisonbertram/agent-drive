@@ -145,6 +145,10 @@ export const files = pgTable(
   (table) => [
     uniqueIndex('files_drive_path_unique').on(table.driveId, table.path),
     index('files_drive_deleted_path_idx').on(table.driveId, table.deletedAt, table.path),
+    // Folder listings (list?delimiter=/). Optional: queries work without it.
+    index('files_drive_live_path_prefix_idx')
+      .on(table.driveId, sql`${table.path} text_pattern_ops`)
+      .where(sql`${table.deletedAt} IS NULL`),
   ],
 );
 

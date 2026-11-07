@@ -316,6 +316,17 @@ describe('MCP product tools over stdio', () => {
         userId: null,
         createdAt: expect.any(String),
       });
+      const folderListed = await call(mcp.client, 'list', {
+        driveId,
+        folder: '/',
+        sort: 'modified',
+      });
+      expect(folderListed.result.isError).not.toBe(true);
+      expect(
+        (folderListed.value.data as { items: Array<Record<string, unknown>> }).items,
+      ).toContainEqual(
+        expect.objectContaining({ kind: 'folder', path: '/mcp', items: expect.any(Number) }),
+      );
       const invalidOverwrite = await call(mcp.client, 'put', {
         driveId,
         path: '/mcp/marker.txt',
