@@ -728,6 +728,110 @@ describe('Phase 1 core API', () => {
     expect(scopedDrives.items.map((drive: { id: string }) => drive.id)).toContain(driveId);
   });
 
+  it('restoring a trashed file at its current version is an undelete: no copy, no new version, no quota check', async () => {
+    const o = await fixture('undel', 'undel-agent', 'undel-drive', [
+      'read',
+      'write',
+      'delete',
+      'share',
+    ]);
+    const api = (op: string, body: Record<string, unknown>) =>
+      request(`/drives/${o.driveId}/${op}`, o.token, 'POST', body);
+    const counts = async () =>
+      (
+        await pool.query(
+          `SELECT (SELECT count(*)::int FROM versions WHERE drive_id = $1) AS versions,
+                  (SELECT count(*)::int FROM file_events WHERE drive_id = $1 AND operation = 'restore') AS restores`,
+          [o.driveId],
+        )
+      ).rows[0] as { versions: number; restores: number };
+    const upload = await uploadCommit(o.token, o.driveId, '/u/a.bin', Buffer.from('undelete-me'));
+    const versionId = upload.body.version.id as string;
+    const share = await json(
+      await request(`/drives/${o.driveId}/shares`, o.token, 'POST', { path: '/u/a.bin' }),
+    );
+    const shareStatus = async () =>
+      (
+        await json(await request(`/drives/${o.driveId}/shares`, o.token))
+      ).items.find((item: { id: string }) => item.id === share.id).status;
+    const state = async () =>
+      (
+        await pool.query('SELECT current_version_id, deleted_at FROM files WHERE drive_id = $1', [
+          o.driveId,
+        ])
+      ).rows[0];
+
+    // Live file: restore with no versionId is a no-op.
+    const live = await api('restore', { path: '/u/a.bin' });
+    expect(live.status).toBe(200);
+    expect((await json(live)).version.id).toBe(versionId);
+    expect(await counts()).toEqual({ versions: 1, restores: 0 });
+
+    // Trash, fill the drive to its quota, then restore: still succeeds.
+    expect((await api('delete', { path: '/u/a.bin' })).status).toBe(200);
+    expect(await shareStatus()).toBe('unavailable');
+    await pool.query('UPDATE drives SET quota_bytes = 1 WHERE id = $1', [o.driveId]);
+    const undone = await api('restore', { path: '/u/a.bin' });
+    expect(undone.status).toBe(200);
+    expect((await json(undone)).version.id).toBe(versionId);
+    expect(await counts()).toEqual({ versions: 1, restores: 1 });
+    expect(await state()).toMatchObject({ current_version_id: versionId, deleted_at: null });
+    const events = await pool.query(
+      "SELECT version_id FROM file_events WHERE drive_id = $1 AND operation = 'restore'",
+      [o.driveId],
+    );
+    expect(events.rows.map((r) => r.version_id)).toEqual([versionId]);
+    const listed = await json(await request(`/drives/${o.driveId}/list?prefix=%2Fu`, o.token));
+    expect(listed.items.map((i: { path: string }) => i.path)).toContain('/u/a.bin');
+    expect(await shareStatus()).toBe('active');
+
+    // Explicit versionId equal to the current version behaves the same.
+    await api('delete', { path: '/u/a.bin' });
+    const explicit = await api('restore', { path: '/u/a.bin', versionId });
+    expect(explicit.status).toBe(200);
+    expect(await counts()).toEqual({ versions: 1, restores: 2 });
+    expect((await state()).deleted_at).toBeNull();
+
+    // Another account cannot undelete in this drive.
+    await api('delete', { path: '/u/a.bin' });
+    const stranger = await fixture('undel2', 'undel2-agent', 'undel2-drive', ['read', 'write']);
+    const foreign = await request(`/drives/${o.driveId}/restore`, stranger.token, 'POST', {
+      path: '/u/a.bin',
+    });
+    expect([403, 404]).toContain(foreign.status);
+    expect((await state()).deleted_at).not.toBeNull();
+    // A read-only key is refused.
+    const ro = key();
+    await pool.query(
+      `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+       VALUES ($1,$2,'ro',$3,$4::uuid[],ARRAY['read']::text[])`,
+      [o.accountId, o.agentId, tokenHash(ro), [o.driveId]],
+    );
+    expect(
+      (await request(`/drives/${o.driveId}/restore`, ro, 'POST', { path: '/u/a.bin' })).status,
+    ).toBe(403);
+    expect((await state()).deleted_at).not.toBeNull();
+    expect((await api('restore', { path: '/u/a.bin' })).status).toBe(200);
+  });
+
+  it('restoring an older version still creates a new current version', async () => {
+    const o = await fixture('older', 'older-agent', 'older-drive', ['read', 'write', 'delete']);
+    const first = await uploadCommit(o.token, o.driveId, '/o/a.bin', Buffer.from('one'));
+    const firstId = first.body.version.id as string;
+    await uploadCommit(o.token, o.driveId, '/o/a.bin', Buffer.from('two'));
+    const res = await request(`/drives/${o.driveId}/restore`, o.token, 'POST', {
+      path: '/o/a.bin',
+      versionId: firstId,
+    });
+    expect(res.status).toBe(201);
+    const newId = (await json(res)).version.id as string;
+    expect(newId).not.toBe(firstId);
+    const row = await pool.query('SELECT current_version_id FROM files WHERE drive_id = $1', [
+      o.driveId,
+    ]);
+    expect(row.rows[0].current_version_id).toBe(newId);
+  });
+
   it('limits writes, moves, copies, deletes and restores to write_paths while reads stay drive-wide', async () => {
     const owner = await fixture('wp', 'wp-agent', 'wp-drive', ['manage']);
     const create = (writePaths: unknown) =>
@@ -810,6 +914,13 @@ describe('Phase 1 core API', () => {
       driveId,
       '/spend-cap-restore.bin',
       Buffer.from('restore is still a write'),
+    );
+    // A second version, so restoring the first is a copy (an undelete of the current version is free).
+    await uploadCommit(
+      writeToken,
+      driveId,
+      '/spend-cap-restore.bin',
+      Buffer.from('restore current version'),
     );
     const stagedResponse = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
       path: '/spend-cap-commit.bin',

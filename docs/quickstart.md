@@ -49,7 +49,7 @@ Restart the MCP process after changing saved credentials.
 
 - The console browses metadata while locked. Load a recovery key to decrypt downloads in browser
   memory. Refreshing or leaving the files page loses that in-memory key.
-- Overwrites and restores create new versions. Trash does not reclaim retained storage.
+- Overwrites and restores of an older version create new versions. Restoring a file's current version from the trash only brings it back, with no new version. Trash does not reclaim retained storage.
 - Revoke an agent or API key in the console when its access is no longer required.
 - `/console/billing` shows plan allowances, usage, spending controls, and statements. Paid
   checkout is disabled until the deployment has complete billing configuration. `/pricing`

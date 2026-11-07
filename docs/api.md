@@ -41,6 +41,8 @@ with `state` (`exists`, `changed`, `trashed`, or `absent`) and `currentVersionId
 version id; `null` for `absent`). A conditional write never revives a trashed file; an unconditional
 overwrite does.
 
+`restore` with no `versionId`, or with the file's current version, undeletes a trashed file: it returns the existing version with 200, creates no version or copy, and does not check quota; on a live file it does nothing. Restoring any other version copies it as a new current version and returns 201.
+
 `recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) in commit
 order (guaranteed for events written after migration 0015; older events are ordered by their timestamps). Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
 cursor the order is exact and `since` is ignored. Without a cursor, the optional exclusive `since`
