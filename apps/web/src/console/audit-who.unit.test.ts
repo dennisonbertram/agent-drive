@@ -13,6 +13,10 @@ describe('keyDetail', () => {
     expect(keyDetail('flowtest-codex', 'ci key')).toBe('ci key');
     expect(keyDetail('You', 'Console')).toBe('Console');
   });
+  it('only strips the name as a whole word', () => {
+    expect(keyDetail('Ann', 'Annual backup')).toBe('Annual backup');
+    expect(keyDetail('Ann', 'Ann on laptop')).toBe('on laptop');
+  });
   it('is empty without a label', () => {
     expect(keyDetail('x', null)).toBeNull();
     expect(keyDetail('x', '  ')).toBeNull();
