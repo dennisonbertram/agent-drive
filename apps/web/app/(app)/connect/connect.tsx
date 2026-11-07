@@ -99,6 +99,17 @@ function describeWrites(scopes: string[], paths: string[]) {
   return paths.length ? `Only under ${paths.join(', ')}` : 'Anywhere in the drive';
 }
 
+// One visible line that never hides a restriction: "full access", "read only", "can write only, writes only in /x".
+function summarizeAccess(scopes: string[], paths: string[]) {
+  const list = scopes.filter((scope) => scope !== 'delegate');
+  const full = ['read', 'write', 'delete', 'share'].every((scope) => list.includes(scope));
+  const only = describeScopes(list);
+  const text = full ? 'full access' : only === 'read' ? 'read only' : `can ${only}`;
+  return list.includes('write') && paths.length
+    ? `${text}, writes only in ${paths.join(', ')}`
+    : text;
+}
+
 function normalizeCode(value: string) {
   const raw = value.toUpperCase().replace(/[^A-Z]/g, '');
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
@@ -452,6 +463,23 @@ export default function Connect({
   }
   if (offer) facts.push(['Offered by', offer.agentName]);
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
+  const grantScopes = offer ? offer.scopes : (previous ?? DEFAULT_SCOPES);
+  const summary = (
+    existing
+      ? ['Existing drive · choose below']
+      : [
+          offer
+            ? offer.drive.name
+            : reconnect.length
+              ? reconnect.map((d) => d.name).join(', ')
+              : 'New encrypted drive',
+          summarizeAccess(grantScopes, offer ? offer.writePaths : (request.write_paths ?? [])),
+          offer ? `offered by ${offer.agentName}` : '',
+        ]
+  )
+    .concat(delegate ? ['can add other agents'] : [])
+    .filter(Boolean)
+    .join(' · ');
   const explain = existing
     ? 'Your browser seals the key to this agent’s login; Agent Drive never sees it.'
     : offer
@@ -473,28 +501,49 @@ export default function Connect({
           {notice}
         </div>
       )}
-      <dl className="connect-facts">
-        {facts.map(([term, value]) => (
-          <div key={term} className="connect-fact">
-            <dt>{term}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+      <p className="connect-summary">{summary}</p>
+      <details className="connect-more connect-details">
+        <summary>Details</summary>
+        <dl className="connect-facts">
+          {facts.map(([term, value]) => (
+            <div key={term} className="connect-fact">
+              <dt>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+        {!existing &&
+          !offer &&
+          request.creates_drive &&
+          !request.scopes &&
+          accountDrives.length > 0 && (
+            <button
+              type="button"
+              className="connect-link"
+              onClick={(event) => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
+                setExisting(true);
+              }}
+            >
+              Use one of my drives instead (needs its recovery file)
+            </button>
+          )}
+        <label className="connect-delegate">
+          <input
+            type="checkbox"
+            checked={delegate}
+            onChange={(event) => setDelegate(event.target.checked)}
+          />
+          <span>
+            Let this agent add other agents to its drives
+            <small>
+              It can hand another agent the key and permissions it holds itself, never more, and it
+              cannot pass this permission on. You still approve each new agent here.
+            </small>
+          </span>
+        </label>
+      </details>
       <p className="connect-explain">{explain}</p>
-      {!existing &&
-        !offer &&
-        request.creates_drive &&
-        !request.scopes &&
-        accountDrives.length > 0 && (
-          <button
-            type="button"
-            className="button secondary connect-branch"
-            onClick={() => setExisting(true)}
-          >
-            Add to an existing drive instead
-          </button>
-        )}
       {existing && (
         <div className="connect-existing">
           <label className="cf-drive">
@@ -591,23 +640,6 @@ export default function Connect({
           </button>
         </div>
       )}
-      <details className="connect-more">
-        <summary>Optional: let this agent connect other agents</summary>
-        <label className="connect-delegate">
-          <input
-            type="checkbox"
-            checked={delegate}
-            onChange={(event) => setDelegate(event.target.checked)}
-          />
-          <span>
-            Let this agent add other agents to its drives
-            <small>
-              It can hand another agent the key and permissions it holds itself, never more, and it
-              cannot pass this permission on. You still approve each new agent here.
-            </small>
-          </span>
-        </label>
-      </details>
       {formError && (
         <div role="alert" className="banner error">
           {formError}

@@ -124,6 +124,16 @@ async function signIn(context: BrowserContext, userId: string) {
   expect(response.status()).toBe(200);
 }
 
+async function openDetails(page: Page) {
+  const details = page.locator('.connect-details');
+  if ((await details.getAttribute('open')) === null) await details.locator('> summary').click();
+}
+
+async function chooseExistingDrive(page: Page) {
+  await openDetails(page);
+  await page.getByRole('button', { name: /Use one of my drives instead/ }).click();
+}
+
 test.describe('agent device login', () => {
   const userIds: string[] = [];
   let root: string;
@@ -202,8 +212,9 @@ test.describe('agent device login', () => {
     await expect(page.locator('input[type="checkbox"]')).toHaveCount(1);
     await expect(page.locator('input[type="checkbox"]')).not.toBeChecked();
     if (delegate) {
-      await page.getByText('Optional: let this agent connect other agents').click();
+      await openDetails(page);
       await page.getByLabel('Let this agent add other agents to its drives').check();
+      await expect(page.locator('.connect-summary')).toContainText('can add other agents');
     }
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
@@ -554,7 +565,7 @@ test.describe('agent device login', () => {
     const assertPrivate = recordRequests(page);
     await page.goto(second.path);
     await expect(page.locator('select')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Add to an existing drive instead' }).click();
+    await chooseExistingDrive(page);
     await expect(page.getByText('Agent Drive never sees it.')).toBeVisible();
     await page.locator('select').selectOption(driveId);
     const posts: string[] = [];
@@ -642,7 +653,7 @@ test.describe('agent device login', () => {
     const second = await startLogin(envB, 'bsecond-bot');
     const assertPrivate = recordRequests(page);
     await page.goto(second.path);
-    await page.getByRole('button', { name: 'Add to an existing drive instead' }).click();
+    await chooseExistingDrive(page);
     await page.locator('select').selectOption(driveId);
     await page.locator('input[type="file"]').setInputFiles(bundle);
     await page.getByLabel('Read only').check();
@@ -701,8 +712,7 @@ test.describe('agent device login', () => {
     const env = cliEnv(baseURL!, root, 'h-third', 'm-h-third');
     const third = await startLogin(env, 'h-third-bot');
     await page.goto(third.path);
-    const open = page.getByRole('button', { name: 'Add to an existing drive instead' });
-    await open.click();
+    await chooseExistingDrive(page);
     const password = page.locator('input[type="password"]');
     const file = page.locator('input[type="file"]');
     const fileCount = () => file.evaluate((el: HTMLInputElement) => el.files!.length);
@@ -718,7 +728,7 @@ test.describe('agent device login', () => {
     // Leaving the form forgets them too.
     await password.fill(one.key);
     await page.getByRole('button', { name: 'Use a new drive instead' }).click();
-    await open.click();
+    await chooseExistingDrive(page);
     await expect(password).toHaveValue('');
 
     // A server rejection keeps the chosen file, so a corrected retry works.
@@ -752,12 +762,11 @@ test.describe('agent device login', () => {
     await page.goto(again.path);
     await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
     await expect(page.getByText(/keeps its previous permissions/)).toBeVisible();
+    await openDetails(page);
     await expect(page.locator('.connect-facts')).toContainText('New encrypted drive');
     await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
     await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Add to an existing drive instead' }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     again.login.child.kill();
   });
 
@@ -804,12 +813,14 @@ test.describe('agent device login', () => {
 
     // The human sees who offered what, and approves once.
     await page.goto(b.path);
+    await expect(page.locator('.connect-summary')).toContainText(
+      `writes only in /inbox/b · offered by ${granter}`,
+    );
+    await openDetails(page);
     await expect(page.locator('.connect-facts')).toContainText('Offered by');
     await expect(page.locator('.connect-facts')).toContainText(granter);
     await expect(page.locator('.connect-facts')).toContainText('/inbox/b');
-    await expect(
-      page.getByRole('button', { name: 'Add to an existing drive instead' }),
-    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     await mkdir('docs/design/shots/spec-connect-share', { recursive: true });
     for (const [width, height] of [
       [1440, 900],
@@ -881,6 +892,10 @@ test.describe('agent device login', () => {
     expect(granted.status, granted.stderr).toBe(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('The request changed; review it again.')).toBeVisible();
+    await expect(page.locator('.connect-summary')).toHaveText(
+      / · read only · offered by granter2-bot$/,
+    );
+    await openDetails(page);
     await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
     await expect(page.locator('.connect-facts')).toContainText('No writes');
     await page.getByRole('button', { name: 'Approve agent' }).click();
@@ -935,6 +950,7 @@ test.describe('agent device login', () => {
     await expect(page.locator('.connect-explain')).toHaveCSS('font-size', '13px');
     await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '16px');
     await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await openDetails(page);
     await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
     await expect(page.locator('.connect-facts')).toContainText('Local test session');
     // Nothing approves it, so the request stays pending; stop the CLI.
@@ -968,10 +984,17 @@ test.describe('agent device login', () => {
       await expect(page.locator('.connect-code-line + .connect-actions')).toHaveCount(1);
       await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
       await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeHidden();
+      await expect(page.locator('.connect-summary')).toHaveText(
+        'New encrypted drive · full access',
+      );
+      await expect(page.locator('.connect-details')).not.toHaveAttribute('open', '');
+      await expect(page.getByText('Machine', { exact: true })).toBeHidden();
+      await expect(page.getByText('Account', { exact: true })).toBeHidden();
     }
-    await page
-      .locator('summary', { hasText: 'Optional: let this agent connect other agents' })
-      .click();
+    await page.locator('.connect-details > summary').click();
+    await expect(page.getByText('Machine', { exact: true })).toBeVisible();
+    await expect(page.getByText('Account', { exact: true })).toBeVisible();
+    await openDetails(page);
     await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeVisible();
     login.child.kill();
   });
@@ -993,7 +1016,8 @@ test.describe('agent device login', () => {
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(second.path);
-    const branch = page.getByRole('button', { name: 'Add to an existing drive instead' });
+    await openDetails(page);
+    const branch = page.getByRole('button', { name: /Use one of my drives instead/ });
     expect((await branch.boundingBox())!.height).toBeGreaterThanOrEqual(40);
     await branch.click();
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -1055,6 +1079,7 @@ test.describe('agent device login', () => {
     expect(granted.status, granted.stderr).toBe(0);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(page.getByText('offered a drive for this login')).toBeVisible();
+    await openDetails(page);
     await expect(page.locator('.connect-facts')).toContainText('Offered by');
     await expect(page.locator('.connect-facts')).toContainText('focus-a-bot');
     await page.getByRole('button', { name: 'Approve agent' }).click();
