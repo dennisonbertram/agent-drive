@@ -379,6 +379,9 @@ button {
 .table-stack td.primary:hover:not(:disabled) {
   background: none;
   box-shadow: none;
+  border-color: var(
+    --line-soft
+  ); /* .primary's dark button border must not draw on the first cell */
 }
 .table-stack td.actions {
   display: table-cell;

@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { BrandMark } from '../../../brand-mark';
+import { auditLabel } from '@/src/console/audit-labels';
+import { AccountHeader } from '../account-header';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type Page<T> = { items: T[]; nextCursor: string | null };
@@ -63,7 +64,23 @@ function date(value: string) {
   return new Date(value).toLocaleString();
 }
 
-export default function SettingsClient() {
+function shortDate(value: string) {
+  return new Date(value).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
+function actor(event: Audit) {
+  if (event.userId) return 'You';
+  if (event.action === 'share.access') return 'Someone with a share link';
+  return event.agentName ?? 'Not signed in';
+}
+
+export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [drives, setDrives] = useState<Drive[]>([]);
   const [jobs, setJobs] = useState<Deletion[]>([]);
   const [jobsCursor, setJobsCursor] = useState<string | null>(null);
@@ -74,6 +91,7 @@ export default function SettingsClient() {
   const [driveConfirmation, setDriveConfirmation] = useState('');
   const [accountConfirmation, setAccountConfirmation] = useState('');
   const [busy, setBusy] = useState<string | null>('load');
+  const [showViews, setShowViews] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [driveError, setDriveError] = useState('');
   const [accountError, setAccountError] = useState('');
@@ -92,9 +110,9 @@ export default function SettingsClient() {
     setSelectedId((current) =>
       nextDrives.some((drive) => drive.id === current) ? current : (nextDrives[0]?.id ?? ''),
     );
-    setAudit(await api<Page<Audit>>('audit?limit=25'));
+    setAudit(await api<Page<Audit>>(`audit?limit=25${showViews ? '' : '&consoleReads=0'}`));
     auditTable.current?.scrollTo({ top: 0 });
-  }, []);
+  }, [showViews]);
 
   useEffect(() => {
     let mounted = true;
@@ -129,7 +147,7 @@ export default function SettingsClient() {
     setLoadError('');
     try {
       const next = await api<Page<Audit>>(
-        `audit?${new URLSearchParams({ limit: '25', cursor: audit.nextCursor })}`,
+        `audit?${new URLSearchParams({ limit: '25', cursor: audit.nextCursor })}${showViews ? '' : '&consoleReads=0'}`,
       );
       setAudit((current) => ({
         items: [...current.items, ...next.items],
@@ -202,25 +220,18 @@ export default function SettingsClient() {
 
   return (
     <div className="billing-page settings-page">
-      <header className="billing-header">
-        <BrandMark href="/console" />
-        <nav className="billing-links" aria-label="Account">
-          <Link href="/console/billing">Billing</Link>
-          <Link className="billing-links-cta" href="/console">
-            Back to files
-          </Link>
-        </nav>
-      </header>
+      <AccountHeader current="settings" clerkEnabled={clerkEnabled} />
       <main>
         <div className="billing-heading">
           <div>
             <p className="eyebrow">YOUR WORKSPACE, YOUR CONTROL</p>
             <h1>Activity &amp; deletion</h1>
             <p>Review access and permanently remove data you no longer need.</p>
+            <nav className="settings-jumps" aria-label="On this page">
+              <a href="#audit-heading">Activity</a>
+              <a href="#delete-heading">Delete data</a>
+            </nav>
           </div>
-          <button className="button secondary" disabled={!!busy} onClick={() => void refresh()}>
-            {busy === 'load' ? 'Loading…' : 'Refresh'}
-          </button>
         </div>
         {loadError && (
           <p className="banner error" role="alert">
@@ -235,10 +246,25 @@ export default function SettingsClient() {
         <section className="billing-card" aria-labelledby="audit-heading">
           <div className="settings-section-heading">
             <div>
-              <h2 id="audit-heading">Audit log</h2>
+              <h2 id="audit-heading">Activity</h2>
               <p>Most recent first. Metadata only—never file contents or credentials.</p>
             </div>
-            <span className="pill">OWNER ONLY</span>
+            <div className="settings-audit-tools">
+              <label className="settings-check">
+                <input
+                  type="checkbox"
+                  checked={showViews}
+                  onChange={(event) => {
+                    setBusy('load');
+                    setShowViews(event.target.checked);
+                  }}
+                />
+                Show my page views
+              </label>
+              <button className="button secondary" disabled={!!busy} onClick={() => void refresh()}>
+                {busy === 'load' ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
           </div>
           <div
             className="table-scroll table-stack"
@@ -251,8 +277,8 @@ export default function SettingsClient() {
               <thead>
                 <tr role="row">
                   <th role="columnheader">When</th>
-                  <th role="columnheader">Action</th>
-                  <th role="columnheader">Actor</th>
+                  <th role="columnheader">What</th>
+                  <th role="columnheader">Who</th>
                   <th role="columnheader">Result</th>
                 </tr>
               </thead>
@@ -260,26 +286,24 @@ export default function SettingsClient() {
                 {audit.items.map((event) => (
                   <tr key={event.id} role="row">
                     <td role="cell" className="primary">
-                      <time dateTime={event.createdAt}>{date(event.createdAt)}</time>
+                      <time dateTime={event.createdAt}>{shortDate(event.createdAt)}</time>
                     </td>
-                    <td role="cell" data-label="Action">
-                      <code>{event.action}</code>
+                    <td role="cell" data-label="What">
+                      <span title={event.action}>{auditLabel(event.action)}</span>
                     </td>
-                    <td role="cell" data-label="Actor">
-                      {event.userId
-                        ? 'Console user'
-                        : (event.agentName ?? 'Public / unauthenticated')}
+                    <td role="cell" data-label="Who">
+                      {actor(event)}
                       {event.keyLabel && <small>{event.keyLabel}</small>}
                     </td>
                     <td role="cell" data-label="Result">
-                      <span className={`settings-outcome ${event.outcome}`}>
-                        {event.outcome === 'pending' ? 'In progress' : event.outcome}
-                      </span>
-                      {event.outcome !== 'pending' && (
-                        <small>
-                          HTTP {event.httpStatus}
-                          {event.errorCode ? ` · ${event.errorCode}` : ''}
-                        </small>
+                      {event.outcome === 'pending' ? (
+                        <span className="settings-result">In progress</span>
+                      ) : event.outcome === 'failure' ? (
+                        <span className="settings-result fail">
+                          Failed · {event.errorCode ?? event.httpStatus}
+                        </span>
+                      ) : (
+                        <span className="settings-result">OK</span>
                       )}
                     </td>
                   </tr>
@@ -289,7 +313,7 @@ export default function SettingsClient() {
           </div>
           {!audit.items.length && (
             <p className="settings-empty">
-              {busy === 'load' ? 'Loading activity…' : 'No audit events loaded.'}
+              {busy === 'load' ? 'Loading activity…' : 'No activity yet.'}
             </p>
           )}
           {audit.nextCursor && (
@@ -427,7 +451,7 @@ export default function SettingsClient() {
               <p>Refresh to check background progress. Save the request ID if you need help.</p>
             </div>
           </div>
-          {!jobs.length && <p className="settings-empty">No deletion requests loaded.</p>}
+          {!jobs.length && <p className="settings-empty">No deletion requests.</p>}
           <ul className="settings-jobs">
             {jobs.map((job) => (
               <li key={job.id}>

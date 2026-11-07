@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BrandMark } from '../../../brand-mark';
+import { AccountHeader } from '../account-header';
 import { formatBytes, MAX_UPLOAD } from '@/src/format/bytes';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
@@ -140,7 +140,13 @@ function downloadBreakdown(statement: Billing) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export default function BillingClient({ plans }: { plans: Plan[] }) {
+export default function BillingClient({
+  plans,
+  clerkEnabled,
+}: {
+  plans: Plan[];
+  clerkEnabled: boolean;
+}) {
   const [billing, setBilling] = useState<Billing | null>(null);
   const [statements, setStatements] = useState<Statement[]>([]);
   const [cap, setCap] = useState('');
@@ -151,6 +157,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState('');
+  const [showIdle, setShowIdle] = useState(false);
   const load = useCallback(async () => {
     const data = await api<Billing>();
     setBilling(data);
@@ -233,18 +240,17 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   }
 
   const rateCard = billing?.plan === 'free' ? billing.checkoutRates : billing?.rates;
+  const meterOn = !!billing?.egressMeteringConfigured && !billing.egressNotMetered;
+  const isIdle = (agent: AgentUsage) =>
+    BigInt(agent.storage_bytes) === 0n &&
+    BigInt(agent.operations) === 0n &&
+    BigInt(agent.egress_bytes ?? 0) === 0n;
+  const idleAgents = billing ? billing.agents.filter(isIdle) : [];
+  const shownAgents = billing ? billing.agents.filter((a) => showIdle || !isIdle(a)) : [];
   const chosen = statements.find((item) => item.periodStart === period)?.statement ?? billing;
   return (
     <div className="billing-page">
-      <header className="billing-header">
-        <BrandMark href="/console" />
-        <nav className="billing-links" aria-label="Account">
-          <Link href="/console/settings">Settings</Link>
-          <Link className="billing-links-cta" href="/console">
-            Back to files
-          </Link>
-        </nav>
-      </header>
+      <AccountHeader current="billing" clerkEnabled={clerkEnabled} />
       <main>
         <div className="billing-heading">
           <div>
@@ -313,19 +319,31 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                 </small>
               </article>
               <article className="billing-card">
-                <p className="eyebrow">OBSERVED DOWNLOADS</p>
+                <p className="eyebrow">
+                  {billing.egressMeteringConfigured && !billing.egressNotMetered
+                    ? 'OBSERVED DOWNLOADS'
+                    : 'DOWNLOADS THIS MONTH'}
+                </p>
                 <strong className="billing-number">
                   {billing.egressNotMetered
-                    ? 'Not metered — provider does not charge egress'
+                    ? 'Not charged'
                     : billing.egressMeteringConfigured
                       ? formatBytes(billing.egressBytes)
-                      : 'Not connected'}
+                      : formatBytes(billing.authorizedEgressBytes)}
                 </strong>
-                <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
-                <small>
-                  Actual transfer reports can be delayed or incomplete. Authorizations are not
-                  charges.
-                </small>
+                {billing.egressNotMetered ? (
+                  <p>{formatBytes(billing.authorizedEgressBytes)} downloaded this month</p>
+                ) : billing.egressMeteringConfigured ? (
+                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
+                ) : (
+                  <p>Authorized downloads. Transfer reports are not set up on this server.</p>
+                )}
+                {billing.egressMeteringConfigured && !billing.egressNotMetered && (
+                  <small>
+                    Actual transfer reports can be delayed or incomplete. Authorizations are not
+                    charges.
+                  </small>
+                )}
               </article>
             </section>
             <section aria-labelledby="plans-title">
@@ -511,28 +529,34 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   <thead>
                     <tr role="row">
                       <th role="columnheader">AGENT</th>
-                      <th role="columnheader">RETAINED STORAGE</th>
-                      <th role="columnheader">OBSERVED DOWNLOADS</th>
-                      <th role="columnheader">OPERATIONS</th>
+                      <th role="columnheader" className="num">
+                        RETAINED STORAGE
+                      </th>
+                      {meterOn && (
+                        <th role="columnheader" className="num">
+                          OBSERVED DOWNLOADS
+                        </th>
+                      )}
+                      <th role="columnheader" className="num">
+                        OPERATIONS
+                      </th>
                     </tr>
                   </thead>
                   <tbody role="rowgroup">
-                    {billing.agents.map((agent) => (
+                    {shownAgents.map((agent) => (
                       <tr key={agent.id} role="row">
                         <td role="cell" className="primary">
                           {agent.name === '__console__' ? 'Console' : agent.name}
                         </td>
-                        <td role="cell" data-label="Retained storage">
+                        <td role="cell" className="num" data-label="Retained storage">
                           {formatBytes(agent.storage_bytes)}
                         </td>
-                        <td role="cell" data-label="Observed downloads">
-                          {billing.egressNotMetered
-                            ? 'Not metered — provider does not charge egress'
-                            : billing.egressMeteringConfigured
-                              ? formatBytes(agent.egress_bytes)
-                              : 'Not connected'}
-                        </td>
-                        <td role="cell" data-label="Operations">
+                        {meterOn && (
+                          <td role="cell" className="num" data-label="Observed downloads">
+                            {formatBytes(agent.egress_bytes)}
+                          </td>
+                        )}
+                        <td role="cell" className="num" data-label="Operations">
                           {BigInt(agent.operations).toLocaleString()}
                         </td>
                       </tr>
@@ -540,6 +564,17 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   </tbody>
                 </table>
               </div>
+              {idleAgents.length > 0 && (
+                <button
+                  className="button secondary"
+                  aria-expanded={showIdle}
+                  onClick={() => setShowIdle((value) => !value)}
+                >
+                  {showIdle
+                    ? 'Hide agents with no usage'
+                    : `Show ${idleAgents.length} agent${idleAgents.length === 1 ? '' : 's'} with no usage this month`}
+                </button>
+              )}
               {!billing.agents.length && (
                 <p className="billing-caption">
                   Agent usage will appear after your first operation.
