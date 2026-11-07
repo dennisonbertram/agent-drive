@@ -52,6 +52,22 @@ export type FileEntry = {
   createdAt: string;
 };
 
+export type FolderEntry = {
+  kind: 'folder';
+  path: string;
+  items: number;
+  ciphertextSize: number;
+  createdAt: string;
+};
+
+type FolderEntryWire = {
+  kind: 'folder';
+  path: string;
+  items: number;
+  ciphertext_size: number | string;
+  created_at: string;
+};
+
 type FileEntryWire = {
   id: string;
   path: string;
@@ -136,6 +152,21 @@ export type ConflictState = 'exists' | 'changed' | 'trashed' | 'absent';
 const conflictStates: unknown[] = ['exists', 'changed', 'trashed', 'absent'];
 // Same pattern as uuid() in apps/web/src/api/validation.ts; keep in sync.
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+function fileEntry(item: FileEntryWire): FileEntry {
+  return {
+    fileId: item.id,
+    versionId: item.version_id,
+    path: item.path,
+    ciphertextSize: Number(item.ciphertext_size),
+    agentId: item.agent_id,
+    machineId: item.machine_id,
+    userId: item.user_id,
+    tags: item.tags ?? [],
+    description: item.description,
+    createdAt: item.created_at,
+  };
+}
 
 export class AgentDriveApiError extends Error {
   readonly upgradeUrl: string | undefined;
@@ -397,6 +428,43 @@ export class AgentDriveClient {
     return this.request<Page<ApiKey>>(this.pagePath('keys', limit, cursor));
   }
 
+  // Immediate children of `folder` (files and folder rows) and/or newest-first order. Opt-in:
+  // plain `list` is unchanged.
+  async browse(
+    driveId: string,
+    options: {
+      folder?: string;
+      prefix?: string;
+      sort?: 'path' | 'modified';
+      limit?: number;
+      cursor?: string;
+      filters?: { tag?: string; agentId?: string; machine?: string; user?: string };
+    },
+  ): Promise<Page<FileEntry | FolderEntry>> {
+    const page = await this.request<Page<FileEntryWire | FolderEntryWire>>(
+      this.pagePath(`drives/${encode(driveId)}/list`, options.limit, options.cursor, {
+        ...(options.folder ? { prefix: options.folder, delimiter: '/' } : {}),
+        ...(!options.folder && options.prefix ? { prefix: options.prefix } : {}),
+        ...(options.sort ? { sort: options.sort } : {}),
+        ...options.filters,
+      }),
+    );
+    return {
+      ...page,
+      items: page.items.map((item) =>
+        'kind' in item && item.kind === 'folder'
+          ? {
+              kind: 'folder' as const,
+              path: item.path,
+              items: item.items,
+              ciphertextSize: Number(item.ciphertext_size),
+              createdAt: item.created_at,
+            }
+          : fileEntry(item as FileEntryWire),
+      ),
+    };
+  }
+
   async list(
     driveId: string,
     prefix?: string,
@@ -412,18 +480,7 @@ export class AgentDriveClient {
     );
     return {
       ...page,
-      items: page.items.map((item) => ({
-        fileId: item.id,
-        versionId: item.version_id,
-        path: item.path,
-        ciphertextSize: Number(item.ciphertext_size),
-        agentId: item.agent_id,
-        machineId: item.machine_id,
-        userId: item.user_id,
-        tags: item.tags ?? [],
-        description: item.description,
-        createdAt: item.created_at,
-      })),
+      items: page.items.map(fileEntry),
     };
   }
 

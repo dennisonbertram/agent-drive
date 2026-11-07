@@ -13,7 +13,11 @@ import {
   MAX_QUERY_LENGTH,
   optionalString,
   page,
+  isoMicros,
+  listDelimiter,
+  listSort,
   prefix,
+  type ListSort,
   queryValue,
   stringField,
   secureTransportAllowed,
@@ -404,6 +408,111 @@ function collection(
     items,
     nextCursor:
       rows.length > limit && last ? encodeCursor({ value: valueOf(last), id: idOf(last) }) : null,
+  };
+}
+
+// Microsecond-exact ISO text for cursors (Date.parse accepts it; created_at::text does not parse).
+const isoText = (column: string) =>
+  `to_char(${column} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+// Flat sort=modified reuses the 'timestamp' cursor; a path cursor must not reach the SQL cast.
+function decodeModifiedCursor(cursor: string | undefined) {
+  const decoded = decodeCursor(cursor, 'timestamp');
+  if (decoded && !isoMicros(decoded.value))
+    throw new ApiError('validation_error', 'cursor is invalid.');
+  return decoded;
+}
+
+// Immediate children of `base` (files and folders). Filters apply to files before grouping.
+// ponytail: each page re-aggregates every live file under the prefix (O(files in the subtree));
+// add a (drive_id, path text_pattern_ops) WHERE deleted_at IS NULL index if EXPLAIN shows root
+// listings over ~300 ms. Migration 0020 adds it; this query does not depend on it.
+async function listChildren(
+  url: URL,
+  driveId: string,
+  p: string,
+  sort: ListSort,
+  limit: number,
+  cursor: string | undefined,
+) {
+  const base = p || '/';
+  const bind = createHash('sha256')
+    .update(`${driveId}\0${base}\0${sort}`)
+    .digest('base64url')
+    .slice(0, 16);
+  const decoded = decodeCursor(cursor, 'child', sort);
+  if (decoded && decoded.bind !== bind)
+    throw new ApiError('validation_error', 'cursor is invalid.');
+  const params: unknown[] = [driveId, `${escapeLikeLiteral(base)}%`, base];
+  const filters = appendFileFilters(url, params, true);
+  let outer = '';
+  if (decoded) {
+    if (sort === 'modified') {
+      params.push(decoded.value, decoded.id);
+      const [v, k] = [params.length - 1, params.length];
+      outer = `WHERE created_at < $${v}::timestamptz OR (created_at = $${v}::timestamptz AND key COLLATE "C" > $${k})`;
+    } else {
+      params.push(decoded.id);
+      outer = `WHERE key COLLATE "C" > $${params.length}`;
+    }
+  }
+  params.push(limit + 1);
+  const rows = await getPool().query(
+    `WITH live AS (
+       SELECT f.id, f.path, substr(f.path, length($3::text) + 1) AS rest, v.id AS version_id,
+              v.ciphertext_size, v.agent_id, v.machine_id, v.user_id, v.tags, v.description, v.created_at
+         FROM files f JOIN versions v ON v.id = f.current_version_id
+        WHERE f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2 ESCAPE '\\'${filters}
+     ), kids AS (
+       SELECT 'file' AS kind, id, path, version_id, ciphertext_size, agent_id, machine_id, user_id,
+              tags, description, created_at, NULL::bigint AS items, path AS key
+         FROM live WHERE strpos(rest, '/') = 0
+       UNION ALL
+       SELECT 'folder', NULL, $3 || split_part(rest, '/', 1), NULL, sum(ciphertext_size)::bigint,
+              NULL, NULL, NULL, NULL, NULL, max(created_at),
+              count(DISTINCT split_part(rest, '/', 2) ||
+                CASE WHEN split_part(rest, '/', 3) <> '' THEN '/' ELSE '' END),
+              $3 || split_part(rest, '/', 1) || '/'
+         FROM live WHERE strpos(rest, '/') > 0 GROUP BY split_part(rest, '/', 1)
+     )
+     SELECT *, ${isoText('created_at')} AS cursor_created_at FROM kids ${outer}
+      ORDER BY ${sort === 'modified' ? 'created_at DESC, ' : ''}key COLLATE "C" LIMIT $${params.length}`,
+    params,
+  );
+  const page = rows.rows.slice(0, limit);
+  const last = rows.rows[limit - 1];
+  return {
+    items: page.map((r) =>
+      r.kind === 'folder'
+        ? {
+            kind: r.kind,
+            path: r.path,
+            items: Number(r.items),
+            ciphertext_size: r.ciphertext_size,
+            created_at: r.created_at,
+          }
+        : {
+            kind: r.kind,
+            id: r.id,
+            path: r.path,
+            version_id: r.version_id,
+            ciphertext_size: r.ciphertext_size,
+            agent_id: r.agent_id,
+            machine_id: r.machine_id,
+            user_id: r.user_id,
+            tags: r.tags,
+            description: r.description,
+            created_at: r.created_at,
+          },
+    ),
+    nextCursor:
+      rows.rows.length > limit
+        ? encodeCursor(
+            sort === 'modified'
+              ? { k: last.key, t: last.cursor_created_at, b: bind }
+              : { k: last.key, b: bind },
+          )
+        : null,
   };
 }
 
@@ -1541,26 +1650,40 @@ async function fileEndpoint(
     need(auth, 'read', driveId);
     const { limit, cursor } = page(url);
     const p = prefix(url.searchParams.get('prefix'));
-    const decoded = decodeCursor(cursor, 'path');
+    const sort = listSort(url.searchParams.get('sort'));
+    if (listDelimiter(url.searchParams.get('delimiter')))
+      return response(await listChildren(url, driveId, p, sort, limit, cursor));
+    const decoded =
+      sort === 'modified' ? decodeModifiedCursor(cursor) : decodeCursor(cursor, 'path');
     const params: unknown[] = [driveId, `${escapeLikeLiteral(p)}%`];
     let clause = `f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2 ESCAPE '\\'`;
     clause += appendFileFilters(url, params, true);
     if (decoded) {
       params.push(decoded.value, decoded.id);
-      clause += ` AND (f.path, f.id) > ($${params.length - 1}, $${params.length}::uuid)`;
+      clause +=
+        sort === 'modified'
+          ? ` AND (v.created_at, f.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`
+          : ` AND (f.path, f.id) > ($${params.length - 1}, $${params.length}::uuid)`;
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT f.id, f.path, v.id AS version_id, v.ciphertext_size, v.agent_id, v.machine_id, v.user_id, v.tags, v.description, v.created_at
-       FROM files f JOIN versions v ON v.id = f.current_version_id WHERE ${clause} ORDER BY f.path, f.id LIMIT $${params.length}`,
+      `SELECT f.id, f.path, v.id AS version_id, v.ciphertext_size, v.agent_id, v.machine_id, v.user_id, v.tags, v.description, v.created_at${sort === 'modified' ? `, ${isoText('v.created_at')} AS cursor_created_at` : ''}
+       FROM files f JOIN versions v ON v.id = f.current_version_id WHERE ${clause} ORDER BY ${sort === 'modified' ? 'v.created_at DESC, f.id DESC' : 'f.path, f.id'} LIMIT $${params.length}`,
       params,
     );
     const items = rows.rows.slice(0, limit);
+    const last = items.at(-1);
+    const lastTime = last?.cursor_created_at;
+    for (const item of items) delete item.cursor_created_at;
     return response({
       items,
       nextCursor:
         rows.rows.length > limit
-          ? encodeCursor({ value: items.at(-1).path, id: items.at(-1).id })
+          ? encodeCursor(
+              sort === 'modified'
+                ? { value: lastTime, id: last.id }
+                : { value: last.path, id: last.id },
+            )
           : null,
     });
   }
