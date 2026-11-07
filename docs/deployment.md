@@ -94,9 +94,18 @@ or its billing rows merely to make the console show completion.
 
 ## Every production release
 
-Automatic Vercel Git deployments are disabled in the checked-in configuration, so a merge does
-not promote an untested build. After linking the dedicated project and installing/authenticating
-an approved Vercel CLI, use the repository's release entry point:
+The Vercel project is connected to GitHub with `prod` as its production branch.
+`apps/web/vercel.json` turns Git deploys off for every branch except `prod`
+(`"deploymentEnabled": { "**": false, "prod": true }`), so merges to `main`, task branches and
+pull requests never deploy. Pushing to `prod` builds and deploys to production. To release, wait
+for CI to pass on `main`, then fast-forward `prod`:
+
+```sh
+git push origin origin/main:prod
+```
+
+That path does not run the staged smoke checks. When a release needs them, use the repository's
+release entry point instead (after linking the project and authenticating an approved Vercel CLI):
 
 ```sh
 pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
@@ -104,7 +113,7 @@ pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
 
 It runs `pnpm verify`, creates a staged production build using `vercel deploy --prod --skip-domain`,
 runs deployed smoke acceptance, promotes only on success, then repeats smoke on the production
-origin. No GitHub Actions are invoked. Do not bypass this command with a direct production deploy.
+origin. No GitHub Actions are invoked.
 The release checks must run on a workstation with local test services and a Playwright browser.
 They are interactive: complete signup with a NEW disposable identity when the browser opens.
 The smoke requires an observed completed Clerk signup, not just a successful HTML response.
