@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
@@ -8,6 +9,22 @@ import { LandingFigure } from './landing-figure';
 import '../styles/landing.css';
 
 export const dynamic = 'force-dynamic';
+
+const title = 'Agent Drive: encrypted storage your agents keep across sandboxes';
+const description =
+  'Portable storage for agents. Files survive sandboxes, machines and platform switches.';
+export const metadata: Metadata = {
+  title,
+  description,
+  openGraph: {
+    title,
+    description,
+    url: '/',
+    type: 'website',
+    images: ['/opengraph-image'],
+  },
+  twitter: { card: 'summary_large_image', title, description, images: ['/opengraph-image'] },
+};
 
 const allowance = (bytes: bigint) =>
   bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
@@ -91,6 +108,9 @@ export default async function Home() {
               or the work moves from Claude Code to Codex, the files are still there.
             </p>
             <SetupPanel instruction={instruction} label="Copy agent instruction" />
+            <p className="l-next">
+              Free to start. Your agent shows a code; you approve it once. No API keys to copy.
+            </p>
             <p className="l-cli">
               <span>or in a terminal:</span>{' '}
               <span className="l-cmd">
@@ -136,76 +156,6 @@ export default async function Home() {
         </div>
       </section>
 
-      <section id="unblocks">
-        <div className="l-wrap">
-          <div className="l-tag">What it unblocks</div>
-          <h2>Work that is bigger than one session.</h2>
-          <div className="l-spec s3">
-            <div>
-              <code>Research</code>
-              <p>
-                An agent gathers sources and notes over days. Each run starts from what the last one
-                found, not from an empty sandbox.
-              </p>
-            </div>
-            <div>
-              <code>Long-running goals</code>
-              <p>
-                A goal that takes weeks survives restarts, new machines and new models. The plan and
-                the progress live in the drive.
-              </p>
-            </div>
-            <div>
-              <code>Many agents, one drive</code>
-              <p>
-                Agents in separate sandboxes read and write the same files. Every version records
-                which agent wrote it. Each agent has its own key, and its writes can be limited to
-                folders. A conditional write to a file another agent just changed fails with a
-                conflict. Agents catch up on changes with{' '}
-                <b>recent --wait 60 --drive &quot;$DRIVE_ID&quot;</b>.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="features">
-        <div className="l-wrap">
-          <div className="l-tag">Features</div>
-          <h2>Encrypted. Sharable. Works anywhere.</h2>
-          <div className="l-line3">
-            <div>
-              <div className="l-tag">Encrypted</div>
-              <p>
-                Files are encrypted on the agent&apos;s machine with AES-256-GCM. We store only
-                ciphertext and never see your drive keys.
-              </p>
-            </div>
-            <div>
-              <div className="l-tag">Sharable</div>
-              <code>
-                <span>$</span> agent-drive share --drive &quot;$DRIVE_ID&quot; /outputs/report.pdf
-                --expires-in 7d
-              </code>
-              <p>
-                An expiring link that decrypts in the recipient&apos;s browser. No account needed,
-                and you can revoke it.
-              </p>
-            </div>
-            <div>
-              <div className="l-tag">Works anywhere</div>
-              <code>
-                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
-              </code>
-              <p>
-                A CLI and an MCP server. Set the credentials as a secret in any sandbox, laptop or
-                CI runner and the agent has its drive.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section id="relay">
         <div className="l-wrap">
           <div className="l-tag">Example</div>
@@ -213,6 +163,14 @@ export default async function Home() {
           <p className="l-lede">
             Three agents on three platforms. None of them shares a machine. They meet in the drive.
           </p>
+          <ul className="l-also">
+            <li>
+              <b>Research:</b> each run starts from what the last one found.
+            </li>
+            <li>
+              <b>Long-running goals:</b> the plan and progress survive restarts and new models.
+            </li>
+          </ul>
           <div className="l-line3 relay">
             <div>
               <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
@@ -267,6 +225,71 @@ export default async function Home() {
               <span>devin-sandbox</span>
             </div>
           </div>
+          <p className="l-lede l-many">
+            Agents in different sandboxes read and write the same files. Each has its own key and
+            can be limited to writing in certain folders. Every version records which agent wrote
+            it, and a write that checks the version fails with a conflict instead of overwriting
+            newer work.
+          </p>
+        </div>
+      </section>
+
+      <section id="console">
+        <div className="l-wrap">
+          <div className="l-tag">Console</div>
+          <h2>See every file your agents saved.</h2>
+          <p className="l-lede">
+            Browse by folder, sort by date, preview and download, all decrypted only in your
+            browser.
+          </p>
+          <figure className="l-shot">
+            <picture>
+              <source media="(max-width: 760px)" srcSet="/console-files-phone.png" />
+              <img
+                src="/console-files.png"
+                width={2320}
+                height={798}
+                alt="The Agent Drive console showing the inbox folder of a drive: files with their size, the agent that wrote them, and when."
+              />
+            </picture>
+          </figure>
+        </div>
+      </section>
+
+      <section id="features">
+        <div className="l-wrap">
+          <div className="l-tag">Features</div>
+          <h2>Encrypted. Sharable. Works anywhere.</h2>
+          <div className="l-line3 feat">
+            <div>
+              <div className="l-tag">Encrypted</div>
+              <p>
+                Files are encrypted on the agent&apos;s machine (AES-256-GCM). We store only
+                ciphertext and never see your drive keys.
+              </p>
+            </div>
+            <div>
+              <div className="l-tag">Sharable</div>
+              <p>
+                Send an expiring link that decrypts in the recipient&apos;s browser. No account
+                needed; revoke it any time.
+              </p>
+              <code>
+                <span>$</span> agent-drive share --drive &quot;$DRIVE_ID&quot; /outputs/report.pdf
+                --expires-in 7d
+              </code>
+            </div>
+            <div>
+              <div className="l-tag">Works anywhere</div>
+              <p>
+                A CLI and an MCP server. Set one secret in a sandbox, laptop or CI runner and the
+                agent has its drive.
+              </p>
+              <code>
+                <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
+              </code>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -292,33 +315,10 @@ export default async function Home() {
               </li>
             </ol>
             <p className="l-nokey">No API key to copy.</p>
-            <h3>Three ways to add a second agent to a drive</h3>
-            <ul className="l-steps">
-              <li>
-                <i>&bull;</i>
-                <b>Approve it in the browser.</b>
-                <p className="p">
-                  Paste the same line into it, then on /connect choose the drive and supply its key
-                  (credentials bundle or recovery file).
-                </p>
-              </li>
-              <li>
-                <i>&bull;</i>
-                <b>Give a sandbox a .env line.</b>
-                <div className="t">
-                  agent-drive credentials issue --name devin --drive &quot;$DRIVE_ID&quot; --to
-                  sandbox.env
-                </div>
-              </li>
-              <li>
-                <i>&bull;</i>
-                <b>Hand it over from an agent that has the drive.</b>
-                <div className="t">agent-drive grant CXRH-TZJT</div>
-                <p className="p">
-                  The granting agent needs the delegate permission. You approve once at /connect.
-                </p>
-              </li>
-            </ul>
+            <p className="l-more">
+              Adding a second agent? Approve it in the browser, hand it a .env line, or let a
+              trusted agent grant it. <a href="/llms.txt">Read the docs</a>.
+            </p>
           </div>
           <div className="l-pair" role="img" aria-label="Example approval page">
             <div className="top">
@@ -347,6 +347,52 @@ export default async function Home() {
         </div>
       </section>
 
+      <section id="faq">
+        <div className="l-wrap">
+          <div className="l-tag">FAQ</div>
+          <h2>Questions, answered.</h2>
+          <div className="l-faq">
+            <details>
+              <summary>What happens if I lose the drive key?</summary>
+              <p>
+                Nobody can open the files, including us. Save the recovery file when you create a
+                drive, or ask your agent to run{' '}
+                <code>agent-drive credentials export --to &lt;a safe path&gt;</code>.
+              </p>
+            </details>
+            <details>
+              <summary>How is this different from S3, git or Dropbox?</summary>
+              <p>
+                The agent connects in one step with no keys to paste. Files are encrypted before
+                upload. Each agent has its own revocable key and folder limits. Every version
+                records which agent wrote it. And it works the same in any sandbox.
+              </p>
+            </details>
+            <details>
+              <summary>Which agents work with it?</summary>
+              <p>
+                Any agent that can run a shell command or use an MCP server. We have tested Claude
+                Code, Codex, pi and opencode.
+              </p>
+            </details>
+            <details>
+              <summary>Can a chat assistant in a vendor&apos;s cloud use it?</summary>
+              <p>
+                Not yet. Encryption happens on the agent&apos;s own machine, so it needs a shell or
+                a local MCP server.
+              </p>
+            </details>
+            <details>
+              <summary>What counts as an API operation?</summary>
+              <p>
+                Each successful request an agent makes (for example a list, upload or download)
+                counts as one. Failed requests do not count.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
       <section id="pricing">
         <div className="l-wrap">
           <div className="l-tag">Pricing</div>
@@ -366,6 +412,11 @@ export default async function Home() {
                   <li>{allowance(p.egressBytes)} downloads a month</li>
                   <li>{count(p.operations)} API operations a month</li>
                 </ul>
+                {p.baseCents === 0 && (
+                  <Link className="l-btn" href="/sign-up">
+                    Start free
+                  </Link>
+                )}
                 {p.baseCents > 0 &&
                   (paid ? (
                     <Link className="l-btn" href="/pricing">
@@ -377,6 +428,9 @@ export default async function Home() {
               </div>
             ))}
           </div>
+          <p className="l-pnote">
+            What counts as an API operation? <a href="#faq">See the FAQ above.</a>
+          </p>
           <p className="l-pnote">
             {paid ? '' : 'Paid checkout is not enabled yet. '}
             <Link href="/pricing">See full pricing</Link>

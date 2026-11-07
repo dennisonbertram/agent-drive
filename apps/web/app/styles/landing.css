@@ -43,7 +43,7 @@
   font: 500 11px/1.2 var(--mono2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--m);
+  color: var(--i2);
 }
 .l-btn {
   display: inline-flex;
@@ -810,8 +810,115 @@
   }
 }
 
-.l-nokey + h3 {
-  margin: 40px 0 0;
-  font-size: 17px;
+/* hero next-step line */
+.l-next {
+  margin-top: 14px;
+  max-width: 560px;
+  font-size: 15px;
+  color: var(--i2);
+}
+
+/* example: also-covers list and many-agents line */
+.l-also {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+  display: grid;
+  gap: 4px;
+  font-size: 16px;
+  color: var(--i2);
+}
+.l-also b {
   font-weight: 500;
+  color: var(--i);
+}
+.l-many {
+  margin-top: 40px;
+}
+
+/* console screenshot */
+.l-shot {
+  margin: 40px 0 0;
+  border: 1px solid var(--i);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 3px 0 var(--i);
+  max-width: 1096px;
+}
+.l-shot img {
+  height: auto;
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* features: equal-height cards */
+.l-line3.feat {
+  margin-top: 32px;
+}
+.feat > div {
+  display: flex;
+  flex-direction: column;
+}
+.feat p {
+  margin: 0 0 18px;
+}
+
+/* connect: one-line pointer to other ways in */
+.l-more {
+  margin-top: 28px;
+  font-size: 15px;
+  color: var(--i2);
+  max-width: 34em;
+}
+.l-more a {
+  font-weight: 500;
+}
+
+/* faq */
+.l-faq {
+  margin-top: 40px;
+  max-width: 760px;
+  border-top: 1px solid var(--rule);
+}
+.l-faq details {
+  border-bottom: 1px solid var(--hair);
+}
+.l-faq summary {
+  cursor: pointer;
+  padding: 18px 28px 18px 0;
+  font-size: 18px;
+  font-weight: 500;
+  list-style: none;
+  position: relative;
+}
+.l-faq summary::-webkit-details-marker {
+  display: none;
+}
+.l-faq summary::after {
+  content: '+';
+  position: absolute;
+  right: 4px;
+  top: 16px;
+  font: 400 20px var(--mono2);
+  color: var(--i2);
+}
+.l-faq details[open] summary::after {
+  content: '\2212';
+}
+.l-faq p {
+  padding: 0 28px 20px 0;
+  font-size: 16px;
+  color: var(--i2);
+}
+.l-faq code {
+  font-size: 14px;
+  background: var(--p2);
+  border-radius: 4px;
+  padding: 1px 6px;
+  overflow-wrap: anywhere;
+}
+
+.l-pnote + .l-pnote {
+  margin-top: 10px;
 }
