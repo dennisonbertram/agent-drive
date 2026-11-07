@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { BrandMark } from '../../../brand-mark';
+import { AccountHeader } from '../account-header';
+import { formatBytes, MAX_UPLOAD, perGbDollars, RATE_UNIT_NOTE } from '@/src/format/bytes';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 type Plan = {
@@ -57,22 +58,6 @@ function dollars(cents: string) {
 function money(cents: string) {
   const [whole, fraction] = dollars(cents).split('.');
   return `$${BigInt(whole!).toLocaleString()}.${fraction}`;
-}
-
-function bytes(raw: string) {
-  const value = BigInt(raw);
-  for (const [unit, divisor] of [
-    ['TiB', 1024n ** 4n],
-    ['GiB', 1024n ** 3n],
-    ['MiB', 1024n ** 2n],
-    ['KiB', 1024n],
-  ] as const) {
-    if (value >= divisor) {
-      const scaled = (value * 10n) / divisor;
-      return `${scaled / 10n}.${scaled % 10n} ${unit}`;
-    }
-  }
-  return `${value} B`;
 }
 
 function centsInput(value: string) {
@@ -155,7 +140,13 @@ function downloadBreakdown(statement: Billing) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export default function BillingClient({ plans }: { plans: Plan[] }) {
+export default function BillingClient({
+  plans,
+  clerkEnabled,
+}: {
+  plans: Plan[];
+  clerkEnabled: boolean;
+}) {
   const [billing, setBilling] = useState<Billing | null>(null);
   const [statements, setStatements] = useState<Statement[]>([]);
   const [cap, setCap] = useState('');
@@ -166,6 +157,7 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState('');
+  const [showIdle, setShowIdle] = useState(false);
   const load = useCallback(async () => {
     const data = await api<Billing>();
     setBilling(data);
@@ -248,18 +240,17 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
   }
 
   const rateCard = billing?.plan === 'free' ? billing.checkoutRates : billing?.rates;
+  const meterOn = !!billing?.egressMeteringConfigured && !billing.egressNotMetered;
+  const isIdle = (agent: AgentUsage) =>
+    BigInt(agent.storage_bytes) === 0n &&
+    BigInt(agent.operations) === 0n &&
+    BigInt(agent.egress_bytes ?? 0) === 0n;
+  const idleAgents = billing ? billing.agents.filter(isIdle) : [];
+  const shownAgents = billing ? billing.agents.filter((a) => showIdle || !isIdle(a)) : [];
   const chosen = statements.find((item) => item.periodStart === period)?.statement ?? billing;
   return (
     <div className="billing-page">
-      <header className="billing-header">
-        <BrandMark href="/console" />
-        <nav className="billing-links" aria-label="Account">
-          <Link href="/console/settings">Settings</Link>
-          <Link className="billing-links-cta" href="/console">
-            Back to files
-          </Link>
-        </nav>
-      </header>
+      <AccountHeader current="billing" clerkEnabled={clerkEnabled} />
       <main>
         <div className="billing-heading">
           <div>
@@ -318,29 +309,41 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
               </article>
               <article className="billing-card">
                 <p className="eyebrow">RETAINED STORAGE</p>
-                <strong className="billing-number">{bytes(billing.storageBytes)}</strong>
+                <strong className="billing-number">{formatBytes(billing.storageBytes)}</strong>
                 <p>
-                  {bytes(billing.limits.storageBytes!)} included · {billing.drives} drives
+                  {formatBytes(billing.limits.storageBytes!)} included · {billing.drives} drives
                 </p>
                 <small>
                   All versions count, including trash. Monthly peak:{' '}
-                  {bytes(billing.peakStorageBytes)}.
+                  {formatBytes(billing.peakStorageBytes)}.
                 </small>
               </article>
               <article className="billing-card">
-                <p className="eyebrow">OBSERVED DOWNLOADS</p>
+                <p className="eyebrow">
+                  {billing.egressMeteringConfigured && !billing.egressNotMetered
+                    ? 'OBSERVED DOWNLOADS'
+                    : 'DOWNLOADS AUTHORIZED THIS MONTH'}
+                </p>
                 <strong className="billing-number">
                   {billing.egressNotMetered
-                    ? 'Not metered — provider does not charge egress'
+                    ? 'Not charged'
                     : billing.egressMeteringConfigured
-                      ? bytes(billing.egressBytes)
-                      : 'Not connected'}
+                      ? formatBytes(billing.egressBytes)
+                      : formatBytes(billing.authorizedEgressBytes)}
                 </strong>
-                <p>{bytes(billing.authorizedEgressBytes)} authorized this month</p>
-                <small>
-                  Actual transfer reports can be delayed or incomplete. Authorizations are not
-                  charges.
-                </small>
+                {billing.egressNotMetered ? (
+                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
+                ) : billing.egressMeteringConfigured ? (
+                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
+                ) : (
+                  <p>Bytes approved for download; actual transfer isn’t metered.</p>
+                )}
+                {billing.egressMeteringConfigured && !billing.egressNotMetered && (
+                  <small>
+                    Actual transfer reports can be delayed or incomplete. Authorizations are not
+                    charges.
+                  </small>
+                )}
               </article>
             </section>
             <section aria-labelledby="plans-title">
@@ -371,8 +374,8 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                     </p>
                     <ul>
                       <li>{plan.drives} drives</li>
-                      <li>{bytes(plan.storageBytes)} encrypted storage</li>
-                      <li>{bytes(plan.egressBytes)} monthly download allowance</li>
+                      <li>{formatBytes(plan.storageBytes)} encrypted storage</li>
+                      <li>{formatBytes(plan.egressBytes)} monthly download allowance</li>
                       <li>{BigInt(plan.operations).toLocaleString()} monthly operations</li>
                     </ul>
                     <button
@@ -402,24 +405,24 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                 </p>
               )}
               <p className="billing-caption">
-                All plans include client-side encryption. 5 GiB maximum encrypted file size. Need a
-                custom enterprise plan? Contact your workspace operator.
+                All plans include client-side encryption. {MAX_UPLOAD} maximum encrypted file size.
+                Need a custom enterprise plan? Contact your workspace operator.
               </p>
               {rateCard && (
                 <div className="billing-card billing-rates">
                   <h3>Configured overage rates</h3>
                   <p>
-                    {money(rateCard.drive)} per extra drive/month · {money(rateCard.storage)} per
-                    extra GiB stored/month ·{' '}
+                    {money(rateCard.drive)} per extra drive/month ·{' '}
+                    {perGbDollars(BigInt(rateCard.storage))} per extra GB stored/month ·{' '}
                     {billing.egressNotMetered
                       ? 'downloads not charged'
-                      : `${money(rateCard.egress)} per extra GiB downloaded`}{' '}
+                      : `${perGbDollars(BigInt(rateCard.egress))} per extra GB downloaded`}{' '}
                     · {money(rateCard.operations)} per 1,000 extra operations.
                   </p>
                   <small>
                     Paid plans only. Storage and drives use the month’s peak allocation, not
-                    time-weighted usage. Each category rounds up to the nearest cent. Rates are
-                    fixed for the current plan period.
+                    time-weighted usage. {RATE_UNIT_NOTE} Each category rounds up to the nearest
+                    cent. Rates are fixed for the current plan period.
                   </small>
                 </div>
               )}
@@ -526,28 +529,34 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   <thead>
                     <tr role="row">
                       <th role="columnheader">AGENT</th>
-                      <th role="columnheader">RETAINED STORAGE</th>
-                      <th role="columnheader">OBSERVED DOWNLOADS</th>
-                      <th role="columnheader">OPERATIONS</th>
+                      <th role="columnheader" className="num">
+                        RETAINED STORAGE
+                      </th>
+                      {meterOn && (
+                        <th role="columnheader" className="num">
+                          OBSERVED DOWNLOADS
+                        </th>
+                      )}
+                      <th role="columnheader" className="num">
+                        OPERATIONS
+                      </th>
                     </tr>
                   </thead>
                   <tbody role="rowgroup">
-                    {billing.agents.map((agent) => (
+                    {shownAgents.map((agent) => (
                       <tr key={agent.id} role="row">
                         <td role="cell" className="primary">
                           {agent.name === '__console__' ? 'Console' : agent.name}
                         </td>
-                        <td role="cell" data-label="Retained storage">
-                          {bytes(agent.storage_bytes)}
+                        <td role="cell" className="num" data-label="Retained storage">
+                          {formatBytes(agent.storage_bytes)}
                         </td>
-                        <td role="cell" data-label="Observed downloads">
-                          {billing.egressNotMetered
-                            ? 'Not metered — provider does not charge egress'
-                            : billing.egressMeteringConfigured
-                              ? bytes(agent.egress_bytes)
-                              : 'Not connected'}
-                        </td>
-                        <td role="cell" data-label="Operations">
+                        {meterOn && (
+                          <td role="cell" className="num" data-label="Observed downloads">
+                            {formatBytes(agent.egress_bytes)}
+                          </td>
+                        )}
+                        <td role="cell" className="num" data-label="Operations">
                           {BigInt(agent.operations).toLocaleString()}
                         </td>
                       </tr>
@@ -555,6 +564,17 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   </tbody>
                 </table>
               </div>
+              {idleAgents.length > 0 && (
+                <button
+                  className="button secondary"
+                  aria-expanded={showIdle}
+                  onClick={() => setShowIdle((value) => !value)}
+                >
+                  {showIdle
+                    ? 'Hide agents with no usage'
+                    : `Show ${idleAgents.length} agent${idleAgents.length === 1 ? '' : 's'} with no usage this month`}
+                </button>
+              )}
               {!billing.agents.length && (
                 <p className="billing-caption">
                   Agent usage will appear after your first operation.

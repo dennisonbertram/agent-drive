@@ -312,8 +312,11 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await page.getByRole('button', { name: 'Usage', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Storage by drive' })).toBeVisible();
     await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
+    const storageTile = page.locator('.stat', { hasText: 'ENCRYPTED STORAGE' });
+    await expect(storageTile).toContainText(' of 5.37 GB');
+    await expect(storageTile.locator('progress')).toHaveCount(1);
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
-    await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await page.getByRole('button', { name: 'Revoke Browser regression key', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
     await expect(page.getByText('Revoked', { exact: true })).toBeVisible();
     const revoked = await cli(['whoami'], environment);
@@ -1429,7 +1432,7 @@ test('console confirms: revoke agent names it and the key count; no Revoke at 0 
     });
     await page.goto('/console');
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
-    await page.getByRole('button', { name: 'Revoke access', exact: true }).click();
+    await page.getByRole('button', { name: `Revoke access for ${agentName}`, exact: true }).click();
     const dialog = page.getByRole('dialog', { name: `Revoke access for ${agentName}?` });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText('2 active API keys stop working now.');
@@ -1438,15 +1441,18 @@ test('console confirms: revoke agent names it and the key count; no Revoke at 0 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByText('2 active keys')).toBeVisible();
-    await page.getByRole('button', { name: 'Revoke access', exact: true }).click();
+    await page.getByRole('button', { name: `Revoke access for ${agentName}`, exact: true }).click();
     await page.getByRole('button', { name: 'Revoke 2 keys', exact: true }).click();
     await expect(page.locator('.toast')).toContainText(`Revoked access for ${agentName}.`);
     await expect(page.getByText('Access revoked')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Revoke access', exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: `Revoke access for ${agentName}`, exact: true }),
+    ).toHaveCount(0);
 
     // A single key uses the key dialog.
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(2);
+    for (const key of ['Row key one', 'Row key two'])
+      await expect(page.getByRole('button', { name: `Revoke ${key}`, exact: true })).toBeDisabled();
     expect(nativeDialogs).toEqual([]);
   } finally {
     await cleanupUser(userId);

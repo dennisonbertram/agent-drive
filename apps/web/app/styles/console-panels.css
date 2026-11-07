@@ -910,3 +910,37 @@ dialog.preview > .dialog-heading + * {
     justify-self: stretch;
   }
 }
+
+/* Plan meters on the Usage tab: ink, or danger from 90 % of the limit. */
+.stat progress {
+  width: 100%;
+  height: 8px;
+  margin: 10px 0 4px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 2px;
+  background: var(--panel, #fff);
+  accent-color: var(--ink, #111);
+}
+.stat progress::-webkit-progress-bar {
+  background: var(--panel, #fff);
+}
+.stat progress::-webkit-progress-value {
+  background: var(--ink, #111);
+}
+.stat progress::-moz-progress-bar {
+  background: var(--ink, #111);
+}
+.stat progress.hot {
+  accent-color: var(--danger, #b42318);
+}
+.stat progress.hot::-webkit-progress-value {
+  background: var(--danger, #b42318);
+}
+.stat progress.hot::-moz-progress-bar {
+  background: var(--danger, #b42318);
+}
+@media (min-width: 761px) {
+  .usage-table .num {
+    text-align: right;
+  }
+}

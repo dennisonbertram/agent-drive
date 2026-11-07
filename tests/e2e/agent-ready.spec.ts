@@ -112,6 +112,10 @@ test.describe('agent-ready site', () => {
     }
     for (const dd of await page.locator('.pricing-rate-list dd').allInnerTexts())
       expect(md).toContain(dd);
+    // One decimal byte unit everywhere: the Free plan's 5 GiB shows as 5.37 GB, never GiB.
+    expect(md).toContain('5.37 GB stored ciphertext');
+    expect(await page.locator('.billing-plan').first().innerText()).toContain('5.37 GB');
+    expect(md).not.toMatch(/GiB|TiB/u);
     // Conditions: every paragraph of the fine print and any availability notice must match.
     const notes = [
       ...(await page.locator('.pricing-details p:not(.eyebrow)').allInnerTexts()),

@@ -290,8 +290,8 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
        VALUES ($1,$2,'share-card-e2e',$3,$4::uuid[],ARRAY['read','write','share']::text[])`,
       [accountId, agentId, createHash('sha256').update(token).digest('hex'), [driveId]],
     );
-    // Plaintext 1,949,980 B reads 1.9 MB; its ciphertext (+57 B) would read 2.0 MB.
-    const big = randomBytes(1_949_980);
+    // Plaintext 1,994,990 B reads 1.99 MB; its ciphertext (+57 B = 1,995,047) would read 2 MB.
+    const big = randomBytes(1_994_990);
     const hostile = '<img src=x onerror=__pwned=1>.txt';
     const small = randomBytes(300);
     await writeFile(join(root, 'report.txt'), big, { mode: 0o600 });
@@ -332,8 +332,8 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
     );
     await expect(page.locator('.share-label svg')).toBeVisible();
     await expect(page.locator('.share-details')).toContainText('SIZE');
-    await expect(page.locator('.share-details')).toContainText('1.9 MB');
-    await expect(page.locator('.share-details')).not.toContainText('2.0 MB');
+    await expect(page.locator('.share-details')).toContainText('1.99 MB');
+    await expect(page.locator('.share-details')).not.toContainText('2 MB');
     await expect(page.locator('.share-details')).not.toContainText('encrypted');
     expect(Math.abs((await card.boundingBox())!.height - loadingHeight)).toBeLessThanOrEqual(2);
     await page.unroute('**/api/shares/*?metadataOnly=1');
