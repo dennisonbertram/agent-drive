@@ -214,6 +214,7 @@ test.describe('agent device login', () => {
     if (delegate) {
       await openDetails(page);
       await page.getByLabel('Let this agent add other agents to its drives').check();
+      await expect(page.locator('.connect-summary')).toContainText('can add other agents');
     }
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();

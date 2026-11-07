@@ -464,19 +464,22 @@ export default function Connect({
   if (offer) facts.push(['Offered by', offer.agentName]);
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
   const grantScopes = offer ? offer.scopes : (previous ?? DEFAULT_SCOPES);
-  const summary = existing
-    ? 'Existing drive · choose below'
-    : [
-        offer
-          ? offer.drive.name
-          : reconnect.length
-            ? reconnect.map((d) => d.name).join(', ')
-            : 'New encrypted drive',
-        summarizeAccess(grantScopes, offer ? offer.writePaths : (request.write_paths ?? [])),
-        offer ? `offered by ${offer.agentName}` : '',
-      ]
-        .filter(Boolean)
-        .join(' · ');
+  const summary = (
+    existing
+      ? ['Existing drive · choose below']
+      : [
+          offer
+            ? offer.drive.name
+            : reconnect.length
+              ? reconnect.map((d) => d.name).join(', ')
+              : 'New encrypted drive',
+          summarizeAccess(grantScopes, offer ? offer.writePaths : (request.write_paths ?? [])),
+          offer ? `offered by ${offer.agentName}` : '',
+        ]
+  )
+    .concat(delegate ? ['can add other agents'] : [])
+    .filter(Boolean)
+    .join(' · ');
   const explain = existing
     ? 'Your browser seals the key to this agent’s login; Agent Drive never sees it.'
     : offer
