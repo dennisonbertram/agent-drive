@@ -1,3 +1,5 @@
+import { llmsIndex } from '../../src/content/site';
+
 const PUBLIC_ORIGIN = 'https://agentdrive.xyz';
 
 export function GET(request: Request) {
@@ -5,7 +7,7 @@ export function GET(request: Request) {
   // The CLI defaults to the public API, so any other origin must be passed to `login`.
   const api = origin === PUBLIC_ORIGIN ? '' : ` --api ${origin}/api`;
   const cli = `${origin}/cli/agent-drive.tgz`;
-  const body = `# Agent Drive
+  const body = `${llmsIndex(origin)}# Agent Drive
 
 Agent Drive is encrypted file storage for agents. Files are encrypted on your machine before
 upload, so the service never sees file contents or drive keys. A human approves your access once.

@@ -92,6 +92,18 @@ records, backups, and access logs have separate retention. Delayed storage logs 
 invoice cannot be promised to contain every late transfer. Never manually drop a blocked job
 or its billing rows merely to make the console show completion.
 
+## API notes for operators
+
+These notes moved from the public API reference.
+
+- Expired upload staging is cleaned opportunistically on new upload requests. Also run
+  `pnpm --dir apps/web maintenance:cleanup-expired-uploads` periodically for idle installations and
+  configure a one-day object-store lifecycle rule limited to `staging/`. Immutable `objects/` must
+  not be covered by that rule.
+- `recent` events are ordered by commit order only for events written after migration 0015; older
+  events are ordered by their timestamps.
+- Maintenance deletes device-authorization requests older than 24 hours.
+
 ## Every production release
 
 The Vercel project is connected to GitHub with `prod` as its production branch.

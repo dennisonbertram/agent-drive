@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google';
+import { publicOrigin } from '@/src/content/origin';
 import './globals.css';
 
 const interTight = Inter_Tight({
@@ -16,11 +18,19 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-export const metadata: Metadata = {
-  title: 'Agent Drive',
-  description:
-    'Portable storage for agents. Files survive sandboxes, machines and platform switches.',
-};
+// Absolute social URLs follow the origin the page is served from, so previews and local runs
+// advertise their own og:image instead of production's. AGENT_DRIVE_PUBLIC_URL pins it.
+export async function generateMetadata(): Promise<Metadata> {
+  const h = await headers();
+  return {
+    metadataBase: new URL(publicOrigin(h)),
+    title: 'Agent Drive',
+    description:
+      'Portable storage for agents. Files survive sandboxes, machines and platform switches.',
+    openGraph: { siteName: 'Agent Drive', type: 'website' },
+    twitter: { card: 'summary_large_image' },
+  };
+}
 
 export default function RootLayout({
   children,

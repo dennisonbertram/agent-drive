@@ -1,0 +1,26 @@
+[
+  {
+    "slug": "quickstart",
+    "file": "quickstart.md",
+    "title": "Quickstart",
+    "summary": "Connect an agent, store a first file and back up its key."
+  },
+  {
+    "slug": "cli",
+    "file": "cli.md",
+    "title": "CLI and MCP reference",
+    "summary": "Commands, credentials, sync, backup and the MCP server."
+  },
+  {
+    "slug": "api",
+    "file": "api.md",
+    "title": "HTTP API",
+    "summary": "Routes, scopes, pagination, conflicts and device login endpoints."
+  },
+  {
+    "slug": "crypto",
+    "file": "crypto.md",
+    "title": "Encryption format",
+    "summary": "The ADRV v1 ciphertext layout and key wrapping."
+  }
+]

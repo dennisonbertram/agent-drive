@@ -1,0 +1,237 @@
+/* Spec-sheet — public docs and comparison pages. Tokens come from globals.css. */
+.doc-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 24px;
+  font-family: var(--sans);
+}
+.doc-heading {
+  margin: 44px 0 28px;
+}
+.doc-eyebrow {
+  margin: 0;
+  font: 500 11px/1.2 var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.doc-heading h1 {
+  margin: 12px 0;
+  font-size: clamp(1.75rem, 5vw, 2.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.doc-md {
+  margin: 0;
+  font: 400 12px var(--mono);
+}
+.doc-md a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.doc-lede,
+.doc-answer {
+  margin: 0 0 24px;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.doc-answer {
+  padding: 20px 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--ink);
+}
+.doc-list {
+  list-style: none;
+  margin: 0 0 32px;
+  padding: 0;
+  border-top: 1px solid var(--line-strong);
+}
+.doc-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.doc-list a {
+  font-weight: 500;
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.doc-list span {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.doc-prose {
+  margin-bottom: 32px;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.doc-prose h2 {
+  margin: 36px 0 12px;
+  font-size: 1.375rem;
+  letter-spacing: -0.02em;
+  font-weight: 500;
+  color: var(--ink);
+}
+.doc-prose h3 {
+  margin: 24px 0 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.doc-prose p,
+.doc-prose ul,
+.doc-prose ol {
+  margin: 0 0 14px;
+  overflow-wrap: anywhere;
+}
+.doc-prose ul,
+.doc-prose ol {
+  padding-left: 22px;
+}
+.doc-prose li {
+  margin-bottom: 6px;
+}
+.doc-prose a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.doc-prose code {
+  font: 400 0.85em var(--mono);
+  background: var(--paper-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+.doc-prose pre {
+  margin: 0 0 16px;
+  padding: 16px;
+  overflow-x: auto;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border-radius: 6px;
+  font: 400 0.8125rem/1.6 var(--mono);
+}
+.doc-prose pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+  overflow-wrap: normal;
+}
+.doc-table {
+  margin: 0 0 24px;
+  overflow-x: auto;
+}
+.doc-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+.doc-table th,
+.doc-table td {
+  padding: 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.doc-table thead th {
+  font: 500 11px/1.2 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.doc-table tbody th {
+  font-weight: 600;
+  min-width: 120px;
+}
+.doc-table td {
+  min-width: 220px;
+}
+.doc-table code {
+  font: 400 0.9em var(--mono);
+  background: var(--paper-2);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.doc-page .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.doc-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 22px 0 32px;
+  border-top: 1px solid var(--line);
+  font: 400 11.5px var(--mono);
+  color: var(--muted);
+}
+.doc-footer nav {
+  display: flex;
+  gap: 20px;
+}
+.doc-footer a {
+  color: var(--ink);
+  letter-spacing: 0.08em;
+}
+.doc-page a:focus-visible,
+.doc-page [tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .doc-page {
+    padding: 0 16px;
+  }
+}
+/* Comparison tables stack on a phone so both columns stay in view. */
+@media (max-width: 640px) {
+  .doc-table.stack thead {
+    position: absolute;
+    clip-path: inset(50%);
+  }
+  .doc-table.stack table,
+  .doc-table.stack tbody,
+  .doc-table.stack tr,
+  .doc-table.stack th,
+  .doc-table.stack td {
+    display: block;
+    min-width: 0;
+  }
+  .doc-table.stack tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .doc-table.stack th,
+  .doc-table.stack td {
+    padding: 4px 0;
+    border: 0;
+  }
+  .doc-table.stack td::before {
+    content: attr(data-label);
+    display: block;
+    font: 500 11px/1.4 var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .doc-table.stack td {
+    margin-top: 6px;
+  }
+}
