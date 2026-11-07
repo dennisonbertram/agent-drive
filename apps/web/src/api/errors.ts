@@ -36,6 +36,7 @@ export class ApiError extends Error {
     status = statuses[code],
     readonly details: {
       upgradeUrl?: string;
+      limit?: 'drives' | 'storage' | 'operations' | 'downloads';
       retryAfter?: number;
       currentVersionId?: string | null;
       state?: 'exists' | 'changed' | 'trashed' | 'absent';

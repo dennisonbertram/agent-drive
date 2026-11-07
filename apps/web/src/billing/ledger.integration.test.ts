@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { getPool, withTransaction } from '../db/client';
-import { billingState, billingSummary } from './ledger';
+import { billingState, billingSummary, enforceWriteBudget } from './ledger';
 import { GIB } from './policy';
 
 let accountId = '';
@@ -108,4 +108,27 @@ it('meters retained versions exactly, preserves earned charges across tier chang
     [accountId],
   );
   expect(reports.rows[0]!.cents).toBe('55');
+});
+
+it('rejects a fourth Free drive with the drive limit named and the same 402 code', async () => {
+  const id = (
+    await getPool().query<{ id: string }>('INSERT INTO accounts (name) VALUES ($1) RETURNING id', [
+      `limit-msg-${randomUUID()}`,
+    ])
+  ).rows[0]!.id;
+  try {
+    for (const n of [1, 2, 3])
+      await getPool().query('INSERT INTO drives (account_id,name) VALUES ($1,$2)', [id, `d${n}`]);
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, id, { drives: 1n })),
+    ).rejects.toMatchObject({
+      code: 'payment_required',
+      status: 402,
+      message: expect.stringContaining('allows 3 drives and you have 3'),
+      details: { limit: 'drives' },
+    });
+  } finally {
+    await getPool().query('DELETE FROM drives WHERE account_id = $1', [id]);
+    await getPool().query('DELETE FROM accounts WHERE id = $1', [id]);
+  }
 });

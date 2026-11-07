@@ -5,6 +5,7 @@ import { ApiError } from '../api/errors';
 import {
   accruedOverage,
   billingRates,
+  limitExceeded,
   monthBounds,
   paymentRequired,
   PLANS,
@@ -223,9 +224,13 @@ export async function enforceWriteBudget(
     quoteUsage(state.account.plan, allowanceUsage, rates).overLimit &&
     (state.account.plan === 'free' || !rates)
   ) {
-    paymentRequired(
-      'Your plan allowance would be exceeded. Upgrade or enable configured overage billing.',
+    const { limit, message } = limitExceeded(
+      state.account.plan,
+      allowanceUsage,
+      state.current,
+      state.end,
     );
+    paymentRequired(message, limit);
   }
   if (
     state.account.subscription_status &&
@@ -274,7 +279,7 @@ export async function authorizeDownload(
         !state.rates ||
         !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
     ) {
-      paymentRequired('Your monthly download allowance has been reached.');
+      paymentRequired('Your monthly download allowance has been reached.', 'downloads');
     }
     const url = await sign();
     await client.query(
@@ -293,7 +298,7 @@ export async function enforceOperationBudget(client: PoolClient, accountId: stri
       !state.rates ||
       !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
   ) {
-    paymentRequired('Your monthly API operation allowance has been reached.');
+    paymentRequired('Your monthly API operation allowance has been reached.', 'operations');
   }
 }
 
