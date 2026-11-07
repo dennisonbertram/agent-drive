@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google';
+import { publicOrigin } from '@/src/content/origin';
 import './globals.css';
 
 const interTight = Inter_Tight({
@@ -21,10 +22,8 @@ const jetbrainsMono = JetBrains_Mono({
 // advertise their own og:image instead of production's. AGENT_DRIVE_PUBLIC_URL pins it.
 export async function generateMetadata(): Promise<Metadata> {
   const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   return {
-    metadataBase: new URL(process.env.AGENT_DRIVE_PUBLIC_URL || `${proto}://${host}`),
+    metadataBase: new URL(publicOrigin(h)),
     title: 'Agent Drive',
     description:
       'Portable storage for agents. Files survive sandboxes, machines and platform switches.',

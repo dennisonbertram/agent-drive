@@ -29,7 +29,7 @@ test.describe('shared site header', () => {
         await expect(page.getByRole('link', { name: 'Sign up free' })).toHaveCount(1);
         const header = page.locator('header.site-header');
         await expect(header.getByRole('link', { name: 'Console' })).toHaveCount(0);
-        await expect(header.locator('a[href="/llms.txt"]')).toHaveCount(1);
+        await expect(header.locator('a[href="/docs"]')).toHaveCount(1);
         const box = await headerBox(page);
         expect(box.width).toBe(box.inner);
         boxes.push(box.height);
