@@ -27,7 +27,7 @@ import { KeyChip } from './key-chip';
 import { UnlockDialog } from './unlock-dialog';
 import { FileIcon } from './file-icon';
 import { MenuButton } from './menu-button';
-import { Toast, type ToastState } from './toast';
+import { Toast, type Announcement, type ToastItem } from './toast';
 import { ConfirmBody } from './confirm-dialog';
 import { versionWhen } from '@/src/console/when';
 import {
@@ -374,10 +374,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [modal, setModal] = useState<ModalName>(null);
-  const [toast, setToast] = useState<ToastState>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const toastSeq = useRef(0);
   // Rows moved to Trash but not yet gone from a loaded list: "fileId:versionId" -> path.
-  const [hiddenRows, setHiddenRows] = useState<Map<string, string>>(new Map());
+  const [hiddenRows, setHiddenRows] = useState<Map<string, { driveId: string; path: string }>>(
+    new Map(),
+  );
   const [confirmState, setConfirmState] = useState<{
     title: string;
     message: string;
@@ -431,7 +434,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
   const fileItems = (filePage?.scope === fileScope ? filePage.items : []).filter(
-    (file) => !hiddenRows.has(`${file.id}:${file.version_id}`),
+    (file) => !hiddenRows.has(`${selected}:${file.id}:${file.version_id}`),
   );
   const countKeys = (agentId: string) =>
     apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
@@ -792,17 +795,46 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal('versions');
   }
 
-  const dismissToast = useCallback(() => setToast(null), []);
-  function showToast(message: string, extra: Partial<NonNullable<ToastState>> = {}) {
-    setToast({ id: ++toastSeq.current, message, ...extra });
+  const dismissToast = useCallback(
+    (id: number) => setToasts((current) => current.filter((item) => item.id !== id)),
+    [],
+  );
+  // Adds a toast (at most 3; the oldest goes first), or updates the one with `id` in place.
+  // A result that arrives after its toast was dismissed gets a new toast.
+  function showToast(
+    message: string,
+    extra: Partial<Omit<ToastItem, 'id' | 'rev' | 'message'>> = {},
+    id?: number,
+  ) {
+    const next = ++toastSeq.current;
+    const tone = extra.tone ?? 'info';
+    const opener = document.activeElement;
+    const returnTo =
+      opener instanceof HTMLElement && !opener.closest('.toast-stack') && opener !== document.body
+        ? opener
+        : null;
+    setToasts((current) => {
+      const item: ToastItem = { id: id ?? next, rev: next, message, returnTo, ...extra };
+      const at = id === undefined ? -1 : current.findIndex((entry) => entry.id === id);
+      if (at >= 0) return current.map((entry, index) => (index === at ? item : entry));
+      return [...current, item].slice(-3);
+    });
+    setAnnouncement({ text: message, tone, n: next });
+    return id ?? next;
   }
   const selectedNow = useRef(selected);
+  const tabNow = useRef(tab);
   useEffect(() => {
     selectedNow.current = selected;
-  }, [selected]);
-  function unhide(path: string) {
+    tabNow.current = tab;
+  }, [selected, tab]);
+  function unhide(driveId: string, path: string, exactKey?: string) {
     setHiddenRows((current) => {
-      const next = new Map([...current].filter(([, hidden]) => hidden !== path));
+      const next = new Map(
+        [...current].filter(([key, hidden]) =>
+          exactKey ? key !== exactKey : !(hidden.driveId === driveId && hidden.path === path),
+        ),
+      );
       return next.size === current.size ? current : next;
     });
   }
@@ -815,21 +847,25 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const cut = path.lastIndexOf('/');
     go({ drive: driveId, path: cut > 0 ? path.slice(0, cut) : undefined, view: 'browse' });
   }
-  function restoredToast(driveId: string, path: string) {
-    showToast(`Restored “${baseName(path)}”.`, {
-      action: {
-        label: 'Show file',
-        run: () => {
-          setToast(null);
-          showFile(driveId, path);
+  function restoredToast(driveId: string, path: string, replaceId?: number) {
+    showToast(
+      `Restored “${baseName(path)}”.`,
+      {
+        action: {
+          label: 'Show file',
+          run: (id) => {
+            dismissToast(id);
+            showFile(driveId, path);
+          },
         },
       },
-    });
+      replaceId,
+    );
   }
 
   async function restore(driveId: string, path: string, versionId?: string) {
     await api(`drives/${driveId}/restore`, 'POST', { path, ...(versionId ? { versionId } : {}) });
-    unhide(path);
+    unhide(driveId, path);
     setModal(null);
     await refresh();
     restoredToast(driveId, path);
@@ -839,37 +875,39 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   function trashFile(file: FileEntry, row: HTMLElement | null) {
     const driveId = selected;
     const name = baseName(file.path);
-    const hideKey = `${file.id}:${file.version_id}`;
+    const hideKey = `${driveId}:${file.id}:${file.version_id}`;
     (
       row?.nextElementSibling?.querySelector<HTMLElement>('.file-row-name') ??
       row?.previousElementSibling?.querySelector<HTMLElement>('.file-row-name') ??
       filterRef.current
     )?.focus();
-    setHiddenRows((current) => new Map(current).set(hideKey, file.path));
+    setHiddenRows((current) => new Map(current).set(hideKey, { driveId, path: file.path }));
+    let toastId = 0;
     const moved = api(`drives/${driveId}/delete`, 'POST', { path: file.path }).then(
       () => {
         api<Usage>('usage')
           .then(setUsage)
           .catch(() => undefined);
+        // A Trash list that loaded while the delete was running would miss this file.
+        if (tabNow.current === 'Trash' && driveId === selectedNow.current)
+          setFileRefresh((value) => value + 1);
         return true;
       },
       (reason: unknown) => {
-        setHiddenRows((current) => {
-          const next = new Map(current);
-          next.delete(hideKey);
-          return next;
-        });
+        unhide(driveId, file.path, hideKey);
+        // Update this file's own toast, never another file's.
         showToast(
           `Could not move “${name}” to Trash. ${reason instanceof Error ? reason.message : ''}`.trim(),
           { tone: 'error' },
+          toastId,
         );
         return false;
       },
     );
-    showToast(`Moved “${name}” to Trash.`, {
+    toastId = showToast(`Moved “${name}” to Trash.`, {
       action: {
         label: 'Undo',
-        run: async () => {
+        run: async (id) => {
           if (!(await moved)) return;
           try {
             // No versionId: the same call as the Trash tab, so a newer write by an agent stays current.
@@ -878,12 +916,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             showToast(
               `Could not restore “${name}”. ${reason instanceof Error ? reason.message : ''} It is still in Trash.`,
               { tone: 'error' },
+              id,
             );
             return;
           }
-          unhide(file.path);
+          unhide(driveId, file.path, hideKey);
           if (driveId === selectedNow.current) setFileRefresh((value) => value + 1);
-          restoredToast(driveId, file.path);
+          restoredToast(driveId, file.path, id);
         },
       },
     });
@@ -1605,7 +1644,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   </section>
                 </>
               )}
-              <Toast toast={toast} onDismiss={dismissToast} />
+              <Toast toasts={toasts} announcement={announcement} onDismiss={dismissToast} />
               {tab === 'Trash' && !drives.length && (
                 <section className="panel empty">
                   <h2>No drives yet.</h2>
@@ -2143,7 +2182,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 <p>Restore creates a new current version. Existing history stays intact.</p>
               )}
               {versions.map((version) => {
-                const current = version.id === newestVersionId || versions.length === 1;
+                const current = version.id === (newestVersionId ?? versions[0]?.id);
                 return (
                   <div className="version-row" key={version.id} data-version-id={version.id}>
                     <strong>

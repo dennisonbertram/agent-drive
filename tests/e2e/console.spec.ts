@@ -288,13 +288,27 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
     await expect(fileRow).toHaveCount(0);
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    // From Trash the current version is the newest one, and it has no Restore button.
+    await page
+      .getByRole('row')
+      .filter({ hasText: '/outputs/artifact.bin' })
+      .getByRole('button', { name: 'Versions', exact: true })
+      .click();
+    const versionRows = page.locator('.version-row');
+    await expect(versionRows.first()).toContainText('Current version');
+    await expect(versionRows.first().getByRole('button')).toHaveCount(0);
+    expect(await versionRows.count()).toBeGreaterThan(1);
+    await expect(page.getByRole('button', { name: 'Restore this version' })).toHaveCount(
+      (await versionRows.count()) - 1,
+    );
+    await page.getByRole('button', { name: 'Close dialog' }).click();
     await page
       .getByRole('row')
       .filter({ hasText: '/outputs/artifact.bin' })
       .getByRole('button', { name: 'Restore', exact: true })
       .click();
     await expect(page.getByText('Nothing in the trash.')).toBeVisible();
-    await expect(page.locator('.toast')).toContainText('Restored “artifact.bin”.');
+    await expect(page.locator('.toast').last()).toContainText('Restored “artifact.bin”.');
     await page.getByRole('button', { name: 'Usage', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Storage by drive' })).toBeVisible();
     await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
@@ -1271,7 +1285,7 @@ test('console row actions: Trash shows Undo at once and Undo restores on the ori
     const [driveA, driveB] = driveIds as [string, string];
     const rows = page.locator('.file-panel tbody tr');
     const rowOf = (name: string) => rows.filter({ hasText: name });
-    const toast = page.locator('.toast');
+    const toast = page.locator('.toast').last();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/console?drive=${driveA}&path=%2Fnotes`);
     await expect(rows).toHaveCount(3);
@@ -1343,6 +1357,37 @@ test('console row actions: Trash shows Undo at once and Undo restores on the ori
     ).toBeVisible();
     await expect(rowOf('b.md')).toHaveCount(1);
     await page.unroute('**/drives/*/delete');
+
+    // Two Undo toasts coexist: trashing a second file keeps the first one's Undo.
+    while (await page.locator('.toast-dismiss').count())
+      await page.locator('.toast-dismiss').first().click();
+    await rowOf('b.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await rowOf('a.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(page.locator('.toast')).toHaveCount(2);
+    await expect(page.locator('.toast').first()).toContainText('“b.md”');
+    // One empty live region stays mounted and carries the text.
+    await expect(page.getByRole('status').filter({ hasText: /Moved/ })).toHaveText(
+      'Moved “a.md” to Trash.',
+    );
+    // Undo the first one by keyboard: the same button stays focused as "Show file".
+    const firstUndo = page.locator('.toast').first().getByRole('button', { name: 'Undo' });
+    await firstUndo.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.toast').first()).toContainText('Restored “b.md”.', {
+      timeout: 15_000,
+    });
+    await expect(
+      page.locator('.toast').first().getByRole('button', { name: 'Show file' }),
+    ).toBeFocused();
+    await expect(page.locator('.toast').nth(1)).toContainText('Moved “a.md” to Trash.');
+    while (await page.locator('.toast-dismiss').count())
+      await page.locator('.toast-dismiss').first().click();
 
     // 5. The toast stays for 8 s, pauses on hover, and is gone after that.
     await page.clock.install();
