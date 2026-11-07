@@ -37,12 +37,12 @@ import { versionWhen } from '@/src/console/when';
 import { formatBytes } from '@/src/format/bytes';
 import {
   ROOT,
-  childrenOf,
   crumbs,
   fileKind,
   folderFromParam,
   listPrefix,
   recentFiles,
+  rowsFromListing,
   sortRows,
   type FileRow,
   type Row,
@@ -74,6 +74,9 @@ type FileEntry = {
   agent_id?: string;
   created_at?: string;
   deletedAt?: string;
+  // Folder listing rows (delimiter=/): a folder has no id or version.
+  kind?: 'file' | 'folder';
+  items?: number;
 };
 type Version = {
   id: string;
@@ -120,8 +123,11 @@ type ModalName =
   | 'share'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
-// A folder or Recent view loads at most this many rows; the list says so when it stops early.
+// Trash and a search in a folder load at most this many rows; the list says so when it stops early.
 const LIST_CAP = 1000;
+const isInternal = (path: string) => path.split('/').includes('.agent-drive');
+const itemKey = (item: FileEntry) =>
+  item.kind === 'folder' ? `folder:${item.path}` : `file:${item.id}`;
 const LAST_DRIVE = 'agent-drive:last-drive';
 const DEFAULT_SORT_DIR = { name: 'asc', modified: 'desc', size: 'desc' } as const;
 
@@ -153,7 +159,21 @@ function count(n: number, noun: string) {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
 
-async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+// Identical GETs started within half a second of each other share one request (React strict mode
+// and a refresh that overlaps a page load would otherwise ask twice).
+const inflight = new Map<string, { request: Promise<unknown>; at: number }>();
+function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  if (method !== 'GET') return send<T>(path, method, body);
+  // Only a request that just started is shared; a Retry later must ask again.
+  const known = inflight.get(path);
+  if (known && Date.now() - known.at < 500) return known.request as Promise<T>;
+  const request = send<T>(path, method, body).finally(() => {
+    if (inflight.get(path)?.request === request) inflight.delete(path);
+  });
+  inflight.set(path, { request, at: Date.now() });
+  return request;
+}
+async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
   let result: Response;
   try {
     result = await fetch(`/api/console/${path}`, {
@@ -174,7 +194,10 @@ async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> 
   const data = await result.json().catch(() => {
     throw new Error('Agent Drive returned an unexpected response. Try again.');
   });
-  if (!result.ok) throw new Error(data.error?.message ?? 'The request could not be completed.');
+  if (!result.ok)
+    throw Object.assign(new Error(data.error?.message ?? 'The request could not be completed.'), {
+      status: result.status,
+    });
   return data as T;
 }
 
@@ -443,7 +466,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     scope: string;
     items: FileEntry[];
     capped: boolean;
+    // The cursor of the next page (Browse and Recent), and whether this page answered a search.
+    next: string | null;
+    searched: boolean;
   } | null>(null);
+  // Load more belongs to one listing (drive, folder, view, search and sort), never to another.
+  const [more, setMore] = useState<{
+    key: string;
+    loading: boolean;
+    error: string;
+    changed: boolean;
+    done: string;
+  } | null>(null);
+  const pageKeyNow = useRef('');
+  const focusPages = useRef(0);
+  // The search box text the server is asked about, 250 ms after the last keystroke.
+  const [typed, setTyped] = useState('');
   // Where the Files list is: drive, folder and view live in the URL so reload and Back work.
   const params = useSearchParams();
   const folder = folderFromParam(params.get('path'));
@@ -454,9 +492,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Back and Forward change the drive in the URL; that wins over the last one chosen here.
   const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
-  const fileItems = (filePage?.scope === fileScope ? filePage.items : []).filter(
-    (file) => !hiddenRows.has(`${selected}:${file.id}:${file.version_id}`),
+  const searchTerm = tab === 'Files' && filter.trim() ? typed : '';
+  const pageKey = `${fileScope}|${searchTerm}|${sort.key}:${sort.dir}`;
+  const moreNow = more?.key === pageKey ? more : null;
+  const loadingMore = Boolean(moreNow?.loading);
+  // Search results are flat paths below the folder. Once the box is cleared they are stale.
+  const pageNow =
+    filePage?.scope === fileScope && (!filePage.searched || filter.trim()) ? filePage : null;
+  const fileItems = (pageNow?.items ?? []).filter(
+    (file) =>
+      file.kind === 'folder' || !hiddenRows.has(`${selected}:${file.id}:${file.version_id}`),
   );
+  const loadedFiles = fileItems.filter((file) => file.kind !== 'folder');
   const countKeys = (agentId: string) =>
     apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
   const issuedBy = (id?: string | null) =>
@@ -464,7 +511,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
   const query = filter.toLowerCase();
   // Trash is a flat list of full paths. Files shows folder rows (Browse) or the newest files (Recent).
-  const shownFiles = fileItems.filter((file) => file.path.toLowerCase().includes(query));
+  const shownFiles = loadedFiles.filter((file) => file.path.toLowerCase().includes(query));
   const folderBase = folder === ROOT ? '/' : `${folder}/`;
   const fileRowOf = (file: FileEntry): FileRow => {
     const cut = file.path.lastIndexOf('/');
@@ -480,17 +527,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   if (tab === 'Files' && view === 'recent') {
     rows = recentFiles(shownFiles);
   } else if (tab === 'Files') {
-    const children = childrenOf(fileItems, folder);
-    // Searching lists every loaded file below this folder, at any depth.
-    const matches = query
-      ? fileItems
+    // A search answer lists every matching file below this folder, at any depth. Until it
+    // arrives, the folder's own rows are narrowed by name.
+    const matches = pageNow?.searched
+      ? loadedFiles
           .filter(
             (file) =>
               file.path.startsWith(folderBase) &&
               file.path.slice(folderBase.length).toLowerCase().includes(query),
           )
           .map(fileRowOf)
-      : children;
+      : rowsFromListing(fileItems, folder).filter((row) => row.name.toLowerCase().includes(query));
     rows = sortRows(matches, sort.key, sort.dir);
   }
   const drive = drives.find((item) => item.id === selected);
@@ -498,7 +545,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const origin =
     typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
-  const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
+  const newestVersionId = loadedFiles.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
   const sharedNow = shares?.driveId === selected ? shares : null;
   const sharedShown = (sharedNow?.items ?? [])
@@ -509,7 +556,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     : tab === 'Files'
       ? rows.length
       : shownFiles.length;
-  const loaded = sharedView ? sharedNow?.status === 'ready' : filePage?.scope === fileScope;
+  const loaded = sharedView ? sharedNow?.status === 'ready' : Boolean(pageNow);
   const failed = sharedView ? sharedNow?.status === 'error' : fileFailure?.scope === fileScope;
   const listStatus = failed
     ? 'error'
@@ -554,25 +601,53 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       .catch((reason: Error) => setError(reason.message));
   }, [refresh]);
   useEffect(() => {
+    if (!filter.trim()) return setTyped('');
+    const timer = setTimeout(() => setTyped(filter.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [filter]);
+  useEffect(() => {
     if (!selected || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
     let active = true;
     void (async () => {
-      const prefix = tab === 'Files' && view === 'browse' ? listPrefix(folder) : null;
+      const searched = tab === 'Files' && Boolean(searchTerm);
+      const browse = tab === 'Files' && view === 'browse';
+      const prefix = browse ? listPrefix(folder) : null;
       const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
+      // Browse is one page of the folder's own rows. Recent is the newest 100 changes.
+      // Trash and a search in a folder page on up to LIST_CAP rows.
+      const wholeList = tab === 'Trash' || (searched && browse);
+      const recent = tab === 'Files' && view === 'recent';
       const items: FileEntry[] = [];
       let cursor: string | null = null;
       let capped = false;
+      let pages = 0;
+      // Recent shows 50 user files; internal .agent-drive rows do not count, so it keeps
+      // paging (up to 10 pages) until it has them or the list ends.
+      const recentShort = () => items.filter((file) => !isInternal(file.path)).length < 50;
       do {
+        pages += 1;
         const query = new URLSearchParams({ limit: '100' });
+        if (tab === 'Files') {
+          if (searched) query.set('q', searchTerm);
+          else if (browse) query.set('delimiter', '/');
+          if (!searched || !browse) query.set('sort', 'modified');
+        }
         if (prefix) query.set('prefix', prefix);
         if (cursor) query.set('cursor', cursor);
         const result: Page<FileEntry> = await api(`${path}?${query}`);
         if (!active) return;
         items.push(...result.items);
         cursor = result.nextCursor;
-        if (cursor && items.length >= LIST_CAP) capped = true;
-      } while (cursor && !capped);
-      setFilePage({ items, capped, scope: fileScope });
+        if (cursor && wholeList && items.length >= LIST_CAP) capped = true;
+        if (cursor && recent && recentShort() && pages >= 10) capped = true;
+      } while (cursor && !capped && (wholeList || (recent && recentShort())));
+      setFilePage({
+        items,
+        capped,
+        next: wholeList || !browse ? null : cursor,
+        searched,
+        scope: fileScope,
+      });
       setFileFailure(null);
     })().catch((reason: Error) => {
       if (active) setFileFailure({ scope: fileScope, message: reason.message });
@@ -580,7 +655,58 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => {
       active = false;
     };
-  }, [selected, tab, view, folder, fileScope, sharedView]);
+  }, [selected, tab, view, folder, fileScope, sharedView, searchTerm]);
+  // Load more: the next page of this folder, added below the rows already shown.
+  async function loadMore() {
+    const page = filePage;
+    const key = pageKey;
+    if (!page?.next || (more?.key === key && more.loading)) return;
+    const mark = (patch: Partial<NonNullable<typeof more>>) =>
+      setMore((current) =>
+        pageKeyNow.current === key
+          ? {
+              loading: false,
+              error: '',
+              changed: false,
+              done: '',
+              ...(current?.key === key ? current : {}),
+              ...patch,
+              key,
+            }
+          : current,
+      );
+    setMore({ key, loading: true, error: '', changed: false, done: '' });
+    try {
+      const query = new URLSearchParams({
+        limit: '100',
+        cursor: page.next,
+        delimiter: '/',
+        sort: 'modified',
+      });
+      const prefix = listPrefix(folder);
+      if (prefix) query.set('prefix', prefix);
+      const result: Page<FileEntry> = await api(`drives/${selected}/list?${query}`);
+      // The listing changed while the page loaded: drop it.
+      if (pageKeyNow.current !== key) return;
+      const known = new Set(page.items.map(itemKey));
+      const fresh = result.items.filter((item) => !known.has(itemKey(item)));
+      setFilePage((current) =>
+        current && current.scope === page.scope && current.next === page.next
+          ? { ...current, items: [...current.items, ...fresh], next: result.nextCursor }
+          : current,
+      );
+      mark({
+        loading: false,
+        done: result.nextCursor ? '' : `All ${page.items.length + fresh.length} items loaded.`,
+      });
+    } catch (reason) {
+      if ((reason as { status?: number }).status === 400) {
+        // The server no longer accepts this cursor: stop paging and ask for a refresh.
+        setFilePage((current) => (current === page ? { ...current, next: null } : current));
+        mark({ loading: false, changed: true });
+      } else mark({ loading: false, error: (reason as Error).message });
+    }
+  }
   useEffect(() => {
     if (selected && sharedView) void loadShares(selected);
     // loadShares only uses refs and setters.
@@ -619,20 +745,33 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const nav = crumbsRef.current;
     (nav?.querySelector<HTMLElement>('[aria-current="page"]') ?? nav)?.focus();
   }, [folder, view]);
+  useEffect(() => {
+    pageKeyNow.current = pageKey;
+  }, [pageKey]);
   // "Show file": once the file's folder has loaded, bring its row into view and focus it.
+  // A file past the first page is found by loading more pages (up to 10).
   useEffect(() => {
     const wanted = focusRequest.current;
     if (!wanted || tab !== 'Files' || listStatus !== 'ready') return;
     const cut = wanted.path.lastIndexOf('/');
     const where = cut > 0 ? wanted.path.slice(0, cut) : ROOT;
     if (selected !== wanted.driveId || folder !== where || view !== 'browse') return;
-    focusRequest.current = null;
     const button = [...document.querySelectorAll<HTMLElement>('.file-panel .file-row-name')].find(
       (item) => item.dataset.path === wanted.path,
     );
+    if (!button && pageNow?.next && focusPages.current < 10) {
+      if (!loadingMore && !moreNow?.error) {
+        focusPages.current += 1;
+        void loadMore();
+      }
+      return;
+    }
+    focusRequest.current = null;
     button?.scrollIntoView({ block: 'nearest' });
     button?.focus();
-  }, [focusTick, tab, listStatus, selected, folder, view]);
+    // loadMore only reads current state through its closure; this runs after every page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTick, tab, listStatus, selected, folder, view, filePage, loadingMore, moreNow]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
     if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
@@ -940,6 +1079,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setTab('Files');
     setSelected(driveId);
     focusRequest.current = { driveId, path };
+    focusPages.current = 0;
     setFocusTick((value) => value + 1);
     const cut = path.lastIndexOf('/');
     go({ drive: driveId, path: cut > 0 ? path.slice(0, cut) : undefined, view: 'browse' });
@@ -1543,7 +1683,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           }
                           ref={filterRef}
                           value={filter}
-                          disabled={sharedView ? !sharedNow?.items.length : !fileItems.length}
+                          disabled={
+                            sharedView
+                              ? !sharedNow?.items.length
+                              : !filePage?.items.length && !query
+                          }
                           onChange={(event) => setFilter(event.target.value)}
                         />
                       </div>
@@ -1591,15 +1735,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       />
                     )}
                     {listStatus === 'ready' &&
-                      (sharedView ? sharedNow?.capped : filePage?.capped) && (
+                      (sharedView ? sharedNow?.capped : pageNow?.capped) && (
                         <p className="list-cap" role="note">
                           {sharedView
                             ? 'Showing the first 1,000 links.'
                             : tab === 'Trash'
                               ? 'Showing the first 1,000 deleted files. Some are not listed here.'
                               : view === 'recent'
-                                ? 'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.'
-                                : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
+                                ? 'Showing the newest files; some may be missing.'
+                                : 'Showing the first 1,000 matches.'}
+                        </p>
+                      )}
+                    {listStatus === 'ready' &&
+                      pageNow?.next &&
+                      (sort.key !== 'modified' || sort.dir !== 'desc') && (
+                        <p className="list-cap" role="note" aria-live="polite">
+                          {`Sorted within the ${listed} items loaded so far. Load more to include the rest.`}
                         </p>
                       )}
                     {listed > 0 && tab === 'Trash' && (
@@ -1905,60 +2056,83 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {listStatus === 'ready' &&
-                      !sharedView &&
-                      !listed &&
-                      !(query && fileItems.length) && (
-                        <div className="empty">
-                          {tab === 'Trash' ? (
-                            <>
-                              <h3>Nothing in the trash.</h3>
-                              <p>Deleted files appear here until permanently removed.</p>
-                            </>
-                          ) : view === 'recent' ? (
-                            <>
-                              <h3>No recent files.</h3>
-                              <p>Files your agents write appear here, newest first.</p>
-                            </>
-                          ) : folder === ROOT ? (
-                            <>
-                              <h3>Ready for your first file.</h3>
-                              <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
-                            </>
-                          ) : (
-                            <>
-                              <h3>Nothing in this folder.</h3>
-                              <p>Its files may have been moved or deleted.</p>
-                              <button
-                                className="button secondary"
-                                onClick={() => go({ path: undefined })}
-                              >
-                                Back to {drive?.name}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    {listStatus === 'ready' &&
-                      !sharedView &&
-                      !listed &&
-                      query &&
-                      fileItems.length > 0 && (
-                        <div className="empty">
-                          <h3>{`No ${filePage?.capped ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
+                    {listStatus === 'ready' && !sharedView && !listed && !query && (
+                      <div className="empty">
+                        {tab === 'Trash' ? (
+                          <>
+                            <h3>Nothing in the trash.</h3>
+                            <p>Deleted files appear here until permanently removed.</p>
+                          </>
+                        ) : view === 'recent' ? (
+                          <>
+                            <h3>No recent files.</h3>
+                            <p>Files your agents write appear here, newest first.</p>
+                          </>
+                        ) : folder === ROOT ? (
+                          <>
+                            <h3>Ready for your first file.</h3>
+                            <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
+                          </>
+                        ) : (
+                          <>
+                            <h3>Nothing in this folder.</h3>
+                            <p>Its files may have been moved or deleted.</p>
+                            <button
+                              className="button secondary"
+                              onClick={() => go({ path: undefined })}
+                            >
+                              Back to {drive?.name}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {listStatus === 'ready' && !sharedView && !listed && query && (
+                      <div className="empty">
+                        <h3>{`No ${tab === 'Trash' ? 'deleted ' : ''}files match “${filter}”.`}</h3>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            setFilter('');
+                            filterRef.current?.focus();
+                          }}
+                        >
+                          Clear filter
+                        </button>
+                      </div>
+                    )}
+                    <span className="sr-only" aria-live="polite">
+                      {moreNow?.done}
+                    </span>
+                    {listStatus === 'ready' && (pageNow?.next || moreNow?.changed) && (
+                      <div className="list-more">
+                        {pageNow?.next && (
                           <button
                             className="button secondary"
-                            onClick={() => {
-                              setFilter('');
-                              filterRef.current?.focus();
-                            }}
+                            disabled={loadingMore}
+                            onClick={() => void loadMore()}
                           >
-                            Clear filter
+                            {loadingMore ? 'Loading…' : 'Load more'}
                           </button>
-                        </div>
-                      )}
+                        )}
+                        {moreNow?.error && (
+                          <span role="alert">{`Could not load more. ${moreNow.error}`}</span>
+                        )}
+                        {moreNow?.changed && (
+                          <>
+                            <span role="alert">This list changed. Refresh to continue.</span>
+                            <button
+                              className="button secondary"
+                              onClick={() => setFileRefresh((value) => value + 1)}
+                            >
+                              Refresh
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <div className="panel-footer">
-                      <span className="footer-count">
+                      <span className="footer-count" aria-live="polite">
                         {loaded
                           ? query
                             ? `${listed} ${listed === 1 ? 'match' : 'matches'}`
@@ -1968,7 +2142,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 ? `${listed} loaded`
                                 : view === 'recent'
                                   ? `${listed} recent files`
-                                  : count(listed, 'item')
+                                  : pageNow?.next
+                                    ? `${listed} loaded`
+                                    : count(listed, 'item')
                           : ''}
                       </span>
                       <span>
