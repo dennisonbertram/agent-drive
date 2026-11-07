@@ -86,7 +86,13 @@ describe('limitExceeded', () => {
     );
     expect(r.limit).toBe('storage');
     expect(r.message).toContain("Free plan's 5.37 GB storage (5.37 GB used)");
-    expect(r.message).toContain('Trashed files');
+    expect(r.message).toContain(
+      'Trashed files and old versions still count. Deleting a drive frees its storage, or upgrade.',
+    );
+  });
+  it('can force the operations or downloads message at the exact boundary', () => {
+    const r = limitExceeded('free', zero, zero, undefined, 'operations');
+    expect(r.limit).toBe('operations');
   });
   it('names operations and downloads with the reset date', () => {
     const resets = new Date(Date.UTC(2026, 11, 1));

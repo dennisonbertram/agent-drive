@@ -215,9 +215,18 @@ export async function enforceWriteBudget(
   };
   const rates = state.rates;
   const quote = quoteState(state, projected);
+  // Drives being deleted no longer count toward the allowance (peak billing is unchanged).
+  const activeDrives = BigInt(
+    (
+      await client.query<{ n: string }>(
+        'SELECT count(*)::text AS n FROM drives WHERE account_id = $1 AND deleting_at IS NULL',
+        [accountId],
+      )
+    ).rows[0]!.n,
+  );
   const allowanceUsage = {
     ...projected,
-    drives: state.current.drives + (options.drives ?? 0n),
+    drives: activeDrives + (options.drives ?? 0n),
     storageBytes: stored + BigInt(pending.rows[0]!.bytes),
   };
   if (
@@ -227,7 +236,7 @@ export async function enforceWriteBudget(
     const { limit, message } = limitExceeded(
       state.account.plan,
       allowanceUsage,
-      state.current,
+      { drives: activeDrives, storageBytes: state.current.storageBytes },
       state.end,
     );
     paymentRequired(message, limit);
@@ -279,7 +288,14 @@ export async function authorizeDownload(
         !state.rates ||
         !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
     ) {
-      paymentRequired('Your monthly download allowance has been reached.', 'downloads');
+      const { limit, message } = limitExceeded(
+        state.account.plan,
+        { ...state.current, drives: 0n },
+        state.current,
+        state.end,
+        'downloads',
+      );
+      paymentRequired(message, limit);
     }
     const url = await sign();
     await client.query(
@@ -298,7 +314,14 @@ export async function enforceOperationBudget(client: PoolClient, accountId: stri
       !state.rates ||
       !['active', 'trialing'].includes(state.account.subscription_status ?? ''))
   ) {
-    paymentRequired('Your monthly API operation allowance has been reached.', 'operations');
+    const { limit, message } = limitExceeded(
+      state.account.plan,
+      state.current,
+      state.current,
+      state.end,
+      'operations',
+    );
+    paymentRequired(message, limit);
   }
 }
 

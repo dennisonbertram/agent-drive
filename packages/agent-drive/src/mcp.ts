@@ -54,7 +54,10 @@ function failure(error: unknown) {
           text: JSON.stringify({
             error: {
               code: error.code,
-              message: apiErrors[error.code] ?? 'Agent Drive request failed.',
+              message:
+                error.code === 'payment_required'
+                  ? error.message
+                  : (apiErrors[error.code] ?? 'Agent Drive request failed.'),
               ...(error.upgradeUrl ? { upgradeUrl: error.upgradeUrl } : {}),
               ...(error.state ? { state: error.state } : {}),
               ...(error.currentVersionId === undefined

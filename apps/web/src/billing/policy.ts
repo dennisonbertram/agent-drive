@@ -121,6 +121,7 @@ export function limitExceeded(
   usage: Usage,
   before: Pick<Usage, 'drives' | 'storageBytes'>,
   resetsOn?: Date,
+  only?: LimitName,
 ) {
   const p = PLANS[plan];
   const name = plan[0]!.toUpperCase() + plan.slice(1);
@@ -128,13 +129,13 @@ export function limitExceeded(
   const resets = resetsOn ? `on ${resetsOn.toISOString().slice(0, 10)}` : 'next month';
   let limit: LimitName;
   let message: string;
-  if (usage.drives > p.drives) {
+  if (only ? only === 'drives' : usage.drives > p.drives) {
     limit = 'drives';
     message = `Your ${name} plan allows ${p.drives} drives and you have ${before.drives}. Delete a drive${upgrade} to add more.`;
-  } else if (usage.storageBytes > p.storageBytes) {
+  } else if (only ? only === 'storage' : usage.storageBytes > p.storageBytes) {
     limit = 'storage';
-    message = `This would exceed your ${name} plan's ${formatBytes(p.storageBytes)} storage (${formatBytes(before.storageBytes)} used). Trashed files and old versions count until permanently deleted. Delete them${upgrade}.`;
-  } else if (usage.operations > p.operations) {
+    message = `This would exceed your ${name} plan's ${formatBytes(p.storageBytes)} storage (${formatBytes(before.storageBytes)} used). Trashed files and old versions still count. Deleting a drive frees its storage${upgrade ? ', or upgrade' : ''}.`;
+  } else if (only ? only === 'operations' : usage.operations > p.operations) {
     limit = 'operations';
     message = `Your ${name} plan's monthly API operation allowance has been reached. It resets ${resets}${upgrade ? '; you can also upgrade' : ''}.`;
   } else {
