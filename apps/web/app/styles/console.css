@@ -378,71 +378,6 @@
   color: var(--ink, #111);
   border-color: var(--ink, #111);
 }
-.console-main .banner.keyline {
-  border-left-width: 1px;
-  display: flex;
-  align-items: center;
-  gap: 6px 10px;
-  min-height: 34px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-  margin-bottom: 10px;
-  font-size: 13px;
-  line-height: 1.4;
-  background: var(--panel, #fff);
-  color: var(--ink, #111);
-  border-color: var(--line, rgba(17, 17, 17, 0.16));
-}
-.keyline .led {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--muted, #6b6963);
-  flex: none;
-}
-.keyline .led.on {
-  background: var(--sig, #ff4a1c);
-  box-shadow:
-    0 0 0 2px var(--panel, #fff),
-    0 0 0 3px var(--line-strong, #111),
-    0 0 10px var(--sig, #ff4a1c);
-}
-.keyline .led.dim {
-  background: var(--sig-dark, #b8360c);
-}
-.keyline code {
-  font-size: 12px;
-  background: var(--paper-2, #f6f5f2);
-  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-.keyline-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.keyline-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-}
-.keyline .button {
-  min-height: 26px;
-  padding: 0 10px;
-  font-size: 12.5px;
-}
-.keyline .copy-button {
-  border-color: var(--ink, #111);
-  color: var(--ink, #111);
-}
-.keyline .copy-button:hover {
-  background: var(--paper-2, #f6f5f2);
-}
 
 /* drive id and key controls live in the file panel toolbar */
 .toolbar-tools {
@@ -587,10 +522,6 @@
     animation: none;
   }
 }
-.keyline-reserve {
-  min-height: 46px;
-  visibility: hidden;
-}
 .file-panel table {
   table-layout: fixed;
   width: 100%;
@@ -724,7 +655,6 @@
 }
 .row-actions button:disabled {
   color: var(--muted, #6b6963);
-  opacity: 0.6;
   cursor: not-allowed;
 }
 .load-more {
@@ -1083,19 +1013,6 @@
   .entity-info {
     min-width: 180px;
   }
-  .console-main .banner.keyline {
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-  .keyline-text {
-    flex: 1 1 calc(100% - 24px);
-    overflow: visible;
-    white-space: normal;
-  }
-  .keyline-actions {
-    flex-wrap: wrap;
-    padding-left: 19px;
-  }
 }
 
 /* secondary tables (usage by author) match the files table header */
@@ -1106,4 +1023,72 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted, #6b6963);
+}
+
+/* key chip and its menu (native popover, positioned by menu-button.tsx) */
+.key-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 999px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  font: 500 12.5px var(--sans, 'Inter Tight', system-ui, sans-serif);
+  cursor: pointer;
+}
+.key-chip:hover {
+  background: var(--paper-2, #f6f5f2);
+}
+.key-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  border: 2px solid var(--muted, #6b6963);
+  background: transparent;
+}
+.key-dot.danger {
+  border-color: var(--danger, #b42318);
+  background: var(--danger, #b42318);
+}
+.key-dot.ok {
+  border-color: var(--ok, #1a7f37);
+  background: var(--ok, #1a7f37);
+}
+.menu-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(320px, calc(100vw - 16px));
+  padding: 12px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  box-shadow: 0 3px 0 var(--line-strong, #111);
+}
+.menu-popover:popover-open {
+  display: grid;
+  gap: 10px;
+}
+.menu-popover p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.menu-popover .button {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+.key-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
 }

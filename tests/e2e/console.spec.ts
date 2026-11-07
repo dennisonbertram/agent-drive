@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -34,6 +34,25 @@ function cli(
       resolveResult({ status, stdout, stderr });
     });
   });
+}
+
+// The backup state lives in the key chip: open its menu, then read the menu text.
+async function keyMenu(page: Page) {
+  const menu = page.getByTestId('key-menu');
+  if (!(await menu.isVisible())) await page.getByTestId('key-chip').click();
+  return menu;
+}
+
+// Exact storage the console may use. P1 stores nothing; later work extends `allowedLocal`.
+async function expectNoStoredSecrets(page: Page, driveKey: string, allowedLocal: string[] = []) {
+  const stored = await page.evaluate(() => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+  }));
+  expect(stored.local.map(([name]) => name).sort()).toEqual([...allowedLocal].sort());
+  expect(stored.session).toEqual([]);
+  const text = JSON.stringify(stored);
+  for (const secret of [driveKey, 'adk_', 'adcred1.']) expect(text).not.toContain(secret);
 }
 
 async function cleanupUser(userId: string) {
@@ -157,7 +176,8 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     expect((await backupPost).postDataJSON()).toEqual({ method: 'file' });
     await expect(page.getByRole('dialog')).toHaveCount(0);
     // F19: saving the recovery file from the receipt records the backup.
-    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+    await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
+    await expect(await keyMenu(page)).toContainText('Key backed up');
     const driveId = await page.getByTestId('drive-id').innerText();
     expect(backup.driveId).toBe(driveId);
 
@@ -216,19 +236,23 @@ test('new human workspace → encrypted CLI upload → browser download, restore
 
     await page.reload();
     await expect(fileRow).toBeVisible();
-    await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeDisabled();
-    expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
-    await page.getByRole('button', { name: 'Load drive key' }).click();
+    await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+    await expectNoStoredSecrets(page, driveKey);
+    await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
+    await page.getByText('Paste a key instead').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
-    await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: /decrypt/i })).toBeVisible();
+    await page.getByTestId('key-chip').click();
     await page.getByRole('button', { name: 'Forget key' }).click();
-    await page.getByRole('button', { name: 'Load drive key' }).click();
+    await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
+    await page.getByText('Paste a key instead').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(driveKey);
+    const pendingDownload = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await pendingDownload;
     const changed = Buffer.from('A later version, restored through the console.');
     await writeFile(localFile, changed);
     expect(
@@ -451,6 +475,119 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
   }
 });
 
+test('console unlock on demand: Download opens the key prompt and continues after the recovery file', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-unlock-'));
+  const driveKey = randomBytes(32).toString('base64url');
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'Unlock drive' });
+    const agent = await post<{ id: string }>('agents', { name: 'Unlock agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Unlock key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: driveKey,
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+    const body = `UNLOCK-BODY-${randomUUID()}\n`;
+    const localFile = join(root, 'today.md');
+    await writeFile(localFile, body, { mode: 0o600 });
+    const upload = await cli(
+      ['put', localFile, '/notes/today.md', '--drive', drive.id],
+      environment,
+    );
+    expect(upload.status, `CLI upload failed: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    const right = join(root, 'right.key.json');
+    const wrong = join(root, 'wrong.key.json');
+    await writeFile(
+      right,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: drive.id, key: driveKey }),
+    );
+    await writeFile(
+      wrong,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: randomUUID(), key: driveKey }),
+    );
+    const requests: string[] = [];
+    page.on('request', (request) => requests.push(`${request.url()} ${request.postData() ?? ''}`));
+
+    await page.clock.install();
+    await page.goto('/console');
+    const row = page.getByRole('row').filter({ hasText: '/notes/today.md' });
+    await expect(row).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+    await row.getByRole('button', { name: 'Download', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Load the key for Unlock drive' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel(/^Drive key or credentials bundle/)).toBeHidden();
+    // A slow read that finishes after the dialog closed must not load the key or download.
+    let downloads = 0;
+    page.on('download', () => (downloads += 1));
+    await page.evaluate(() => {
+      const w = window as unknown as { releaseRead: () => void };
+      const original = File.prototype.text;
+      const gate = new Promise<void>((resolve) => (w.releaseRead = resolve));
+      File.prototype.text = async function () {
+        const text = await original.call(this);
+        await gate;
+        File.prototype.text = original;
+        return text;
+      };
+    });
+    await dialog.getByLabel('Choose recovery file').setInputFiles(right);
+    await dialog.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.evaluate(() => (window as unknown as { releaseRead: () => void }).releaseRead());
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('key-chip')).toContainText('Key needed');
+    expect(downloads).toBe(0);
+    await row.getByRole('button', { name: 'Download', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    const before = await dialog.boundingBox();
+    await dialog.getByLabel('Choose recovery file').setInputFiles(wrong);
+    await expect(dialog.getByRole('alert')).toHaveText('That recovery file is not for this drive.');
+    const after = await dialog.boundingBox();
+    expect(after!.height).toBe(before!.height);
+    expect(after!.y).toBe(before!.y);
+
+    const download = page.waitForEvent('download');
+    await dialog.getByLabel('Choose recovery file').setInputFiles(right);
+    expect((await readFile((await (await download).path())!, 'utf8')) === body).toBe(true);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByTestId('key-chip')).toContainText('Key loaded');
+
+    // The idle lock clears the key and says so; the chip returns to "Key needed".
+    await page.clock.fastForward('31:00');
+    await expect(page.getByTestId('key-chip')).toContainText('Key needed');
+    await expect(page.getByText(/The key was cleared after 30 minutes without use/)).toBeVisible();
+
+    await expectNoStoredSecrets(page, driveKey);
+    expect(requests.some((entry) => entry.includes(driveKey))).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});
+
 test('console trash: a failed load shows an error with Retry instead of loading forever', async ({
   page,
   context,
@@ -524,13 +661,16 @@ test('console files: recovery download stays on an empty drive, and a failed rel
     ).toBeVisible();
     // No files, key loaded: the backup warning and recovery download remain available.
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
-    await expect(page.getByTestId('key-backup-status')).toContainText('hasn’t been backed up');
+    await expect(page.getByTestId('key-chip')).toContainText('Not backed up');
     failBackup = false;
-    await page.getByRole('button', { name: 'Download recovery file', exact: true }).click();
-    // The key line also records the backup only after "I saved it".
-    await expect(page.getByTestId('key-backup-status')).toContainText('hasn’t been backed up');
+    await (await keyMenu(page))
+      .getByRole('button', { name: 'Download recovery file', exact: true })
+      .click();
+    // The key menu also records the backup only after "I saved it".
+    await expect(page.getByTestId('key-chip')).toContainText('Not backed up');
     await page.getByRole('button', { name: 'I saved it' }).click();
-    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+    await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
+    await expect(await keyMenu(page)).toContainText('Key backed up');
 
     // The files list loaded once; a later reload of the cached scope fails.
     await page.route('**/api/console/drives/*/list*', (route) =>
@@ -653,9 +793,10 @@ test('console files: a stale refresh cannot hide a recorded backup', async ({ pa
     // The backup was recorded; now the stale refresh lands.
     await page.waitForTimeout(500);
     release();
-    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+    await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
     await page.waitForTimeout(500);
-    await expect(page.getByTestId('key-backup-status')).toContainText('Key backed up');
+    await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
+    await expect(await keyMenu(page)).toContainText('Key backed up');
   } finally {
     await cleanupUser(userId);
   }
