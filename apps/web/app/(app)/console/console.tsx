@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type FocusEvent,
   type FormEvent,
   type ReactNode,
 } from 'react';
@@ -19,6 +20,7 @@ import {
 import { validateDownloadUrl } from '@/src/share/url';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
+import { ListState } from './list-state';
 import '../../styles/console.css';
 import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
 
@@ -89,30 +91,41 @@ type ModalName =
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-  const result = await fetch(`/api/console/${path}`, {
-    method,
-    credentials: 'same-origin',
-    cache: 'no-store',
-    ...(body === undefined
-      ? {}
-      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-  });
+  let result: Response;
+  try {
+    result = await fetch(`/api/console/${path}`, {
+      method,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      ...(body === undefined
+        ? {}
+        : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+    });
+  } catch {
+    throw new Error('Could not reach Agent Drive. Check your connection and try again.');
+  }
   if (result.status === 401) {
     window.location.assign('/sign-in');
     throw new Error('Your session expired. Sign in again.');
   }
-  const data = await result.json();
+  const data = await result.json().catch(() => {
+    throw new Error('Agent Drive returned an unexpected response. Try again.');
+  });
   if (!result.ok) throw new Error(data.error?.message ?? 'The request could not be completed.');
   return data as T;
 }
 
-function ConnectAgentPanel({ open }: { open: boolean }) {
+function useAgentInstruction() {
   const origin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
     () => 'https://agentdrive.xyz',
   );
-  const instruction = `Set up Agent Drive: ${origin}/llms.txt`;
+  return `Set up Agent Drive: ${origin}/llms.txt`;
+}
+
+function ConnectAgentPanel({ open }: { open: boolean }) {
+  const instruction = useAgentInstruction();
   const snippets = [
     ['Claude Code', 'claude mcp add agent-drive -- agent-drive mcp'],
     [
@@ -180,6 +193,18 @@ function date(value?: string) {
   return value ? new Date(value).toLocaleString() : '—';
 }
 
+function deletedOn(value?: string) {
+  return value
+    ? new Date(value).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : '—';
+}
+
 function modifiedAt(value?: string) {
   return value
     ? new Date(value).toLocaleString([], {
@@ -217,11 +242,12 @@ function Dialog({
     const opener = document.activeElement as HTMLElement | null;
     dialog?.showModal();
     // Land on the first field, or the Copy button of a secret receipt, not on Close.
-    dialog
-      ?.querySelector<HTMLElement>(
+    (
+      dialog?.querySelector<HTMLElement>('[data-autofocus]') ??
+      dialog?.querySelector<HTMLElement>(
         'input:not([type=checkbox]):not([type=file]):not([readonly]), select, .copy-button, .version-row button',
       )
-      ?.focus();
+    )?.focus();
     return () => {
       dialog?.close();
       // Give focus back to whatever opened the dialog, unless it has left the page.
@@ -272,6 +298,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
   const [filter, setFilter] = useState('');
+  const [slowScope, setSlowScope] = useState('');
+  // Stage of the key receipt, and the drive whose key-line download awaits "I saved it".
+  const [receiptSaved, setReceiptSaved] = useState(false);
+  const [keylineConfirm, setKeylineConfirm] = useState('');
+  // Backups recorded in this page, so a refresh that started earlier cannot hide them.
+  const recordedBackups = useRef<Record<string, { at: string; method: string }>>({});
+  const filterRef = useRef<HTMLInputElement>(null);
   const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
     scope: string;
@@ -289,12 +322,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     file.path.toLowerCase().includes(filter.toLowerCase()),
   );
   const drive = drives.find((item) => item.id === selected);
+  const agentInstruction = useAgentInstruction();
   const origin =
     typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
   const loaded = filePage?.scope === fileScope;
+  const failed = fileFailure?.scope === fileScope;
+  const listStatus = failed
+    ? 'error'
+    : loaded
+      ? 'ready'
+      : slowScope === fileScope
+        ? 'slow'
+        : 'loading';
   const backupText = drive?.key_backup_at
     ? `Key backed up ${new Date(drive.key_backup_at).toLocaleDateString()} (${drive.key_backup_method})`
     : 'This drive’s key hasn’t been backed up. If the agent’s machine is lost, these files can’t be opened. Ask the agent to run agent-drive credentials export';
@@ -307,7 +349,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       all<ApiKey>('keys'),
       api<Usage>('usage'),
     ]);
-    setDrives(nextDrives);
+    setDrives(
+      nextDrives.map((item) => {
+        const recorded = recordedBackups.current[item.id];
+        return recorded && !item.key_backup_at
+          ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
+          : item;
+      }),
+    );
     setAgents(nextAgents);
     setApiKeys(nextKeys);
     setUsage(nextUsage);
@@ -337,6 +386,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       });
     return () => {
       active = false;
+    };
+  }, [selected, tab, fileScope]);
+  useEffect(() => {
+    // A drive switch, tab switch or Retry changes fileScope, which restarts this timer.
+    if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
+    const timer = setTimeout(() => setSlowScope(fileScope), 10_000);
+    return () => {
+      clearTimeout(timer);
+      // Leaving a scope forgets that it was slow, so coming back starts a fresh 10 s.
+      setSlowScope('');
     };
   }, [selected, tab, fileScope]);
   useEffect(() => {
@@ -416,6 +475,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
     setDriveReceipt({ id: created.id, key });
+    setReceiptSaved(false);
     setSaved(false);
     setModal('driveReceipt');
     await refresh();
@@ -433,8 +493,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       credentials: 'omit',
       redirect: 'error',
       cache: 'no-store',
-    });
-    if (!response.ok) throw new Error('The encrypted file could not be downloaded.');
+    }).catch(() => null);
+    if (!response?.ok) throw new Error('The encrypted file could not be downloaded.');
     const bytes = await decryptFile(
       new Uint8Array(await response.arrayBuffer()),
       metadata.wrappedKey,
@@ -492,20 +552,42 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setKeyInput(candidate.key);
   }
 
-  async function downloadRecoveryFile() {
-    const key = driveKeys[selected];
-    if (!key) return;
+  function saveRecoveryFile(driveId: string, key: string) {
     save(
-      new Blob(
-        [JSON.stringify({ format: 'agent-drive-key-v1', driveId: selected, key }, null, 2)],
-        { type: 'application/json' },
-      ),
-      `agent-drive-${selected}.key.json`,
+      new Blob([JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2)], {
+        type: 'application/json',
+      }),
+      `agent-drive-${driveId}.key.json`,
     );
-    // Only the method is reported; the key never leaves this page.
-    await api(`drives/${selected}/key-backup`, 'POST', { method: 'file' });
-    await refresh();
-    setNotice('Recovery file saved. Store it in a password manager or another secure location.');
+  }
+
+  // Called only after the user confirms the file saved. Records the method; the key never leaves this page.
+  async function recordBackup(driveId: string) {
+    let recorded: { keyBackupAt: string; keyBackupMethod: string };
+    try {
+      recorded = await api(`drives/${driveId}/key-backup`, 'POST', { method: 'file' });
+    } catch {
+      throw new Error(
+        'The backup was not recorded. Use Download recovery file, then I saved it, to try again.',
+      );
+    }
+    recordedBackups.current[driveId] = {
+      at: recorded.keyBackupAt,
+      method: recorded.keyBackupMethod,
+    };
+    // Patch this drive from the response so a failing list or usage call cannot hide the backup.
+    setDrives((current) =>
+      current.map((item) =>
+        item.id === driveId
+          ? {
+              ...item,
+              key_backup_at: recorded.keyBackupAt,
+              key_backup_method: recorded.keyBackupMethod,
+            }
+          : item,
+      ),
+    );
+    setNotice('Recovery file saved. Store it in a password manager.');
   }
 
   const errorBanner = error && (
@@ -551,9 +633,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 {['▤', '⌘', '⚿', '▥', '⌫'][index]}
               </span>
               {item}
-              {item === 'Files' && tab === 'Files' && selected && filePage?.scope === fileScope && (
-                <span className="nav-count">{fileItems.length}</span>
-              )}
             </button>
           ))}
           <Link className="nav-item" href="/console/billing">
@@ -638,11 +717,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <div className="heading-text">
               <h1>{tab === 'Files' ? 'Drives & files' : tab}</h1>
               <p
-                role="status"
-                className={notice ? 'notice-slot' : 'heading-sub'}
-                title={notice || undefined}
+                role={error && !modal ? 'alert' : 'status'}
+                className={
+                  error && !modal ? 'notice-slot error' : notice ? 'notice-slot' : 'heading-sub'
+                }
+                title={(error && !modal ? error : notice) || undefined}
               >
-                {notice ? (
+                {error && !modal ? (
+                  <>
+                    <span className="notice-text">{error}</span>
+                    <button type="button" className="notice-dismiss" onClick={() => setError('')}>
+                      Dismiss
+                    </button>
+                  </>
+                ) : notice ? (
                   <>
                     <span className="notice-text">{notice}</span>
                     <button type="button" className="notice-dismiss" onClick={() => setNotice('')}>
@@ -668,9 +756,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               >
                 Refresh
               </button>
-              {tab === 'Files' && (
+              {tab === 'Files' && drives.length > 0 && (
                 <button
-                  className={`button ${drives.length ? 'primary' : 'secondary'}`}
+                  className="button primary"
                   disabled={busy || !ready}
                   onClick={() => open('drive')}
                 >
@@ -693,7 +781,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
             </div>
           </div>
-          {!modal && errorBanner}
           {!ready ? (
             <section className={`panel empty ${error ? '' : 'loading'}`}>
               <h2>{error ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
@@ -702,31 +789,52 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   ? 'Check the connection, then refresh to try again.'
                   : 'Loading your drives and access settings.'}
               </p>
+              {error && (
+                <button
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => void act(refresh)}
+                >
+                  Try again
+                </button>
+              )}
             </section>
           ) : (
             <>
               {tab === 'Files' && !drives.length && (
                 <section className="onboarding panel">
                   <BrandLogo className="onboarding-logo" />
-                  <p className="eyebrow">A LITTLE SETUP. A LASTING WORKSPACE.</p>
+                  <p className="eyebrow">CONNECT YOUR AGENT</p>
                   <h2>Give your first agent a home.</h2>
                   <p>
-                    Create a drive, save your encryption key, and connect an agent. You control the
-                    keys from the very first byte.
+                    Paste this line into your agent. It installs the CLI and gives you a link; open
+                    it and click Approve. The agent sets up its own encrypted drive.
                   </p>
-                  <button className="button primary" onClick={() => open('drive')}>
-                    Create your first drive ↗
-                  </button>
-                  <div className="setup-steps">
-                    <span>
-                      01 <strong>Create a drive</strong>
-                    </span>
-                    <span>
-                      02 <strong>Save your key</strong>
-                    </span>
-                    <span>
-                      03 <strong>Connect an agent</strong>
-                    </span>
+                  <div className="onboarding-command">
+                    <code>{agentInstruction}</code>
+                    <CopyButton
+                      text={agentInstruction}
+                      label="Copy agent instruction"
+                      caption="Copy"
+                      className="button primary"
+                    />
+                  </div>
+                  <ol className="onboarding-steps">
+                    <li>
+                      <i>1</i> Paste one line into your agent.
+                    </li>
+                    <li>
+                      <i>2</i> The agent shows a pairing code.
+                    </li>
+                    <li>
+                      <i>3</i> You approve it once.
+                    </li>
+                  </ol>
+                  <div className="onboarding-alt">
+                    <p>Prefer to set up a drive yourself?</p>
+                    <button className="button secondary" onClick={() => open('drive')}>
+                      New drive
+                    </button>
                   </div>
                 </section>
               )}
@@ -737,7 +845,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
                       data-testid="key-backup-status"
                     >
-                      <span className={`led ${drive.key_backup_at ? 'dim' : 'on'}`} aria-hidden />
+                      <span className={`led ${drive.key_backup_at ? 'ok' : 'on'}`} aria-hidden />
                       <span className="keyline-text" title={backupText}>
                         {drive.key_backup_at ? (
                           backupText
@@ -756,13 +864,38 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             label="Copy credentials export command"
                           />
                         )}
-                        {hasKey && (
+                        {hasKey && keylineConfirm !== selected && (
                           <button
                             className="button secondary"
-                            onClick={() => void act(downloadRecoveryFile)}
+                            onClick={() => {
+                              saveRecoveryFile(selected, driveKeys[selected]!);
+                              setKeylineConfirm(selected);
+                            }}
                           >
                             Download recovery file
                           </button>
+                        )}
+                        {hasKey && keylineConfirm === selected && (
+                          <span className="keyline-confirm" role="group" aria-label="Confirm save">
+                            Did the file save?
+                            <button
+                              className="button primary"
+                              onClick={() =>
+                                void act(async () => {
+                                  setKeylineConfirm('');
+                                  await recordBackup(selected);
+                                })
+                              }
+                            >
+                              I saved it
+                            </button>
+                            <button
+                              className="button secondary"
+                              onClick={() => saveRecoveryFile(selected, driveKeys[selected]!)}
+                            >
+                              Download again
+                            </button>
+                          </span>
                         )}
                       </span>
                     </div>
@@ -770,7 +903,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   {tab === 'Files' && drive && !loaded && (
                     <div className="banner keyline keyline-reserve" aria-hidden />
                   )}
-                  <section className="panel file-panel">
+                  <section className={`panel file-panel ${tab === 'Trash' ? 'trash' : ''}`}>
                     <div className="panel-toolbar">
                       <h2>
                         {tab === 'Trash' ? 'Deleted files' : 'All files'}{' '}
@@ -806,23 +939,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <input
                           aria-label="Filter loaded files"
                           placeholder="Filter loaded files…"
+                          ref={filterRef}
                           value={filter}
                           disabled={!fileItems.length}
                           onChange={(event) => setFilter(event.target.value)}
                         />
                       </div>
                     </div>
-                    {fileFailure?.scope === fileScope && (
-                      <div className="empty" role="alert">
-                        <h3>Could not load files.</h3>
-                        <p>{fileFailure.message}</p>
-                        <button
-                          className="button secondary"
-                          onClick={() => setFileRefresh((value) => value + 1)}
-                        >
-                          Retry
-                        </button>
-                      </div>
+                    {listStatus !== 'ready' && (
+                      <ListState
+                        status={listStatus}
+                        message={fileFailure?.message}
+                        onRetry={() => setFileRefresh((value) => value + 1)}
+                      />
                     )}
                     {shownFiles.length > 0 && (
                       <div className="table-scroll table-stack">
@@ -836,8 +965,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               >
                                 {tab === 'Trash' ? 'DELETED' : 'SIZE'}
                               </th>
-                              <th role="columnheader">{tab === 'Trash' ? 'RECOVERY' : 'AUTHOR'}</th>
-                              <th role="columnheader">MODIFIED</th>
+                              {tab !== 'Trash' && (
+                                <>
+                                  <th role="columnheader">AUTHOR</th>
+                                  <th role="columnheader">MODIFIED</th>
+                                </>
+                              )}
                               <th role="columnheader">
                                 <span className="sr-only">Actions</span>
                               </th>
@@ -858,29 +991,27 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 </td>
                                 <td role="cell" data-label={tab === 'Trash' ? 'Deleted' : 'Size'}>
                                   {tab === 'Trash'
-                                    ? date(file.deletedAt)
+                                    ? deletedOn(file.deletedAt)
                                     : size(Number(file.ciphertext_size ?? 0))}
                                 </td>
-                                <td
-                                  role="cell"
-                                  data-label={tab === 'Trash' ? 'Recovery' : 'Author'}
-                                >
-                                  {tab === 'Trash' ? (
-                                    'Versions preserved'
-                                  ) : (
-                                    <span className="author">
-                                      <span className="led dim" aria-hidden />
-                                      {authorLabel(
-                                        agents.find((agent) => agent.id === file.agent_id)?.name ??
-                                          file.agent_id ??
-                                          '',
-                                      )}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="modified" role="cell" data-label="Modified">
-                                  {modifiedAt(file.created_at)}
-                                </td>
+                                {tab !== 'Trash' && (
+                                  <>
+                                    <td role="cell" data-label="Author">
+                                      <span className="author">
+                                        <span className="led dim" aria-hidden />
+                                        {authorLabel(
+                                          agents.find((agent) => agent.id === file.agent_id)
+                                            ?.name ??
+                                            file.agent_id ??
+                                            '',
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td className="modified" role="cell" data-label="Modified">
+                                      {modifiedAt(file.created_at)}
+                                    </td>
+                                  </>
+                                )}
                                 <td className="actions" role="cell">
                                   <div className="row-actions">
                                     {tab === 'Trash' ? (
@@ -945,12 +1076,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {!loaded && fileFailure?.scope !== fileScope && (
-                      <div className="empty loading">
-                        <h3>Loading files…</h3>
-                      </div>
-                    )}
-                    {loaded && !fileItems.length && fileFailure?.scope !== fileScope && (
+                    {listStatus === 'ready' && !fileItems.length && (
                       <div className="empty">
                         <h3>
                           {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}
@@ -973,9 +1099,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         )}
                       </div>
                     )}
-                    {loaded && fileItems.length > 0 && !shownFiles.length && (
+                    {listStatus === 'ready' && fileItems.length > 0 && !shownFiles.length && (
                       <div className="empty">
-                        <h3>No loaded files match “{filter}”.</h3>
+                        <h3>{`No ${filePage?.nextCursor ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
+                        <button
+                          className="button secondary"
+                          onClick={() => {
+                            setFilter('');
+                            filterRef.current?.focus();
+                          }}
+                        >
+                          Clear filter
+                        </button>
                       </div>
                     )}
                     {filePage?.scope === fileScope && filePage.nextCursor && (
@@ -1302,6 +1437,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   maxLength={128}
                   placeholder="Research workspace"
                   autoFocus
+                  {...(drives.length === 0
+                    ? {
+                        defaultValue: 'my-drive',
+                        onFocus: (event: FocusEvent<HTMLInputElement>) =>
+                          event.currentTarget.select(),
+                      }
+                    : {})}
                 />
               </label>
               <button className="button primary" disabled={busy}>
@@ -1312,61 +1454,63 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           {modal === 'driveReceipt' && driveReceipt && (
             <div className="form-stack">
               <p>
-                This key decrypts your drive. Save a recovery copy before continuing. It is not sent
-                to the service or saved in browser storage.
+                This key decrypts your drive. Without it nobody, including us, can open this drive.
+                It is not sent to the service or saved in browser storage.
               </p>
-              <label>
-                Drive key
-                <textarea data-testid="drive-key" readOnly value={driveReceipt.key} />
-              </label>
-              <CopyButton text={driveReceipt.key} label="Copy drive key" />
-              <button
-                className="button secondary"
-                onClick={() =>
-                  save(
-                    new Blob(
-                      [
-                        JSON.stringify(
-                          {
-                            format: 'agent-drive-key-v1',
-                            driveId: driveReceipt.id,
-                            key: driveReceipt.key,
-                          },
-                          null,
-                          2,
-                        ),
-                      ],
-                      { type: 'application/json' },
-                    ),
-                    `agent-drive-${driveReceipt.id}.key.json`,
-                  )
-                }
-              >
-                Save recovery key
-              </button>
+              <details>
+                <summary>Show drive key</summary>
+                <label>
+                  Drive key
+                  <textarea data-testid="drive-key" readOnly value={driveReceipt.key} />
+                </label>
+                <CopyButton text={driveReceipt.key} label="Copy drive key" />
+              </details>
               <p className="warning-copy">
                 The recovery file contains a secret in plaintext. Store it in a password manager or
-                another secure location. Losing this key means losing access to file contents.
+                another secure location.
               </p>
-              <label className="check-label">
-                <input
-                  type="checkbox"
-                  checked={saved}
-                  onChange={(event) => setSaved(event.target.checked)}
-                />{' '}
-                I saved my drive key securely
-              </label>
-              <button
-                className="button primary"
-                disabled={!saved || busy}
-                onClick={() => {
-                  setDriveReceipt(null);
-                  setModal(null);
-                  setTab('Files');
-                }}
-              >
-                Continue to drive
-              </button>
+              {!receiptSaved ? (
+                <button
+                  className="button primary"
+                  data-autofocus
+                  onClick={() => {
+                    saveRecoveryFile(driveReceipt.id, driveReceipt.key);
+                    setReceiptSaved(true);
+                  }}
+                >
+                  Download recovery file and continue
+                </button>
+              ) : (
+                <div className="receipt-confirm" role="group" aria-label="Confirm save">
+                  <h3>Did the recovery file save?</h3>
+                  <p>
+                    Without it nobody, including us, can open this drive. Check your downloads
+                    before you continue.
+                  </p>
+                  <button
+                    className="button primary"
+                    autoFocus
+                    onClick={() =>
+                      void act(async () => {
+                        const receipt = driveReceipt;
+                        setDriveReceipt(null);
+                        setReceiptSaved(false);
+                        setModal(null);
+                        setTab('Files');
+                        await recordBackup(receipt.id);
+                      })
+                    }
+                  >
+                    I saved it
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => saveRecoveryFile(driveReceipt.id, driveReceipt.key)}
+                  >
+                    Download again
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {modal === 'unlock' && (
