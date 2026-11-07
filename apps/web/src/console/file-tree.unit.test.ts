@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  childrenOf,
   crumbs,
   fileKind,
   folderFromParam,
   listPrefix,
   recentFiles,
+  rowsFromListing,
   sortRows,
+  type ListItem,
   type TreeFile,
 } from './file-tree';
 
@@ -16,64 +17,49 @@ const f = (path: string, extra: Partial<TreeFile> = {}): TreeFile => ({
   ...extra,
 });
 
-const research = [
-  '/README.md',
-  '/memory/project-notes.md',
-  '/memory/preferences.json',
-  '/inbox/request-0412-pricing-scan.md',
-  '/inbox/request-0415-competitor-feed.md',
-  '/inbox/request-0419-glossary.md',
-  '/outputs/reports/weekly-2026-44.md',
-  '/outputs/reports/weekly-2026-45.md',
-  '/outputs/vendors.csv',
-  '/outputs/charts/pricing-trend.svg',
-  ...[1, 2, 3, 4, 5, 6].map((n) => `/logs/agent-trace-${n}.log`),
-  '/work/scratch/old-outline.md',
-  '/work/csv-export/q3-input.csv',
-  '/config/schedule.yaml',
-  '/archive/2026-10-report.md',
-].map((p) => f(p));
+// Rows as the server's folder listing returns them (delimiter=/).
+const dir = (path: string, items: number, created_at = '2026-11-01T00:00:00Z'): ListItem => ({
+  kind: 'folder',
+  path,
+  items,
+  ciphertext_size: 100,
+  created_at,
+});
+const file = (path: string, extra: Partial<TreeFile> = {}): ListItem => ({
+  kind: 'file',
+  ...f(path, extra),
+});
 
-describe('childrenOf', () => {
-  it('builds root folders and files', () => {
-    const rows = childrenOf(research, '/');
-    expect(
-      rows
-        .filter((r) => r.kind === 'folder')
-        .map((r) => r.name)
-        .sort(),
-    ).toEqual(['archive', 'config', 'inbox', 'logs', 'memory', 'outputs', 'work']);
-    expect(rows.filter((r) => r.kind === 'file').map((r) => r.name)).toEqual(['README.md']);
-    const logs = rows.find((r) => r.kind === 'folder' && r.name === 'logs');
-    expect(logs).toMatchObject({ items: 6, key: 'folder:/logs', path: '/logs' });
+describe('rowsFromListing', () => {
+  it('maps a folder item to a folder row with the server count, size and time', () => {
+    const rows = rowsFromListing([dir('/logs', 1000, '2026-11-03T00:00:00Z')], '/');
+    expect(rows).toEqual([
+      {
+        kind: 'folder',
+        key: 'folder:/logs',
+        name: 'logs',
+        path: '/logs',
+        items: 1000,
+        size: 100,
+        modified: '2026-11-03T00:00:00Z',
+      },
+    ]);
   });
 
-  it('counts direct children and shows nested folders', () => {
-    const rows = childrenOf(research, '/outputs');
-    expect(rows.map((r) => r.name).sort()).toEqual(['charts', 'reports', 'vendors.csv']);
-    expect(rows.find((r) => r.name === 'reports')).toMatchObject({ items: 2 });
+  it('maps a file item to a file row under its folder', () => {
+    const item = file('/inbox/Meeting notes – Q4 ünïcode.md');
+    const rows = rowsFromListing([item], '/inbox');
+    expect(rows[0]).toMatchObject({
+      kind: 'file',
+      key: 'file:/inbox/Meeting notes – Q4 ünïcode.md',
+      name: 'Meeting notes – Q4 ünïcode.md',
+      parent: '/inbox',
+    });
   });
 
   it('shows a file and a folder with the same name as two rows', () => {
-    const rows = childrenOf([f('/reports'), f('/reports/a.md')], '/');
-    expect(rows).toHaveLength(2);
+    const rows = rowsFromListing([file('/reports'), dir('/reports', 2)], '/');
     expect(rows.map((r) => r.key).sort()).toEqual(['file:/reports', 'folder:/reports']);
-  });
-
-  it('keeps spaces and Unicode in names', () => {
-    const rows = childrenOf([f('/inbox/Meeting notes – Q4 ünïcode.md')], '/inbox');
-    expect(rows[0]).toMatchObject({ kind: 'file', name: 'Meeting notes – Q4 ünïcode.md' });
-  });
-
-  it('uses the newest created_at below a folder as its modified time', () => {
-    const rows = childrenOf(
-      [
-        f('/a/x', { created_at: '2026-11-01T00:00:00Z' }),
-        f('/a/b/y', { created_at: '2026-11-03T00:00:00Z' }),
-      ],
-      '/',
-    );
-    expect(rows[0]).toMatchObject({ modified: '2026-11-03T00:00:00Z' });
   });
 });
 
@@ -96,13 +82,13 @@ describe('folderFromParam', () => {
 });
 
 describe('sortRows', () => {
-  const rows = childrenOf(
+  const rows = rowsFromListing(
     [
-      f('/b.md', { ciphertext_size: 5, created_at: '2026-11-02T00:00:00Z' }),
-      f('/a10.md', { ciphertext_size: 50, created_at: '2026-11-01T00:00:00Z' }),
-      f('/a2.md', { ciphertext_size: 20, created_at: '2026-11-03T00:00:00Z' }),
-      f('/z/x', { created_at: '2026-10-01T00:00:00Z' }),
-      f('/c/x', { created_at: '2026-10-05T00:00:00Z' }),
+      file('/b.md', { ciphertext_size: 5, created_at: '2026-11-02T00:00:00Z' }),
+      file('/a10.md', { ciphertext_size: 50, created_at: '2026-11-01T00:00:00Z' }),
+      file('/a2.md', { ciphertext_size: 20, created_at: '2026-11-03T00:00:00Z' }),
+      dir('/z', 1, '2026-10-01T00:00:00Z'),
+      dir('/c', 1, '2026-10-05T00:00:00Z'),
     ],
     '/',
   );
@@ -179,23 +165,18 @@ describe('crumbs, listPrefix, fileKind', () => {
 });
 
 describe('edge cases', () => {
-  it('does not match a sibling folder that shares a prefix', () => {
-    const rows = childrenOf([f('/a/x.md'), f('/ab/y.md')], '/a');
-    expect(rows.map((r) => r.name)).toEqual(['x.md']);
-  });
   it('keeps NFC and NFD names as separate rows', () => {
     const nfc = '/caf\u00e9.md';
     const nfd = '/cafe\u0301.md';
-    expect(childrenOf([f(nfc), f(nfd)], '/')).toHaveLength(2);
+    expect(rowsFromListing([file(nfc), file(nfd)], '/')).toHaveLength(2);
   });
   it('orders names that differ only by case deterministically', () => {
-    const rows = childrenOf([f('/b.md'), f('/B.md'), f('/a.md')], '/');
+    const rows = rowsFromListing([file('/b.md'), file('/B.md'), file('/a.md')], '/');
     const once = sortRows(rows, 'name', 'asc').map((r) => r.key);
     expect(sortRows([...rows].reverse(), 'name', 'asc').map((r) => r.key)).toEqual(once);
   });
   it('handles a 50-level-deep path', () => {
     const deep = '/' + Array.from({ length: 50 }, (_, i) => 'd' + i).join('/');
-    expect(childrenOf([f(deep + '/f.md')], '/')[0]).toMatchObject({ name: 'd0', items: 1 });
     expect(crumbs(deep)).toHaveLength(50);
     expect(folderFromParam(deep)).toBe(deep);
   });

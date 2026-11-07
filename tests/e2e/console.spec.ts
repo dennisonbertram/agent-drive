@@ -1161,8 +1161,8 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
   }
 });
 
-// UI only: the list API is mocked (11 pages of 100 rows) to test the cap, not the server.
-test('console files: a folder over 1,000 files is capped and says so (mocked API)', async ({
+// UI only: the list API is mocked, to test what the console asks for and shows.
+test('console files: browse asks for one folder page, pages with Load more, and searches with q (mocked API)', async ({
   page,
   context,
   baseURL,
@@ -1178,43 +1178,144 @@ test('console files: a folder over 1,000 files is capped and says so (mocked API
       data: { name: 'Bulk drive' },
       headers: { Origin: baseURL! },
     });
-    const cursors = new Set<string>();
+    const requests: URLSearchParams[] = [];
+    const file = (n: number, path = `/f-${String(n).padStart(4, '0')}.log`) => ({
+      kind: 'file',
+      id: `file-${n}`,
+      path,
+      version_id: `v-${n}`,
+      ciphertext_size: 64,
+      agent_id: 'agent',
+      created_at: '2026-11-01T00:00:00.000Z',
+    });
     await page.route('**/api/console/drives/*/list*', (route) => {
-      const cursor = new URL(route.request().url()).searchParams.get('cursor') ?? '0';
-      cursors.add(cursor);
-      const index = Number(cursor);
-      return route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          items: Array.from({ length: 100 }, (_, n) => {
-            const id = String(index * 100 + n).padStart(4, '0');
-            return {
-              id: `file-${id}`,
-              path: `/f-${id}.log`,
-              version_id: `v-${id}`,
-              ciphertext_size: 64,
-              agent_id: 'agent',
+      const query = new URL(route.request().url()).searchParams;
+      requests.push(query);
+      const respond = (items: unknown[], nextCursor: string | null) =>
+        route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ items, nextCursor }),
+        });
+      if (query.get('q')) return respond([file(900, '/deep/er/needle.md')], null);
+      if (query.get('delimiter') !== '/')
+        return respond([file(1, '/newest.md'), file(2, '/.agent-drive/check.txt')], null);
+      if (!query.get('cursor') && !query.get('prefix'))
+        return respond(
+          [
+            {
+              kind: 'folder',
+              path: '/logs',
+              items: 1000,
+              ciphertext_size: 640,
               created_at: '2026-11-01T00:00:00.000Z',
-            };
-          }),
-          nextCursor: index < 10 ? String(index + 1) : null,
-        }),
-      });
+            },
+            {
+              kind: 'folder',
+              path: '/outputs',
+              items: 50,
+              ciphertext_size: 640,
+              created_at: '2026-11-02T00:00:00.000Z',
+            },
+            ...Array.from({ length: 98 }, (_, n) => file(n + 10)),
+          ],
+          '100',
+        );
+      // The second page repeats one row of the first page, as a moving listing can.
+      return respond([file(10), ...Array.from({ length: 4 }, (_, n) => file(n + 200))], null);
     });
     await page.goto('/console');
-    await expect(page.getByRole('note')).toContainText('Showing the first 1,000 files', {
-      timeout: 30_000,
-    });
-    await expect(page.locator('.panel-footer')).toContainText('1000 items');
-    expect(cursors.size).toBe(10);
-    expect(cursors.has('10')).toBe(false);
+    // Both root folders show with the server's counts, and the page cost one request.
+    await expect(page.locator('[data-kind="folder"]')).toHaveCount(2, { timeout: 30_000 });
+    await expect(page.locator('[data-kind="folder"]').first()).toContainText('50 items');
+    await expect(page.locator('[data-kind="folder"]').nth(1)).toContainText('1000 items');
+    await expect(page.locator('.list-cap')).toHaveCount(0);
+    // React strict mode runs the mount load twice in `next dev`; both ask the same question.
+    expect(new Set(requests.map(String)).size).toBe(1);
+    expect(requests[0]!.get('delimiter')).toBe('/');
+    expect(requests[0]!.get('sort')).toBe('modified');
+    requests.length = 0;
+    // Load more continues from nextCursor and does not repeat a row.
+    await expect(page.locator('.panel-footer')).toContainText('100 loaded');
+    await page.getByRole('button', { name: 'Load more', exact: true }).click();
+    await expect(page.locator('.panel-footer')).toContainText('104 items');
+    await expect(page.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.get('cursor')).toBe('100');
+    const names = await page.locator('.file-row-name .file-label').allTextContents();
+    expect(new Set(names).size).toBe(names.length);
+    // Search asks the server and finds a file two folders down.
+    await page.getByLabel('Search this folder').fill('needle');
+    await expect(page.getByText('needle.md')).toBeVisible();
+    expect(requests.some((query) => query.get('q') === 'needle')).toBe(true);
+    // Recent is one request, newest first, with no cap note.
+    requests.length = 0;
     await page.goto('/console?view=recent');
-    await expect(page.getByRole('note')).toHaveText(
-      'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.',
-    );
+    await expect(page.getByText('newest.md')).toBeVisible();
+    await expect(page.getByText('check.txt')).toHaveCount(0);
+    await expect(page.locator('.list-cap')).toHaveCount(0);
+    expect(new Set(requests.map(String)).size).toBe(1);
+    expect(requests[0]!.get('sort')).toBe('modified');
+    expect(requests[0]!.get('delimiter')).toBeNull();
   } finally {
     await cleanupUser(userId);
   }
+});
+
+// Real data: needs the `e2e_uxr1_big` user from scripts/seed-console-fixtures.mjs (1,050 files).
+test('console files: a big drive lists every root folder and the newest file from the server', async ({
+  page,
+  context,
+}) => {
+  const login = await context.request.post('/api/test-session', {
+    headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+    data: { userId: 'e2e_uxr1_big' },
+  });
+  expect(login.status()).toBe(200);
+  const drives = (await (await context.request.get('/api/console/drives?limit=100')).json()) as {
+    items: { id: string; name: string }[];
+  };
+  const drive = drives.items.find((item) => item.name === 'bulk-logs');
+  test.skip(!drive, 'Seed e2e_uxr1_big first: node scripts/seed-console-fixtures.mjs');
+  const listRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/list')) listRequests.push(request.url());
+  });
+  await page.goto(`/console?drive=${drive!.id}`);
+  const folders = page.locator('[data-kind="folder"]');
+  await expect(folders).toHaveCount(2, { timeout: 30_000 });
+  await expect(folders.filter({ hasText: 'logs' })).toContainText('1000 items');
+  await expect(folders.filter({ hasText: 'outputs' })).toContainText('50 items');
+  await expect(page.locator('.list-cap')).toHaveCount(0);
+  await expect(page.locator('.panel-footer')).toContainText('2 items');
+  // React strict mode runs the mount load twice in `next dev`; both ask the same question.
+  expect(new Set(listRequests).size).toBe(1);
+  // Opening a folder from the list is exactly one more request.
+  listRequests.length = 0;
+  await folders.filter({ hasText: 'outputs' }).getByRole('link').first().click();
+  await expect(page.locator('.file-row-name')).toHaveCount(50);
+  expect(listRequests).toHaveLength(1);
+  expect(listRequests[0]).toContain('prefix=%2Foutputs');
+  // /logs has exactly 1,000 files: ten pages with Load more, no repeats, no cap note.
+  await page.goto(`/console?drive=${drive!.id}&path=/logs`);
+  const rows = page.locator('.file-row-name');
+  await expect(rows).toHaveCount(100);
+  const more = page.getByRole('button', { name: 'Load more', exact: true });
+  for (let n = 0; n < 9; n += 1) await more.click({ timeout: 30_000 });
+  await expect(rows).toHaveCount(1000);
+  await expect(more).toHaveCount(0);
+  const names = await page.locator('.file-row-name .file-label').allTextContents();
+  expect(new Set(names).size).toBe(1000);
+  await expect(page.locator('.list-cap')).toHaveCount(0);
+  // Recent covers the whole drive: its newest file is the newest the server knows about.
+  const newest = (await (
+    await context.request.get(`/api/console/drives/${drive!.id}/list?sort=modified&limit=100`)
+  ).json()) as { items: { path: string }[] };
+  const newestName = newest.items[0]!.path.split('/').pop()!;
+  await page.goto(`/console?drive=${drive!.id}&view=recent`);
+  await expect(page.locator('.file-row-name .file-label').first()).toHaveText(newestName, {
+    timeout: 30_000,
+  });
+  await expect(page.locator('.list-cap')).toHaveCount(0);
 });
 
 // Signs in a fresh test user, creates drives (key backed up, so the key chip stays short) and

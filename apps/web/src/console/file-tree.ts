@@ -1,5 +1,5 @@
-// Pure folder-view logic for the console file browser. The API returns flat paths;
-// folders exist only as path prefixes, so they are derived here from the loaded rows.
+// Pure folder-view logic for the console file browser. The server's folder listing
+// (list?delimiter=/) returns the immediate children; this turns them into rows.
 export type TreeFile = {
   id: string;
   path: string;
@@ -14,6 +14,7 @@ export type FolderRow = {
   name: string;
   path: string;
   items: number;
+  size?: number | undefined;
   modified?: string | undefined;
 };
 export type FileRow = { kind: 'file'; key: string; name: string; parent: string; file: TreeFile };
@@ -29,37 +30,29 @@ export function folderFromParam(raw: string | null): string {
   return path;
 }
 
-const newer = (a?: string, b?: string) => (a && b ? (a > b ? a : b) : (a ?? b));
+// One row of the server's folder listing (list?delimiter=/): a file, or a folder with totals.
+export type ListItem = Partial<TreeFile> & {
+  path: string;
+  kind?: 'file' | 'folder';
+  items?: number;
+};
 
-export function childrenOf(files: TreeFile[], folder: string): Row[] {
-  const base = folder === ROOT ? '/' : folder + '/';
-  const folders = new Map<string, { row: FolderRow; direct: Set<string> }>();
-  const rows: Row[] = [];
-  for (const file of files) {
-    if (!file.path.startsWith(base)) continue;
-    const rest = file.path.slice(base.length);
-    const slash = rest.indexOf('/');
-    if (slash === -1) {
-      rows.push({ kind: 'file', key: 'file:' + file.id, name: rest, parent: folder, file });
-      continue;
-    }
-    const name = rest.slice(0, slash);
-    let entry = folders.get(name);
-    if (!entry) {
-      entry = {
-        row: { kind: 'folder', key: 'folder:' + base + name, name, path: base + name, items: 0 },
-        direct: new Set(),
+export function rowsFromListing(items: ListItem[], folder: string): Row[] {
+  return items.map((item): Row => {
+    const name = item.path.slice(item.path.lastIndexOf('/') + 1);
+    if (item.kind === 'folder')
+      return {
+        kind: 'folder',
+        key: 'folder:' + item.path,
+        name,
+        path: item.path,
+        items: item.items ?? 0,
+        size: item.ciphertext_size,
+        modified: item.created_at,
       };
-      folders.set(name, entry);
-    }
-    // Direct children of the folder: a file name, or a subfolder name with a trailing '/'.
-    const inner = rest.slice(slash + 1);
-    const next = inner.indexOf('/');
-    entry.direct.add(next === -1 ? inner : inner.slice(0, next + 1));
-    entry.row.modified = newer(entry.row.modified, file.created_at);
-  }
-  for (const { row, direct } of folders.values()) rows.push({ ...row, items: direct.size });
-  return rows;
+    const file = { ...item, id: item.id ?? item.path };
+    return { kind: 'file', key: 'file:' + file.id, name, parent: folder, file };
+  });
 }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
