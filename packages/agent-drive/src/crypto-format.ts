@@ -19,6 +19,14 @@ export function encryptedSize(size: number) {
   return HEADER_SIZE + size + countChunks(size) * TAG_SIZE;
 }
 
+/** Inverse of `encryptedSize`: the file size a ciphertext of `size` bytes holds. */
+export function plaintextSize(size: number) {
+  if (!Number.isSafeInteger(size) || size < HEADER_SIZE + TAG_SIZE)
+    throw new Error('Invalid encrypted length.');
+  const body = size - HEADER_SIZE;
+  return body - Math.max(1, Math.ceil(body / (CHUNK_SIZE + TAG_SIZE))) * TAG_SIZE;
+}
+
 function chunkParameters(header: Uint8Array, index: number, final: boolean) {
   const iv = new Uint8Array(12);
   iv.set(header.subarray(9, 17));

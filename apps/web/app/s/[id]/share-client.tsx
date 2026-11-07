@@ -1,11 +1,15 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { BrandMark } from '../../brand-mark';
+import { FileIcon } from '../../(app)/console/file-icon';
 import {
   decryptWithFileKey,
   DriveCryptoError,
+  plaintextSize,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
+import { fileKind } from '@/src/console/file-tree';
 import { validateDownloadUrl } from '@/src/share/url';
 import { parseShareFragment } from '@/src/share/fragment';
 
@@ -22,14 +26,14 @@ const errorHeadings: Record<string, string> = {
   share_revoked: 'Share link revoked',
   share_expired: 'Share link expired',
   share_unavailable: 'Shared file unavailable',
-  'decryption-failed': "This link's key can't decrypt this file",
+  'decryption-failed': "This link's key doesn't match this file",
   unavailable: 'Share unavailable',
 };
 
 const errorBodies: Record<string, string> = {
   'missing-key': 'Ask the sender for the complete link, including everything after the # symbol.',
   'decryption-failed':
-    'Ask the sender for the complete link, including everything after the # symbol.',
+    'The link is complete, but its key does not open this file. Ask the sender to copy the link again, or paste it below.',
   unavailable: 'The file could not be downloaded. Check your connection and try again.',
   not_found:
     'This link does not match any shared file. Check the address, or ask the sender for a new link.',
@@ -39,6 +43,8 @@ const errorBodies: Record<string, string> = {
 };
 const defaultErrorBody = 'This file cannot be opened right now. Ask the sender for a new link.';
 
+// TODO(P3): replace this local helper with the shared decimal `formatBytes` from
+// `@/src/format/bytes` (owned by agent-drive-r5-p3-billing). Same rule: 1 KB = 1000 B.
 function formatBytes(bytes: number) {
   if (bytes < 1000) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
@@ -49,6 +55,14 @@ function formatBytes(bytes: number) {
     i += 1;
   }
   return `${value.toFixed(1)} ${units[i]}`;
+}
+
+function plainSizeLabel(ciphertextSize: number) {
+  try {
+    return formatBytes(plaintextSize(ciphertextSize));
+  } catch {
+    return 'Unknown';
+  }
 }
 
 function formatExpiry(iso: string) {
@@ -82,6 +96,28 @@ async function fetchShare(id: string, download = false): Promise<ShareMetadata> 
     throw new ShareError(body.error?.code ?? 'unavailable');
   }
   return response.json() as Promise<ShareMetadata>;
+}
+
+/** Reads the encrypted body, reporting whole percent of `total` as bytes arrive (never sent anywhere). */
+async function readBody(response: Response, total: number, onPercent: (percent: number) => void) {
+  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onPercent(total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0);
+  }
+  const body = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return body;
 }
 
 function subscribeToHash(onChange: () => void) {
@@ -124,7 +160,10 @@ export default function ShareClient({ id }: { id: string }) {
   const [share, setShare] = useState<ShareMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'idle' | 'downloading' | 'decrypting'>('idle');
+  const [percent, setPercent] = useState<number | null>(null);
+  const [saved, setSaved] = useState('');
+  const busy = phase !== 'idle';
   const [attempt, setAttempt] = useState(0);
   const [pasted, setPasted] = useState('');
   const [pasteProblem, setPasteProblem] = useState('');
@@ -155,7 +194,9 @@ export default function ShareClient({ id }: { id: string }) {
 
   async function download(key = fileKey) {
     if (!share || !key) return;
-    setBusy(true);
+    setPhase('downloading');
+    setPercent(null);
+    setSaved('');
     setError(null);
     setErrorCode('');
     try {
@@ -167,7 +208,9 @@ export default function ShareClient({ id }: { id: string }) {
         cache: 'no-store',
       });
       if (!response.ok) throw new Error('The encrypted file could not be downloaded.');
-      const bytes = await decryptWithFileKey(new Uint8Array(await response.arrayBuffer()), key);
+      const encrypted = await readBody(response, metadata.ciphertextSize, setPercent);
+      setPhase('decrypting');
+      const bytes = await decryptWithFileKey(encrypted, key);
       const url = URL.createObjectURL(
         new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
       );
@@ -176,16 +219,17 @@ export default function ShareClient({ id }: { id: string }) {
       link.download = metadata.name;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setSaved(metadata.name);
     } catch (reason) {
       if (reason instanceof DriveCryptoError && reason.code === 'decryption_failed') {
         setErrorCode('decryption-failed');
-        setError("This link's key can't decrypt this file");
+        setError("This link's key doesn't match this file");
       } else {
         setErrorCode(reason instanceof ShareError ? reason.code : 'unavailable');
         setError(reason instanceof Error ? reason.message : 'The file could not be decrypted.');
       }
     } finally {
-      setBusy(false);
+      setPhase('idle');
     }
   }
 
@@ -232,7 +276,18 @@ export default function ShareClient({ id }: { id: string }) {
         </div>
         <div className="share-sled">
           {displayError ? null : (
-            <h1 className="share-label">{share?.name ?? 'Opening secure link'}</h1>
+            <h1 className="share-label">
+              {share ? (
+                <>
+                  <span className="share-icon">
+                    <FileIcon kind={fileKind(share.name)} />
+                  </span>
+                  {share.name}
+                </>
+              ) : (
+                'Opening link…'
+              )}
+            </h1>
           )}
           <div className="share-window">
             {displayError ? (
@@ -250,6 +305,7 @@ export default function ShareClient({ id }: { id: string }) {
                       <input
                         id="share-paste-link"
                         type="text"
+                        placeholder="https://…/s/…#k=…"
                         value={pasted}
                         autoComplete="off"
                         spellCheck={false}
@@ -276,12 +332,15 @@ export default function ShareClient({ id }: { id: string }) {
                     Try again
                   </button>
                 ) : null}
+                <Link className="share-home" href="/">
+                  Go to Agent Drive
+                </Link>
               </div>
             ) : share ? (
               <div className="share-details">
                 <div>
-                  <span>TRANSFER SIZE</span>
-                  <strong>{formatBytes(share.ciphertextSize)} encrypted</strong>
+                  <span>SIZE</span>
+                  <strong>{plainSizeLabel(share.ciphertextSize)}</strong>
                 </div>
                 <div>
                   <span>LINK EXPIRES</span>
@@ -289,23 +348,45 @@ export default function ShareClient({ id }: { id: string }) {
                 </div>
               </div>
             ) : (
-              <p className="share-msg">Checking this share link…</p>
+              <div className="share-details" aria-hidden="true">
+                <div>
+                  <span>SIZE</span>
+                  <strong>&nbsp;</strong>
+                </div>
+                <div>
+                  <span>LINK EXPIRES</span>
+                  <strong>&nbsp;</strong>
+                </div>
+              </div>
             )}
           </div>
-          {share && !displayError ? (
-            <button
-              className="button primary share-download"
-              disabled={busy}
-              onClick={() => void download()}
-            >
-              {busy ? 'Decrypting…' : 'Download'}
-            </button>
-          ) : null}
+          {displayError ? null : (
+            <>
+              <button
+                className="button primary share-download"
+                disabled={!share || busy}
+                onClick={() => void download()}
+              >
+                {phase === 'downloading'
+                  ? percent === null
+                    ? 'Downloading…'
+                    : `Downloading ${percent}%`
+                  : phase === 'decrypting'
+                    ? 'Decrypting…'
+                    : 'Download'}
+              </button>
+              <p className="share-status" role="status">
+                {saved ? `Saved ${saved}.` : ''}
+              </p>
+            </>
+          )}
         </div>
       </section>
-      <p className="share-footer">
-        Your browser decrypts this file and the key never leaves it. No sign-in required.
-      </p>
+      {displayError ? null : (
+        <p className="share-footer">
+          Your browser decrypts this file and the key never leaves it. No sign-in required.
+        </p>
+      )}
     </main>
   );
 }

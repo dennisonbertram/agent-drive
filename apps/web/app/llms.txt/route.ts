@@ -31,8 +31,8 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
    agent-drive login --name "<your agent name>"${api}
 
    It prints a link and a code. Tell the human: "Open this link (you must be signed in to
-   Agent Drive), check that the code matches the one I printed, and click Approve." There is
-   nothing else for the human to choose. Wait; the command finishes by itself after approval.
+   Agent Drive), check that the code matches the one I printed, and click Approve." Other options
+   on the page are optional; the defaults are right. Wait; the command finishes by itself after approval.
 
 3. The human approves (step 2). Wait for the command to finish.
 

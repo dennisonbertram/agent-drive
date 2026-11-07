@@ -238,3 +238,161 @@ test('CLI share links download, expire, revoke, and never send fragment keys', a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('share page: file card, progress, saved state, wrong-key copy, way out of errors', async ({
+  page,
+  baseURL,
+}) => {
+  test.setTimeout(180_000);
+  const database = new Pool({
+    connectionString:
+      process.env.DATABASE_URL ??
+      'postgresql://agent_drive:agent_drive_local_only@127.0.0.1:5432/agent_drive',
+  });
+  const storage = new S3Client({
+    endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+    region: process.env.S3_REGION ?? 'us-east-1',
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'agent_drive_local',
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'agent_drive_local_secret',
+    },
+  });
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-share-card-e2e-'));
+  const accountId = randomUUID();
+  const agentId = randomUUID();
+  const driveId = randomUUID();
+  const token = `adk_${randomBytes(32).toString('base64url')}`;
+  const environment = {
+    ...process.env,
+    AGENT_DRIVE_API_URL: baseURL!,
+    AGENT_DRIVE_API_KEY: token,
+    AGENT_DRIVE_KEY: randomBytes(32).toString('base64url'),
+    AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+  };
+  try {
+    await database.query('INSERT INTO accounts (id, name) VALUES ($1, $2)', [
+      accountId,
+      `share-card-e2e-${randomUUID()}`,
+    ]);
+    await database.query('INSERT INTO agents (id,account_id,name) VALUES ($1,$2,$3)', [
+      agentId,
+      accountId,
+      `share-card-agent-${randomUUID()}`,
+    ]);
+    await database.query('INSERT INTO drives (id,account_id,name) VALUES ($1,$2,$3)', [
+      driveId,
+      accountId,
+      `share-card-drive-${randomUUID()}`,
+    ]);
+    await database.query(
+      `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+       VALUES ($1,$2,'share-card-e2e',$3,$4::uuid[],ARRAY['read','write','share']::text[])`,
+      [accountId, agentId, createHash('sha256').update(token).digest('hex'), [driveId]],
+    );
+    const big = randomBytes(3 * 1024 * 1024);
+    const small = randomBytes(300);
+    await writeFile(join(root, 'report.txt'), big, { mode: 0o600 });
+    await writeFile(join(root, 'other.bin'), small, { mode: 0o600 });
+    for (const [file, path] of [
+      ['report.txt', '/card/report.txt'],
+      ['other.bin', '/card/other.bin'],
+    ] as const) {
+      const put = await cli(['put', join(root, file), path, '--drive', driveId], environment);
+      expect(put.status).toBe(0);
+    }
+    const createShare = async (path: string) => {
+      const result = await cli(['share', path, '--drive', driveId], environment);
+      expect(result.status).toBe(0);
+      return JSON.parse(result.stdout) as { id: string; url: string };
+    };
+    const shareBig = await createShare('/card/report.txt');
+    const shareOther = await createShare('/card/other.bin');
+
+    // 5. Loading and ready cards have the same height (hold the metadata request).
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolveHeld) => (release = resolveHeld));
+    await page.route('**/api/shares/*?metadataOnly=1', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto(shareBig.url);
+    await expect(page.getByRole('heading', { name: 'Opening link…' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download' })).toBeDisabled();
+    const card = page.locator('.share-card');
+    const loadingHeight = (await card.boundingBox())!.height;
+    release();
+    // 1. Ready: icon, name and the real (decrypted) size, 3 MiB = 3.1 MB.
+    await expect(page.getByRole('heading', { name: 'report.txt' })).toBeVisible();
+    await expect(page.locator('.share-label svg')).toBeVisible();
+    await expect(page.locator('.share-details')).toContainText('SIZE');
+    await expect(page.locator('.share-details')).toContainText('3.1 MB');
+    await expect(page.locator('.share-details')).not.toContainText('encrypted');
+    expect(Math.abs((await card.boundingBox())!.height - loadingHeight)).toBeLessThanOrEqual(2);
+    await page.unroute('**/api/shares/*?metadataOnly=1');
+
+    // 2. Slow object download: progress label, then the saved line; bytes equal the source.
+    const s3Origin = new URL(process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000').origin;
+    await page.route(`${s3Origin}/**`, async (route) => {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 1500));
+      await route.continue();
+    });
+    const downloaded = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download' }).click();
+    await expect(page.getByRole('button', { name: /^Downloading/u })).toBeVisible();
+    expect((await readFile((await (await downloaded).path())!)).equals(big)).toBe(true);
+    await expect(page.getByRole('status')).toHaveText('Saved report.txt.');
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+    await page.unroute(`${s3Origin}/**`);
+
+    // 3. Wrong key: new heading and body, paste field has a placeholder.
+    const keyBig = new URL(shareBig.url).hash;
+    await page.goto(`${baseURL}/s/${shareOther.id}${keyBig}`);
+    await page.getByRole('button', { name: 'Download' }).click();
+    await expect(
+      page.getByRole('heading', { name: "This link's key doesn't match this file" }),
+    ).toBeVisible();
+    await expect(page.getByTestId('share-error')).toContainText('Ask the sender to copy the link');
+    const paste = page.getByLabel('Paste the full share link');
+    await expect(paste).toHaveAttribute('placeholder', 'https://…/s/…#k=…');
+    const inputBox = (await paste.boundingBox())!;
+    const buttonBox = (await page.getByRole('button', { name: 'Use link' }).boundingBox())!;
+    expect(inputBox.height).toBe(buttonBox.height);
+    await expect(page.getByText('Your browser decrypts')).toHaveCount(0);
+
+    // 4. Revoked: a way out, no encryption footer.
+    const revoke = await cli(['share', 'revoke', shareOther.id, '--drive', driveId], environment);
+    expect(revoke.status).toBe(0);
+    await page.goto(shareOther.url);
+    await expect(page.getByTestId('share-error-share_revoked')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Go to Agent Drive' })).toHaveAttribute(
+      'href',
+      '/',
+    );
+    await expect(page.getByText('Your browser decrypts')).toHaveCount(0);
+  } finally {
+    for (const prefix of [`objects/${accountId}/`, `staging/${accountId}/`]) {
+      const result = await storage.send(
+        new ListObjectsV2Command({
+          Bucket: process.env.S3_BUCKET ?? 'agent-drive-local',
+          Prefix: prefix,
+        }),
+      );
+      for (const item of result.Contents ?? [])
+        if (item.Key)
+          await storage.send(
+            new DeleteObjectCommand({
+              Bucket: process.env.S3_BUCKET ?? 'agent-drive-local',
+              Key: item.Key,
+            }),
+          );
+    }
+    await database.query('DELETE FROM audit_events WHERE account_id=$1', [accountId]);
+    await database.query('DELETE FROM file_events WHERE drive_id=$1', [driveId]);
+    await database.query('DELETE FROM versions WHERE drive_id=$1', [driveId]);
+    await database.query('DELETE FROM accounts WHERE id=$1', [accountId]);
+    storage.destroy();
+    await database.end();
+    await rm(root, { recursive: true, force: true });
+  }
+});

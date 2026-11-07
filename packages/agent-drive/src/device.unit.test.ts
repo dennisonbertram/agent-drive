@@ -7,7 +7,14 @@ import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
 import { unsealDriveKey } from './seal.js';
 import { DriveCryptoError } from './crypto.js';
-import { apiErrorLines, createdDriveNote, localKeyMap, pickCheckDrive, runCheck } from './check.js';
+import {
+  apiErrorLines,
+  createdDriveNote,
+  localKeyMap,
+  pickCheckDrive,
+  runCheck,
+  SCOPE_HINT,
+} from './check.js';
 
 const { subtle } = webcrypto;
 const text = new TextEncoder();
@@ -550,6 +557,19 @@ describe('check and key helpers', () => {
       'Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.',
     ]);
     expect(apiErrorLines(new AgentDriveApiError('not_found', 404, 'nope'))).toEqual(['nope']);
+  });
+
+  it('names the approval option for a delegate-scope denial only', () => {
+    const lines = (message: string) =>
+      apiErrorLines(new AgentDriveApiError('permission_denied', 403, message));
+    expect(lines('The API key needs the delegate scope.')).toEqual([
+      'The API key needs the delegate scope.',
+      'Ask the owner to approve a new login with "Let this agent add other agents to its drives" turned on (under "Optional" on the approval page), then run agent-drive login again.',
+    ]);
+    expect(lines('The API key lacks the "delegate" scope.')[1]).toMatch(
+      /^Ask the owner to approve/u,
+    );
+    expect(lines('The API key needs the write scope.')[1]).toBe(SCOPE_HINT);
   });
 
   it('tells the conflict loser what to do for each state', () => {
