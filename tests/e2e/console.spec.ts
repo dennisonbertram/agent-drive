@@ -1735,3 +1735,191 @@ test('console preview: decrypts in the tab, never renders HTML or SVG, and revok
     await cleanupUser(userId);
   }
 });
+
+test('console share: one link with the key only in the fragment, revoke in place, Shared view', async ({
+  page,
+  context,
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-share-'));
+  const driveKey = randomBytes(32).toString('base64url');
+  const body = `share body ${randomUUID()}\n`;
+  try {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'Share drive' });
+    const agent = await post<{ id: string }>('agents', { name: 'Share agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Share key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: driveKey,
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+    const local = join(root, 'report.md');
+    await writeFile(local, body, { mode: 0o600 });
+    const upload = await cli(['put', local, '/s/report.md', '--drive', drive.id], environment);
+    expect(upload.status, upload.stderr.slice(0, 300)).toBe(0);
+    const recovery = join(root, 'right.key.json');
+    await writeFile(
+      recovery,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: drive.id, key: driveKey }),
+    );
+
+    // Every request (URL, headers, body) and every console message.
+    const requests: string[] = [];
+    const consoleText: string[] = [];
+    const sharePosts: { url: string; body: Record<string, unknown> }[] = [];
+    let shareListLoads = 0;
+    page.on('request', (request) => {
+      requests.push(
+        `${request.method()} ${request.url()} ${JSON.stringify(request.headers())} ${request.postData() ?? ''}`,
+      );
+      if (request.method() === 'POST' && /\/drives\/[^/]+\/shares$/.test(request.url()))
+        sharePosts.push({ url: request.url(), body: request.postDataJSON() });
+      if (request.method() === 'GET' && /\/drives\/[^/]+\/shares\?/.test(request.url()))
+        shareListLoads += 1;
+    });
+    page.on('console', (message) => consoleText.push(message.text()));
+    page.on('pageerror', (error) => consoleText.push(String(error)));
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/console?drive=${drive.id}&path=%2Fs`);
+    const row = page.locator('.file-panel tbody tr').filter({ hasText: 'report.md' });
+    const dialog = page.getByRole('dialog', { name: 'Share report.md' });
+    const openShare = async () => {
+      await row.getByRole('button', { name: /More actions/ }).click();
+      await rowMenu(page).getByRole('button', { name: 'Share', exact: true }).click();
+    };
+
+    // 1. No key: the unlock dialog says what happens next, then the Share dialog opens.
+    await openShare();
+    await expect(page.getByText('After the key loads, you can share report.md.')).toBeVisible();
+    await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('radio', { name: '7 days' })).toBeChecked();
+
+    // 2. One click: one POST, the link in the clipboard, the key only in its fragment.
+    await dialog.getByRole('button', { name: 'Copy link' }).click();
+    await expect(dialog.getByRole('status')).toContainText('Link copied.');
+    const url1 = await page.evaluate(() => navigator.clipboard.readText());
+    expect(url1).toMatch(/\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/);
+    expect(sharePosts).toHaveLength(1);
+    expect(Object.keys(sharePosts[0]!.body).sort()).toEqual(['expiresAt', 'path', 'versionId']);
+    const ahead = Date.parse(String(sharePosts[0]!.body.expiresAt)) - Date.now();
+    expect(Math.abs(ahead - 7 * 86_400_000)).toBeLessThan(5 * 60_000);
+    expect(page.url()).not.toContain('#k=');
+
+    // 3. A fresh browser context downloads the same bytes from the link.
+    const outsider = await browser.newContext({ acceptDownloads: true });
+    try {
+      const guest = await outsider.newPage();
+      await guest.goto(url1);
+      const download = guest.waitForEvent('download', { timeout: 20_000 });
+      await guest.getByRole('button', { name: 'Download' }).click({ timeout: 20_000 });
+      expect((await readFile((await (await download).path())!)).toString()).toBe(body);
+    } finally {
+      await outsider.close();
+    }
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    // 4. A clipboard failure keeps one link and shows it in a read-only field; retrying creates nothing.
+    await openShare();
+    await expect(dialog).toBeVisible();
+    await page.evaluate(() => {
+      const deny = () => Promise.reject(new Error('denied'));
+      Object.defineProperty(navigator.clipboard, 'write', { value: deny, configurable: true });
+      Object.defineProperty(navigator.clipboard, 'writeText', { value: deny, configurable: true });
+    });
+    await dialog.getByRole('button', { name: 'Copy link' }).click();
+    const field = dialog.getByLabel('Share link');
+    await expect(field).toBeVisible();
+    await expect(field).toHaveJSProperty('readOnly', true);
+    await expect(dialog.getByRole('status')).toContainText('Copy failed.');
+    await dialog.getByRole('button', { name: 'Copy link' }).click();
+    await expect(field).toBeVisible();
+    expect(sharePosts).toHaveLength(2);
+    await expect(field).toHaveValue(/\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/);
+    const url2 = await field.inputValue();
+    expect(url2).not.toBe(url1);
+
+    // 5. Both links are listed (newest first); revoking the older one is a two-step change in place.
+    const links = dialog.getByTestId('share-link-row');
+    await expect(links).toHaveCount(2);
+    const loadsBefore = shareListLoads;
+    await links.nth(1).getByRole('button', { name: 'Revoke' }).click();
+    await expect(links.nth(1)).toContainText('Stop this link?');
+    await links.nth(1).getByRole('button', { name: 'Revoke link' }).click();
+    await expect(links.nth(1)).toContainText('Revoked');
+    expect(shareListLoads).toBe(loadsBefore);
+    await expect(links.nth(0)).toContainText('Active');
+    const revokedGuest = await browser.newContext();
+    try {
+      const guest = await revokedGuest.newPage();
+      await guest.goto(url1);
+      await expect(guest.getByTestId('share-error-share_revoked')).toBeVisible();
+    } finally {
+      await revokedGuest.close();
+    }
+    await page.keyboard.press('Escape');
+
+    // 6. The Shared view lists both and survives a reload.
+    await page.getByRole('button', { name: 'Shared', exact: true }).click();
+    await expect(page).toHaveURL(/view=shared/);
+    const shared = page.locator('.file-panel tbody tr');
+    await expect(shared).toHaveCount(2);
+    await expect(shared.filter({ hasText: 'Active' })).toHaveCount(1);
+    await expect(shared.filter({ hasText: 'Revoked' })).toHaveCount(1);
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Shared', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(shared).toHaveCount(2);
+
+    // 7. Trash mentions the live link; Undo turns it back on.
+    await page.goto(`/console?drive=${drive.id}&path=%2Fs`);
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    const toast = page.locator('.toast').last();
+    await expect(toast).toContainText('Moved “report.md” to Trash.');
+    await expect(toast).toContainText('Its 1 share link stops working until you restore it.');
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect(toast).toContainText('Restored “report.md”.', { timeout: 15_000 });
+    await page.getByRole('button', { name: 'Shared', exact: true }).click();
+    await expect(shared.filter({ hasText: 'Active' })).toHaveCount(1);
+
+    // 8. Neither the drive key nor any file key crossed the network, console or storage.
+    const fileKeys = [url1, url2].map((url) => url.split('#k=')[1]!);
+    await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
+    const outbound = [...requests, ...consoleText].join('\n');
+    expect(outbound).not.toContain(driveKey);
+    expect(outbound).not.toContain('#k=');
+    for (const fileKey of fileKeys) {
+      expect(outbound).not.toContain(fileKey);
+      const stored = await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]));
+      expect(stored).not.toContain(fileKey);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});

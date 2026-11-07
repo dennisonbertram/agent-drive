@@ -31,6 +31,8 @@ import { FileIcon } from './file-icon';
 import { MenuButton } from './menu-button';
 import { Toast, type Announcement, type ToastItem } from './toast';
 import { ConfirmBody } from './confirm-dialog';
+import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
+import type { ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import {
   ROOT,
@@ -112,6 +114,7 @@ type ModalName =
   | 'versions'
   | 'confirm'
   | 'preview'
+  | 'share'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
 // A folder or Recent view loads at most this many rows; the list says so when it stops early.
@@ -405,11 +408,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [pendingAction, setPendingAction] = useState<{
     driveId: string;
     file: FileEntry;
-    kind: 'download' | 'preview';
+    kind: 'download' | 'preview' | 'share';
   } | null>(null);
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
   const previewRequest = useRef(0);
+  // The file whose Share dialog is open, and the drive's share links (loaded when a dialog or the Shared view opens).
+  const [shareFile, setShareFile] = useState<FileEntry | null>(null);
+  const [shares, setShares] = useState<SharesState | null>(null);
+  const sharesNow = useRef<SharesState | null>(null);
+  const sharesSeq = useRef(0);
   const [selectedPath, setSelectedPath] = useState('');
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
@@ -438,7 +446,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Where the Files list is: drive, folder and view live in the URL so reload and Back work.
   const params = useSearchParams();
   const folder = folderFromParam(params.get('path'));
-  const view = params.get('view') === 'recent' ? 'recent' : 'browse';
+  const viewParam = params.get('view');
+  const view = viewParam === 'recent' || viewParam === 'shared' ? viewParam : 'browse';
+  const sharedView = tab === 'Files' && view === 'shared';
   const urlDrive = params.get('drive');
   // Back and Forward change the drive in the URL; that wins over the last one chosen here.
   const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
@@ -482,7 +492,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       : children;
     rows = sortRows(matches, sort.key, sort.dir);
   }
-  const listed = tab === 'Files' ? rows.length : shownFiles.length;
   const drive = drives.find((item) => item.id === selected);
   const agentInstruction = useAgentInstruction();
   const origin =
@@ -490,8 +499,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = fileItems.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
-  const loaded = filePage?.scope === fileScope;
-  const failed = fileFailure?.scope === fileScope;
+  const sharedNow = shares?.driveId === selected ? shares : null;
+  const sharedShown = (sharedNow?.items ?? [])
+    .filter((row) => row.path.toLowerCase().includes(query))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const listed = sharedView
+    ? sharedShown.length
+    : tab === 'Files'
+      ? rows.length
+      : shownFiles.length;
+  const loaded = sharedView ? sharedNow?.status === 'ready' : filePage?.scope === fileScope;
+  const failed = sharedView ? sharedNow?.status === 'error' : fileFailure?.scope === fileScope;
   const listStatus = failed
     ? 'error'
     : loaded
@@ -535,7 +553,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       .catch((reason: Error) => setError(reason.message));
   }, [refresh]);
   useEffect(() => {
-    if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
+    if (!selected || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
     let active = true;
     void (async () => {
       const prefix = tab === 'Files' && view === 'browse' ? listPrefix(folder) : null;
@@ -561,24 +579,31 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => {
       active = false;
     };
-  }, [selected, tab, view, folder, fileScope]);
+  }, [selected, tab, view, folder, fileScope, sharedView]);
+  useEffect(() => {
+    if (selected && sharedView) void loadShares(selected);
+    // loadShares only uses refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, sharedView, fileRefresh]);
   useEffect(() => {
     // A drive switch, tab switch or Retry changes fileScope, which restarts this timer.
-    if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
+    if (!selected || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
     const timer = setTimeout(() => setSlowScope(fileScope), 10_000);
     return () => {
       clearTimeout(timer);
       // Leaving a scope forgets that it was slow, so coming back starts a fresh 10 s.
       setSlowScope('');
     };
-  }, [selected, tab, fileScope]);
+  }, [selected, tab, fileScope, sharedView]);
   // Back and Forward leave other tabs for the list they changed.
   useEffect(() => {
     const onPop = () => {
       setTab((current) => (current === 'Trash' ? current : 'Files'));
       setFilter('');
       // A key prompt belongs to the drive it was opened for.
-      setModal((current) => (current === 'unlock' || current === 'preview' ? null : current));
+      setModal((current) =>
+        current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
+      );
       setPendingAction(null);
       previewRequest.current += 1;
       setPreview(null);
@@ -657,7 +682,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         // Plaintext must not stay on screen after the key is cleared.
         previewRequest.current += 1;
         setPreview(null);
-        setModal((current) => (current === 'preview' ? null : current));
+        setModal((current) => (current === 'preview' || current === 'share' ? null : current));
         setDriveKeys({});
         setKeylineConfirm('');
         setNotice(
@@ -696,6 +721,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (!busy) {
       setPendingAction(null);
       closePreview();
+      setShareFile(null);
       setModal(null);
       setError('');
     }
@@ -707,7 +733,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   // Move inside the Files list. History entries, not page loads: no server round trip per folder.
-  function go(next: { drive?: string; path?: string | undefined; view?: 'browse' | 'recent' }) {
+  function go(next: {
+    drive?: string;
+    path?: string | undefined;
+    view?: 'browse' | 'recent' | 'shared';
+  }) {
     const query = new URLSearchParams(window.location.search);
     if (selected && !query.get('drive')) {
       // Give the entry we leave a drive, so Back returns to it.
@@ -728,7 +758,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (id === selected && !new URLSearchParams(window.location.search).get('path')) return;
     setSelected(id);
     setNotice('');
-    setModal((current) => (current === 'unlock' || current === 'preview' ? null : current));
+    setModal((current) =>
+      current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
+    );
     setPendingAction(null);
     closePreview();
     go({ drive: id, path: undefined });
@@ -965,7 +997,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         return false;
       },
     );
-    toastId = showToast(`Moved “${name}” to Trash.`, {
+    const movedText = `Moved “${name}” to Trash.`;
+    toastId = showToast(movedText, {
       action: {
         label: 'Undo',
         run: async (id) => {
@@ -987,11 +1020,118 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         },
       },
     });
+    // Never delays the toast: once the delete is done, mention links that just stopped working.
+    void moved.then(async (ok) => {
+      if (!ok) return;
+      const held = sharesNow.current?.driveId === driveId ? sharesNow.current : null;
+      const items =
+        held?.status === 'ready'
+          ? held.items
+          : await fetchShares(driveId).then(
+              (r) => r.items,
+              () => [],
+            );
+      const n = items.filter(
+        (row) =>
+          row.path === file.path && (row.status === 'active' || row.status === 'unavailable'),
+      ).length;
+      if (!n) return;
+      const message = `${movedText} Its ${n} share ${n === 1 ? 'link stops' : 'links stop'} working until you restore it.`;
+      const seq = ++toastSeq.current;
+      // Only the still-unchanged toast: not one that was dismissed, or already replaced by Undo.
+      setToasts((current) =>
+        current.map((item) =>
+          item.id === toastId && item.message === movedText ? { ...item, message, rev: seq } : item,
+        ),
+      );
+      setAnnouncement({ text: message, tone: 'info', n: seq });
+    });
   }
 
   function askConfirm(next: NonNullable<typeof confirmState>) {
     setConfirmState(next);
     open('confirm');
+  }
+
+  // Up to LIST_CAP links, a page at a time.
+  async function fetchShares(driveId: string) {
+    const items: ShareRow[] = [];
+    let cursor: string | null = null;
+    let capped = false;
+    do {
+      const query = new URLSearchParams({ limit: '100' });
+      if (cursor) query.set('cursor', cursor);
+      const result: Page<ShareRow> = await api(`drives/${driveId}/shares?${query}`);
+      items.push(...result.items);
+      cursor = result.nextCursor;
+      if (cursor && items.length >= LIST_CAP) capped = true;
+    } while (cursor && !capped);
+    return { items, capped };
+  }
+  async function loadShares(driveId: string) {
+    const mine = ++sharesSeq.current;
+    const put = (next: (current: SharesState | null) => SharesState) => {
+      if (mine !== sharesSeq.current) return;
+      const value = next(sharesNow.current);
+      sharesNow.current = value;
+      setShares(value);
+    };
+    const same = (current: SharesState | null) => (current?.driveId === driveId ? current : null);
+    put((current) => ({
+      driveId,
+      items: same(current)?.items ?? [],
+      capped: same(current)?.capped ?? false,
+      status: 'loading',
+    }));
+    try {
+      const result = await fetchShares(driveId);
+      // A link created while this load was running is not in its answer yet (it has no versionId here).
+      put((current) => {
+        const known = new Set(result.items.map((row) => row.id));
+        const fresh = (same(current)?.items ?? []).filter(
+          (row) => row.versionId === '' && !known.has(row.id),
+        );
+        return {
+          driveId,
+          items: [...fresh, ...result.items],
+          capped: result.capped,
+          status: 'ready',
+        };
+      });
+    } catch (reason) {
+      put((current) => ({
+        driveId,
+        items: same(current)?.items ?? [],
+        capped: false,
+        status: 'error',
+        message: reason instanceof Error ? reason.message : 'Could not load links.',
+      }));
+    }
+  }
+  function updateShares(change: (items: ShareRow[]) => ShareRow[]) {
+    setShares((current) => {
+      const value = current ? { ...current, items: change(current.items) } : current;
+      sharesNow.current = value;
+      return value;
+    });
+  }
+  async function revokeShare(driveId: string, id: string) {
+    const result = await api<{ revokedAt: string }>(`drives/${driveId}/shares/${id}`, 'DELETE');
+    updateShares((items) =>
+      items.map((row) =>
+        row.id === id ? { ...row, revokedAt: result.revokedAt, status: 'revoked' } : row,
+      ),
+    );
+  }
+  function openShare(file: FileEntry, key = driveKeys[selected]) {
+    if (!key) {
+      setPendingAction({ driveId: selected, file, kind: 'share' });
+      open('unlock');
+      return;
+    }
+    setShareFile(file);
+    void loadShares(selected);
+    open('share');
   }
 
   function keyLoaded(key: string) {
@@ -1001,6 +1141,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal(null);
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
+    else if (pending.kind === 'share') openShare(pending.file, key);
     else void act(() => download(pending.file, key));
   }
 
@@ -1260,10 +1401,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             ref={crumbsRef}
                             tabIndex={-1}
                           >
-                            {folder === ROOT ? (
+                            {folder === ROOT && !sharedView ? (
                               <span className="crumb">All files</span>
                             ) : (
-                              <a className="crumb" href={hrefFor(ROOT)} onClick={openFolder(ROOT)}>
+                              <a
+                                className="crumb"
+                                href={hrefFor(ROOT)}
+                                onClick={openFolder(ROOT, 'browse')}
+                              >
                                 All files
                               </a>
                             )}
@@ -1279,7 +1424,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               onNewDrive={() => open('drive')}
                               disabled={busy || !ready}
                             />
-                            {crumbs(folder).map((crumb, index, all) => (
+                            {(sharedView ? [] : crumbs(folder)).map((crumb, index, all) => (
                               <Fragment key={crumb.path}>
                                 <span className="crumb-sep" aria-hidden>
                                   /
@@ -1343,6 +1488,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               >
                                 Recent
                               </button>
+                              <button
+                                type="button"
+                                aria-pressed={view === 'shared'}
+                                onClick={() => go({ view: 'shared' })}
+                              >
+                                Shared
+                              </button>
                             </div>
                             {view === 'browse' && (
                               <select
@@ -1365,20 +1517,24 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           aria-label={
                             tab === 'Trash'
                               ? 'Search deleted files'
-                              : view === 'recent'
-                                ? 'Search recent files'
-                                : 'Search this folder'
+                              : view === 'shared'
+                                ? 'Search shared files'
+                                : view === 'recent'
+                                  ? 'Search recent files'
+                                  : 'Search this folder'
                           }
                           placeholder={
                             tab === 'Trash'
                               ? 'Search deleted files…'
-                              : view === 'recent'
-                                ? 'Search recent files…'
-                                : 'Search this folder…'
+                              : view === 'shared'
+                                ? 'Search shared files…'
+                                : view === 'recent'
+                                  ? 'Search recent files…'
+                                  : 'Search this folder…'
                           }
                           ref={filterRef}
                           value={filter}
-                          disabled={!fileItems.length}
+                          disabled={sharedView ? !sharedNow?.items.length : !fileItems.length}
                           onChange={(event) => setFilter(event.target.value)}
                         />
                       </div>
@@ -1420,19 +1576,23 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     {listStatus !== 'ready' && (
                       <ListState
                         status={listStatus}
-                        message={fileFailure?.message}
+                        message={sharedView ? sharedNow?.message : fileFailure?.message}
+                        noun={sharedView ? 'links' : 'files'}
                         onRetry={() => setFileRefresh((value) => value + 1)}
                       />
                     )}
-                    {listStatus === 'ready' && filePage?.capped && (
-                      <p className="list-cap" role="note">
-                        {tab === 'Trash'
-                          ? 'Showing the first 1,000 deleted files. Some are not listed here.'
-                          : view === 'recent'
-                            ? 'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.'
-                            : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
-                      </p>
-                    )}
+                    {listStatus === 'ready' &&
+                      (sharedView ? sharedNow?.capped : filePage?.capped) && (
+                        <p className="list-cap" role="note">
+                          {sharedView
+                            ? 'Showing the first 1,000 links.'
+                            : tab === 'Trash'
+                              ? 'Showing the first 1,000 deleted files. Some are not listed here.'
+                              : view === 'recent'
+                                ? 'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.'
+                                : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
+                        </p>
+                      )}
                     {listed > 0 && tab === 'Trash' && (
                       <div className="table-scroll table-stack">
                         <table role="table">
@@ -1484,7 +1644,87 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {listed > 0 && tab === 'Files' && (
+                    {listed > 0 && sharedView && listStatus === 'ready' && (
+                      <div className="table-scroll browse-list shared-list">
+                        <table role="table">
+                          <thead role="rowgroup">
+                            <tr role="row">
+                              <th role="columnheader">FILE</th>
+                              <th role="columnheader">CREATED</th>
+                              <th role="columnheader">EXPIRES</th>
+                              <th role="columnheader">STATUS</th>
+                              <th role="columnheader">
+                                <span className="sr-only">Actions</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody role="rowgroup">
+                            {sharedShown.map((row) => {
+                              const name = baseName(row.path);
+                              const parent = row.path.slice(0, row.path.lastIndexOf('/')) || ROOT;
+                              return (
+                                <tr key={row.id} role="row" data-kind="share">
+                                  <td className="file-cell" role="cell">
+                                    <span className="file-row-name">
+                                      <FileIcon kind={fileKind(name)} />
+                                      <span className="file-text">
+                                        <span className="file-label">{name}</span>
+                                        <span className="file-meta">
+                                          {STATUS_LABEL[row.status]} · expires{' '}
+                                          {versionWhen(row.expiresAt)}
+                                        </span>
+                                      </span>
+                                    </span>
+                                    <a
+                                      className="file-parent"
+                                      href={hrefFor(parent)}
+                                      onClick={openFolder(parent, 'browse')}
+                                    >
+                                      {parent}
+                                    </a>
+                                  </td>
+                                  <td role="cell">{versionWhen(row.createdAt)}</td>
+                                  <td role="cell">
+                                    {row.status === 'expired'
+                                      ? 'Expired'
+                                      : versionWhen(row.expiresAt)}
+                                  </td>
+                                  <td role="cell">
+                                    <span className="share-state" data-status={row.status}>
+                                      {STATUS_LABEL[row.status]}
+                                    </span>
+                                  </td>
+                                  <td className="row-actions-cell" role="cell">
+                                    {row.status === 'active' && (
+                                      <RevokeControl
+                                        question={`Stop the link to ${name}?`}
+                                        onRevoke={() => revokeShare(selected, row.id)}
+                                      />
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {listStatus === 'ready' && sharedView && !listed && (
+                      <div className="empty">
+                        {query && sharedNow?.items.length ? (
+                          <h3>{`No links match “${filter}”.`}</h3>
+                        ) : (
+                          <>
+                            <h3>No share links yet.</h3>
+                            <p>
+                              Share a file from its ⋯ menu. Links can only be copied when they are
+                              created.
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {listed > 0 && tab === 'Files' && !sharedView && (
                       <div className="table-scroll browse-list">
                         <table role="table">
                           <thead role="rowgroup">
@@ -1620,6 +1860,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                         >
                                           Versions
                                         </button>
+                                        <button
+                                          type="button"
+                                          className="menu-item"
+                                          onClick={(event) => {
+                                            event.currentTarget
+                                              .closest<HTMLElement>('[popover]')
+                                              ?.hidePopover();
+                                            openShare(file);
+                                          }}
+                                        >
+                                          Share
+                                        </button>
                                         <hr className="menu-divider" aria-hidden />
                                         <button
                                           type="button"
@@ -1644,61 +1896,70 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {listStatus === 'ready' && !listed && !(query && fileItems.length) && (
-                      <div className="empty">
-                        {tab === 'Trash' ? (
-                          <>
-                            <h3>Nothing in the trash.</h3>
-                            <p>Deleted files appear here until permanently removed.</p>
-                          </>
-                        ) : view === 'recent' ? (
-                          <>
-                            <h3>No recent files.</h3>
-                            <p>Files your agents write appear here, newest first.</p>
-                          </>
-                        ) : folder === ROOT ? (
-                          <>
-                            <h3>Ready for your first file.</h3>
-                            <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
-                          </>
-                        ) : (
-                          <>
-                            <h3>Nothing in this folder.</h3>
-                            <p>Its files may have been moved or deleted.</p>
-                            <button
-                              className="button secondary"
-                              onClick={() => go({ path: undefined })}
-                            >
-                              Back to {drive?.name}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    {listStatus === 'ready' && !listed && query && fileItems.length > 0 && (
-                      <div className="empty">
-                        <h3>{`No ${filePage?.capped ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
-                        <button
-                          className="button secondary"
-                          onClick={() => {
-                            setFilter('');
-                            filterRef.current?.focus();
-                          }}
-                        >
-                          Clear filter
-                        </button>
-                      </div>
-                    )}
+                    {listStatus === 'ready' &&
+                      !sharedView &&
+                      !listed &&
+                      !(query && fileItems.length) && (
+                        <div className="empty">
+                          {tab === 'Trash' ? (
+                            <>
+                              <h3>Nothing in the trash.</h3>
+                              <p>Deleted files appear here until permanently removed.</p>
+                            </>
+                          ) : view === 'recent' ? (
+                            <>
+                              <h3>No recent files.</h3>
+                              <p>Files your agents write appear here, newest first.</p>
+                            </>
+                          ) : folder === ROOT ? (
+                            <>
+                              <h3>Ready for your first file.</h3>
+                              <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
+                            </>
+                          ) : (
+                            <>
+                              <h3>Nothing in this folder.</h3>
+                              <p>Its files may have been moved or deleted.</p>
+                              <button
+                                className="button secondary"
+                                onClick={() => go({ path: undefined })}
+                              >
+                                Back to {drive?.name}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    {listStatus === 'ready' &&
+                      !sharedView &&
+                      !listed &&
+                      query &&
+                      fileItems.length > 0 && (
+                        <div className="empty">
+                          <h3>{`No ${filePage?.capped ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
+                          <button
+                            className="button secondary"
+                            onClick={() => {
+                              setFilter('');
+                              filterRef.current?.focus();
+                            }}
+                          >
+                            Clear filter
+                          </button>
+                        </div>
+                      )}
                     <div className="panel-footer">
                       <span className="footer-count">
                         {loaded
                           ? query
                             ? `${listed} ${listed === 1 ? 'match' : 'matches'}`
-                            : tab === 'Trash'
-                              ? `${listed} loaded`
-                              : view === 'recent'
-                                ? `${listed} recent files`
-                                : count(listed, 'item')
+                            : sharedView
+                              ? count(listed, 'link')
+                              : tab === 'Trash'
+                                ? `${listed} loaded`
+                                : view === 'recent'
+                                  ? `${listed} recent files`
+                                  : count(listed, 'item')
                           : ''}
                       </span>
                       <span>
@@ -1985,6 +2246,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               versions: 'Version history',
               confirm: confirmState?.title ?? '',
               preview: preview?.file.path.split('/').at(-1) ?? 'Preview',
+              share: `Share ${shareFile ? baseName(shareFile.path) : ''}`,
             }[modal]
           }
           className={modal === 'preview' ? 'preview' : undefined}
@@ -2087,8 +2349,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveId={selected}
               pendingMessage={
                 pendingAction
-                  ? `After the key loads, ${pendingAction.file.path.split('/').at(-1)} ${
-                      pendingAction.kind === 'preview' ? 'opens' : 'downloads'
+                  ? `After the key loads, ${
+                      pendingAction.kind === 'share'
+                        ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
+                        : `${pendingAction.file.path.split('/').at(-1)} ${
+                            pendingAction.kind === 'preview' ? 'opens' : 'downloads'
+                          }`
                     }.`
                   : undefined
               }
@@ -2131,6 +2397,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 </button>
               </div>
             </>
+          )}
+          {modal === 'share' && shareFile && driveKeys[selected] && (
+            <ShareDialog
+              driveId={selected}
+              path={shareFile.path}
+              driveKey={driveKeys[selected]}
+              origin={origin}
+              request={api}
+              shares={shares}
+              onReload={() => void loadShares(selected)}
+              onCreated={(row) => updateShares((items) => [row, ...items])}
+              onRevoke={(id) => revokeShare(selected, id)}
+            />
           )}
           {modal === 'connect' && <ConnectAgentBody />}
           {modal === 'agent' && (

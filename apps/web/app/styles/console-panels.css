@@ -789,3 +789,124 @@ dialog.preview > .dialog-heading + * {
     min-height: 44px;
   }
 }
+
+/* ---- share dialog ---- */
+.share-dialog {
+  display: grid;
+  gap: 12px;
+  width: min(480px, calc(100vw - 96px));
+}
+.share-expiry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.share-expiry legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font: 500 11px/1.4 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
+}
+.share-expiry label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.share-dialog input[type='radio'] {
+  width: auto;
+  margin: 0;
+}
+.share-dialog .button.primary {
+  justify-self: start;
+}
+.share-status,
+.share-error {
+  min-height: 20px;
+  margin: 0;
+}
+.share-error {
+  color: var(--danger, #b42318);
+}
+.share-help {
+  margin: 0;
+  color: var(--ink-2, #3b3a37);
+}
+.share-heading {
+  margin: 8px 0 0;
+  font: 500 11px/1.4 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
+}
+.share-links {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+}
+.share-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  font-size: 13px;
+}
+.share-when {
+  flex: 1 1 100%;
+  color: var(--ink-2, #3b3a37);
+}
+.share-state {
+  font: 500 12px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+}
+.share-state[data-status='active'] {
+  color: var(--ok, #1a7f37);
+}
+.share-state[data-status='revoked'],
+.share-state[data-status='expired'],
+.share-state[data-status='unavailable'] {
+  color: var(--muted, #6b6963);
+}
+.share-revoke {
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--danger, #b42318);
+  font: 500 13px var(--sans, 'Inter Tight', system-ui, sans-serif);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.share-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.share-confirm .button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+@media (max-width: 760px) {
+  .share-dialog {
+    width: auto;
+  }
+  .share-dialog .button,
+  .share-revoke,
+  .share-confirm .button,
+  .share-expiry label {
+    min-height: 44px;
+  }
+  .share-dialog .button.primary {
+    justify-self: stretch;
+  }
+}

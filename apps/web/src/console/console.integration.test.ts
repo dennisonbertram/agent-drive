@@ -326,6 +326,14 @@ describe('Phase 4 console API', () => {
     expect(
       (await consoleRequest(ownerUserId, `${base}/${share.id}`, 'DELETE', undefined, null)).status,
     ).toBe(403);
+    // A foreign Origin is refused on create and revoke, and nothing changes.
+    const foreign = 'https://evil.example';
+    expect((await consoleRequest(ownerUserId, base, 'POST', body, foreign)).status).toBe(403);
+    expect(
+      (await consoleRequest(ownerUserId, `${base}/${share.id}`, 'DELETE', undefined, foreign))
+        .status,
+    ).toBe(403);
+    expect(await status()).toBe('active');
     const revoked = await consoleRequest(ownerUserId, `${base}/${share.id}`, 'DELETE');
     expect((await json(revoked)).revokedAt).toBeTruthy();
     expect(await status()).toBe('revoked');
