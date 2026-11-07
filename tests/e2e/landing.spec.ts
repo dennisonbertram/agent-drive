@@ -78,6 +78,23 @@ test.describe('landing page', () => {
     );
   });
 
+  test('phones get the portrait console screenshot', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    const img = page.locator('#console img');
+    await img.scrollIntoViewIfNeeded();
+    await expect
+      .poll(() => img.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0))
+      .toBe(true);
+    const m = await img.evaluate((i: HTMLImageElement) => ({
+      w: i.getBoundingClientRect().width,
+      nw: i.naturalWidth,
+      nh: i.naturalHeight,
+    }));
+    expect(m.w).toBeGreaterThanOrEqual(300);
+    expect(m.nh).toBeGreaterThan(m.nw);
+  });
+
   test('has Open Graph and Twitter metadata', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(

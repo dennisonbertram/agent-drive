@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
@@ -225,14 +224,15 @@ export default async function Home() {
             browser.
           </p>
           <figure className="l-shot">
-            <Image
-              src="/console-files.png"
-              width={2320}
-              height={862}
-              sizes="(max-width: 1160px) 100vw, 1096px"
-              alt="The Agent Drive console file browser for a drive named research-bot. A folder list sorted by modified date shows archive, assets, config, inbox, logs, memory and outputs, with a Browse and Recent switch, a search box and a Key needed button."
-              unoptimized
-            />
+            <picture>
+              <source media="(max-width: 760px)" srcSet="/console-files-phone.png" />
+              <img
+                src="/console-files.png"
+                width={2320}
+                height={798}
+                alt="The Agent Drive console file browser for the research-bot drive. The inbox folder lists five files with their size, author (research-bot and summarizer), modified date and a Download button, with a Browse and Recent switch, a search box and a Key needed button."
+              />
+            </picture>
           </figure>
         </div>
       </section>

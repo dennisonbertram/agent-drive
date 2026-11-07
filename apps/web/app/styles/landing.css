@@ -846,6 +846,7 @@
   max-width: 1096px;
 }
 .l-shot img {
+  height: auto;
   display: block;
   width: 100%;
   height: auto;
