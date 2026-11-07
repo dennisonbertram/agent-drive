@@ -114,6 +114,20 @@ test.describe('landing page', () => {
     expect(res.headers()['content-type']).toContain('image/png');
   });
 
+  test('has a favicon and an Apple touch icon that load', async ({ page }) => {
+    await page.goto('/');
+    for (const [selector, type] of [
+      ['link[rel="icon"][type="image/svg+xml"]', 'image/svg+xml'],
+      ['link[rel="apple-touch-icon"]', 'image/png'],
+    ] as const) {
+      const href = await page.locator(selector).first().getAttribute('href');
+      expect(href).toBeTruthy();
+      const res = await page.request.get(new URL(href!, page.url()).href);
+      expect(res.status()).toBe(200);
+      expect(res.headers()['content-type']).toContain(type);
+    }
+  });
+
   test('pricing has its own social title and url', async ({ page }) => {
     await page.goto('/pricing');
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
