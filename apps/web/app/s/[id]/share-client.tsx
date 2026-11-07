@@ -376,7 +376,7 @@ export default function ShareClient({ id }: { id: string }) {
                     : 'Download'}
               </button>
               <p className="share-status" role="status">
-                {saved ? `Saved ${saved}.` : ''}
+                {saved ? `Download started: ${saved}. Check your downloads.` : ''}
               </p>
             </>
           )}

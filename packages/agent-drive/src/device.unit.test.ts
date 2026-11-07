@@ -564,10 +564,10 @@ describe('check and key helpers', () => {
       apiErrorLines(new AgentDriveApiError('permission_denied', 403, message));
     expect(lines('The API key needs the delegate scope.')).toEqual([
       'The API key needs the delegate scope.',
-      'Ask the owner to approve a new login with "Let this agent add other agents to its drives" turned on (under "Optional" on the approval page), then run agent-drive login again.',
+      'Run `agent-drive login` again; on the approval page, tick "Let this agent add other agents to its drives" (under "Optional") before approving.',
     ]);
     expect(lines('The API key lacks the "delegate" scope.')[1]).toMatch(
-      /^Ask the owner to approve/u,
+      /^Run `agent-drive login` again; on the approval page, tick/u,
     );
     expect(lines('The API key needs the write scope.')[1]).toBe(SCOPE_HINT);
   });

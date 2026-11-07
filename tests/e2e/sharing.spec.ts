@@ -290,12 +290,14 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
        VALUES ($1,$2,'share-card-e2e',$3,$4::uuid[],ARRAY['read','write','share']::text[])`,
       [accountId, agentId, createHash('sha256').update(token).digest('hex'), [driveId]],
     );
-    const big = randomBytes(3 * 1024 * 1024);
+    // Plaintext 1,949,980 B reads 1.9 MB; its ciphertext (+57 B) would read 2.0 MB.
+    const big = randomBytes(1_949_980);
+    const hostile = '<img src=x onerror=__pwned=1>.txt';
     const small = randomBytes(300);
     await writeFile(join(root, 'report.txt'), big, { mode: 0o600 });
     await writeFile(join(root, 'other.bin'), small, { mode: 0o600 });
     for (const [file, path] of [
-      ['report.txt', '/card/report.txt'],
+      ['report.txt', `/card/${hostile}`],
       ['other.bin', '/card/other.bin'],
     ] as const) {
       const put = await cli(['put', join(root, file), path, '--drive', driveId], environment);
@@ -306,7 +308,7 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
       expect(result.status).toBe(0);
       return JSON.parse(result.stdout) as { id: string; url: string };
     };
-    const shareBig = await createShare('/card/report.txt');
+    const shareBig = await createShare(`/card/${hostile}`);
     const shareOther = await createShare('/card/other.bin');
 
     // 5. Loading and ready cards have the same height (hold the metadata request).
@@ -322,28 +324,60 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
     const card = page.locator('.share-card');
     const loadingHeight = (await card.boundingBox())!.height;
     release();
-    // 1. Ready: icon, name and the real (decrypted) size, 3 MiB = 3.1 MB.
-    await expect(page.getByRole('heading', { name: 'report.txt' })).toBeVisible();
+    // 1. Ready: icon, name (as text, never markup) and the real (decrypted) size.
+    await expect(page.getByRole('heading', { name: hostile })).toBeVisible();
+    await expect(page.locator('.share-label img')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+      undefined,
+    );
     await expect(page.locator('.share-label svg')).toBeVisible();
     await expect(page.locator('.share-details')).toContainText('SIZE');
-    await expect(page.locator('.share-details')).toContainText('3.1 MB');
+    await expect(page.locator('.share-details')).toContainText('1.9 MB');
+    await expect(page.locator('.share-details')).not.toContainText('2.0 MB');
     await expect(page.locator('.share-details')).not.toContainText('encrypted');
     expect(Math.abs((await card.boundingBox())!.height - loadingHeight)).toBeLessThanOrEqual(2);
     await page.unroute('**/api/shares/*?metadataOnly=1');
 
     // 2. Slow object download: progress label, then the saved line; bytes equal the source.
     const s3Origin = new URL(process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000').origin;
-    await page.route(`${s3Origin}/**`, async (route) => {
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 1500));
-      await route.continue();
-    });
+    // Deliver the object in four parts, 400 ms apart, and record every button label.
+    await page.evaluate((origin) => {
+      const original = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const response = await original(input, init);
+        if (!String(input).startsWith(origin)) return response;
+        const whole = new Uint8Array(await response.arrayBuffer());
+        const step = Math.ceil(whole.length / 4);
+        let offset = 0;
+        const body = new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            if (offset >= whole.length) return controller.close();
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, 400));
+            controller.enqueue(whole.slice(offset, offset + step));
+            offset += step;
+          },
+        });
+        return new Response(body, { status: response.status });
+      };
+      const labels: string[] = [];
+      (window as unknown as { __labels: string[] }).__labels = labels;
+      new MutationObserver(() => {
+        const text = document.querySelector('.share-download')?.textContent ?? '';
+        if (labels.at(-1) !== text) labels.push(text);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    }, s3Origin);
     const downloaded = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download' }).click();
-    await expect(page.getByRole('button', { name: /^Downloading/u })).toBeVisible();
+    await expect(page.getByRole('button', { name: /^Downloading [1-9]\d*%$/u })).toBeVisible();
     expect((await readFile((await (await downloaded).path())!)).equals(big)).toBe(true);
-    await expect(page.getByRole('status')).toHaveText('Saved report.txt.');
+    await expect(page.getByRole('status')).toHaveText(
+      `Download started: ${hostile}. Check your downloads.`,
+    );
+    const labels = await page.evaluate(
+      () => (window as unknown as { __labels: string[] }).__labels,
+    );
+    expect(labels.some((label) => /^Downloading \d+%$/u.test(label))).toBe(true);
     await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
-    await page.unroute(`${s3Origin}/**`);
 
     // 3. Wrong key: new heading and body, paste field has a placeholder.
     const keyBig = new URL(shareBig.url).hash;
@@ -370,6 +404,17 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
       '/',
     );
     await expect(page.getByText('Your browser decrypts')).toHaveCount(0);
+    await expect(page.locator('body')).not.toContainText('other.bin');
+
+    // Expired cards also carry no file name.
+    await database.query(
+      `UPDATE shares SET created_at = now() - interval '2 seconds',
+                         expires_at = now() - interval '1 second' WHERE id = $1`,
+      [shareBig.id],
+    );
+    await page.goto(shareBig.url);
+    await expect(page.getByTestId('share-error-share_expired')).toBeVisible();
+    await expect(page.locator('body')).not.toContainText('.txt');
   } finally {
     for (const prefix of [`objects/${accountId}/`, `staging/${accountId}/`]) {
       const result = await storage.send(
