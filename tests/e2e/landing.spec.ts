@@ -72,7 +72,7 @@ test.describe('landing page', () => {
   test('console section shows a described screenshot', async ({ page }) => {
     await page.goto('/');
     const img = page.locator('#console img');
-    await expect(img).toHaveAttribute('alt', /file browser/i);
+    await expect(img).toHaveAttribute('alt', /console showing the inbox/i);
     expect(await img.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(
       true,
     );
@@ -107,9 +107,23 @@ test.describe('landing page', () => {
       'summary_large_image',
     );
     const og = await page.locator('meta[property="og:image"]').getAttribute('content');
-    const res = await page.request.get(new URL(og!).pathname);
+    const ogUrl = new URL(og!);
+    expect(ogUrl.origin).toBe(new URL(page.url()).origin);
+    const res = await page.request.get(ogUrl.href);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-type']).toContain('image/png');
+  });
+
+  test('pricing has its own social title and url', async ({ page }) => {
+    await page.goto('/pricing');
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+      'content',
+      'Pricing | Agent Drive',
+    );
+    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
+      'content',
+      `${new URL(page.url()).origin}/pricing`,
+    );
   });
 
   for (const width of [375, 390]) {

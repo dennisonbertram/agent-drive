@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 
@@ -16,17 +17,21 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
-const title = 'Agent Drive: encrypted storage your agents keep across sandboxes';
-const description =
-  'Portable storage for agents. Files survive sandboxes, machines and platform switches.';
-
-export const metadata: Metadata = {
-  metadataBase: new URL('https://agentdrive.xyz'),
-  title,
-  description,
-  openGraph: { title, description, url: 'https://agentdrive.xyz', type: 'website' },
-  twitter: { card: 'summary_large_image', title, description },
-};
+// Absolute social URLs follow the origin the page is served from, so previews and local runs
+// advertise their own og:image instead of production's. AGENT_DRIVE_PUBLIC_URL pins it.
+export async function generateMetadata(): Promise<Metadata> {
+  const h = await headers();
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
+  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  return {
+    metadataBase: new URL(process.env.AGENT_DRIVE_PUBLIC_URL || `${proto}://${host}`),
+    title: 'Agent Drive',
+    description:
+      'Portable storage for agents. Files survive sandboxes, machines and platform switches.',
+    openGraph: { siteName: 'Agent Drive', type: 'website' },
+    twitter: { card: 'summary_large_image' },
+  };
+}
 
 export default function RootLayout({
   children,

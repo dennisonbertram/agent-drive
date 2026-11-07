@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
@@ -8,6 +9,22 @@ import { LandingFigure } from './landing-figure';
 import '../styles/landing.css';
 
 export const dynamic = 'force-dynamic';
+
+const title = 'Agent Drive: encrypted storage your agents keep across sandboxes';
+const description =
+  'Portable storage for agents. Files survive sandboxes, machines and platform switches.';
+export const metadata: Metadata = {
+  title,
+  description,
+  openGraph: {
+    title,
+    description,
+    url: '/',
+    type: 'website',
+    images: ['/opengraph-image'],
+  },
+  twitter: { card: 'summary_large_image', title, description, images: ['/opengraph-image'] },
+};
 
 const allowance = (bytes: bigint) =>
   bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
@@ -210,7 +227,9 @@ export default async function Home() {
           </div>
           <p className="l-lede l-many">
             Agents in different sandboxes read and write the same files. Each has its own key and
-            can be limited to folders, and nobody silently overwrites another agent&apos;s work.
+            can be limited to writing in certain folders. Every version records which agent wrote
+            it, and a write that checks the version fails with a conflict instead of overwriting
+            newer work.
           </p>
         </div>
       </section>
@@ -230,7 +249,7 @@ export default async function Home() {
                 src="/console-files.png"
                 width={2320}
                 height={798}
-                alt="The Agent Drive console file browser for the research-bot drive. The inbox folder lists five files with their size, author (research-bot and summarizer), modified date and a Download button, with a Browse and Recent switch, a search box and a Key needed button."
+                alt="The Agent Drive console showing the inbox folder of a drive: files with their size, the agent that wrote them, and when."
               />
             </picture>
           </figure>
@@ -246,7 +265,7 @@ export default async function Home() {
               <div className="l-tag">Encrypted</div>
               <p>
                 Files are encrypted on the agent&apos;s machine (AES-256-GCM). We store only
-                ciphertext and never see your keys.
+                ciphertext and never see your drive keys.
               </p>
             </div>
             <div>
@@ -337,7 +356,8 @@ export default async function Home() {
               <summary>What happens if I lose the drive key?</summary>
               <p>
                 Nobody can open the files, including us. Save the recovery file when you create a
-                drive, or ask your agent to run <code>agent-drive credentials export</code>.
+                drive, or ask your agent to run{' '}
+                <code>agent-drive credentials export --to &lt;a safe path&gt;</code>.
               </p>
             </details>
             <details>

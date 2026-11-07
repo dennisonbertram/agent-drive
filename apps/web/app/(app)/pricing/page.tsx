@@ -7,7 +7,14 @@ import '../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata: Metadata = { title: 'Pricing | Agent Drive' };
+export const metadata: Metadata = {
+  title: 'Pricing | Agent Drive',
+  openGraph: {
+    title: 'Pricing | Agent Drive',
+    url: '/pricing',
+    images: ['/opengraph-image'],
+  },
+};
 
 const allowance = (bytes: bigint) =>
   bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
