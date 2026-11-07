@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { driveKeyFromPastedText, driveKeyFromRecoveryText } from '@/src/console/recovery-file';
 import { CopyButton } from '../copy-button';
 
@@ -17,13 +17,27 @@ export function UnlockDialog({
   const [error, setError] = useState('');
   const [pasted, setPasted] = useState('');
 
+  // Only the latest attempt for this open dialog may load a key. Closing the dialog, changing
+  // drive, choosing again or pasting invalidates reads still in flight.
+  const attempt = useRef(0);
+  useEffect(() => {
+    const current = attempt;
+    return () => {
+      current.current += 1;
+    };
+  }, [driveId]);
+
   async function choose(file?: File) {
     if (!file) return;
     setError('');
+    const mine = ++attempt.current;
     try {
       // An oversize file is rejected without reading it; '' fails the same way as non-JSON.
-      onKey(driveKeyFromRecoveryText(file.size > 16_384 ? '' : await file.text(), driveId));
+      const text = file.size > 16_384 ? '' : await file.text();
+      if (mine !== attempt.current) return;
+      onKey(driveKeyFromRecoveryText(text, driveId));
     } catch (reason) {
+      if (mine !== attempt.current) return;
       setError(reason instanceof Error ? reason.message : 'That file could not be read.');
     }
   }
@@ -57,6 +71,7 @@ export function UnlockDialog({
           onSubmit={(event) => {
             event.preventDefault();
             setError('');
+            attempt.current += 1;
             try {
               onKey(driveKeyFromPastedText(pasted, driveId));
             } catch (reason) {

@@ -43,6 +43,18 @@ async function keyMenu(page: Page) {
   return menu;
 }
 
+// Exact storage the console may use. P1 stores nothing; later work extends `allowedLocal`.
+async function expectNoStoredSecrets(page: Page, driveKey: string, allowedLocal: string[] = []) {
+  const stored = await page.evaluate(() => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+  }));
+  expect(stored.local.map(([name]) => name).sort()).toEqual([...allowedLocal].sort());
+  expect(stored.session).toEqual([]);
+  const text = JSON.stringify(stored);
+  for (const secret of [driveKey, 'adk_', 'adcred1.']) expect(text).not.toContain(secret);
+}
+
 async function cleanupUser(userId: string) {
   const database = new Pool({ connectionString: process.env.DATABASE_URL });
   const storage = new S3Client({
@@ -225,11 +237,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await page.reload();
     await expect(fileRow).toBeVisible();
     await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
-    // The key is never stored: no storage value contains it.
-    const stored = await page.evaluate(() =>
-      JSON.stringify([{ ...localStorage }, { ...sessionStorage }]),
-    );
-    expect(stored).not.toContain(driveKey);
+    await expectNoStoredSecrets(page, driveKey);
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     await page.getByText('Paste a key instead').click();
     await page
@@ -531,6 +539,29 @@ test('console unlock on demand: Download opens the key prompt and continues afte
     const dialog = page.getByRole('dialog', { name: 'Load the key for Unlock drive' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel(/^Drive key or credentials bundle/)).toBeHidden();
+    // A slow read that finishes after the dialog closed must not load the key or download.
+    let downloads = 0;
+    page.on('download', () => (downloads += 1));
+    await page.evaluate(() => {
+      const w = window as unknown as { releaseRead: () => void };
+      const original = File.prototype.text;
+      const gate = new Promise<void>((resolve) => (w.releaseRead = resolve));
+      File.prototype.text = async function () {
+        const text = await original.call(this);
+        await gate;
+        File.prototype.text = original;
+        return text;
+      };
+    });
+    await dialog.getByLabel('Choose recovery file').setInputFiles(right);
+    await dialog.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.evaluate(() => (window as unknown as { releaseRead: () => void }).releaseRead());
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('key-chip')).toContainText('Key needed');
+    expect(downloads).toBe(0);
+    await row.getByRole('button', { name: 'Download', exact: true }).click();
+    await expect(dialog).toBeVisible();
     const before = await dialog.boundingBox();
     await dialog.getByLabel('Choose recovery file').setInputFiles(wrong);
     await expect(dialog.getByRole('alert')).toHaveText('That recovery file is not for this drive.');
@@ -549,9 +580,7 @@ test('console unlock on demand: Download opens the key prompt and continues afte
     await expect(page.getByTestId('key-chip')).toContainText('Key needed');
     await expect(page.getByText(/The key was cleared after 30 minutes without use/)).toBeVisible();
 
-    expect(
-      await page.evaluate(() => JSON.stringify([{ ...localStorage }, { ...sessionStorage }])),
-    ).not.toContain(driveKey);
+    await expectNoStoredSecrets(page, driveKey);
     expect(requests.some((entry) => entry.includes(driveKey))).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });

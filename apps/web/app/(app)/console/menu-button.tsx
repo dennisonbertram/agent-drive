@@ -60,7 +60,6 @@ export function MenuButton({
         popoverTarget={id}
         aria-controls={id}
         aria-expanded={open}
-        aria-haspopup="true"
         aria-label={ariaLabel}
         data-testid={testId}
       >
