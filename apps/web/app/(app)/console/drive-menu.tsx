@@ -62,8 +62,9 @@ export function DriveMenu({
         })}
         {selected && (
           <div className="drive-id-row">
+            <span className="drive-id-label">Drive ID</span>
             <code className="drive-id" data-testid="drive-id" title={selected}>
-              {selected}
+              {selected.slice(0, 8)}…
             </code>
             <CopyButton text={selected} label="Copy drive ID" />
           </div>

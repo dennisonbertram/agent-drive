@@ -35,7 +35,7 @@ export function BrandMark({
   const cls = `brand ${className}`.trim();
   const body = (
     <>
-      <BrandLogo /> Agent Drive
+      <BrandLogo /> <span className="brand-text">Agent Drive</span>
     </>
   );
   return href === null ? (

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { auditLabel } from '@/src/console/audit-labels';
+import { auditLabel, errorLabel } from '@/src/console/audit-labels';
 import { AccountHeader } from '../account-header';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -300,7 +300,7 @@ export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean
                         <span className="settings-result">In progress</span>
                       ) : event.outcome === 'failure' ? (
                         <span className="settings-result fail">
-                          Failed · {event.errorCode ?? event.httpStatus}
+                          Failed · {errorLabel(event.errorCode)}
                         </span>
                       ) : (
                         <span className="settings-result">OK</span>

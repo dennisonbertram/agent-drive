@@ -1125,14 +1125,17 @@
   .toolbar-tools {
     order: 2;
     justify-content: flex-start;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     width: 100%;
   }
+  /* search gets its own full-width row under Browse / Recent / Shared */
   .toolbar-tools input {
     width: auto;
     max-width: 100%;
     min-width: 0;
-    flex: 1 1 80px;
+    flex: 1 1 100%;
+    order: 3;
+    min-height: 44px;
   }
   .sort-select {
     display: block;
@@ -1374,8 +1377,10 @@
 .drive-id-row .drive-id {
   flex: 1;
   font-size: 11px;
-  overflow-wrap: anywhere;
-  white-space: normal;
+}
+.drive-id-row .drive-id-label {
+  font-size: 11px;
+  color: var(--muted, #6b6963);
 }
 .drive-id-row .copy-button {
   border-color: var(--ink, #111);

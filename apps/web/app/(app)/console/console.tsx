@@ -959,7 +959,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const bytes = await fetchPlaintext(selected, file.path, key);
     const name = file.path.split('/').at(-1) || 'download';
     save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-    showToast(`${name} decrypted in your browser and downloaded.`);
+    showToast(`Download started: ${name}. Check your downloads.`);
   }
 
   // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
@@ -1085,19 +1085,35 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     go({ drive: driveId, path: cut > 0 ? path.slice(0, cut) : undefined, view: 'browse' });
   }
   function restoredToast(driveId: string, path: string, replaceId?: number) {
-    showToast(
-      `Restored “${baseName(path)}”.`,
+    const message = `Restored “${baseName(path)}”.`;
+    const id = showToast(
+      message,
       {
         action: {
           label: 'Show file',
-          run: (id) => {
-            dismissToast(id);
+          run: (toastId) => {
+            dismissToast(toastId);
             showFile(driveId, path);
           },
         },
       },
       replaceId,
     );
+    // Once the list has re-rendered: if the row is already on screen, "Show file" has nothing to show.
+    setTimeout(() => {
+      const row = [...document.querySelectorAll<HTMLElement>('.file-panel .file-row-name')].find(
+        (item) => item.dataset.path === path,
+      );
+      const rect = row?.getBoundingClientRect();
+      if (
+        rect &&
+        selectedNow.current === driveId &&
+        rect.top >= 0 &&
+        rect.bottom <= window.innerHeight &&
+        toastsNow.current.some((item) => item.id === id && item.message === message)
+      )
+        showToast(message, {}, id);
+    }, 300);
   }
 
   async function restore(driveId: string, path: string, versionId?: string) {

@@ -47,3 +47,23 @@ const LABELS: Record<string, string> = {
 export function auditLabel(action: string): string {
   return LABELS[action] ?? 'Other request';
 }
+
+const ERROR_LABELS: Record<string, string> = {
+  validation_error: 'invalid request',
+  unauthorized: 'not signed in',
+  permission_denied: 'not allowed',
+  not_found: 'not found',
+  conflict: 'conflict',
+  quota_exceeded: 'over quota',
+  payment_required: 'payment required',
+  rate_limited: 'too many requests',
+  share_revoked: 'link was revoked',
+  share_expired: 'link expired',
+  share_unavailable: 'link unavailable',
+  internal_error: 'server error',
+};
+
+/** Plain words for an ApiError code recorded on a failed audit event. */
+export function errorLabel(code: string | null | undefined): string {
+  return (code && ERROR_LABELS[code]) || 'error';
+}
