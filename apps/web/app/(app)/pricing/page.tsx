@@ -1,14 +1,24 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { headers } from 'next/headers';
+import { publicOrigin } from '@/src/content/origin';
 import { SiteHeader } from '../../site-header';
-import { billingRates, downloadsLabel, GIB, PLANS } from '@/src/billing/policy';
+import { PLANS, type PlanName } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
+import { JsonLd } from '@/src/content/json-ld';
+import { money, PLAN_INCLUDES, planFacts } from '@/src/content/plans';
+import {
+  egressNotMetered as egressNotMeteredEnv,
+  pricingJsonLd,
+  publishedRates,
+} from '@/src/content/pricing';
 import '../../styles/account.css';
 
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Pricing | Agent Drive',
+  alternates: { types: { 'text/markdown': '/pricing.md' } },
   openGraph: {
     title: 'Pricing | Agent Drive',
     url: '/pricing',
@@ -16,28 +26,14 @@ export const metadata: Metadata = {
   },
 };
 
-const allowance = (bytes: bigint) =>
-  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
-
-const money = (cents: number | bigint) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
-    Number(cents) / 100,
-  );
-
-function publishedRates() {
-  try {
-    return billingRates();
-  } catch {
-    return null;
-  }
-}
-
-export default function PricingPage() {
+export default async function PricingPage() {
+  const origin = publicOrigin(await headers());
   const rates = publishedRates();
   const paidAvailable = rates !== null && checkoutConfigured();
-  const egressNotMetered = process.env.S3_EGRESS_METERING === 'none';
+  const egressNotMetered = egressNotMeteredEnv();
   return (
     <>
+      <JsonLd data={pricingJsonLd(origin)} />
       <SiteHeader current="pricing" />
       <div className="billing-page pricing-page">
         <main>
@@ -56,38 +52,41 @@ export default function PricingPage() {
             </p>
           )}
           <section className="billing-plans" aria-label="Plans">
-            {Object.entries(PLANS).map(([name, plan]) => (
-              <article key={name} className="billing-card billing-plan">
-                <h2>{name}</h2>
-                <p>
-                  <span className="billing-price">{money(plan.baseCents)}</span> / month
-                </p>
-                <ul>
-                  <li>{String(plan.drives)} drives</li>
-                  <li>{allowance(plan.storageBytes)} stored ciphertext</li>
-                  <li>{downloadsLabel(allowance(plan.egressBytes), egressNotMetered)}</li>
-                  <li>{Number(plan.operations).toLocaleString('en-US')} API operations / month</li>
-                  <li>CLI, MCP, web console, and encrypted sharing</li>
-                </ul>
-                {name === 'free' ? (
-                  <Link className="button primary" href="/sign-up">
-                    Start with Free
-                  </Link>
-                ) : paidAvailable ? (
-                  <Link className="button secondary" href="/console/billing" prefetch={false}>
-                    Choose {name === 'developer' ? 'Developer' : 'Team'}
-                  </Link>
-                ) : (
-                  <button
-                    className="button secondary"
-                    disabled
-                    aria-describedby="pricing-availability"
-                  >
-                    Coming soon
-                  </button>
-                )}
-              </article>
-            ))}
+            {(Object.keys(PLANS) as PlanName[]).map((name) => {
+              const plan = planFacts(name, egressNotMetered);
+              return (
+                <article key={name} className="billing-card billing-plan">
+                  <h2>{name}</h2>
+                  <p>
+                    <span className="billing-price">{plan.price}</span> / month
+                  </p>
+                  <ul>
+                    <li>{plan.drives}</li>
+                    <li>{plan.storage}</li>
+                    <li>{plan.downloads}</li>
+                    <li>{plan.operations}</li>
+                    <li>{PLAN_INCLUDES}</li>
+                  </ul>
+                  {name === 'free' ? (
+                    <Link className="button primary" href="/sign-up">
+                      Start with Free
+                    </Link>
+                  ) : paidAvailable ? (
+                    <Link className="button secondary" href="/console/billing" prefetch={false}>
+                      Choose {name === 'developer' ? 'Developer' : 'Team'}
+                    </Link>
+                  ) : (
+                    <button
+                      className="button secondary"
+                      disabled
+                      aria-describedby="pricing-availability"
+                    >
+                      Coming soon
+                    </button>
+                  )}
+                </article>
+              );
+            })}
           </section>
           <section className="billing-card pricing-details" aria-labelledby="usage-pricing">
             <div>

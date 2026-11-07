@@ -1,67 +1,86 @@
 # Agent Drive quickstart
 
-Agent Drive stores encrypted file contents for agents. The API sees paths, sizes, tags, and
+Agent Drive stores encrypted file contents for agents. The service sees paths, sizes, tags, and
 activity metadata, but not plaintext file contents or drive keys. Lost drive keys cannot be recovered.
 
-## Connect an agent to a configured installation
+## Connect an agent
 
-1. Open the installation's `/sign-up` page and create a human account through its Clerk instance.
-2. In `/console`, create a drive and save its one-time recovery JSON somewhere secure. That JSON
-   contains a plaintext secret; do not commit it, email it, or paste it into an agent conversation.
-3. Create an agent and a drive-scoped API key. Grant `read` and `write`, adding `share` or `delete`
-   only when needed. API keys authorize operations; drive keys separately decrypt contents.
-4. Clone this repository, install Node 24 and the pinned pnpm version, and build the private CLI.
-   The package is not yet published to npm; do not assume a global binary exists.
+1. Create a human account at `/sign-up`.
+2. Give your agent this one line, with your own origin: `Set up Agent Drive: https://agentdrive.xyz/llms.txt`.
+   The agent follows the setup guide at that URL. Or do the same steps yourself, below.
+3. Install the CLI (Node 20 or newer). The CLI is served by this site as a tarball:
 
 ```sh
-corepack enable pnpm
-pnpm install --frozen-lockfile
-pnpm --filter ./packages/agent-drive build
-
-export AGENT_DRIVE_API_URL=https://YOUR-AGENT-DRIVE-ORIGIN
-read -rs -p 'Scoped API key: ' AGENT_DRIVE_API_KEY; printf '\n'
-export AGENT_DRIVE_API_KEY
-read -rs -p 'Drive key: ' AGENT_DRIVE_KEY; printf '\n'
-export AGENT_DRIVE_KEY
-export DRIVE_ID=YOUR_DRIVE_UUID
-
-printf 'hello from an agent\n' > sample.txt
-pnpm agent-drive put ./sample.txt /sample.txt --drive "$DRIVE_ID"
-pnpm agent-drive get /sample.txt --drive "$DRIVE_ID" --output ./downloaded.txt
-cmp ./sample.txt ./downloaded.txt
-pnpm agent-drive share /sample.txt --drive "$DRIVE_ID" --expires-in 24h
+npm install -g https://agentdrive.xyz/cli/agent-drive.tgz
+# No global installs allowed? Prefix every command with:
+#   npx -y https://agentdrive.xyz/cli/agent-drive.tgz
 ```
 
-These examples use Bash's hidden prompt. Use your shell's secure input equivalent or a secret
-manager on other platforms. Prefer per-drive key variables or an explicitly protected config
-file for multiple drives; see [CLI documentation](cli.md). Do not put secret values in arguments.
-The complete share URL is a bearer secret: its fragment contains the file decryption key.
+4. Log in. The CLI prints a link and a code.
+
+```sh
+agent-drive login --name "my agent"
+```
+
+5. Approve it. Open the link while signed in, check that the code matches the one the CLI printed,
+   and click Approve. The command finishes by itself. You do not copy an API key.
+6. Back up the credentials. The drive key exists only on this machine, so if the machine or sandbox
+   is deleted the files can never be opened again.
+
+```sh
+agent-drive credentials export --to /a/path/that/survives
+# or, into a secret store:
+agent-drive credentials export --stdout | gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm
+```
+
+7. Check that it worked. Setup is complete only when this prints `check ok`.
+
+```sh
+agent-drive check
+```
+
+8. Store and fetch a file, then share it.
+
+```sh
+printf 'hello from an agent\n' > sample.txt
+agent-drive put ./sample.txt /sample.txt
+agent-drive get /sample.txt --output ./downloaded.txt
+cmp ./sample.txt ./downloaded.txt
+agent-drive share /sample.txt --expires-in 24h
+```
+
+The complete share URL is a bearer secret: its fragment contains the file decryption key. Add
+`--drive ID` to a command if you have more than one drive. See the [CLI reference](cli.md).
 
 ## Use MCP
 
-Configure your MCP host to launch `node /ABSOLUTE/CHECKOUT/packages/agent-drive/dist/cli.js mcp`.
-Forward the API URL, scoped API key, and drive key through protected environment variables, or
-use `AGENT_DRIVE_CONFIG` pointing to the CLI's private config file. See the [README](../README.md#mcp-server)
-for Claude Code and Codex examples and the included [skill](../skills/agent-drive/SKILL.md).
-Restart the MCP process after changing saved credentials.
+Claude Code:
+
+```sh
+claude mcp add agent-drive -- agent-drive mcp
+```
+
+Other MCP clients launch the command `agent-drive` with the argument `mcp`. Codex needs per-tool
+approval for tools that change data; see the [CLI reference](cli.md). Restart the MCP client after
+changing saved credentials.
+
+## Sandboxes and more agents
+
+- In a sandbox that is deleted or recreated, set `AGENT_DRIVE_CREDENTIALS` as a secret on the
+  platform, using the output of `agent-drive credentials export --stdout`. Every new sandbox is then
+  already connected.
+- To add another agent, run `agent-drive login` on its machine and approve it in the browser. You can
+  make it read-only or limit its writes to one folder.
 
 ## Operate the workspace
 
 - The console browses metadata while locked. Load a recovery key to decrypt downloads in browser
   memory. Refreshing or leaving the files page loses that in-memory key.
-- Overwrites and restores of an older version create new versions. Restoring a file's current version from the trash only brings it back, with no new version. Trash does not reclaim retained storage.
+- Overwrites and restores of an older version create new versions. Restoring a file's current version
+  from the trash only brings it back, with no new version. Trash does not reclaim retained storage.
 - Revoke an agent or API key in the console when its access is no longer required.
-- `/console/billing` shows plan allowances, usage, spending controls, and statements. Paid
-  checkout is disabled until the deployment has complete billing configuration. `/pricing`
-  displays the shared plan definitions and configured rates, not proof of live payment setup.
+- `/console/billing` shows plan allowances, usage, spending controls, and statements. See
+  `/pricing` for plans.
 - `/console/settings` shows the account-scoped audit log and permanent deletion controls.
   Deletion requires an exact confirmation, disables new access, and queues a background purge.
   Wait for completion; accepting the request does not prove all bytes have already been erased.
-
-For local development, follow the [service and database setup](../README.md#local-development-environment).
-Use `http://localhost:3100` consistently for browser testing; mixing it with `127.0.0.1` can cause
-same-origin mutations to be rejected. Next.js needs app-local environment configuration; the
-root Docker `.env` is not automatically loaded by the web application.
-
-For a hosted installation, follow the [deployment and release runbook](deployment.md). The local
-test-auth adapter is never a substitute for live Clerk acceptance.

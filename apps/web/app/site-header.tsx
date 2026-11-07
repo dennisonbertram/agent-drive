@@ -19,7 +19,7 @@ export function SiteHeader({ current }: { current?: Current }) {
           <Link href="/pricing" aria-current={page('pricing')}>
             Pricing
           </Link>
-          <a href="/llms.txt">Docs</a>
+          <Link href="/docs">Docs</Link>
           <Link href="/sign-in" aria-current={page('sign-in')}>
             Sign in
           </Link>
@@ -67,7 +67,7 @@ export function AuthLinks({
       {' · '}
       <Link href="/pricing">Pricing</Link>
       {' · '}
-      <a href="/llms.txt">Docs</a>
+      <Link href="/docs">Docs</Link>
     </p>
   );
 }

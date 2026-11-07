@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
-import { billingRates, GIB, PLANS } from '@/src/billing/policy';
+import { billingRates, PLANS } from '@/src/billing/policy';
+import { allowance } from '@/src/content/plans';
+import { FAQ, FEATURES, HERO, PROBLEM, faqJsonLd } from '@/src/content/home';
+import { JsonLd } from '@/src/content/json-ld';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
 import { LandingFigure } from './landing-figure';
@@ -16,6 +19,7 @@ const description =
 export const metadata: Metadata = {
   title,
   description,
+  alternates: { types: { 'text/markdown': '/index.md' } },
   openGraph: {
     title,
     description,
@@ -26,8 +30,6 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title, description, images: ['/opengraph-image'] },
 };
 
-const allowance = (bytes: bigint) =>
-  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
 const count = (n: bigint) => new Intl.NumberFormat('en-US').format(n);
 
 function paidAvailable() {
@@ -96,21 +98,17 @@ export default async function Home() {
   ] as const;
   return (
     <main className="landing" id="top">
+      <JsonLd data={faqJsonLd()} />
       <SiteHeader />
 
       <section className="l-hero">
         <div className="l-wrap l-g">
           <div>
             <div className="l-tag">Portable storage for agents</div>
-            <h1>Agent files that outlive the sandbox.</h1>
-            <p className="l-lede">
-              Agents save to their drive as they work. When the sandbox ends, the machine changes,
-              or the work moves from Claude Code to Codex, the files are still there.
-            </p>
+            <h1>{HERO.title}</h1>
+            <p className="l-lede">{HERO.lede}</p>
             <SetupPanel instruction={instruction} label="Copy agent instruction" />
-            <p className="l-next">
-              Free to start. Your agent shows a code; you approve it once. No API keys to copy.
-            </p>
+            <p className="l-next">{HERO.next}</p>
             <p className="l-cli">
               <span>or in a terminal:</span>{' '}
               <span className="l-cmd">
@@ -125,11 +123,8 @@ export default async function Home() {
       <section id="problem">
         <div className="l-wrap">
           <div className="l-tag">The problem</div>
-          <h2>Sandboxes end. Machines change. Platforms switch.</h2>
-          <p className="l-lede">
-            Each one wipes whatever the agent saved locally, and the next run starts from zero. With
-            a drive, the agent picks up where it stopped.
-          </p>
+          <h2>{PROBLEM.title}</h2>
+          <p className="l-lede">{PROBLEM.lede}</p>
           <div className="l-three">
             {problems.map(([title, a, as, b, bs, c, cs]) => (
               <div key={title}>
@@ -263,17 +258,11 @@ export default async function Home() {
           <div className="l-line3 feat">
             <div>
               <div className="l-tag">Encrypted</div>
-              <p>
-                Files are encrypted on the agent&apos;s machine (AES-256-GCM). We store only
-                ciphertext and never see your drive keys.
-              </p>
+              <p>{FEATURES[0]!.text}</p>
             </div>
             <div>
               <div className="l-tag">Sharable</div>
-              <p>
-                Send an expiring link that decrypts in the recipient&apos;s browser. No account
-                needed; revoke it any time.
-              </p>
+              <p>{FEATURES[1]!.text}</p>
               <code>
                 <span>$</span> agent-drive share --drive &quot;$DRIVE_ID&quot; /outputs/report.pdf
                 --expires-in 7d
@@ -281,10 +270,7 @@ export default async function Home() {
             </div>
             <div>
               <div className="l-tag">Works anywhere</div>
-              <p>
-                A CLI and an MCP server. Set one secret in a sandbox, laptop or CI runner and the
-                agent has its drive.
-              </p>
+              <p>{FEATURES[2]!.text}</p>
               <code>
                 <span>$</span> export AGENT_DRIVE_CREDENTIALS=adcred1.…
               </code>
@@ -317,7 +303,7 @@ export default async function Home() {
             <p className="l-nokey">No API key to copy.</p>
             <p className="l-more">
               Adding a second agent? Approve it in the browser, hand it a .env line, or let a
-              trusted agent grant it. <a href="/llms.txt">Read the docs</a>.
+              trusted agent grant it. <Link href="/docs">Read the docs</Link>.
             </p>
           </div>
           <div className="l-pair" role="img" aria-label="Example approval page">
@@ -352,43 +338,12 @@ export default async function Home() {
           <div className="l-tag">FAQ</div>
           <h2>Questions, answered.</h2>
           <div className="l-faq">
-            <details>
-              <summary>What happens if I lose the drive key?</summary>
-              <p>
-                Nobody can open the files, including us. Save the recovery file when you create a
-                drive, or ask your agent to run{' '}
-                <code>agent-drive credentials export --to &lt;a safe path&gt;</code>.
-              </p>
-            </details>
-            <details>
-              <summary>How is this different from S3, git or Dropbox?</summary>
-              <p>
-                The agent connects in one step with no keys to paste. Files are encrypted before
-                upload. Each agent has its own revocable key and folder limits. Every version
-                records which agent wrote it. And it works the same in any sandbox.
-              </p>
-            </details>
-            <details>
-              <summary>Which agents work with it?</summary>
-              <p>
-                Any agent that can run a shell command or use an MCP server. We have tested Claude
-                Code, Codex, pi and opencode.
-              </p>
-            </details>
-            <details>
-              <summary>Can a chat assistant in a vendor&apos;s cloud use it?</summary>
-              <p>
-                Not yet. Encryption happens on the agent&apos;s own machine, so it needs a shell or
-                a local MCP server.
-              </p>
-            </details>
-            <details>
-              <summary>What counts as an API operation?</summary>
-              <p>
-                Each successful request an agent makes (for example a list, upload or download)
-                counts as one. Failed requests do not count.
-              </p>
-            </details>
+            {FAQ.map(({ q, a }) => (
+              <details key={q}>
+                <summary>{q}</summary>
+                <p>{a.split('`').map((part, n) => (n % 2 ? <code key={n}>{part}</code> : part))}</p>
+              </details>
+            ))}
           </div>
         </div>
       </section>
@@ -454,7 +409,8 @@ export default async function Home() {
         <div className="l-wrap">
           <nav aria-label="Footer">
             <Link href="/pricing">Pricing</Link>
-            <a href="/llms.txt">Docs</a>
+            <Link href="/docs">Docs</Link>
+            <Link href="/compare">Compare</Link>
             <Link href="/sign-in">Sign in</Link>
             <Link href="/console">Console</Link>
           </nav>
