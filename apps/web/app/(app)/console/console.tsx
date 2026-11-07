@@ -434,13 +434,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     };
   };
   let rows: Row[] = [];
-  let totalRows = 0;
   if (tab === 'Files' && view === 'recent') {
     rows = recentFiles(shownFiles);
-    totalRows = query ? recentFiles(fileItems).length : rows.length;
   } else if (tab === 'Files') {
     const children = childrenOf(fileItems, folder);
-    totalRows = children.length;
     // Searching lists every loaded file below this folder, at any depth.
     const matches = query
       ? fileItems
@@ -454,7 +451,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     rows = sortRows(matches, sort.key, sort.dir);
   }
   const listed = tab === 'Files' ? rows.length : shownFiles.length;
-  const listedTotal = tab === 'Files' ? totalRows : fileItems.length;
   const drive = drives.find((item) => item.id === selected);
   const agentInstruction = useAgentInstruction();
   const origin =
