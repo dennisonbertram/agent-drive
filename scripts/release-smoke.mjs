@@ -140,7 +140,7 @@ export async function runSmoke({ url, localTestAuth = false, headless = false, r
     await page.getByRole('button', { name: 'Download recovery file and continue' }).click();
     await recoveryDownload;
     await page.getByRole('button', { name: 'I saved it' }).click();
-    await page.getByTestId('drive-id').waitFor();
+    await page.getByTestId('drive-id').waitFor({ state: 'attached' });
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
     await page.getByRole('button', { name: 'Create your first agent' }).click();
     await page.getByLabel('Agent name').fill('Release smoke agent');
