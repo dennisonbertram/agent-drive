@@ -1,4 +1,5 @@
 import { ApiError } from '../api/errors';
+import { formatBytes } from '../format/bytes';
 
 export const GIB = 1024n ** 3n;
 export const PLANS = {
@@ -104,8 +105,42 @@ export function downloadsLabel(allowance: string, notMetered: boolean) {
   return notMetered ? 'Downloads not charged' : `${allowance} monthly downloads included`;
 }
 
-export function paymentRequired(message: string): never {
+export type LimitName = 'drives' | 'storage' | 'operations' | 'downloads';
+
+export function paymentRequired(message: string, limit?: LimitName): never {
   throw new ApiError('payment_required', message, 402, {
     upgradeUrl: `${billingOrigin()}/console/billing`,
+    ...(limit && { limit }),
   });
+}
+
+// Names the first allowance a write would exceed. Only used where overage is unavailable
+// (Free plan or no configured rates), so the message never offers overage billing.
+export function limitExceeded(
+  plan: PlanName,
+  usage: Usage,
+  before: Pick<Usage, 'drives' | 'storageBytes'>,
+  resetsOn?: Date,
+  only?: LimitName,
+) {
+  const p = PLANS[plan];
+  const name = plan[0]!.toUpperCase() + plan.slice(1);
+  const upgrade = plan === 'team' ? '' : ' or upgrade';
+  const resets = resetsOn ? `on ${resetsOn.toISOString().slice(0, 10)}` : 'next month';
+  let limit: LimitName;
+  let message: string;
+  if (only ? only === 'drives' : usage.drives > p.drives) {
+    limit = 'drives';
+    message = `Your ${name} plan allows ${p.drives} drives and you have ${before.drives}. Delete a drive${upgrade} to add more.`;
+  } else if (only ? only === 'storage' : usage.storageBytes > p.storageBytes) {
+    limit = 'storage';
+    message = `This would exceed your ${name} plan's ${formatBytes(p.storageBytes)} storage (${formatBytes(before.storageBytes)} used). Trashed files and old versions still count. Deleting a drive frees its storage${upgrade ? ', or upgrade' : ''}.`;
+  } else if (only ? only === 'operations' : usage.operations > p.operations) {
+    limit = 'operations';
+    message = `Your ${name} plan's monthly API operation allowance has been reached. It resets ${resets}${upgrade ? '; you can also upgrade' : ''}.`;
+  } else {
+    limit = 'downloads';
+    message = `Your ${name} plan's monthly download allowance has been reached. It resets ${resets}${upgrade ? '; you can also upgrade' : ''}.`;
+  }
+  return { limit, message };
 }

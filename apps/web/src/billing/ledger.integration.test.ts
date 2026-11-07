@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { getPool, withTransaction } from '../db/client';
-import { billingState, billingSummary } from './ledger';
+import {
+  authorizeDownload,
+  billingState,
+  billingSummary,
+  enforceOperationBudget,
+  enforceWriteBudget,
+} from './ledger';
 import { GIB } from './policy';
 
 let accountId = '';
@@ -108,4 +114,100 @@ it('meters retained versions exactly, preserves earned charges across tier chang
     [accountId],
   );
   expect(reports.rows[0]!.cents).toBe('55');
+});
+
+it('rejects a fourth Free drive with the drive limit named and the same 402 code', async () => {
+  const id = (
+    await getPool().query<{ id: string }>('INSERT INTO accounts (name) VALUES ($1) RETURNING id', [
+      `limit-msg-${randomUUID()}`,
+    ])
+  ).rows[0]!.id;
+  try {
+    for (const n of [1, 2, 3])
+      await getPool().query('INSERT INTO drives (account_id,name) VALUES ($1,$2)', [id, `d${n}`]);
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, id, { drives: 1n })),
+    ).rejects.toMatchObject({
+      code: 'payment_required',
+      status: 402,
+      message: expect.stringContaining('allows 3 drives and you have 3'),
+      details: { limit: 'drives' },
+    });
+  } finally {
+    await getPool().query('DELETE FROM drives WHERE account_id = $1', [id]);
+    await getPool().query('DELETE FROM accounts WHERE id = $1', [id]);
+  }
+});
+
+async function freeAccount(drives: number) {
+  const id = (
+    await getPool().query<{ id: string }>('INSERT INTO accounts (name) VALUES ($1) RETURNING id', [
+      `limit-msg-${randomUUID()}`,
+    ])
+  ).rows[0]!.id;
+  for (let n = 1; n <= drives; n += 1)
+    await getPool().query('INSERT INTO drives (account_id,name) VALUES ($1,$2)', [id, `d${n}`]);
+  return id;
+}
+async function dropAccount(id: string) {
+  await getPool().query('DELETE FROM audit_events WHERE account_id = $1', [id]);
+  await getPool().query('DELETE FROM drives WHERE account_id = $1', [id]);
+  await getPool().query('DELETE FROM accounts WHERE id = $1', [id]);
+}
+
+it('does not count a drive that is being deleted toward the drive allowance', async () => {
+  const id = await freeAccount(3);
+  try {
+    await getPool().query(
+      `UPDATE drives SET deleting_at = now() WHERE id = (SELECT id FROM drives WHERE account_id = $1 LIMIT 1)`,
+      [id],
+    );
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, id, { drives: 1n })),
+    ).resolves.toBeDefined();
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, id, { drives: 2n })),
+    ).rejects.toMatchObject({ details: { limit: 'drives' } });
+  } finally {
+    await dropAccount(id);
+  }
+});
+
+it('names the download allowance with a reset date and keeps the 402 code', async () => {
+  const id = await freeAccount(0);
+  try {
+    await expect(authorizeDownload(id, 6n * GIB, async () => 'url')).rejects.toMatchObject({
+      code: 'payment_required',
+      status: 402,
+      message: expect.stringMatching(
+        /download allowance has been reached\. It resets on \d{4}-\d\d-01/,
+      ),
+      details: { limit: 'downloads' },
+    });
+  } finally {
+    await dropAccount(id);
+  }
+});
+
+it('names the operations allowance with a reset date and keeps the 402 code', async () => {
+  const id = await freeAccount(0);
+  try {
+    await getPool().query(
+      `INSERT INTO audit_events (account_id,action,outcome,http_status)
+       SELECT $1,'synthetic','success',200 FROM generate_series(1,1000000)`,
+      [id],
+    );
+    await expect(
+      withTransaction((client) => enforceOperationBudget(client, id)),
+    ).rejects.toMatchObject({
+      code: 'payment_required',
+      status: 402,
+      message: expect.stringMatching(
+        /operation allowance has been reached\. It resets on \d{4}-\d\d-01/,
+      ),
+      details: { limit: 'operations' },
+    });
+  } finally {
+    await dropAccount(id);
+  }
 });

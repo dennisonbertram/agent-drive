@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { GIB, PLANS, quoteUsage, monthBounds, accruedOverage, downloadsLabel } from './policy';
+import {
+  GIB,
+  PLANS,
+  quoteUsage,
+  monthBounds,
+  accruedOverage,
+  downloadsLabel,
+  limitExceeded,
+} from './policy';
 
 const rates = { drive: 200n, storage: 5n, egress: 15n, operations: 1n };
 describe('billing quota and price math', () => {
@@ -57,5 +65,42 @@ describe('pricing download wording', () => {
   it('lists the allowance only when downloads are metered', () => {
     expect(downloadsLabel('100 GiB', false)).toBe('100 GiB monthly downloads included');
     expect(downloadsLabel('100 GiB', true)).toBe('Downloads not charged');
+  });
+});
+
+describe('limitExceeded', () => {
+  const zero = { drives: 0n, storageBytes: 0n, egressBytes: 0n, operations: 0n };
+  it('names the drive limit on Free at 3 of 3 drives and never offers overage', () => {
+    const r = limitExceeded('free', { ...zero, drives: 4n }, { drives: 3n, storageBytes: 0n });
+    expect(r.limit).toBe('drives');
+    expect(r.message).toBe(
+      'Your Free plan allows 3 drives and you have 3. Delete a drive or upgrade to add more.',
+    );
+    expect(r.message).not.toMatch(/overage/i);
+  });
+  it('names storage with decimal sizes', () => {
+    const r = limitExceeded(
+      'free',
+      { ...zero, storageBytes: 6n * GIB },
+      { drives: 1n, storageBytes: 5n * GIB },
+    );
+    expect(r.limit).toBe('storage');
+    expect(r.message).toContain("Free plan's 5.37 GB storage (5.37 GB used)");
+    expect(r.message).toContain(
+      'Trashed files and old versions still count. Deleting a drive frees its storage, or upgrade.',
+    );
+  });
+  it('can force the operations or downloads message at the exact boundary', () => {
+    const r = limitExceeded('free', zero, zero, undefined, 'operations');
+    expect(r.limit).toBe('operations');
+  });
+  it('names operations and downloads with the reset date', () => {
+    const resets = new Date(Date.UTC(2026, 11, 1));
+    const ops = limitExceeded('free', { ...zero, operations: 1_000_001n }, zero, resets);
+    expect(ops.limit).toBe('operations');
+    expect(ops.message).toContain('resets on 2026-12-01');
+    const dl = limitExceeded('developer', { ...zero, egressBytes: 101n * GIB }, zero);
+    expect(dl.limit).toBe('downloads');
+    expect(dl.message).toContain('resets next month');
   });
 });

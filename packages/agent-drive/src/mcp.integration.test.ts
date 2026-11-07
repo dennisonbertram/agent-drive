@@ -547,7 +547,7 @@ describe('MCP product tools over stdio', () => {
       expect(result.value).toMatchObject({
         error: {
           code: 'payment_required',
-          message: 'The account requires a billing plan or payment action.',
+          message: expect.stringContaining('spend cap has been reached'),
           upgradeUrl: expect.any(String),
         },
       });
