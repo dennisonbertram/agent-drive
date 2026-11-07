@@ -12,6 +12,8 @@ export function MenuButton({
   className = '',
   testId,
   menuTestId,
+  menuClassName = '',
+  align = 'end',
   children,
 }: {
   label: ReactNode;
@@ -19,6 +21,8 @@ export function MenuButton({
   className?: string;
   testId?: string;
   menuTestId?: string;
+  menuClassName?: string;
+  align?: 'start' | 'end';
   children: ReactNode;
 }) {
   const id = useId();
@@ -38,7 +42,8 @@ export function MenuButton({
       const rect = anchor.getBoundingClientRect();
       const width = popover.offsetWidth;
       const height = popover.offsetHeight;
-      const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+      const wanted = align === 'start' ? rect.left : rect.right - width;
+      const left = Math.max(8, Math.min(wanted, window.innerWidth - width - 8));
       const below = rect.bottom + 6;
       const top =
         below + height > window.innerHeight && rect.top - 6 - height >= 0
@@ -49,7 +54,7 @@ export function MenuButton({
     };
     popover.addEventListener('toggle', onToggle);
     return () => popover.removeEventListener('toggle', onToggle);
-  }, []);
+  }, [align]);
 
   return (
     <>
@@ -65,7 +70,13 @@ export function MenuButton({
       >
         {label}
       </button>
-      <div ref={menu} id={id} popover="auto" className="menu-popover" data-testid={menuTestId}>
+      <div
+        ref={menu}
+        id={id}
+        popover="auto"
+        className={`menu-popover ${menuClassName}`}
+        data-testid={menuTestId}
+      >
         {children}
       </div>
     </>
