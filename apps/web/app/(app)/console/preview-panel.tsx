@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { looksBinary, previewMime } from '@/src/console/preview';
 
 export type PreviewView =
@@ -21,13 +21,20 @@ export function PreviewBody({ name, view }: { name: string; view: PreviewView })
   const bytes = view.status === 'ready' && view.kind !== 'text' ? view.bytes : null;
   const mime = previewMime(name);
   const [url, setUrl] = useState('');
-  const [failedUrl, setFailedUrl] = useState('');
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  // When the PDF was opened in its own tab; that tab needs the URL for about a minute.
+  const openedAt = useRef(0);
   useEffect(() => {
     if (!bytes || !mime) return;
     const made = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mime }));
+    openedAt.current = 0;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL must be created and revoked by this effect
     setUrl(made);
-    return () => URL.revokeObjectURL(made);
+    return () => {
+      const wait = openedAt.current ? openedAt.current + 60_000 - Date.now() : 0;
+      if (wait > 0) setTimeout(() => URL.revokeObjectURL(made), wait);
+      else URL.revokeObjectURL(made);
+    };
   }, [bytes, mime]);
 
   const text = useMemo(
@@ -74,13 +81,22 @@ export function PreviewBody({ name, view }: { name: string; view: PreviewView })
         )
       );
   } else {
-    body = bytes && url && (
-      <>
-        <iframe className="preview-pdf" src={url} title={`Preview of ${name}`} />
-        <a className="preview-newtab" href={url} target="_blank" rel="noopener">
-          Open in a new tab
-        </a>
-      </>
+    // PDFs are never embedded: a link inside a PDF could navigate this key-holding tab.
+    body = (
+      <div className="preview-note">
+        <p>PDF files open in a separate tab.</p>
+        <button
+          type="button"
+          className="button"
+          disabled={!url}
+          onClick={() => {
+            openedAt.current = Date.now();
+            window.open(url, '_blank', 'noopener,noreferrer');
+          }}
+        >
+          Open PDF in new tab
+        </button>
+      </div>
     );
   }
 

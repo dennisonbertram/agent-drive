@@ -755,9 +755,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
-  async function fetchPlaintext(driveId: string, path: string, key: string): Promise<Uint8Array> {
+  async function fetchPlaintext(
+    driveId: string,
+    path: string,
+    key: string,
+    versionId?: string,
+  ): Promise<Uint8Array> {
     const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
-      `drives/${driveId}/get?path=${encodeURIComponent(path)}`,
+      `drives/${driveId}/get?path=${encodeURIComponent(path)}${versionId ? `&versionId=${versionId}` : ''}`,
     );
     const url = validateDownloadUrl(metadata.downloadUrl);
     const response = await fetch(url, {
@@ -792,7 +797,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (listed > PREVIEW_MAX_BYTES) return show({ status: 'too-large', sizeLabel: size(listed) });
     show({ status: 'loading' });
     try {
-      const bytes = await fetchPlaintext(selected, file.path, key);
+      // Pin the listed version, so the size checked above is the size fetched.
+      const bytes = await fetchPlaintext(selected, file.path, key, file.version_id);
       if (bytes.length > PREVIEW_MAX_BYTES)
         return show({ status: 'too-large', sizeLabel: size(bytes.length) });
       show({ status: 'ready', kind, bytes });
