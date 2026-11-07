@@ -16,10 +16,16 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+const title = 'Agent Drive: encrypted storage your agents keep across sandboxes';
+const description =
+  'Portable storage for agents. Files survive sandboxes, machines and platform switches.';
+
 export const metadata: Metadata = {
-  title: 'Agent Drive',
-  description:
-    'Portable storage for agents. Files survive sandboxes, machines and platform switches.',
+  metadataBase: new URL('https://agentdrive.xyz'),
+  title,
+  description,
+  openGraph: { title, description, url: 'https://agentdrive.xyz', type: 'website' },
+  twitter: { card: 'summary_large_image', title, description },
 };
 
 export default function RootLayout({
