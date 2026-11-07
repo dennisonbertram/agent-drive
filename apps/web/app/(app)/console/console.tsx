@@ -25,6 +25,8 @@ import '../../styles/console.css';
 import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog } from './unlock-dialog';
+import { PreviewBody, type PreviewView } from './preview-panel';
+import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
 import { FileIcon } from './file-icon';
 import { MenuButton } from './menu-button';
 import {
@@ -105,6 +107,7 @@ type ModalName =
   | 'driveReceipt'
   | 'keyReceipt'
   | 'versions'
+  | 'preview'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
 // A folder or Recent view loads at most this many rows; the list says so when it stops early.
@@ -284,11 +287,13 @@ function Dialog({
   children,
   onClose,
   closable = true,
+  className,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   closable?: boolean;
+  className?: string | undefined;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -311,6 +316,7 @@ function Dialog({
   return (
     <dialog
       ref={ref}
+      className={className}
       onCancel={(event) => {
         event.preventDefault();
         if (closable) onClose();
@@ -375,11 +381,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [keyReceipt, setKeyReceipt] = useState('');
   const [saved, setSaved] = useState(false);
   const [downloadingId, setDownloadingId] = useState('');
-  // The row whose Download asked for the key; it continues once the key loads.
-  const [pendingDownload, setPendingDownload] = useState<{
+  // The row whose Download or Preview asked for the key; it continues once the key loads.
+  const [pendingAction, setPendingAction] = useState<{
     driveId: string;
     file: FileEntry;
+    kind: 'download' | 'preview';
   } | null>(null);
+  // The open preview. The decrypted bytes live only here; closing sets it to null.
+  const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
+  const previewRequest = useRef(0);
   const [selectedPath, setSelectedPath] = useState('');
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
@@ -546,8 +556,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       setTab((current) => (current === 'Trash' ? current : 'Files'));
       setFilter('');
       // A key prompt belongs to the drive it was opened for.
-      setModal((current) => (current === 'unlock' ? null : current));
-      setPendingDownload(null);
+      setModal((current) => (current === 'unlock' || current === 'preview' ? null : current));
+      setPendingAction(null);
+      previewRequest.current += 1;
+      setPreview(null);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -606,6 +618,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (!anyKey) return;
     const lock = startIdleLock({
       onIdle: () => {
+        // Plaintext must not stay on screen after the key is cleared.
+        previewRequest.current += 1;
+        setPreview(null);
+        setModal((current) => (current === 'preview' ? null : current));
         setDriveKeys({});
         setKeylineConfirm('');
         setNotice(
@@ -642,7 +658,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
   function close() {
     if (!busy) {
-      setPendingDownload(null);
+      setPendingAction(null);
+      closePreview();
       setModal(null);
       setError('');
     }
@@ -675,8 +692,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (id === selected && !new URLSearchParams(window.location.search).get('path')) return;
     setSelected(id);
     setNotice('');
-    setModal((current) => (current === 'unlock' ? null : current));
-    setPendingDownload(null);
+    setModal((current) => (current === 'unlock' || current === 'preview' ? null : current));
+    setPendingAction(null);
+    closePreview();
     go({ drive: id, path: undefined });
   }
   const hrefFor = (path: string) =>
@@ -716,7 +734,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
 
   async function download(file: FileEntry, key = driveKeys[selected]) {
     if (!key) {
-      setPendingDownload({ driveId: selected, file });
+      setPendingAction({ driveId: selected, file, kind: 'download' });
       open('unlock');
       return;
     }
@@ -730,8 +748,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   async function decryptAndSave(file: FileEntry, key: string) {
+    const bytes = await fetchPlaintext(selected, file.path, key);
+    const name = file.path.split('/').at(-1) || 'download';
+    save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
+    setNotice(`${name} decrypted in your browser and downloaded.`);
+  }
+
+  // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
+  async function fetchPlaintext(
+    driveId: string,
+    path: string,
+    key: string,
+    versionId?: string,
+  ): Promise<Uint8Array> {
     const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
-      `drives/${selected}/get?path=${encodeURIComponent(file.path)}`,
+      `drives/${driveId}/get?path=${encodeURIComponent(path)}${versionId ? `&versionId=${versionId}` : ''}`,
     );
     const url = validateDownloadUrl(metadata.downloadUrl);
     const response = await fetch(url, {
@@ -740,14 +771,44 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       cache: 'no-store',
     }).catch(() => null);
     if (!response?.ok) throw new Error('The encrypted file could not be downloaded.');
-    const bytes = await decryptFile(
-      new Uint8Array(await response.arrayBuffer()),
-      metadata.wrappedKey,
-      key,
-    );
-    const name = file.path.split('/').at(-1) || 'download';
-    save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-    setNotice(`${name} decrypted in your browser and downloaded.`);
+    return decryptFile(new Uint8Array(await response.arrayBuffer()), metadata.wrappedKey, key);
+  }
+
+  function closePreview() {
+    previewRequest.current += 1;
+    setPreview(null);
+  }
+
+  async function openPreview(file: FileEntry, key = driveKeys[selected]) {
+    if (!key) {
+      setPendingAction({ driveId: selected, file, kind: 'preview' });
+      open('unlock');
+      return;
+    }
+    const name = file.path.split('/').at(-1) || file.path;
+    const mine = ++previewRequest.current;
+    const show = (view: PreviewView) => {
+      if (mine === previewRequest.current) setPreview({ file, view });
+    };
+    open('preview');
+    const kind = previewKind(name);
+    const listed = Number(file.ciphertext_size ?? 0);
+    if (kind === 'none') return show({ status: 'unsupported' });
+    if (listed > PREVIEW_MAX_BYTES) return show({ status: 'too-large', sizeLabel: size(listed) });
+    show({ status: 'loading' });
+    try {
+      // Pin the listed version, so the size checked above is the size fetched.
+      const bytes = await fetchPlaintext(selected, file.path, key, file.version_id);
+      if (bytes.length > PREVIEW_MAX_BYTES)
+        return show({ status: 'too-large', sizeLabel: size(bytes.length) });
+      show({ status: 'ready', kind, bytes });
+      if (mine === previewRequest.current) idleLock.current?.touch();
+    } catch (reason) {
+      show({
+        status: 'error',
+        message: reason instanceof Error ? reason.message : 'The file could not be previewed.',
+      });
+    }
   }
 
   async function showVersions(path: string) {
@@ -767,11 +828,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   function keyLoaded(key: string) {
-    const pending = pendingDownload;
-    setPendingDownload(null);
+    const pending = pendingAction;
+    setPendingAction(null);
     setDriveKeys((current) => ({ ...current, [selected]: key }));
     setModal(null);
-    if (pending?.driveId === selected) void act(() => download(pending.file, key));
+    if (pending?.driveId !== selected) return;
+    if (pending.kind === 'preview') void openPreview(pending.file, key);
+    else void act(() => download(pending.file, key));
   }
 
   function saveRecoveryFile(driveId: string, key: string) {
@@ -1161,7 +1224,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             confirming={keylineConfirm === selected}
                             busy={busy}
                             onLoad={() => {
-                              setPendingDownload(null);
+                              setPendingAction(null);
                               open('unlock');
                             }}
                             onDownload={() => {
@@ -1328,10 +1391,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     <button
                                       type="button"
                                       className="file-row-name"
-                                      title={file.path}
-                                      aria-busy={downloadingId === file.id || undefined}
+                                      title={`Preview ${row.name}`}
                                       onClick={() => {
-                                        if (!busy) void act(() => download(file));
+                                        if (!busy) void openPreview(file);
                                       }}
                                     >
                                       <FileIcon kind={fileKind(row.name)} />
@@ -1366,6 +1428,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                         className="row-primary"
                                         disabled={busy}
                                         title="Decrypt and download"
+                                        aria-busy={downloadingId === file.id || undefined}
                                         onClick={() => void act(() => download(file))}
                                       >
                                         {downloadingId === file.id ? 'Downloading…' : 'Download'}
@@ -1751,8 +1814,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveReceipt: 'Your drive. Your key.',
               keyReceipt: 'Save your API key',
               versions: 'Version history',
+              preview: preview?.file.path.split('/').at(-1) ?? 'Preview',
             }[modal]
           }
+          className={modal === 'preview' ? 'preview' : undefined}
           onClose={close}
           closable={!busy && modal !== 'driveReceipt' && modal !== 'keyReceipt'}
         >
@@ -1850,9 +1915,52 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           {modal === 'unlock' && (
             <UnlockDialog
               driveId={selected}
-              pendingName={pendingDownload?.file.path.split('/').at(-1)}
+              pendingMessage={
+                pendingAction
+                  ? `After the key loads, ${pendingAction.file.path.split('/').at(-1)} ${
+                      pendingAction.kind === 'preview' ? 'opens' : 'downloads'
+                    }.`
+                  : undefined
+              }
               onKey={keyLoaded}
             />
+          )}
+          {modal === 'preview' && preview && (
+            <>
+              <PreviewBody name={preview.file.path.split('/').at(-1) ?? ''} view={preview.view} />
+              <div className="preview-footer">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const { file, view } = preview;
+                    if (view.status === 'ready')
+                      save(
+                        new Blob([new Uint8Array(view.bytes)], {
+                          type: 'application/octet-stream',
+                        }),
+                        file.path.split('/').at(-1) || 'download',
+                      );
+                    else void act(() => download(file));
+                  }}
+                >
+                  Download
+                </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    const path = preview.file.path;
+                    closePreview();
+                    void act(() => showVersions(path));
+                  }}
+                >
+                  Versions
+                </button>
+              </div>
+            </>
           )}
           {modal === 'connect' && <ConnectAgentBody />}
           {modal === 'agent' && (
