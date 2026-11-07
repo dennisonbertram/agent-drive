@@ -134,8 +134,7 @@
   flex-direction: column;
   background: var(--bg, #fff);
 }
-.console-main > .topbar,
-.console-main > .bay-strip {
+.console-main > .topbar {
   flex: none;
 }
 .topbar {
@@ -177,107 +176,6 @@
 .console-content > .file-panel {
   flex: 0 1 auto;
   min-height: 240px;
-}
-.console-footer {
-  margin-top: auto;
-  padding-top: 14px;
-  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
-  font-size: 11px;
-}
-
-/* drive bay strip */
-.bay-strip {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-  padding: 12px 28px;
-  overflow-x: auto;
-  background: var(--bg, #fff);
-  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
-}
-.bay {
-  flex: 1 1 0;
-  min-width: 168px;
-  max-width: 280px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--line-strong, #111);
-  border-radius: 6px;
-  background: var(--panel, #fff);
-  box-shadow: 0 2px 0 var(--line-strong, #111);
-  color: var(--ink, #111);
-  text-align: left;
-  cursor: pointer;
-}
-.bay-label {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.bay-name {
-  font: 500 12.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
-  color: var(--ink, #111);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bay-meta {
-  font: 400 11px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
-  color: var(--muted, #6b6963);
-  white-space: nowrap;
-}
-.bay .led {
-  display: inline-block;
-  flex: none;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--muted, #6b6963);
-}
-.bay.selected {
-  background: var(--paper-2, #f6f5f2);
-  border-width: 2px;
-  padding: 7px 11px;
-  color: var(--ink, #111);
-}
-.bay.selected .bay-name {
-  color: var(--ink, #111);
-}
-.bay.selected .bay-meta {
-  color: var(--muted, #6b6963);
-}
-.led.on,
-.bay .led.on {
-  background: var(--sig, #ff4a1c);
-  box-shadow:
-    0 0 0 2px var(--panel, #fff),
-    0 0 0 3px var(--line-strong, #111),
-    0 0 10px var(--sig, #ff4a1c);
-}
-.bay.add {
-  flex: 0 1 auto;
-  background: transparent;
-  border: 1px dashed var(--line-strong, #111);
-  box-shadow: none;
-  color: var(--ink, #111);
-}
-.bay.add .bay-meta {
-  color: var(--ink, #111);
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.bay.add:hover:not(:disabled) {
-  background: var(--paper-2, #f6f5f2);
-}
-.bay-plus {
-  font: 500 18px/1 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
-}
-.bay:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 /* page heading: title and subtitle share one line; a notice replaces the subtitle in place */
@@ -389,7 +287,7 @@
   min-width: 0;
 }
 .drive-id {
-  max-width: 10ch;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -758,8 +656,7 @@
   .console-shell {
     grid-template-columns: 184px minmax(0, 1fr);
   }
-  .console-content,
-  .bay-strip {
+  .console-content {
     padding-left: 16px;
     padding-right: 16px;
   }
@@ -898,37 +795,6 @@
   }
   .console-content > .file-panel {
     min-height: 0;
-  }
-  .bay-strip {
-    padding: 10px 16px;
-    scroll-snap-type: x proximity;
-    scroll-padding: 0 16px;
-    scrollbar-width: none;
-    -webkit-mask-image: linear-gradient(
-      90deg,
-      transparent 0,
-      #000 14px,
-      #000 calc(100% - 40px),
-      transparent
-    );
-    mask-image: linear-gradient(
-      90deg,
-      transparent 0,
-      #000 14px,
-      #000 calc(100% - 40px),
-      transparent
-    );
-  }
-  .bay {
-    flex: 0 0 auto;
-    width: auto;
-    min-width: 150px;
-    max-width: min(240px, 72vw);
-    min-height: 44px;
-    scroll-snap-align: start;
-  }
-  .bay.add {
-    flex: none;
   }
   .page-heading {
     flex-wrap: wrap;
@@ -1091,4 +957,65 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+/* drive menu: the drive name is the button; sizes, drive ID and New drive are inside */
+.drive-menu-button {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  font: 500 14px var(--sans, 'Inter Tight', system-ui, sans-serif);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.drive-menu.disabled .drive-menu-button {
+  pointer-events: none;
+  color: var(--muted, #6b6963);
+}
+.drive-option {
+  display: grid;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink, #111);
+  text-align: left;
+  cursor: pointer;
+}
+.drive-option:hover:not(:disabled) {
+  background: var(--paper-2, #f6f5f2);
+}
+.drive-option[aria-current='true'] {
+  border-color: var(--line-strong, #111);
+  font-weight: 600;
+}
+.drive-option-meta {
+  font: 400 12px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #6b6963);
+}
+.drive-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+}
+.drive-id-row .drive-id {
+  flex: 1;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.drive-id-row .copy-button {
+  border-color: var(--ink, #111);
+  color: var(--ink, #111);
 }

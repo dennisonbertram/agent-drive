@@ -16,6 +16,7 @@ import { decryptFile, generateDriveKey } from '../../../../../packages/agent-dri
 import { validateDownloadUrl } from '@/src/share/url';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
+import { DriveMenu } from './drive-menu';
 import { ListState } from './list-state';
 import '../../styles/console.css';
 import { startIdleLock } from '@/src/console/idle-lock';
@@ -81,6 +82,7 @@ type ModalName =
   | 'drive'
   | 'unlock'
   | 'agent'
+  | 'connect'
   | 'key'
   | 'driveReceipt'
   | 'keyReceipt'
@@ -122,7 +124,7 @@ function useAgentInstruction() {
   return `Set up Agent Drive: ${origin}/llms.txt`;
 }
 
-function ConnectAgentPanel({ open }: { open: boolean }) {
+function ConnectAgentBody() {
   const instruction = useAgentInstruction();
   const snippets = [
     ['Claude Code', 'claude mcp add agent-drive -- agent-drive mcp'],
@@ -136,8 +138,7 @@ function ConnectAgentPanel({ open }: { open: boolean }) {
     ],
   ];
   return (
-    <details className="panel agent-panel" open={open}>
-      <summary>Connect an agent</summary>
+    <>
       <p>
         Paste this into your agent. It installs the CLI and gives you a link; open it and click
         Approve. The agent sets up its own encrypted drive, or you add it to a drive your other
@@ -159,6 +160,15 @@ function ConnectAgentPanel({ open }: { open: boolean }) {
           <CopyButton text={text!} label={`Copy ${name} setup`} />
         </details>
       ))}
+    </>
+  );
+}
+
+function ConnectAgentPanel({ open }: { open: boolean }) {
+  return (
+    <details className="panel agent-panel" open={open}>
+      <summary>Connect an agent</summary>
+      <ConnectAgentBody />
     </details>
   );
 }
@@ -421,12 +431,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     };
   }, [navOpen]);
   useEffect(() => {
-    // Keep the selected drive fully visible in the phone bay strip.
-    document
-      .querySelector('.bay[aria-pressed="true"]')
-      ?.scrollIntoView({ inline: 'center', block: 'nearest' });
-  }, [selected, drives.length, ready]);
-  useEffect(() => {
     if (!driveReceipt && !keyReceipt) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -506,6 +510,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal('driveReceipt');
     await refresh();
     setSelected(created.id);
+    setFilter('');
   }
 
   async function download(file: FileEntry, key = driveKeys[selected]) {
@@ -685,53 +690,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <span className="status-dot" /> CLIENT-SIDE ENCRYPTED
           </span>
         </header>
-        {ready && drives.length > 0 && (
-          <div className="bay-strip" role="group" aria-label="Drives">
-            {drives.map((item) => {
-              const stats = usage?.drives.find((entry) => entry.id === item.id);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`bay ${item.id === selected ? 'selected' : ''}`}
-                  aria-pressed={item.id === selected}
-                  onClick={() => {
-                    setSelected(item.id);
-                    setNotice('');
-                    setFilter('');
-                  }}
-                >
-                  <span className={`led ${item.id === selected ? 'on' : ''}`} aria-hidden />
-                  <span className="bay-label">
-                    <span className="bay-name">{item.name}</span>
-                    {stats && (
-                      <span className="bay-meta">
-                        {size(stats.storageBytes)} · {stats.liveFiles}{' '}
-                        {stats.liveFiles === 1 ? 'file' : 'files'}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              className="bay add"
-              disabled={busy || !ready}
-              aria-label="Add a drive"
-              onClick={() => open('drive')}
-            >
-              <span className="bay-plus" aria-hidden>
-                +
-              </span>
-              <span className="bay-meta">your next agent</span>
-            </button>
-          </div>
-        )}
         <div className="console-content">
           <div className="page-heading">
             <div className="heading-text">
-              <h1>{tab === 'Files' ? 'Drives & files' : tab}</h1>
+              <h1>{tab}</h1>
               <p
                 role={error && !modal ? 'alert' : 'status'}
                 className={
@@ -755,7 +717,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   </>
                 ) : (
                   {
-                    Files: 'A home for the work. A starting point for what’s next.',
+                    Files: '',
                     Agents: 'Separate identities. Purpose-built permissions.',
                     'API keys': 'Give each agent access to exactly what it needs.',
                     Usage: 'Understand what your workspace stores and serves.',
@@ -776,9 +738,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 <button
                   className="button primary"
                   disabled={busy || !ready}
-                  onClick={() => open('drive')}
+                  onClick={() => open('connect')}
                 >
-                  + New drive
+                  Connect an agent
                 </button>
               )}
               {tab === 'Agents' && (
@@ -860,13 +822,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <div className="panel-toolbar">
                       <h2>
                         {tab === 'Trash' ? 'Deleted files' : 'All files'}{' '}
-                        <span className="muted">/ {drive?.name}</span>
+                        <span className="muted">/</span>{' '}
+                        <DriveMenu
+                          drives={drives}
+                          usage={usage}
+                          selected={selected}
+                          formatSize={size}
+                          onSelect={(id) => {
+                            setSelected(id);
+                            setNotice('');
+                            setFilter('');
+                          }}
+                          onNewDrive={() => open('drive')}
+                          disabled={busy || !ready}
+                        />
                       </h2>
                       <div className="toolbar-tools">
-                        <code className="drive-id" data-testid="drive-id" title={selected}>
-                          {selected}
-                        </code>
-                        <CopyButton text={selected} label="Copy drive ID" />
                         {tab === 'Files' && (
                           <KeyChip
                             hasKey={hasKey}
@@ -1046,17 +1017,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             ? 'Deleted files appear here until permanently removed.'
                             : 'Connect an agent with the CLI or MCP to upload encrypted files.'}
                         </p>
-                        {tab === 'Files' && (
-                          <button
-                            className="button secondary"
-                            onClick={() => {
-                              setTab('API keys');
-                              setNotice('');
-                            }}
-                          >
-                            Connect an agent
-                          </button>
-                        )}
                       </div>
                     )}
                     {listStatus === 'ready' && fileItems.length > 0 && !shownFiles.length && (
@@ -1359,10 +1319,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
             </>
           )}
-          <footer className="console-footer">
-            <span>Built for the work between sessions.</span>
-            <span>AGENT DRIVE / V1</span>
-          </footer>
         </div>
       </main>
       {modal && (
@@ -1373,6 +1329,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               drive: 'Create a drive',
               unlock: `Load the key for ${drive?.name ?? 'this drive'}`,
               agent: 'Create an agent',
+              connect: 'Connect an agent',
               key: 'Create API key',
               driveReceipt: 'Your drive. Your key.',
               keyReceipt: 'Save your API key',
@@ -1480,6 +1437,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               onKey={keyLoaded}
             />
           )}
+          {modal === 'connect' && <ConnectAgentBody />}
           {modal === 'agent' && (
             <form
               onSubmit={(event) =>

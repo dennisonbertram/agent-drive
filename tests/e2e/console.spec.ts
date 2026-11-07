@@ -178,6 +178,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     // F19: saving the recovery file from the receipt records the backup.
     await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
     await expect(await keyMenu(page)).toContainText('Key backed up');
+    await page.getByTestId('drive-menu-button').click();
     const driveId = await page.getByTestId('drive-id').innerText();
     expect(backup.driveId).toBe(driveId);
 
@@ -378,6 +379,21 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     }));
     expect(desktop.page).toBeLessThanOrEqual(0);
     expect(desktop.table).toBeGreaterThan(0);
+
+    // Chrome: one primary (Connect an agent, opens in place), no drive strip, no filler, no footer.
+    await expect(page.locator('.button.primary:visible')).toHaveCount(1);
+    await expect(page.locator('.button.primary:visible')).toHaveAccessibleName('Connect an agent');
+    await expect(page.getByText('A home for the work')).toHaveCount(0);
+    await expect(page.getByText('Built for the work between sessions.')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Connect an agent' }).click();
+    await expect(
+      page.getByRole('dialog').getByRole('button', { name: 'Copy agent instruction' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await page.getByRole('button', { name: 'Agents', exact: true }).first().click();
+    await expect(page.locator('.bay-strip')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Files', exact: true }).first().click();
+    await expect(firstRow).toBeVisible();
 
     // Filtering: zero matches offer Clear filter, and one match pins the footer to the panel bottom.
     const filter = page.getByLabel('Filter loaded files');
@@ -830,8 +846,10 @@ test('console files: coming back to a drive restarts the slow-load timer', async
     await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible({
       timeout: 25_000,
     });
+    await page.getByTestId('drive-menu-button').click();
     await page.getByRole('button', { name: /b-fast/ }).click();
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    await page.getByTestId('drive-menu-button').click();
     await page.getByRole('button', { name: /a-slow/ }).click();
     await expect(page.locator('.list-state[data-state="loading"]')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Still loading files…' })).toHaveCount(0);
