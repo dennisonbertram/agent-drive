@@ -605,3 +605,73 @@ dialog .check-label input {
   gap: 8px;
   font-size: 13px;
 }
+
+/* unlock dialog: one big file target, a reserved error line, paste as a disclosure */
+.unlock {
+  display: grid;
+  gap: 12px;
+  width: min(480px, calc(100vw - 80px));
+}
+.unlock p {
+  margin: 0;
+}
+.drop-box {
+  position: relative;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 6px;
+  min-height: 96px;
+  border: 2px dashed var(--line-strong, #111);
+  border-radius: 10px;
+  background: var(--paper-2, #f6f5f2);
+}
+.drop-box:focus-within {
+  outline: 2px solid var(--ink, #111);
+  outline-offset: 2px;
+}
+.drop-box .button {
+  pointer-events: none;
+  min-height: 40px;
+}
+.drop-box small {
+  color: var(--muted, #6b6963);
+  font-size: 12.5px;
+}
+.drop-box input[type='file'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.unlock .field-error {
+  min-height: 20px;
+  color: var(--danger, #b42318);
+  font-size: 13px;
+  line-height: 20px;
+}
+.unlock summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.unlock details form {
+  margin-top: 12px;
+  display: grid;
+}
+.unlock-help code {
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .unlock {
+    width: auto;
+  }
+  .drop-box .button,
+  .unlock details .button {
+    min-height: 48px;
+  }
+}

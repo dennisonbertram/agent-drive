@@ -12,17 +12,15 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import {
-  decodeDriveKey,
-  decryptFile,
-  generateDriveKey,
-} from '../../../../../packages/agent-drive/src/crypto.ts';
+import { decryptFile, generateDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { validateDownloadUrl } from '@/src/share/url';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
 import { ListState } from './list-state';
 import '../../styles/console.css';
-import { BUNDLE_PREFIX, driveKeyFromBundle } from '@/src/console/credentials-bundle';
+import { startIdleLock } from '@/src/console/idle-lock';
+import { KeyChip } from './key-chip';
+import { UnlockDialog } from './unlock-dialog';
 
 type Drive = {
   id: string;
@@ -293,7 +291,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [driveReceipt, setDriveReceipt] = useState<{ id: string; key: string } | null>(null);
   const [keyReceipt, setKeyReceipt] = useState('');
   const [saved, setSaved] = useState(false);
-  const [keyInput, setKeyInput] = useState('');
+  const [downloadingId, setDownloadingId] = useState('');
+  // The row whose Download asked for the key; it continues once the key loads.
+  const [pendingDownload, setPendingDownload] = useState<{
+    driveId: string;
+    file: FileEntry;
+  } | null>(null);
   const [selectedPath, setSelectedPath] = useState('');
   const [versions, setVersions] = useState<Version[]>([]);
   const [fileRefresh, setFileRefresh] = useState(0);
@@ -304,6 +307,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [keylineConfirm, setKeylineConfirm] = useState('');
   // Backups recorded in this page, so a refresh that started earlier cannot hide them.
   const recordedBackups = useRef<Record<string, { at: string; method: string }>>({});
+  // The row whose Download asked for the key; it continues once the key loads.
+  const idleLock = useRef<ReturnType<typeof startIdleLock> | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
@@ -337,9 +342,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       : slowScope === fileScope
         ? 'slow'
         : 'loading';
-  const backupText = drive?.key_backup_at
-    ? `Key backed up ${new Date(drive.key_backup_at).toLocaleDateString()} (${drive.key_backup_method})`
-    : 'This drive’s key hasn’t been backed up. If the agent’s machine is lost, these files can’t be opened. Ask the agent to run agent-drive credentials export';
+  const backupText = `Key backed up ${
+    drive?.key_backup_at ? new Date(drive.key_backup_at).toLocaleDateString() : ''
+  } (${drive?.key_backup_method})`;
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
 
   const refresh = useCallback(async () => {
@@ -431,6 +436,27 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [driveReceipt, keyReceipt]);
 
+  // Clear every key after 30 minutes without use. Never touches driveReceipt: that dialog holds
+  // the only copy of a new drive's key. A download already running holds its key and finishes.
+  const anyKey = Object.keys(driveKeys).length > 0;
+  useEffect(() => {
+    if (!anyKey) return;
+    const lock = startIdleLock({
+      onIdle: () => {
+        setDriveKeys({});
+        setKeylineConfirm('');
+        setNotice(
+          'The key was cleared after 30 minutes without use. You’ll be asked for the recovery file at the next download.',
+        );
+      },
+    });
+    idleLock.current = lock;
+    return () => {
+      lock.stop();
+      idleLock.current = null;
+    };
+  }, [anyKey]);
+
   async function act(operation: () => Promise<void>) {
     setBusy(true);
     setError('');
@@ -449,11 +475,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   function open(name: ModalName) {
     setError('');
     setSaved(false);
-    setKeyInput('');
     setModal(name);
   }
   function close() {
     if (!busy) {
+      setPendingDownload(null);
       setModal(null);
       setError('');
     }
@@ -482,9 +508,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setSelected(created.id);
   }
 
-  async function download(file: FileEntry) {
-    const key = driveKeys[selected];
-    if (!key) throw new Error('Load the drive key to download file contents.');
+  async function download(file: FileEntry, key = driveKeys[selected]) {
+    if (!key) {
+      setPendingDownload({ driveId: selected, file });
+      open('unlock');
+      return;
+    }
+    setDownloadingId(file.id);
+    try {
+      await decryptAndSave(file, key);
+    } finally {
+      setDownloadingId('');
+    }
+    idleLock.current?.touch();
+  }
+
+  async function decryptAndSave(file: FileEntry, key: string) {
     const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
       `drives/${selected}/get?path=${encodeURIComponent(file.path)}`,
     );
@@ -500,11 +539,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       metadata.wrappedKey,
       key,
     );
-    save(
-      new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
-      file.path.split('/').at(-1) || 'download',
-    );
-    setNotice('File decrypted in your browser. Download started.');
+    const name = file.path.split('/').at(-1) || 'download';
+    save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
+    setNotice(`${name} decrypted in your browser and downloaded.`);
   }
 
   async function showVersions(path: string) {
@@ -523,33 +560,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setNotice('Restored as a new version. Previous versions are preserved.');
   }
 
-  async function loadKeyFile(file?: File) {
-    if (!file) return;
-    if (file.size > 16_384) throw new Error('This is not a valid drive key file.');
-    const text = await file.text();
-    if (text.trim().startsWith(BUNDLE_PREFIX)) {
-      const key = driveKeyFromBundle(text, selected);
-      decodeDriveKey(key);
-      setKeyInput(key);
-      return;
-    }
-    let candidate: unknown;
-    try {
-      candidate = JSON.parse(text);
-    } catch {
-      throw new Error('Choose a JSON recovery key file downloaded from this console.');
-    }
-    if (
-      !candidate ||
-      typeof candidate !== 'object' ||
-      !('driveId' in candidate) ||
-      !('key' in candidate) ||
-      candidate.driveId !== selected ||
-      typeof candidate.key !== 'string'
-    )
-      throw new Error('This recovery file does not belong to the selected drive.');
-    decodeDriveKey(candidate.key);
-    setKeyInput(candidate.key);
+  function keyLoaded(key: string) {
+    const pending = pendingDownload;
+    setPendingDownload(null);
+    setDriveKeys((current) => ({ ...current, [selected]: key }));
+    setModal(null);
+    if (pending?.driveId === selected) void act(() => download(pending.file, key));
   }
 
   function saveRecoveryFile(driveId: string, key: string) {
@@ -840,69 +856,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               )}
               {(tab === 'Files' || tab === 'Trash') && drives.length > 0 && (
                 <>
-                  {tab === 'Files' && drive && loaded && (
-                    <div
-                      className={`banner keyline ${drive.key_backup_at ? 'info' : 'error'}`}
-                      data-testid="key-backup-status"
-                    >
-                      <span className={`led ${drive.key_backup_at ? 'ok' : 'on'}`} aria-hidden />
-                      <span className="keyline-text" title={backupText}>
-                        {drive.key_backup_at ? (
-                          backupText
-                        ) : (
-                          <>
-                            This drive&rsquo;s key hasn&rsquo;t been backed up. If the agent&rsquo;s
-                            machine is lost, these files can&rsquo;t be opened. Ask the agent to run{' '}
-                            <code>agent-drive credentials export</code>
-                          </>
-                        )}
-                      </span>
-                      <span className="keyline-actions">
-                        {!drive.key_backup_at && (
-                          <CopyButton
-                            text="agent-drive credentials export"
-                            label="Copy credentials export command"
-                          />
-                        )}
-                        {hasKey && keylineConfirm !== selected && (
-                          <button
-                            className="button secondary"
-                            onClick={() => {
-                              saveRecoveryFile(selected, driveKeys[selected]!);
-                              setKeylineConfirm(selected);
-                            }}
-                          >
-                            Download recovery file
-                          </button>
-                        )}
-                        {hasKey && keylineConfirm === selected && (
-                          <span className="keyline-confirm" role="group" aria-label="Confirm save">
-                            Did the file save?
-                            <button
-                              className="button primary"
-                              onClick={() =>
-                                void act(async () => {
-                                  setKeylineConfirm('');
-                                  await recordBackup(selected);
-                                })
-                              }
-                            >
-                              I saved it
-                            </button>
-                            <button
-                              className="button secondary"
-                              onClick={() => saveRecoveryFile(selected, driveKeys[selected]!)}
-                            >
-                              Download again
-                            </button>
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  )}
-                  {tab === 'Files' && drive && !loaded && (
-                    <div className="banner keyline keyline-reserve" aria-hidden />
-                  )}
                   <section className={`panel file-panel ${tab === 'Trash' ? 'trash' : ''}`}>
                     <div className="panel-toolbar">
                       <h2>
@@ -914,27 +867,37 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           {selected}
                         </code>
                         <CopyButton text={selected} label="Copy drive ID" />
-                        <span className={`badge ${hasKey ? 'positive' : ''}`}>
-                          {hasKey ? 'Key loaded' : 'Key required for downloads'}
-                        </span>
-                        {hasKey ? (
-                          <button
-                            className="button secondary"
-                            onClick={() => {
+                        {tab === 'Files' && (
+                          <KeyChip
+                            hasKey={hasKey}
+                            backedUp={Boolean(drive?.key_backup_at)}
+                            backupText={backupText}
+                            confirming={keylineConfirm === selected}
+                            busy={busy}
+                            onLoad={() => {
+                              setPendingDownload(null);
+                              open('unlock');
+                            }}
+                            onDownload={() => {
+                              saveRecoveryFile(selected, driveKeys[selected]!);
+                              setKeylineConfirm(selected);
+                            }}
+                            onSaved={() =>
+                              void act(async () => {
+                                setKeylineConfirm('');
+                                await recordBackup(selected);
+                              })
+                            }
+                            onForget={() => {
                               setDriveKeys((current) => {
                                 const next = { ...current };
                                 delete next[selected];
                                 return next;
                               });
+                              setKeylineConfirm('');
                               setNotice('Drive key removed from this browser session.');
                             }}
-                          >
-                            Forget key
-                          </button>
-                        ) : (
-                          <button className="button secondary" onClick={() => open('unlock')}>
-                            Load drive key
-                          </button>
+                          />
                         )}
                         <input
                           aria-label="Filter loaded files"
@@ -1034,15 +997,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       <>
                                         <button
                                           className="row-primary"
-                                          disabled={busy || !hasKey}
-                                          title={
-                                            !hasKey
-                                              ? 'Load your drive key first'
-                                              : 'Decrypt and download'
-                                          }
+                                          disabled={busy}
+                                          title="Decrypt and download"
+                                          aria-busy={downloadingId === file.id || undefined}
                                           onClick={() => void act(() => download(file))}
                                         >
-                                          Download
+                                          {downloadingId === file.id ? 'Downloading…' : 'Download'}
                                         </button>
                                         <button
                                           disabled={busy}
@@ -1411,7 +1371,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           title={
             {
               drive: 'Create a drive',
-              unlock: 'Load drive key',
+              unlock: `Load the key for ${drive?.name ?? 'this drive'}`,
               agent: 'Create an agent',
               key: 'Create API key',
               driveReceipt: 'Your drive. Your key.',
@@ -1422,7 +1382,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           onClose={close}
           closable={!busy && modal !== 'driveReceipt' && modal !== 'keyReceipt'}
         >
-          {errorBanner}
+          {modal !== 'unlock' && errorBanner}
           {modal === 'drive' && (
             <form onSubmit={(event) => form(event, createDrive)}>
               <p>
@@ -1514,44 +1474,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             </div>
           )}
           {modal === 'unlock' && (
-            <form
-              onSubmit={(event) =>
-                form(event, async () => {
-                  const pasted = keyInput.trim();
-                  const key = pasted.startsWith(BUNDLE_PREFIX)
-                    ? driveKeyFromBundle(pasted, selected)
-                    : pasted;
-                  decodeDriveKey(key);
-                  setDriveKeys((current) => ({ ...current, [selected]: key }));
-                  setModal(null);
-                })
-              }
-            >
-              <p>
-                For {drive?.name}. Your key stays in this page’s memory and is cleared when you
-                reload.
-              </p>
-              <label>
-                Drive key or credentials bundle (adcred1.…)
-                <input
-                  type="password"
-                  autoComplete="off"
-                  required
-                  value={keyInput}
-                  onChange={(event) => setKeyInput(event.target.value)}
-                />
-              </label>
-              <label>
-                Or choose a recovery file or credentials bundle
-                <input
-                  type="file"
-                  onChange={(event) => void act(() => loadKeyFile(event.target.files?.[0]))}
-                />
-              </label>
-              <button className="button primary" disabled={busy}>
-                Load key
-              </button>
-            </form>
+            <UnlockDialog
+              driveId={selected}
+              pendingName={pendingDownload?.file.path.split('/').at(-1)}
+              onKey={keyLoaded}
+            />
           )}
           {modal === 'agent' && (
             <form
