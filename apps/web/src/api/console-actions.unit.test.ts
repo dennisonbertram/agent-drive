@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { auditLabel } from '../console/audit-labels';
+import { actionFor, consoleReadActions, consoleRouteAllowed } from './handler';
+
+const ID = '11111111-1111-1111-1111-111111111111';
+const SID = 'a'.repeat(22);
+const firsts = [
+  'device',
+  'deletions',
+  'audit',
+  'account',
+  'billing',
+  'session',
+  'usage',
+  'whoami',
+  'drives',
+  'agents',
+  'keys',
+];
+const seconds = [ID, 'statements', 'settings', 'checkout', 'portal'];
+const thirds = [
+  'approve',
+  'deny',
+  'revoke',
+  'shares',
+  'key-backup',
+  'get',
+  'list',
+  'versions',
+  'recent',
+  'search',
+  'trash',
+  'delete',
+  'restore',
+  'move',
+  'copy',
+  'put',
+  'commit',
+  'metadata',
+  'head',
+];
+const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+const shapes = firsts.flatMap((a) => [
+  [a],
+  ...seconds.flatMap((b) => [
+    [a, b],
+    ...thirds.flatMap((c) => [
+      [a, b, c],
+      [a, b, c, SID],
+    ]),
+  ]),
+]);
+const allowed = methods.flatMap((m) =>
+  shapes.filter((p) => consoleRouteAllowed(m, p)).map((p) => [m, p] as const),
+);
+
+describe('console actions', () => {
+  it('enumerates a meaningful set of console routes', () => {
+    expect(allowed.length).toBeGreaterThan(30);
+  });
+  it('names every console-allowed route with a label', () => {
+    for (const [m, p] of allowed) {
+      const action = actionFor(m, p);
+      expect(action, `${m} ${p.join('/')}`).not.toBe('unknown');
+      expect(auditLabel(action), action).not.toBe('Other request');
+    }
+  });
+  it('consoleReads=0 hides every console GET read and keeps writes', () => {
+    // Mirrors the SQL filter in the audit endpoint: LIKE '%.list', LIKE '%.read', or consoleReadActions.
+    const hidden = (a: string) => /\.(list|read)$/u.test(a) || consoleReadActions.includes(a);
+    for (const [m, p] of allowed) {
+      const action = actionFor(m, p);
+      if (p[0] === 'audit') continue; // the audit page itself is listed as console.audit.list
+      expect(hidden(action), `${m} ${p.join('/')} -> ${action}`).toBe(m === 'GET');
+    }
+  });
+});
