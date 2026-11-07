@@ -1018,6 +1018,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     await page.getByLabel('Search this folder').fill('11-02');
     await expect(rows).toHaveCount(1);
     await expect(rows.first().getByRole('link', { name: '/inbox/x' })).toBeVisible();
+    await expect(page.locator('.footer-count')).toHaveText('1 match');
 
     // A folder that is gone says so, and the button goes back to the drive.
     await page.goto('/console?path=/nope');
@@ -1034,6 +1035,21 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     await expect(up).toHaveAttribute('href', /path=%2Fprojects%2Facme%2F2026$/);
     expect((await up.boundingBox())!.width).toBeGreaterThanOrEqual(44);
     await expect(crumbNav.locator('[aria-current="page"]')).toBeVisible();
+    // Phone touch targets are at least 44 px tall.
+    await rows
+      .first()
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    for (const target of [
+      page.getByTestId('drive-menu-button'),
+      page.getByRole('button', { name: 'Browse', exact: true }),
+      page.getByRole('button', { name: 'Recent', exact: true }),
+      page.getByLabel('Sort by'),
+      rowMenu(page).getByRole('button', { name: 'Versions' }),
+      rowMenu(page).getByRole('button', { name: 'Trash' }),
+    ])
+      expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press('Escape');
     for (const part of [
       crumbNav.locator('[aria-current="page"]'),
       page.getByTestId('drive-menu-button'),
@@ -1088,6 +1104,29 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     // The last-used drive is remembered when the URL has none.
     await page.goto('/console');
     await expect(crumbNav).toContainText('B drive');
+
+    // Back restores the first drive even after a folder open and a drive switch.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/console');
+    await page.evaluate((id) => localStorage.setItem('agent-drive:last-drive', id), drive.id);
+    await page.goto('/console');
+    await expect(rows).toHaveCount(7);
+    // Keyboard: opening a folder moves focus to the current folder in the breadcrumb.
+    await page.getByRole('link', { name: 'inbox', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(crumbNav.locator('[aria-current="page"]')).toBeFocused();
+    await page.getByTestId('drive-menu-button').click();
+    await page.getByRole('button', { name: /B drive/ }).click();
+    // An unlock dialog opened for B does not survive going Back to A.
+    await page.getByTestId('key-chip').click();
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(crumbNav).toContainText('A drive');
+    await page.goBack();
+    await expect(crumbNav).toContainText('A drive');
+    await expect(rows).toHaveCount(7);
 
     // Storage that throws must not break the console: it opens the first drive with no error.
     await page.addInitScript(() => {
@@ -1155,6 +1194,10 @@ test('console files: a folder over 1,000 files is capped and says so (mocked API
     await expect(page.locator('.panel-footer')).toContainText('1000 items');
     expect(cursors.size).toBe(10);
     expect(cursors.has('10')).toBe(false);
+    await page.goto('/console?view=recent');
+    await expect(page.getByRole('note')).toHaveText(
+      'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.',
+    );
   } finally {
     await cleanupUser(userId);
   }

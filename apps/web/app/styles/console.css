@@ -1303,6 +1303,13 @@
   display: none;
 }
 @media (max-width: 760px) {
+  /* touch targets of at least 44 px */
+  .drive-menu-button,
+  .view-switch button,
+  .sort-select,
+  .row-actions .row-menu button.menu-item {
+    min-height: 44px;
+  }
   .crumbs > .crumb,
   .crumbs > .crumb-sep {
     display: none;

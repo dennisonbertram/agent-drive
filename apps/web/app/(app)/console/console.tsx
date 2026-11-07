@@ -393,6 +393,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The row whose Download asked for the key; it continues once the key loads.
   const idleLock = useRef<ReturnType<typeof startIdleLock> | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const crumbsRef = useRef<HTMLElement>(null);
+  const focusCrumb = useRef(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
     key: 'modified',
     dir: 'desc',
@@ -547,10 +549,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const onPop = () => {
       setTab((current) => (current === 'Trash' ? current : 'Files'));
       setFilter('');
+      // A key prompt belongs to the drive it was opened for.
+      setModal((current) => (current === 'unlock' ? null : current));
+      setPendingDownload(null);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+  // After opening a folder by link, keep keyboard users' place at the current folder.
+  useEffect(() => {
+    if (!focusCrumb.current) return;
+    focusCrumb.current = false;
+    const nav = crumbsRef.current;
+    (nav?.querySelector<HTMLElement>('[aria-current="page"]') ?? nav)?.focus();
+  }, [folder, view]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
     if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
@@ -648,11 +660,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Move inside the Files list. History entries, not page loads: no server round trip per folder.
   function go(next: { drive?: string; path?: string | undefined; view?: 'browse' | 'recent' }) {
     const query = new URLSearchParams(window.location.search);
-    if ('drive' in next && selected && !query.get('drive')) {
+    if (selected && !query.get('drive')) {
       // Give the entry we leave a drive, so Back returns to it.
       const current = new URLSearchParams(query);
       current.set('drive', selected);
       window.history.replaceState(null, '', `?${current}`);
+      query.set('drive', selected);
     }
     for (const [name, value] of Object.entries(next)) {
       if (value && value !== ROOT && value !== 'browse') query.set(name, value);
@@ -666,6 +679,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (id === selected && !new URLSearchParams(window.location.search).get('path')) return;
     setSelected(id);
     setNotice('');
+    setModal((current) => (current === 'unlock' ? null : current));
+    setPendingDownload(null);
     go({ drive: id, path: undefined });
   }
   const hrefFor = (path: string) =>
@@ -676,6 +691,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)
         return;
       event.preventDefault();
+      focusCrumb.current = true;
       go(nextView ? { path, view: nextView } : { path });
     };
   const sortBy = (key: SortKey) =>
@@ -1012,7 +1028,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       {tab === 'Files' ? (
                         <>
                           <h2 className="sr-only">Files</h2>
-                          <nav aria-label="Folder path" className="crumbs">
+                          <nav
+                            aria-label="Folder path"
+                            className="crumbs"
+                            ref={crumbsRef}
+                            tabIndex={-1}
+                          >
                             {folder === ROOT ? (
                               <span className="crumb">All files</span>
                             ) : (
@@ -1047,7 +1068,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     >
                                       ‹
                                     </a>
-                                    <span className="crumb-last" aria-current="page">
+                                    <span className="crumb-last" aria-current="page" tabIndex={-1}>
                                       {crumb.name}
                                     </span>
                                   </>
@@ -1181,7 +1202,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <p className="list-cap" role="note">
                         {tab === 'Trash'
                           ? 'Showing the first 1,000 deleted files. Some are not listed here.'
-                          : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
+                          : view === 'recent'
+                            ? 'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.'
+                            : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
                       </p>
                     )}
                     {listed > 0 && tab === 'Trash' && (
@@ -1449,7 +1472,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <span className="footer-count">
                         {loaded
                           ? query
-                            ? `${listed} of ${listedTotal}`
+                            ? `${listed} ${listed === 1 ? 'match' : 'matches'}`
                             : tab === 'Trash'
                               ? `${listed} loaded`
                               : view === 'recent'
