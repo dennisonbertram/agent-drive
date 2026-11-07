@@ -1297,3 +1297,36 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* up link: phones only (the full breadcrumb is hidden there) */
+.crumbs .crumb-up {
+  display: none;
+}
+@media (max-width: 760px) {
+  .crumbs > .crumb,
+  .crumbs > .crumb-sep {
+    display: none;
+  }
+  .crumbs {
+    gap: 2px;
+  }
+  .crumbs .drive-menu {
+    flex: none;
+    max-width: 40vw;
+  }
+  .crumbs .crumb-up {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin: -8px -4px -8px -2px;
+    font-size: 22px;
+  }
+  .crumbs .crumb-last {
+    flex: 0 1 auto;
+    max-width: none;
+    font-weight: 600;
+  }
+}

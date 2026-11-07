@@ -1038,9 +1038,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   /
                                 </span>
                                 {index === all.length - 1 ? (
-                                  <span className="crumb-last" aria-current="page">
-                                    {crumb.name}
-                                  </span>
+                                  <>
+                                    <a
+                                      className="crumb-up"
+                                      aria-label={`Up to ${all[index - 1]?.name ?? drive?.name}`}
+                                      href={hrefFor(all[index - 1]?.path ?? ROOT)}
+                                      onClick={openFolder(all[index - 1]?.path ?? ROOT)}
+                                    >
+                                      ‹
+                                    </a>
+                                    <span className="crumb-last" aria-current="page">
+                                      {crumb.name}
+                                    </span>
+                                  </>
                                 ) : (
                                   <a
                                     className="crumb"

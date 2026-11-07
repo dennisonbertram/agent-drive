@@ -898,8 +898,10 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
       (await (
         await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
       ).json()) as T;
-    const drive = await post<{ id: string }>('drives', { name: 'A browse drive' });
-    const second = await post<{ id: string }>('drives', { name: 'B second drive' });
+    const drive = await post<{ id: string }>('drives', { name: 'A drive' });
+    const second = await post<{ id: string }>('drives', { name: 'B drive' });
+    // A backed-up drive keeps the key chip short, which leaves room for the phone breadcrumb.
+    for (const { id } of [drive, second]) await post(`drives/${id}/key-backup`, { method: 'file' });
     const agent = await post<{ id: string }>('agents', { name: 'Browse agent' });
     const key = await post<{ token: string }>('keys', {
       label: 'Browse key',
@@ -925,6 +927,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
       '/reports/week 45 ünïcode.md',
       '/logs/a.log',
       '/.agent-drive/check.txt',
+      '/projects/acme/2026/q4/notes.md',
     ]) {
       const upload = await cli(['put', localFile, path, '--drive', drive.id], environment);
       expect(upload.status, `CLI upload failed: ${upload.stderr.slice(0, 300)}`).toBe(0);
@@ -935,7 +938,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     const names = () => rows.locator('.file-row-name').allInnerTexts();
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/console');
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(7);
     // No row title shows a path.
     expect(
       await rows.evaluateAll(
@@ -943,7 +946,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
       ),
     ).toBe(0);
     expect((await names()).sort()).toEqual(
-      ['.agent-drive', 'README.md', 'inbox', 'logs', 'reports', 'reports'].sort(),
+      ['.agent-drive', 'README.md', 'inbox', 'logs', 'projects', 'reports', 'reports'].sort(),
     );
     await expect(
       rows.filter({ has: page.getByRole('link', { name: 'reports', exact: true }) }),
@@ -963,7 +966,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     await expect(rows).toHaveCount(1);
     await expect(crumbNav.locator('[aria-current="page"]')).toHaveText('inbox');
     await crumbNav.getByRole('link', { name: 'All files' }).click();
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(7);
     await expect(page).not.toHaveURL(/path=/);
 
     // A file and a folder share a name; the folder opens, and the Unicode name survives reload.
@@ -979,7 +982,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
 
     // Sorting by keyboard: folders stay first.
     await page.goto('/console');
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(7);
     const nameHeader = page.locator('th').filter({ hasText: 'NAME' });
     await page.getByRole('button', { name: /^NAME/ }).focus();
     await page.keyboard.press('Enter');
@@ -992,8 +995,9 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
 
     // Recent: newest first across folders, no .agent-drive, survives reload.
     await page.goto('/console?view=recent');
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(7);
     expect(await names()).toEqual([
+      'notes.md',
       'a.log',
       'week 45 ünïcode.md',
       'reports',
@@ -1003,7 +1007,7 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     ]);
     await expect(page.getByText('check.txt')).toHaveCount(0);
     await page.reload();
-    await expect(rows).toHaveCount(6);
+    await expect(rows).toHaveCount(7);
     await expect(page.getByRole('button', { name: 'Recent' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -1018,26 +1022,43 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     // A folder that is gone says so, and the button goes back to the drive.
     await page.goto('/console?path=/nope');
     await expect(page.getByRole('heading', { name: 'Nothing in this folder.' })).toBeVisible();
-    await page.getByRole('button', { name: 'Back to A browse drive' }).click();
-    await expect(rows).toHaveCount(6);
+    await page.getByRole('button', { name: 'Back to A drive' }).click();
+    await expect(rows).toHaveCount(7);
+
+    // Phone: only the drive, an up link and the current folder show, none of them truncated.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/console?path=/projects/acme/2026/q4');
+    await expect(rows).toHaveCount(1);
+    const up = crumbNav.getByRole('link', { name: /^Up to/ });
+    await expect(up).toBeVisible();
+    await expect(up).toHaveAttribute('href', /path=%2Fprojects%2Facme%2F2026$/);
+    expect((await up.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+    await expect(crumbNav.locator('[aria-current="page"]')).toBeVisible();
+    for (const part of [
+      crumbNav.locator('[aria-current="page"]'),
+      page.getByTestId('drive-menu-button'),
+    ])
+      expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(crumbNav.getByRole('link', { name: '2026', exact: true })).toBeHidden();
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // Switching drive drops the folder from the URL.
     await page.goto('/console?path=/inbox');
     await expect(rows).toHaveCount(1);
     await page.getByTestId('drive-menu-button').click();
-    await page.getByRole('button', { name: /B second drive/ }).click();
+    await page.getByRole('button', { name: /B drive/ }).click();
     await expect(page).not.toHaveURL(/path=/);
     await expect(page).toHaveURL(new RegExp(`drive=${second.id}`));
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
     // Back restores the drive and its folder together.
     await page.goBack();
-    await expect(crumbNav).toContainText('A browse drive');
+    await expect(crumbNav).toContainText('A drive');
     await expect(rows).toHaveCount(1);
     await page.goForward();
-    await expect(crumbNav).toContainText('B second drive');
+    await expect(crumbNav).toContainText('B drive');
     // The last-used drive is remembered when the URL has none.
     await page.goto('/console');
-    await expect(crumbNav).toContainText('B second drive');
+    await expect(crumbNav).toContainText('B drive');
 
     // Storage that throws must not break the console: it opens the first drive with no error.
     await page.addInitScript(() => {
@@ -1049,8 +1070,8 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
       };
     });
     await page.goto('/console');
-    await expect(crumbNav).toContainText('A browse drive');
-    await expect(rows).toHaveCount(6);
+    await expect(crumbNav).toContainText('A drive');
+    await expect(rows).toHaveCount(7);
     await expect(page.locator('.banner.error, .notice-slot.error')).toHaveCount(0);
   } finally {
     await cleanupUser(userId);

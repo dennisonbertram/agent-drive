@@ -30,6 +30,7 @@ export function DriveMenu({
   return (
     <span className={`drive-menu ${disabled ? 'disabled' : ''}`}>
       <MenuButton
+        align="start"
         className="drive-menu-button"
         testId="drive-menu-button"
         ariaLabel={`Drive: ${current?.name ?? 'none'}`}
