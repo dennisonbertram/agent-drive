@@ -12,6 +12,7 @@ export function MenuButton({
   className = '',
   testId,
   menuTestId,
+  menuClassName = '',
   children,
 }: {
   label: ReactNode;
@@ -19,6 +20,7 @@ export function MenuButton({
   className?: string;
   testId?: string;
   menuTestId?: string;
+  menuClassName?: string;
   children: ReactNode;
 }) {
   const id = useId();
@@ -65,7 +67,13 @@ export function MenuButton({
       >
         {label}
       </button>
-      <div ref={menu} id={id} popover="auto" className="menu-popover" data-testid={menuTestId}>
+      <div
+        ref={menu}
+        id={id}
+        popover="auto"
+        className={`menu-popover ${menuClassName}`}
+        data-testid={menuTestId}
+      >
         {children}
       </div>
     </>

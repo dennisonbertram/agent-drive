@@ -2,7 +2,9 @@
 
 import { UserButton } from '@clerk/nextjs';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -10,6 +12,7 @@ import {
   useSyncExternalStore,
   type FocusEvent,
   type FormEvent,
+  type MouseEvent,
   type ReactNode,
 } from 'react';
 import { decryptFile, generateDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
@@ -21,6 +24,21 @@ import '../../styles/console.css';
 import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog } from './unlock-dialog';
+import { FileIcon } from './file-icon';
+import { MenuButton } from './menu-button';
+import {
+  ROOT,
+  childrenOf,
+  crumbs,
+  fileKind,
+  folderFromParam,
+  listPrefix,
+  recentFiles,
+  sortRows,
+  type FileRow,
+  type Row,
+  type SortKey,
+} from '@/src/console/file-tree';
 
 type Drive = {
   id: string;
@@ -87,6 +105,34 @@ type ModalName =
   | 'versions'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
+// A folder or Recent view loads at most this many rows; the list says so when it stops early.
+const LIST_CAP = 1000;
+const LAST_DRIVE = 'agent-drive:last-drive';
+const DEFAULT_SORT_DIR = { name: 'asc', modified: 'desc', size: 'desc' } as const;
+
+function rememberedDrive() {
+  try {
+    return localStorage.getItem(LAST_DRIVE);
+  } catch {
+    return null;
+  }
+}
+
+// The drive named in the URL, else the last one used in this browser, else the first.
+function pickDrive(list: { id: string }[]) {
+  const wanted = new URLSearchParams(window.location.search).get('drive');
+  for (const id of [wanted, rememberedDrive()])
+    if (id && list.some((item) => item.id === id)) return id;
+  return list[0]?.id ?? '';
+}
+
+function shortDate(value?: string) {
+  return value ? new Date(value).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '—';
+}
+
+function count(n: number, noun: string) {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
 
 async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   let result: Response;
@@ -274,13 +320,40 @@ function Dialog({
   );
 }
 
+function SortHeader({
+  label,
+  sortable,
+  active,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortable: boolean;
+  active: boolean;
+  dir: 'asc' | 'desc';
+  onSort: () => void;
+}) {
+  if (!sortable) return <th role="columnheader">{label}</th>;
+  return (
+    <th
+      role="columnheader"
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button type="button" className="sort-button" onClick={onSort}>
+        {label}
+        {active && <span aria-hidden> {dir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
+    </th>
+  );
+}
+
 export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [tab, setTab] = useState<Tab>('Files');
   const [drives, setDrives] = useState<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
-  const [selected, setSelected] = useState('');
+  const [chosenDrive, setSelected] = useState('');
   const [driveKeys, setDriveKeys] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -310,22 +383,66 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The row whose Download asked for the key; it continues once the key loads.
   const idleLock = useRef<ReturnType<typeof startIdleLock> | null>(null);
   const filterRef = useRef<HTMLInputElement>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+    key: 'modified',
+    dir: 'desc',
+  });
   const [fileFailure, setFileFailure] = useState<{ scope: string; message: string } | null>(null);
   const [filePage, setFilePage] = useState<{
     scope: string;
     items: FileEntry[];
-    nextCursor: string | null;
+    capped: boolean;
   } | null>(null);
-  const fileScope = `${selected}:${tab}:${fileRefresh}`;
+  // Where the Files list is: drive, folder and view live in the URL so reload and Back work.
+  const params = useSearchParams();
+  const folder = folderFromParam(params.get('path'));
+  const view = params.get('view') === 'recent' ? 'recent' : 'browse';
+  const urlDrive = params.get('drive');
+  // Back and Forward change the drive in the URL; that wins over the last one chosen here.
+  const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
+  const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
   const fileItems = filePage?.scope === fileScope ? filePage.items : [];
   const countKeys = (agentId: string) =>
     apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
   const issuedBy = (id?: string | null) =>
     id ? `issued by ${agents.find((agent) => agent.id === id)?.name ?? 'another agent'}` : '';
   const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
-  const shownFiles = fileItems.filter((file) =>
-    file.path.toLowerCase().includes(filter.toLowerCase()),
-  );
+  const query = filter.toLowerCase();
+  // Trash is a flat list of full paths. Files shows folder rows (Browse) or the newest files (Recent).
+  const shownFiles = fileItems.filter((file) => file.path.toLowerCase().includes(query));
+  const folderBase = folder === ROOT ? '/' : `${folder}/`;
+  const fileRowOf = (file: FileEntry): FileRow => {
+    const cut = file.path.lastIndexOf('/');
+    return {
+      kind: 'file',
+      key: `file:${file.id}`,
+      name: file.path.slice(cut + 1),
+      parent: cut === 0 ? ROOT : file.path.slice(0, cut),
+      file,
+    };
+  };
+  let rows: Row[] = [];
+  let totalRows = 0;
+  if (tab === 'Files' && view === 'recent') {
+    rows = recentFiles(shownFiles);
+    totalRows = query ? recentFiles(fileItems).length : rows.length;
+  } else if (tab === 'Files') {
+    const children = childrenOf(fileItems, folder);
+    totalRows = children.length;
+    // Searching lists every loaded file below this folder, at any depth.
+    const matches = query
+      ? fileItems
+          .filter(
+            (file) =>
+              file.path.startsWith(folderBase) &&
+              file.path.slice(folderBase.length).toLowerCase().includes(query),
+          )
+          .map(fileRowOf)
+      : children;
+    rows = sortRows(matches, sort.key, sort.dir);
+  }
+  const listed = tab === 'Files' ? rows.length : shownFiles.length;
+  const listedTotal = tab === 'Files' ? totalRows : fileItems.length;
   const drive = drives.find((item) => item.id === selected);
   const agentInstruction = useAgentInstruction();
   const origin =
@@ -366,7 +483,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setApiKeys(nextKeys);
     setUsage(nextUsage);
     setSelected((current) =>
-      nextDrives.some((item) => item.id === current) ? current : (nextDrives[0]?.id ?? ''),
+      nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives),
     );
     setReady(true);
     setFileRefresh((value) => value + 1);
@@ -380,19 +497,31 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   useEffect(() => {
     if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
     let active = true;
-    void api<Page<FileEntry>>(`drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}?limit=100`)
-      .then((result) => {
+    void (async () => {
+      const prefix = tab === 'Files' && view === 'browse' ? listPrefix(folder) : null;
+      const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
+      const items: FileEntry[] = [];
+      let cursor: string | null = null;
+      let capped = false;
+      do {
+        const query = new URLSearchParams({ limit: '100' });
+        if (prefix) query.set('prefix', prefix);
+        if (cursor) query.set('cursor', cursor);
+        const result: Page<FileEntry> = await api(`${path}?${query}`);
         if (!active) return;
-        setFilePage({ ...result, scope: fileScope });
-        setFileFailure(null);
-      })
-      .catch((reason: Error) => {
-        if (active) setFileFailure({ scope: fileScope, message: reason.message });
-      });
+        items.push(...result.items);
+        cursor = result.nextCursor;
+        if (cursor && items.length >= LIST_CAP) capped = true;
+      } while (cursor && !capped);
+      setFilePage({ items, capped, scope: fileScope });
+      setFileFailure(null);
+    })().catch((reason: Error) => {
+      if (active) setFileFailure({ scope: fileScope, message: reason.message });
+    });
     return () => {
       active = false;
     };
-  }, [selected, tab, fileScope]);
+  }, [selected, tab, view, folder, fileScope]);
   useEffect(() => {
     // A drive switch, tab switch or Retry changes fileScope, which restarts this timer.
     if (!selected || (tab !== 'Files' && tab !== 'Trash')) return;
@@ -403,6 +532,28 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       setSlowScope('');
     };
   }, [selected, tab, fileScope]);
+  // Back and Forward leave other tabs for the list they changed.
+  useEffect(() => {
+    const onPop = () => {
+      setTab((current) => (current === 'Trash' ? current : 'Files'));
+      setFilter('');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  // A drive in the URL that does not exist is replaced by the one that opened.
+  useEffect(() => {
+    if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
+    window.history.replaceState(null, '', `?${new URLSearchParams({ drive: selected })}`);
+  }, [ready, selected, urlDrive, drives]);
+  useEffect(() => {
+    if (!selected) return;
+    try {
+      localStorage.setItem(LAST_DRIVE, selected);
+    } catch {
+      // Storage can be blocked; the first drive opens next time.
+    }
+  }, [selected]);
   useEffect(() => {
     if (!navOpen) return;
     const onKey = (event: KeyboardEvent) => {
@@ -490,6 +641,45 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     void act(() => operation(data));
   }
 
+  // Move inside the Files list. History entries, not page loads: no server round trip per folder.
+  function go(next: { drive?: string; path?: string | undefined; view?: 'browse' | 'recent' }) {
+    const query = new URLSearchParams(window.location.search);
+    if ('drive' in next && selected && !query.get('drive')) {
+      // Give the entry we leave a drive, so Back returns to it.
+      const current = new URLSearchParams(query);
+      current.set('drive', selected);
+      window.history.replaceState(null, '', `?${current}`);
+    }
+    for (const [name, value] of Object.entries(next)) {
+      if (value && value !== ROOT && value !== 'browse') query.set(name, value);
+      else query.delete(name);
+    }
+    const text = query.toString();
+    window.history.pushState(null, '', text ? `?${text}` : window.location.pathname);
+    setFilter('');
+  }
+  function selectDrive(id: string) {
+    if (id === selected && !new URLSearchParams(window.location.search).get('path')) return;
+    setSelected(id);
+    setNotice('');
+    go({ drive: id, path: undefined });
+  }
+  const hrefFor = (path: string) =>
+    `?${new URLSearchParams({ ...(selected ? { drive: selected } : {}), ...(path !== ROOT ? { path } : {}) })}`;
+  // A plain click moves in place; modified clicks keep the link's normal behaviour.
+  const openFolder =
+    (path: string, nextView?: 'browse') => (event: MouseEvent<HTMLAnchorElement>) => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)
+        return;
+      event.preventDefault();
+      go(nextView ? { path, view: nextView } : { path });
+    };
+  const sortBy = (key: SortKey) =>
+    setSort((current) => ({
+      key,
+      dir: current.key === key ? (current.dir === 'asc' ? 'desc' : 'asc') : DEFAULT_SORT_DIR[key],
+    }));
+
   async function createDrive(data: FormData) {
     const key = generateDriveKey();
     const created = await api<Drive & { created: boolean }>('drives', 'POST', {
@@ -505,7 +695,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setSaved(false);
     setModal('driveReceipt');
     await refresh();
-    setSelected(created.id);
+    selectDrive(created.id);
   }
 
   async function download(file: FileEntry, key = driveKeys[selected]) {
@@ -695,11 +885,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   type="button"
                   className={`bay ${item.id === selected ? 'selected' : ''}`}
                   aria-pressed={item.id === selected}
-                  onClick={() => {
-                    setSelected(item.id);
-                    setNotice('');
-                    setFilter('');
-                  }}
+                  onClick={() => selectDrive(item.id)}
                 >
                   <span className={`led ${item.id === selected ? 'on' : ''}`} aria-hidden />
                   <span className="bay-label">
@@ -858,11 +1044,107 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 <>
                   <section className={`panel file-panel ${tab === 'Trash' ? 'trash' : ''}`}>
                     <div className="panel-toolbar">
-                      <h2>
-                        {tab === 'Trash' ? 'Deleted files' : 'All files'}{' '}
-                        <span className="muted">/ {drive?.name}</span>
-                      </h2>
+                      {tab === 'Files' ? (
+                        <>
+                          <h2 className="sr-only">Files</h2>
+                          <nav aria-label="Folder path" className="crumbs">
+                            {folder === ROOT ? (
+                              <span className="crumb-drive">{drive?.name}</span>
+                            ) : (
+                              <a
+                                className="crumb-drive"
+                                href={hrefFor(ROOT)}
+                                onClick={openFolder(ROOT)}
+                              >
+                                {drive?.name}
+                              </a>
+                            )}
+                            {crumbs(folder).map((crumb, index, all) => (
+                              <Fragment key={crumb.path}>
+                                <span className="crumb-sep" aria-hidden>
+                                  /
+                                </span>
+                                {index === all.length - 1 ? (
+                                  <span className="crumb-last" aria-current="page">
+                                    {crumb.name}
+                                  </span>
+                                ) : (
+                                  <a
+                                    className="crumb"
+                                    href={hrefFor(crumb.path)}
+                                    onClick={openFolder(crumb.path)}
+                                  >
+                                    {crumb.name}
+                                  </a>
+                                )}
+                              </Fragment>
+                            ))}
+                          </nav>
+                        </>
+                      ) : (
+                        <div className="toolbar-title">
+                          <h2>Deleted files</h2>
+                          <span className="crumb-drive">{drive?.name}</span>
+                        </div>
+                      )}
                       <div className="toolbar-tools">
+                        {tab === 'Files' && (
+                          <>
+                            <div className="view-switch" role="group" aria-label="View">
+                              <button
+                                type="button"
+                                aria-pressed={view === 'browse'}
+                                onClick={() => go({ view: 'browse' })}
+                              >
+                                Browse
+                              </button>
+                              <button
+                                type="button"
+                                aria-pressed={view === 'recent'}
+                                onClick={() => go({ view: 'recent' })}
+                              >
+                                Recent
+                              </button>
+                            </div>
+                            {view === 'browse' && (
+                              <select
+                                className="sort-select"
+                                aria-label="Sort by"
+                                value={sort.key}
+                                onChange={(event) => {
+                                  const key = event.target.value as SortKey;
+                                  setSort({ key, dir: DEFAULT_SORT_DIR[key] });
+                                }}
+                              >
+                                <option value="modified">Modified</option>
+                                <option value="name">Name</option>
+                                <option value="size">Size</option>
+                              </select>
+                            )}
+                          </>
+                        )}
+                        <input
+                          aria-label={
+                            tab === 'Trash'
+                              ? 'Search deleted files'
+                              : view === 'recent'
+                                ? 'Search recent files'
+                                : 'Search this folder'
+                          }
+                          placeholder={
+                            tab === 'Trash'
+                              ? 'Search deleted files…'
+                              : view === 'recent'
+                                ? 'Search recent files…'
+                                : 'Search this folder…'
+                          }
+                          ref={filterRef}
+                          value={filter}
+                          disabled={!fileItems.length}
+                          onChange={(event) => setFilter(event.target.value)}
+                        />
+                      </div>
+                      <div className="toolbar-key">
                         <code className="drive-id" data-testid="drive-id" title={selected}>
                           {selected}
                         </code>
@@ -899,14 +1181,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             }}
                           />
                         )}
-                        <input
-                          aria-label="Filter loaded files"
-                          placeholder="Filter loaded files…"
-                          ref={filterRef}
-                          value={filter}
-                          disabled={!fileItems.length}
-                          onChange={(event) => setFilter(event.target.value)}
-                        />
                       </div>
                     </div>
                     {listStatus !== 'ready' && (
@@ -916,24 +1190,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         onRetry={() => setFileRefresh((value) => value + 1)}
                       />
                     )}
-                    {shownFiles.length > 0 && (
+                    {listStatus === 'ready' && filePage?.capped && (
+                      <p className="list-cap" role="note">
+                        {tab === 'Trash'
+                          ? 'Showing the first 1,000 deleted files. Some are not listed here.'
+                          : 'Showing the first 1,000 files, in path order. Some folders and files are not listed here.'}
+                      </p>
+                    )}
+                    {listed > 0 && tab === 'Trash' && (
                       <div className="table-scroll table-stack">
                         <table role="table">
                           <thead role="rowgroup">
                             <tr role="row">
                               <th role="columnheader">FILE PATH</th>
-                              <th
-                                role="columnheader"
-                                title={tab === 'Trash' ? undefined : 'Encrypted size'}
-                              >
-                                {tab === 'Trash' ? 'DELETED' : 'SIZE'}
-                              </th>
-                              {tab !== 'Trash' && (
-                                <>
-                                  <th role="columnheader">AUTHOR</th>
-                                  <th role="columnheader">MODIFIED</th>
-                                </>
-                              )}
+                              <th role="columnheader">DELETED</th>
                               <th role="columnheader">
                                 <span className="sr-only">Actions</span>
                               </th>
@@ -952,82 +1222,24 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     </span>
                                   </span>
                                 </td>
-                                <td role="cell" data-label={tab === 'Trash' ? 'Deleted' : 'Size'}>
-                                  {tab === 'Trash'
-                                    ? deletedOn(file.deletedAt)
-                                    : size(Number(file.ciphertext_size ?? 0))}
+                                <td role="cell" data-label="Deleted">
+                                  {deletedOn(file.deletedAt)}
                                 </td>
-                                {tab !== 'Trash' && (
-                                  <>
-                                    <td role="cell" data-label="Author">
-                                      <span className="author">
-                                        <span className="led dim" aria-hidden />
-                                        {authorLabel(
-                                          agents.find((agent) => agent.id === file.agent_id)
-                                            ?.name ??
-                                            file.agent_id ??
-                                            '',
-                                        )}
-                                      </span>
-                                    </td>
-                                    <td className="modified" role="cell" data-label="Modified">
-                                      {modifiedAt(file.created_at)}
-                                    </td>
-                                  </>
-                                )}
                                 <td className="actions" role="cell">
                                   <div className="row-actions">
-                                    {tab === 'Trash' ? (
-                                      <>
-                                        <button
-                                          className="row-primary"
-                                          disabled={busy}
-                                          onClick={() => void act(() => restore(file.path))}
-                                        >
-                                          Restore
-                                        </button>
-                                        <button
-                                          disabled={busy}
-                                          onClick={() => void act(() => showVersions(file.path))}
-                                        >
-                                          Versions
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <button
-                                          className="row-primary"
-                                          disabled={busy}
-                                          title="Decrypt and download"
-                                          aria-busy={downloadingId === file.id || undefined}
-                                          onClick={() => void act(() => download(file))}
-                                        >
-                                          {downloadingId === file.id ? 'Downloading…' : 'Download'}
-                                        </button>
-                                        <button
-                                          disabled={busy}
-                                          onClick={() => void act(() => showVersions(file.path))}
-                                        >
-                                          Versions
-                                        </button>
-                                        <button
-                                          disabled={busy}
-                                          onClick={() =>
-                                            void act(async () => {
-                                              await api(`drives/${selected}/delete`, 'POST', {
-                                                path: file.path,
-                                              });
-                                              await refresh();
-                                              setNotice(
-                                                `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
-                                              );
-                                            })
-                                          }
-                                        >
-                                          Trash
-                                        </button>
-                                      </>
-                                    )}
+                                    <button
+                                      className="row-primary"
+                                      disabled={busy}
+                                      onClick={() => void act(() => restore(file.path))}
+                                    >
+                                      Restore
+                                    </button>
+                                    <button
+                                      disabled={busy}
+                                      onClick={() => void act(() => showVersions(file.path))}
+                                    >
+                                      Versions
+                                    </button>
                                   </div>
                                 </td>
                               </tr>
@@ -1036,32 +1248,214 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </table>
                       </div>
                     )}
-                    {listStatus === 'ready' && !fileItems.length && (
+                    {listed > 0 && tab === 'Files' && (
+                      <div className="table-scroll browse-list">
+                        <table role="table">
+                          <thead role="rowgroup">
+                            <tr role="row">
+                              {(
+                                [
+                                  ['name', 'NAME'],
+                                  ['size', 'SIZE'],
+                                ] as const
+                              ).map(([key, label]) => (
+                                <SortHeader
+                                  key={key}
+                                  label={label}
+                                  sortable={view === 'browse'}
+                                  active={sort.key === key}
+                                  dir={sort.dir}
+                                  onSort={() => sortBy(key)}
+                                />
+                              ))}
+                              <th role="columnheader">AUTHOR</th>
+                              <SortHeader
+                                label="MODIFIED"
+                                sortable={view === 'browse'}
+                                active={sort.key === 'modified'}
+                                dir={sort.dir}
+                                onSort={() => sortBy('modified')}
+                              />
+                              <th role="columnheader">
+                                <span className="sr-only">Actions</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody role="rowgroup">
+                            {rows.map((row) => {
+                              if (row.kind === 'folder')
+                                return (
+                                  <tr key={row.key} role="row" data-kind="folder">
+                                    <td className="file-cell" role="cell">
+                                      <a
+                                        className="file-row-name"
+                                        href={hrefFor(row.path)}
+                                        onClick={openFolder(row.path)}
+                                      >
+                                        <FileIcon kind="folder" />
+                                        <span className="file-text">
+                                          <span className="file-label">{row.name}</span>
+                                          <span className="file-meta">
+                                            {count(row.items, 'item')} · {shortDate(row.modified)}
+                                          </span>
+                                        </span>
+                                      </a>
+                                    </td>
+                                    <td role="cell">{count(row.items, 'item')}</td>
+                                    <td role="cell" />
+                                    <td className="modified" role="cell">
+                                      {modifiedAt(row.modified)}
+                                    </td>
+                                    <td role="cell" />
+                                  </tr>
+                                );
+                              const file = row.file;
+                              const author = authorLabel(
+                                agents.find((agent) => agent.id === file.agent_id)?.name ??
+                                  file.agent_id ??
+                                  '',
+                              );
+                              const meta = `${size(Number(file.ciphertext_size ?? 0))} · ${shortDate(file.created_at)} · ${author}`;
+                              return (
+                                <tr key={row.key} role="row" data-kind="file">
+                                  <td className="file-cell" role="cell">
+                                    <button
+                                      type="button"
+                                      className="file-row-name"
+                                      title={file.path}
+                                      aria-busy={downloadingId === file.id || undefined}
+                                      onClick={() => {
+                                        if (!busy) void act(() => download(file));
+                                      }}
+                                    >
+                                      <FileIcon kind={fileKind(row.name)} />
+                                      <span className="file-text">
+                                        <span className="file-label">{row.name}</span>
+                                        <span className="file-meta">{meta}</span>
+                                      </span>
+                                    </button>
+                                    {(view === 'recent' || query) && (
+                                      <a
+                                        className="file-parent"
+                                        href={hrefFor(row.parent)}
+                                        onClick={openFolder(row.parent, 'browse')}
+                                      >
+                                        {row.parent}
+                                      </a>
+                                    )}
+                                  </td>
+                                  <td role="cell">{size(Number(file.ciphertext_size ?? 0))}</td>
+                                  <td role="cell">
+                                    <span className="author">
+                                      <span className="led dim" aria-hidden />
+                                      {author}
+                                    </span>
+                                  </td>
+                                  <td className="modified" role="cell">
+                                    {modifiedAt(file.created_at)}
+                                  </td>
+                                  <td className="row-actions-cell" role="cell">
+                                    <div className="row-actions">
+                                      <button
+                                        className="row-primary"
+                                        disabled={busy}
+                                        title="Decrypt and download"
+                                        onClick={() => void act(() => download(file))}
+                                      >
+                                        {downloadingId === file.id ? 'Downloading…' : 'Download'}
+                                      </button>
+                                      <MenuButton
+                                        className="more-button"
+                                        ariaLabel={`More actions for ${row.name}`}
+                                        label="⋯"
+                                        menuTestId="row-menu"
+                                        menuClassName="row-menu"
+                                      >
+                                        <button
+                                          type="button"
+                                          className="menu-item"
+                                          onClick={(event) => {
+                                            event.currentTarget
+                                              .closest<HTMLElement>('[popover]')
+                                              ?.hidePopover();
+                                            void act(() => showVersions(file.path));
+                                          }}
+                                        >
+                                          Versions
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="menu-item"
+                                          onClick={(event) => {
+                                            event.currentTarget
+                                              .closest<HTMLElement>('[popover]')
+                                              ?.hidePopover();
+                                            void act(async () => {
+                                              await api(`drives/${selected}/delete`, 'POST', {
+                                                path: file.path,
+                                              });
+                                              await refresh();
+                                              setNotice(
+                                                `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
+                                              );
+                                            });
+                                          }}
+                                        >
+                                          Trash
+                                        </button>
+                                      </MenuButton>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {listStatus === 'ready' && !listed && !(query && fileItems.length) && (
                       <div className="empty">
-                        <h3>
-                          {tab === 'Trash' ? 'Nothing in the trash.' : 'Ready for your first file.'}
-                        </h3>
-                        <p>
-                          {tab === 'Trash'
-                            ? 'Deleted files appear here until permanently removed.'
-                            : 'Connect an agent with the CLI or MCP to upload encrypted files.'}
-                        </p>
-                        {tab === 'Files' && (
-                          <button
-                            className="button secondary"
-                            onClick={() => {
-                              setTab('API keys');
-                              setNotice('');
-                            }}
-                          >
-                            Connect an agent
-                          </button>
+                        {tab === 'Trash' ? (
+                          <>
+                            <h3>Nothing in the trash.</h3>
+                            <p>Deleted files appear here until permanently removed.</p>
+                          </>
+                        ) : view === 'recent' ? (
+                          <>
+                            <h3>No recent files.</h3>
+                            <p>Files your agents write appear here, newest first.</p>
+                          </>
+                        ) : folder === ROOT ? (
+                          <>
+                            <h3>Ready for your first file.</h3>
+                            <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
+                            <button
+                              className="button secondary"
+                              onClick={() => {
+                                setTab('API keys');
+                                setNotice('');
+                              }}
+                            >
+                              Connect an agent
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <h3>Nothing in this folder.</h3>
+                            <p>Its files may have been moved or deleted.</p>
+                            <button
+                              className="button secondary"
+                              onClick={() => go({ path: undefined })}
+                            >
+                              Back to {drive?.name}
+                            </button>
+                          </>
                         )}
                       </div>
                     )}
-                    {listStatus === 'ready' && fileItems.length > 0 && !shownFiles.length && (
+                    {listStatus === 'ready' && !listed && query && fileItems.length > 0 && (
                       <div className="empty">
-                        <h3>{`No ${filePage?.nextCursor ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
+                        <h3>{`No ${filePage?.capped ? 'loaded files' : 'files'} match “${filter}”.`}</h3>
                         <button
                           className="button secondary"
                           onClick={() => {
@@ -1073,32 +1467,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </button>
                       </div>
                     )}
-                    {filePage?.scope === fileScope && filePage.nextCursor && (
-                      <button
-                        className="button secondary load-more"
-                        disabled={busy}
-                        onClick={() =>
-                          void act(async () => {
-                            const result = await api<Page<FileEntry>>(
-                              `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}?limit=100&cursor=${encodeURIComponent(filePage.nextCursor!)}`,
-                            );
-                            setFilePage({
-                              scope: fileScope,
-                              items: [...fileItems, ...result.items],
-                              nextCursor: result.nextCursor,
-                            });
-                          })
-                        }
-                      >
-                        Load more files
-                      </button>
-                    )}
                     <div className="panel-footer">
-                      {loaded
-                        ? filter
-                          ? `${shownFiles.length} of ${fileItems.length}`
-                          : `${fileItems.length} loaded`
-                        : ''}{' '}
+                      <span className="footer-count">
+                        {loaded
+                          ? query
+                            ? `${listed} of ${listedTotal}`
+                            : tab === 'Trash'
+                              ? `${listed} loaded`
+                              : view === 'recent'
+                                ? `${listed} recent files`
+                                : count(listed, 'item')
+                          : ''}
+                      </span>
                       <span>
                         File contents encrypted · Paths and metadata visible to the service
                       </span>
