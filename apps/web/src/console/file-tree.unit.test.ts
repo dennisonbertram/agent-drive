@@ -172,4 +172,31 @@ describe('crumbs, listPrefix, fileKind', () => {
     expect(fileKind('x.pdf')).toBe('file');
     expect(fileKind('Makefile')).toBe('file');
   });
+  it('does not read object prototype names as extensions', () => {
+    for (const name of ['x.constructor', 'x.__proto__', 'x.toString', 'x.hasOwnProperty'])
+      expect(fileKind(name)).toBe('file');
+  });
+});
+
+describe('edge cases', () => {
+  it('does not match a sibling folder that shares a prefix', () => {
+    const rows = childrenOf([f('/a/x.md'), f('/ab/y.md')], '/a');
+    expect(rows.map((r) => r.name)).toEqual(['x.md']);
+  });
+  it('keeps NFC and NFD names as separate rows', () => {
+    const nfc = '/caf\u00e9.md';
+    const nfd = '/cafe\u0301.md';
+    expect(childrenOf([f(nfc), f(nfd)], '/')).toHaveLength(2);
+  });
+  it('orders names that differ only by case deterministically', () => {
+    const rows = childrenOf([f('/b.md'), f('/B.md'), f('/a.md')], '/');
+    const once = sortRows(rows, 'name', 'asc').map((r) => r.key);
+    expect(sortRows([...rows].reverse(), 'name', 'asc').map((r) => r.key)).toEqual(once);
+  });
+  it('handles a 50-level-deep path', () => {
+    const deep = '/' + Array.from({ length: 50 }, (_, i) => 'd' + i).join('/');
+    expect(childrenOf([f(deep + '/f.md')], '/')[0]).toMatchObject({ name: 'd0', items: 1 });
+    expect(crumbs(deep)).toHaveLength(50);
+    expect(folderFromParam(deep)).toBe(deep);
+  });
 });

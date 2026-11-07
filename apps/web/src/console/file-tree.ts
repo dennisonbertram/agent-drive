@@ -105,18 +105,18 @@ export function recentFiles(files: TreeFile[], limit = 50): FileRow[] {
     });
 }
 
-const KINDS: Record<string, 'text' | 'image' | 'archive'> = {};
+const KINDS = new Map<string, 'text' | 'image' | 'archive'>();
 for (const ext of 'md txt log csv tsv json jsonl yaml yml toml xml html css js ts tsx py sh sql'.split(
   ' ',
 ))
-  KINDS[ext] = 'text';
-for (const ext of 'png jpg jpeg gif webp svg heic'.split(' ')) KINDS[ext] = 'image';
-for (const ext of 'zip tar gz tgz bz2 xz 7z'.split(' ')) KINDS[ext] = 'archive';
+  KINDS.set(ext, 'text');
+for (const ext of 'png jpg jpeg gif webp svg heic'.split(' ')) KINDS.set(ext, 'image');
+for (const ext of 'zip tar gz tgz bz2 xz 7z'.split(' ')) KINDS.set(ext, 'archive');
 
 export function fileKind(name: string): 'text' | 'image' | 'archive' | 'file' {
   const dot = name.lastIndexOf('.');
   if (dot === -1) return 'file';
-  return KINDS[name.slice(dot + 1).toLowerCase()] ?? 'file';
+  return KINDS.get(name.slice(dot + 1).toLowerCase()) ?? 'file';
 }
 
 export function listPrefix(folder: string): string | null {
