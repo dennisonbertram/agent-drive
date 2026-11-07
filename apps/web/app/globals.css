@@ -261,8 +261,7 @@ button {
 .feature-grid p {
   font-size: var(--fs-sm);
 }
-.landing-footer,
-.console-footer {
+.landing-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -522,10 +521,6 @@ progress::-moz-progress-bar {
   background: var(--sig);
   border-radius: 4px;
 }
-.console-footer {
-  padding-top: 28px;
-  font-size: var(--fs-xs);
-}
 dialog {
   width: min(550px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
@@ -651,10 +646,6 @@ legend {
   .landing-footer {
     align-items: flex-start;
     flex-direction: column;
-  }
-  .console-footer {
-    gap: 10px;
-    font-size: var(--fs-xs);
   }
 }
 

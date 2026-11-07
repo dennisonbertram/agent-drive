@@ -55,6 +55,9 @@ async function expectNoStoredSecrets(page: Page, driveKey: string, allowedLocal:
   for (const secret of [driveKey, 'adk_', 'adcred1.']) expect(text).not.toContain(secret);
 }
 
+// The open ⋯ menu of a file row (a popover; closed ones are hidden).
+const rowMenu = (page: Page) => page.locator('[data-testid="row-menu"]:visible');
+
 async function cleanupUser(userId: string) {
   const database = new Pool({ connectionString: process.env.DATABASE_URL });
   const storage = new S3Client({
@@ -178,6 +181,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     // F19: saving the recovery file from the receipt records the backup.
     await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
     await expect(await keyMenu(page)).toContainText('Key backed up');
+    await page.getByTestId('drive-menu-button').click();
     const driveId = await page.getByTestId('drive-id').innerText();
     expect(backup.driveId).toBe(driveId);
 
@@ -217,7 +221,9 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     const initialVersion = JSON.parse(upload.stdout) as { id: string };
     await page.getByRole('button', { name: /^Files/ }).click();
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    const fileRow = page.getByRole('row').filter({ hasText: '/outputs/artifact.bin' });
+    // Rows show names, not paths: open the folder, and the URL keeps it across reloads.
+    await page.getByRole('link', { name: 'outputs', exact: true }).click();
+    const fileRow = page.getByRole('row').filter({ hasText: 'artifact.bin' });
     await expect(fileRow).toBeVisible();
     await expect(fileRow).toContainText('Browser test agent');
     const contentDownload = page.waitForEvent('download');
@@ -237,7 +243,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await page.reload();
     await expect(fileRow).toBeVisible();
     await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
-    await expectNoStoredSecrets(page, driveKey);
+    await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     await page.getByText('Paste a key instead').click();
     await page
@@ -263,8 +269,14 @@ test('new human workspace → encrypted CLI upload → browser download, restore
         )
       ).status,
     ).toBe(0);
+    // Refresh replaces the list; wait for the new one before opening a row menu.
+    const reloaded = page.waitForResponse(
+      (response) => response.url().includes('/list?') && response.ok(),
+    );
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await fileRow.getByRole('button', { name: 'Versions' }).click();
+    await reloaded;
+    await fileRow.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Versions' }).click();
     await page
       .locator('.version-row')
       .filter({ hasText: initialVersion.id })
@@ -273,7 +285,8 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     const restoredDownload = page.waitForEvent('download');
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     expect((await readFile((await (await restoredDownload).path())!)).equals(original)).toBe(true);
-    await fileRow.getByRole('button', { name: 'Trash', exact: true }).click();
+    await fileRow.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
     await expect(fileRow).toHaveCount(0);
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
     await page
@@ -356,7 +369,7 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
 
     const firstRow = page.locator('.file-panel tbody tr').first();
     const openFiles = async () => {
-      await page.goto('/console');
+      await page.goto('/console?path=/notes');
       await expect(firstRow).toBeVisible();
     };
 
@@ -379,8 +392,23 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     expect(desktop.page).toBeLessThanOrEqual(0);
     expect(desktop.table).toBeGreaterThan(0);
 
+    // Chrome: one primary (Connect an agent, opens in place), no drive strip, no filler, no footer.
+    await expect(page.locator('.button.primary:visible')).toHaveCount(1);
+    await expect(page.locator('.button.primary:visible')).toHaveAccessibleName('Connect an agent');
+    await expect(page.getByText('A home for the work')).toHaveCount(0);
+    await expect(page.getByText('Built for the work between sessions.')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Connect an agent' }).click();
+    await expect(
+      page.getByRole('dialog').getByRole('button', { name: 'Copy agent instruction' }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await page.getByRole('button', { name: 'Agents', exact: true }).first().click();
+    await expect(page.locator('.bay-strip')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Files', exact: true }).first().click();
+    await expect(firstRow).toBeVisible();
+
     // Filtering: zero matches offer Clear filter, and one match pins the footer to the panel bottom.
-    const filter = page.getByLabel('Filter loaded files');
+    const filter = page.getByLabel('Search this folder');
     await filter.fill('zzz');
     await expect(page.getByRole('heading', { name: 'No files match “zzz”.' })).toBeVisible();
     await page.getByRole('button', { name: 'Clear filter' }).click();
@@ -428,12 +456,26 @@ test('console layout: tablet path column, desktop one-screen, phone rows and sec
     // Phone: row actions are reachable without sideways scrolling.
     await page.setViewportSize({ width: 375, height: 812 });
     await openFiles();
-    const download = await firstRow.getByRole('button', { name: 'Download' }).boundingBox();
-    expect(download!.x).toBeGreaterThanOrEqual(0);
-    expect(download!.x + download!.width).toBeLessThanOrEqual(375);
+    const more = await firstRow.getByRole('button', { name: /More actions/ }).boundingBox();
+    expect(more!.x).toBeGreaterThanOrEqual(0);
+    expect(more!.x + more!.width).toBeLessThanOrEqual(375);
+    expect(more!.width).toBeGreaterThanOrEqual(44);
+    expect(more!.height).toBeGreaterThanOrEqual(44);
+    expect((await firstRow.boundingBox())!.height).toBeLessThanOrEqual(64);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       375,
     );
+    // Phone: at least 8 file rows fit on the first screen at 390x844.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFiles();
+    expect(
+      await page
+        .locator('.file-panel tbody tr')
+        .evaluateAll(
+          (rows) => rows.filter((row) => row.getBoundingClientRect().bottom <= 844).length,
+        ),
+    ).toBeGreaterThanOrEqual(8);
+    await page.setViewportSize({ width: 375, height: 812 });
 
     // Phone: a short tab (Trash) still fills the viewport height.
     await page.locator('.nav-toggle').click();
@@ -531,8 +573,8 @@ test('console unlock on demand: Download opens the key prompt and continues afte
     page.on('request', (request) => requests.push(`${request.url()} ${request.postData() ?? ''}`));
 
     await page.clock.install();
-    await page.goto('/console');
-    const row = page.getByRole('row').filter({ hasText: '/notes/today.md' });
+    await page.goto('/console?path=/notes');
+    const row = page.getByRole('row').filter({ hasText: 'today.md' });
     await expect(row).toBeVisible();
     await expect(row.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
     await row.getByRole('button', { name: 'Download', exact: true }).click();
@@ -580,7 +622,7 @@ test('console unlock on demand: Download opens the key prompt and continues afte
     await expect(page.getByTestId('key-chip')).toContainText('Key needed');
     await expect(page.getByText(/The key was cleared after 30 minutes without use/)).toBeVisible();
 
-    await expectNoStoredSecrets(page, driveKey);
+    await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
     expect(requests.some((entry) => entry.includes(driveKey))).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -830,11 +872,332 @@ test('console files: coming back to a drive restarts the slow-load timer', async
     await expect(page.getByRole('heading', { name: 'Still loading files…' })).toBeVisible({
       timeout: 25_000,
     });
+    await page.getByTestId('drive-menu-button').click();
     await page.getByRole('button', { name: /b-fast/ }).click();
     await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    await page.getByTestId('drive-menu-button').click();
     await page.getByRole('button', { name: /a-slow/ }).click();
     await expect(page.locator('.list-state[data-state="loading"]')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Still loading files…' })).toHaveCount(0);
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('console files: browse folders like a drive', async ({ page, context, baseURL }) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-browse-'));
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'A drive' });
+    const second = await post<{ id: string }>('drives', { name: 'B drive' });
+    // A backed-up drive keeps the key chip short, which leaves room for the phone breadcrumb.
+    for (const { id } of [drive, second]) await post(`drives/${id}/key-backup`, { method: 'file' });
+    const agent = await post<{ id: string }>('agents', { name: 'Browse agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Browse key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: randomBytes(32).toString('base64url'),
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+    const localFile = join(root, 'note.txt');
+    await writeFile(localFile, 'browse fixture', { mode: 0o600 });
+    // Upload order is the modified order: the last file written is the newest.
+    for (const path of [
+      '/README.md',
+      '/inbox/x/2026-11-01.jsonl',
+      '/inbox/x/2026-11-02.jsonl',
+      '/reports',
+      '/reports/week 45 ünïcode.md',
+      '/logs/a.log',
+      '/.agent-drive/check.txt',
+      '/projects/acme/2026/q4/notes.md',
+    ]) {
+      const upload = await cli(['put', localFile, path, '--drive', drive.id], environment);
+      expect(upload.status, `CLI upload failed: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    }
+
+    const rows = page.locator('.file-panel tbody tr');
+    const crumbNav = page.getByRole('navigation', { name: 'Folder path' });
+    const names = () => rows.locator('.file-row-name').allInnerTexts();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/console');
+    await expect(rows).toHaveCount(7);
+    // No row title shows a path.
+    expect(
+      await rows.evaluateAll(
+        (all) => all.filter((row) => /\//.test(row.querySelector('td')!.textContent!)).length,
+      ),
+    ).toBe(0);
+    expect((await names()).sort()).toEqual(
+      ['.agent-drive', 'README.md', 'inbox', 'logs', 'projects', 'reports', 'reports'].sort(),
+    );
+    await expect(
+      rows.filter({ has: page.getByRole('link', { name: 'reports', exact: true }) }),
+    ).toHaveCount(1);
+    await expect(
+      rows.filter({ has: page.getByRole('button', { name: 'reports', exact: true }) }),
+    ).toHaveCount(1);
+
+    // Folders open, the URL keeps the place, reload and Back restore it.
+    await page.getByRole('link', { name: 'inbox', exact: true }).click();
+    await page.getByRole('link', { name: 'x', exact: true }).click();
+    await expect(page).toHaveURL(/path=%2Finbox%2Fx/);
+    await expect(rows).toHaveCount(2);
+    await page.reload();
+    await expect(rows).toHaveCount(2);
+    await page.goBack();
+    await expect(rows).toHaveCount(1);
+    await expect(crumbNav.locator('[aria-current="page"]')).toHaveText('inbox');
+    await crumbNav.getByRole('link', { name: 'All files' }).click();
+    await expect(rows).toHaveCount(7);
+    await expect(page).not.toHaveURL(/path=/);
+
+    // A file and a folder share a name; the folder opens, and the Unicode name survives reload.
+    await page.getByRole('link', { name: 'reports', exact: true }).click();
+    await expect(rows).toHaveCount(1);
+    await expect(
+      page.getByRole('button', { name: 'week 45 ünïcode.md', exact: true }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByRole('button', { name: 'week 45 ünïcode.md', exact: true }),
+    ).toBeVisible();
+
+    // Sorting by keyboard: folders stay first.
+    await page.goto('/console');
+    await expect(rows).toHaveCount(7);
+    const nameHeader = page.locator('th').filter({ hasText: 'NAME' });
+    await page.getByRole('button', { name: /^NAME/ }).focus();
+    await page.keyboard.press('Enter');
+    await expect(nameHeader).toHaveAttribute('aria-sort', 'ascending');
+    await expect(rows.first()).toHaveAttribute('data-kind', 'folder');
+    await expect(rows.last()).toHaveAttribute('data-kind', 'file');
+    await page.keyboard.press('Enter');
+    await expect(nameHeader).toHaveAttribute('aria-sort', 'descending');
+    await expect(rows.first()).toHaveAttribute('data-kind', 'folder');
+
+    // Recent: newest first across folders, no .agent-drive, survives reload.
+    await page.goto('/console?view=recent');
+    await expect(rows).toHaveCount(7);
+    expect(await names()).toEqual([
+      'notes.md',
+      'a.log',
+      'week 45 ünïcode.md',
+      'reports',
+      '2026-11-02.jsonl',
+      '2026-11-01.jsonl',
+      'README.md',
+    ]);
+    await expect(page.getByText('check.txt')).toHaveCount(0);
+    await page.reload();
+    await expect(rows).toHaveCount(7);
+    await expect(page.getByRole('button', { name: 'Recent' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // Search below the folder finds files at any depth and names their folder.
+    await page.goto('/console?path=/inbox');
+    await page.getByLabel('Search this folder').fill('11-02');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first().getByRole('link', { name: '/inbox/x' })).toBeVisible();
+    await expect(page.locator('.footer-count')).toHaveText('1 match');
+
+    // A folder that is gone says so, and the button goes back to the drive.
+    await page.goto('/console?path=/nope');
+    await expect(page.getByRole('heading', { name: 'Nothing in this folder.' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back to A drive' }).click();
+    await expect(rows).toHaveCount(7);
+
+    // Phone: only the drive, an up link and the current folder show, none of them truncated.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/console?path=/projects/acme/2026/q4');
+    await expect(rows).toHaveCount(1);
+    const up = crumbNav.getByRole('link', { name: /^Up to/ });
+    await expect(up).toBeVisible();
+    await expect(up).toHaveAttribute('href', /path=%2Fprojects%2Facme%2F2026$/);
+    expect((await up.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+    await expect(crumbNav.locator('[aria-current="page"]')).toBeVisible();
+    // Phone touch targets are at least 44 px tall.
+    await rows
+      .first()
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    for (const target of [
+      page.getByTestId('drive-menu-button'),
+      page.getByRole('button', { name: 'Browse', exact: true }),
+      page.getByRole('button', { name: 'Recent', exact: true }),
+      page.getByLabel('Sort by'),
+      rowMenu(page).getByRole('button', { name: 'Versions' }),
+      rowMenu(page).getByRole('button', { name: 'Trash' }),
+    ])
+      expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press('Escape');
+    for (const part of [
+      crumbNav.locator('[aria-current="page"]'),
+      page.getByTestId('drive-menu-button'),
+    ])
+      expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await expect(crumbNav.getByRole('link', { name: '2026', exact: true })).toBeHidden();
+    // Phone, drive not backed up (long key chip): the chip wraps below and nothing is cut off.
+    const bare = await post<{ id: string }>('drives', { name: 'C drive' });
+    await page.route('**/api/console/drives/*/list*', (route) =>
+      !route.request().url().includes(bare.id)
+        ? route.continue()
+        : route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              items: [{ id: 'f1', path: '/projects/acme/2026/q4/n.md', ciphertext_size: 9 }],
+              nextCursor: null,
+            }),
+          }),
+    );
+    await page.goto(`/console?drive=${bare.id}&path=/projects/acme/2026/q4`);
+    await expect(page.getByTestId('key-chip')).toContainText('Not backed up');
+    await expect(rows).toHaveCount(1);
+    for (const part of [
+      crumbNav.locator('[aria-current="page"]'),
+      page.getByTestId('drive-menu-button'),
+    ])
+      expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(
+      await crumbNav.locator('[aria-current="page"]').evaluate((el) => el.clientWidth),
+    ).toBeGreaterThanOrEqual(20);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // Switching drive drops the folder from the URL.
+    await page.goto(`/console?drive=${drive.id}&path=/inbox`);
+    await expect(rows).toHaveCount(1);
+    await page.getByTestId('drive-menu-button').click();
+    await page.getByRole('button', { name: /B drive/ }).click();
+    await expect(page).not.toHaveURL(/path=/);
+    await expect(page).toHaveURL(new RegExp(`drive=${second.id}`));
+    await expect(page.getByRole('heading', { name: 'Ready for your first file.' })).toBeVisible();
+    // Back restores the drive and its folder together.
+    await page.goBack();
+    await expect(crumbNav).toContainText('A drive');
+    await expect(rows).toHaveCount(1);
+    await page.goForward();
+    await expect(crumbNav).toContainText('B drive');
+    // The last-used drive is remembered when the URL has none.
+    await page.goto('/console');
+    await expect(crumbNav).toContainText('B drive');
+
+    // Back restores the first drive even after a folder open and a drive switch.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/console');
+    await page.evaluate((id) => localStorage.setItem('agent-drive:last-drive', id), drive.id);
+    await page.goto('/console');
+    await expect(rows).toHaveCount(7);
+    // Keyboard: opening a folder moves focus to the current folder in the breadcrumb.
+    await page.getByRole('link', { name: 'inbox', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    await expect(crumbNav.locator('[aria-current="page"]')).toBeFocused();
+    await page.getByTestId('drive-menu-button').click();
+    await page.getByRole('button', { name: /B drive/ }).click();
+    // An unlock dialog opened for B does not survive going Back to A.
+    await page.getByTestId('key-chip').click();
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.goBack();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(crumbNav).toContainText('A drive');
+    await page.goBack();
+    await expect(crumbNav).toContainText('A drive');
+    await expect(rows).toHaveCount(7);
+
+    // Storage that throws must not break the console: it opens the first drive with no error.
+    await page.addInitScript(() => {
+      Storage.prototype.getItem = () => {
+        throw new Error('blocked');
+      };
+      Storage.prototype.setItem = () => {
+        throw new Error('blocked');
+      };
+    });
+    await page.goto('/console');
+    await expect(crumbNav).toContainText('A drive');
+    await expect(rows).toHaveCount(7);
+    await expect(page.locator('.banner.error, .notice-slot.error')).toHaveCount(0);
+  } finally {
+    await cleanupUser(userId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// UI only: the list API is mocked (11 pages of 100 rows) to test the cap, not the server.
+test('console files: a folder over 1,000 files is capped and says so (mocked API)', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await context.request.post('/api/console/drives', {
+      data: { name: 'Bulk drive' },
+      headers: { Origin: baseURL! },
+    });
+    const cursors = new Set<string>();
+    await page.route('**/api/console/drives/*/list*', (route) => {
+      const cursor = new URL(route.request().url()).searchParams.get('cursor') ?? '0';
+      cursors.add(cursor);
+      const index = Number(cursor);
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: Array.from({ length: 100 }, (_, n) => {
+            const id = String(index * 100 + n).padStart(4, '0');
+            return {
+              id: `file-${id}`,
+              path: `/f-${id}.log`,
+              version_id: `v-${id}`,
+              ciphertext_size: 64,
+              agent_id: 'agent',
+              created_at: '2026-11-01T00:00:00.000Z',
+            };
+          }),
+          nextCursor: index < 10 ? String(index + 1) : null,
+        }),
+      });
+    });
+    await page.goto('/console');
+    await expect(page.getByRole('note')).toContainText('Showing the first 1,000 files', {
+      timeout: 30_000,
+    });
+    await expect(page.locator('.panel-footer')).toContainText('1000 items');
+    expect(cursors.size).toBe(10);
+    expect(cursors.has('10')).toBe(false);
+    await page.goto('/console?view=recent');
+    await expect(page.getByRole('note')).toHaveText(
+      'Showing the 50 most recent of the first 1,000 files. Newer files beyond them may be missing.',
+    );
   } finally {
     await cleanupUser(userId);
   }
