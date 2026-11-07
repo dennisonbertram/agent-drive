@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
-import { consoleUserId } from '@/src/console/auth';
+import { clerkConfigured, consoleUserId } from '@/src/console/auth';
 import { PLANS } from '@/src/billing/policy';
 import BillingClient from './billing-client';
 import '../../../styles/account.css';
@@ -20,5 +20,5 @@ export default async function BillingPage() {
     egressBytes: String(plan.egressBytes),
     operations: String(plan.operations),
   }));
-  return <BillingClient key={userId} plans={plans} />;
+  return <BillingClient key={userId} plans={plans} clerkEnabled={clerkConfigured()} />;
 }

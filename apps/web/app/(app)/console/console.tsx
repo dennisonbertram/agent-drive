@@ -34,6 +34,7 @@ import { ConfirmBody } from './confirm-dialog';
 import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
 import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
+import { formatBytes } from '@/src/format/bytes';
 import {
   ROOT,
   crumbs,
@@ -87,6 +88,8 @@ type Version = {
 };
 type Page<T> = { items: T[]; nextCursor: string | null };
 type Usage = {
+  plan: string;
+  limits: { storageBytes: string; operations: string; drives: string };
   storageBytes: number;
   operations: number;
   drives: {
@@ -274,10 +277,7 @@ function authorLabel(name: string) {
 }
 
 function size(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  return formatBytes(bytes);
 }
 
 function deletedOn(value?: string) {
@@ -2209,6 +2209,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       {countKeys(agent.id) > 0 && (
                         <button
                           className="button secondary"
+                          aria-label={`Revoke access for ${agent.name}`}
                           disabled={busy}
                           onClick={() => {
                             const n = countKeys(agent.id);
@@ -2284,6 +2285,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </span>
                         <button
                           className="button secondary"
+                          aria-label={`Revoke ${key.label}`}
                           disabled={busy || Boolean(key.revoked_at)}
                           onClick={() =>
                             askConfirm({
@@ -2328,13 +2330,34 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   <div className="stat-grid">
                     <article className="panel stat">
                       <p>ENCRYPTED STORAGE</p>
-                      <strong>{size(usage.storageBytes)}</strong>
-                      <small>All committed versions, including trash</small>
+                      <strong>
+                        {size(usage.storageBytes)} of {formatBytes(usage.limits.storageBytes)}
+                      </strong>
+                      <progress
+                        className={
+                          usage.storageBytes >= Number(usage.limits.storageBytes) * 0.9 ? 'hot' : ''
+                        }
+                        value={usage.storageBytes}
+                        max={Number(usage.limits.storageBytes)}
+                        aria-label="Storage used of plan limit"
+                      />
+                      <small>All versions count, including Trash.</small>
                     </article>
                     <article className="panel stat">
                       <p>API OPERATIONS</p>
-                      <strong>{usage.operations.toLocaleString()}</strong>
-                      <small>Successful operations this calendar month</small>
+                      <strong>
+                        {usage.operations.toLocaleString()} of{' '}
+                        {Number(usage.limits.operations).toLocaleString()}
+                      </strong>
+                      <progress
+                        className={
+                          usage.operations >= Number(usage.limits.operations) * 0.9 ? 'hot' : ''
+                        }
+                        value={usage.operations}
+                        max={Number(usage.limits.operations)}
+                        aria-label="Operations used of plan limit"
+                      />
+                      <small>Successful operations this month</small>
                     </article>
                     <article className="panel stat">
                       <p>EGRESS & COST</p>
@@ -2379,14 +2402,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <h2>Usage by author</h2>
                       <span className="muted">Versions attributed to their author</span>
                     </div>
-                    <div className="table-scroll table-stack">
+                    <div className="table-scroll table-stack usage-table">
                       <table role="table">
                         <thead role="rowgroup">
                           <tr role="row">
                             <th role="columnheader">AGENT</th>
-                            <th role="columnheader">STORAGE</th>
-                            <th role="columnheader">VERSIONS</th>
-                            <th role="columnheader">OPERATIONS</th>
+                            <th role="columnheader" className="num">
+                              STORAGE
+                            </th>
+                            <th role="columnheader" className="num">
+                              VERSIONS
+                            </th>
+                            <th role="columnheader" className="num">
+                              OPERATIONS
+                            </th>
                           </tr>
                         </thead>
                         <tbody role="rowgroup">
@@ -2395,13 +2424,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               <td className="primary" role="cell">
                                 {authorLabel(item.name)}
                               </td>
-                              <td role="cell" data-label="Storage">
+                              <td role="cell" className="num" data-label="Storage">
                                 {size(item.storageBytes)}
                               </td>
-                              <td role="cell" data-label="Versions">
+                              <td role="cell" className="num" data-label="Versions">
                                 {item.versions}
                               </td>
-                              <td role="cell" data-label="Operations">
+                              <td role="cell" className="num" data-label="Operations">
                                 {item.operations}
                               </td>
                             </tr>
