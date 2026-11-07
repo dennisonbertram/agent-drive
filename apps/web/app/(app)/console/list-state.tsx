@@ -4,17 +4,19 @@ export type ListStatus = 'loading' | 'slow' | 'error';
 export function ListState({
   status,
   message,
+  noun = 'files',
   onRetry,
 }: {
   status: ListStatus;
   message?: string | undefined;
+  noun?: string;
   onRetry: () => void;
 }) {
   if (status === 'loading')
     return (
       <div className="list-state" data-state="loading" aria-busy="true">
         <span role="status" className="sr-only">
-          Loading files…
+          Loading {noun}…
         </span>
         <span className="skeleton-bar" />
         <span className="skeleton-bar" />
@@ -27,7 +29,7 @@ export function ListState({
       data-state={status}
       role={status === 'error' ? 'alert' : undefined}
     >
-      <h3>{status === 'error' ? 'Could not load files.' : 'Still loading files…'}</h3>
+      <h3>{status === 'error' ? `Could not load ${noun}.` : `Still loading ${noun}…`}</h3>
       <p>{status === 'error' ? message : 'This is taking longer than usual.'}</p>
       <button className="button secondary" onClick={onRetry}>
         Retry

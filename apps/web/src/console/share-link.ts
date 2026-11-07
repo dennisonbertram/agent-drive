@@ -28,6 +28,56 @@ export type ShareRow = {
   status: 'active' | 'expired' | 'revoked' | 'unavailable';
 };
 
+export type ShareLink = { id: string; url: string; expiresAt: string; createdAt: string };
+
+export const shareUrl = (origin: string, id: string, fileKey: string) =>
+  `${origin}/s/${id}#k=${fileKey}`;
+
+/** Adds a row unless a row with that id is already listed (a list load and a create can both bring it). */
+export function addShareRow(items: ShareRow[], row: ShareRow): ShareRow[] {
+  return items.some((item) => item.id === row.id) ? items : [row, ...items];
+}
+
+/**
+ * After a failure that may have come after the server created the link (a lost response, a 5xx),
+ * look for it in the drive's newest links: same path and version, not listed before the attempt,
+ * created since it began. Returns its URL, rebuilt from the file key already held, or null.
+ */
+export async function recoverShareLink(
+  request: Request,
+  args: {
+    origin: string;
+    driveId: string;
+    path: string;
+    versionId: string;
+    fileKey: string;
+    knownIds: Set<string>;
+    since: number;
+  },
+): Promise<ShareLink | null> {
+  const page = await request<{ items: ShareRow[] }>(
+    `drives/${encodeURIComponent(args.driveId)}/shares?limit=100`,
+  );
+  const found = page.items
+    .filter(
+      (row) =>
+        row.path === args.path &&
+        row.versionId === args.versionId &&
+        row.status === 'active' &&
+        !args.knownIds.has(row.id) &&
+        Date.parse(row.createdAt) >= args.since,
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return found
+    ? {
+        id: found.id,
+        url: shareUrl(args.origin, found.id, args.fileKey),
+        expiresAt: found.expiresAt,
+        createdAt: found.createdAt,
+      }
+    : null;
+}
+
 export async function createShareLink(
   request: Request,
   args: {
@@ -37,14 +87,18 @@ export async function createShareLink(
     driveKey: string;
     expiry: ShareExpiry;
     now?: number;
+    // Called once the file key is unwrapped and the POST is about to be sent: from then on a failure
+    // can mean the server created the link, so the caller keeps what it needs to look for it.
+    onPrepared?: (prepared: { fileKey: string; versionId: string }) => void;
   },
-): Promise<{ id: string; url: string; expiresAt: string; createdAt: string }> {
+): Promise<ShareLink> {
   const drive = `drives/${encodeURIComponent(args.driveId)}`;
   const meta = await request<{ id: string; wrappedKey: string }>(
     `${drive}/get?path=${encodeURIComponent(args.path)}&metadataOnly=1`,
   );
   // Unwrap before the POST so a wrong drive key fails without creating a share.
   const fileKey = await unwrapFileKey(meta.wrappedKey, args.driveKey);
+  args.onPrepared?.({ fileKey, versionId: meta.id });
   const created = await request<{ id: string; expiresAt: string; createdAt: string }>(
     `${drive}/shares`,
     'POST',
@@ -56,7 +110,7 @@ export async function createShareLink(
   );
   return {
     id: created.id,
-    url: `${args.origin}/s/${created.id}#k=${fileKey}`,
+    url: shareUrl(args.origin, created.id, fileKey),
     expiresAt: created.expiresAt,
     createdAt: created.createdAt,
   };
