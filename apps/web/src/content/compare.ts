@@ -48,12 +48,12 @@ export const COMPARISONS: Comparison[] = [
       ],
       [
         'Per-agent limits',
-        'Possible with access policies you write and maintain.',
+        'Possible with access policies (S3) or scoped API tokens (R2) that you create and maintain.',
         'Each agent has its own revocable key, can be read-only, and can be limited to writing under chosen folders.',
       ],
       [
         'File history',
-        'Versioning is a bucket option you turn on and manage.',
+        'S3: optional bucket versioning that you turn on and manage. R2: no object versioning.',
         'Every write keeps a version that records which agent wrote it. A conditional write fails with a conflict instead of overwriting newer work.',
       ],
       [
@@ -64,7 +64,7 @@ export const COMPARISONS: Comparison[] = [
     ],
     chooseOther: [
       'You serve files to users, websites or other services.',
-      'You need very large objects, high throughput or fine-grained cloud-wide access control.',
+      'You need very large objects, high throughput or detailed access control.',
       'Your team already manages credentials and policies in that cloud, and you do not need client-side encryption.',
     ],
     chooseAgentDrive: [

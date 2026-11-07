@@ -2,7 +2,11 @@ import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextFetchEvent } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { clerkKeysConfigured, isClerkConsolePage } from './src/console/clerk-config';
+import { prefersMarkdown } from './src/content/negotiate';
 import { shareTransportAllowed } from './src/share/transport';
+
+// Public pages with a Markdown twin. These never touch Clerk or auth().
+const TWIN = /^\/(?:pricing|docs(?:\/[^/]+)?|compare(?:\/[^/]+)?)?$/;
 
 const configured =
   process.env.AGENT_DRIVE_TEST_AUTH !== '1' &&
@@ -20,6 +24,11 @@ const clerkProxy = clerkMiddleware(
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
   const pathname = request.nextUrl.pathname;
+  if (TWIN.test(pathname)) {
+    if (!prefersMarkdown(request.headers.get('accept'))) return NextResponse.next();
+    const slug = pathname === '/' ? '/index' : pathname;
+    return NextResponse.rewrite(new URL(`/md${slug}`, request.url));
+  }
   if (
     pathname === '/s' ||
     pathname.startsWith('/s/') ||
@@ -40,6 +49,12 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   matcher: [
+    '/',
+    '/pricing',
+    '/docs',
+    '/docs/:slug',
+    '/compare',
+    '/compare/:slug',
     '/console/:path*',
     '/connect/:path*',
     '/sign-in/:path*',

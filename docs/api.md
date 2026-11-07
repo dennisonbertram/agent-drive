@@ -44,7 +44,7 @@ overwrite does.
 `restore` with no `versionId`, or with the file's current version, undeletes a trashed file: it returns the existing version with 200, creates no version or copy, and does not check quota; on a live file it does nothing. Restoring any other version copies it as a new current version and returns 201.
 
 `recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) in commit
-order. Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
+order, except events written before the 2026 ordering change (migration 0015), which are ordered by creation time instead. Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
 cursor the order is exact and `since` is ignored. Without a cursor, the optional exclusive `since`
 timestamp compares with the transaction start time, so it is approximate. `latestCursor` is the last
 item's cursor, or the request cursor when there are no new events (`null` if none). Cursors from

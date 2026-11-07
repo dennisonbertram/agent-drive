@@ -80,6 +80,17 @@ test.describe('agent-ready site', () => {
     });
   }
 
+  test('Accept negotiation honours q-values', async ({ request }) => {
+    const kind = async (accept: string) =>
+      (await request.get('/pricing', { headers: { accept } })).headers()['content-type'] ?? '';
+    expect(await kind('text/markdown;q=0, text/html')).toContain('text/html');
+    expect(await kind('text/html;q=0.5, text/markdown')).toContain('text/markdown');
+    expect(await kind('text/markdown')).toContain('text/markdown');
+    expect(await kind('text/markdown;q=0.4, text/html;q=0.8')).toContain('text/html');
+    expect(await kind('*/*')).toContain('text/html');
+    expect(await kind('text/html,application/xhtml+xml,*/*;q=0.8')).toContain('text/html');
+  });
+
   test('/index.md contains every homepage FAQ question', async ({ request, page }) => {
     const md = await (await request.get('/index.md')).text();
     for (const q of QUESTIONS) expect(md).toContain(q);
@@ -101,6 +112,13 @@ test.describe('agent-ready site', () => {
     }
     for (const dd of await page.locator('.pricing-rate-list dd').allInnerTexts())
       expect(md).toContain(dd);
+    // Conditions: every paragraph of the fine print and any availability notice must match.
+    const notes = [
+      ...(await page.locator('.pricing-details p:not(.eyebrow)').allInnerTexts()),
+      ...(await page.locator('#pricing-availability').allInnerTexts()),
+    ];
+    expect(notes.length).toBeGreaterThanOrEqual(3);
+    for (const n of notes) expect(md).toContain(n);
   });
 
   test('JSON-LD on /pricing matches the plan prices; FAQPage on /', async ({ page }) => {

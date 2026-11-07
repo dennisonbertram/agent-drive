@@ -55,7 +55,7 @@ approves. The default name is `<machine> agent`. It sends the saved drive IDs fo
 as `known_drive_ids`, saves the API key and unsealed drive keys to the private config, and never
 prints them. A drive key that fails to unseal is reported and skipped. If no granted drive has a
 usable key, login exits 1 (the config is still saved); run `login` again. Otherwise it prints the
-usable drives and the config path. See `docs/agent-login.md`.
+usable drives and the config path.
 
 `agent-drive whoami` adds `localDriveKeys`, a map of authorized drive IDs to whether this machine
 holds a key. `agent-drive check [--drive ID]` first downloads the newest existing file (other than
@@ -94,7 +94,7 @@ The drive key lives only in the config file, so lose the machine and the files c
 - `agent-drive grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...` needs the
   `delegate` scope. `CODE` is the code a new agent's `agent-drive login` showed. It prints
   `Request from <client_name> on <machine>, made <time>.`, seals this machine's drive key to the
-  login's public key (the `adk-device-v1` format of agent-login.md section 4), posts the sealed
+  login's public key (the `adk-device-v1` sealed-key format), posts the sealed
   blob as an offer, and prints `Offered drive <id> to <name> (<scopes>; writes under <paths>). The
 owner approves at <origin>/connect?code=CODE.` It does not approve: the human opens that page and
   clicks Approve once. The drive defaults to the only configured drive key. Scopes default to

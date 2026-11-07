@@ -8,6 +8,7 @@ import { checkoutConfigured } from '@/src/billing/providers';
 import { JsonLd } from '@/src/content/json-ld';
 import { money, PLAN_INCLUDES, planFacts } from '@/src/content/plans';
 import {
+  DISCLOSURE,
   egressNotMetered as egressNotMeteredEnv,
   pricingJsonLd,
   publishedRates,
@@ -46,9 +47,7 @@ export default async function PricingPage() {
           </section>
           {!paidAvailable && (
             <p className="pricing-availability" id="pricing-availability" role="status">
-              Paid checkout is not enabled on this deployment. The Free plan is available when
-              sign-in and storage are configured; the paid prices below describe the supported
-              plans.
+              {DISCLOSURE.checkoutDisabled}
             </p>
           )}
           <section className="billing-plans" aria-label="Plans">
@@ -92,17 +91,9 @@ export default async function PricingPage() {
             <div>
               <p className="eyebrow">NO SURPRISES IN THE FINE PRINT</p>
               <h2 id="usage-pricing">How usage works</h2>
-              <p>
-                Limits apply across your account. All retained file versions count toward storage,
-                including overwritten files and trash. Each encrypted upload can be at most 5 GiB;
-                the original file must leave room for encryption overhead.
-              </p>
-              <p>
-                Free accounts stop at their included allowances. Paid overages require a configured
-                billing provider and active subscription. Drive and storage overages use the monthly
-                high-water allocation, not hourly averages. Base prices are in USD, before
-                applicable taxes.
-              </p>
+              {DISCLOSURE.usage.map((t) => (
+                <p key={t}>{t}</p>
+              ))}
             </div>
             <div>
               <h3>Additional usage on paid plans</h3>
@@ -126,16 +117,9 @@ export default async function PricingPage() {
                   </div>
                 </dl>
               ) : (
-                <p>
-                  Overage rates have not been published for this deployment. Paid checkout stays
-                  disabled until billing is fully configured.
-                </p>
+                <p>{DISCLOSURE.noRates}</p>
               )}
-              <p className="billing-caption">
-                Downloads are measured from observed storage logs, not just issued links. Logs can
-                arrive late, and an issued link can be reused until it expires. Spending caps block
-                new writes; they are not guaranteed invoice or network-traffic ceilings.
-              </p>
+              <p className="billing-caption">{DISCLOSURE.downloads}</p>
             </div>
           </section>
           <section className="feature-grid" aria-label="Your data and access">

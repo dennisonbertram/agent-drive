@@ -2,11 +2,6 @@ import type { NextConfig } from 'next';
 
 // Public pages that have a Markdown twin. Keep in step with src/content/site.ts getMarkdown().
 const TWIN_PAGES = ['/pricing', '/docs', '/docs/:slug', '/compare', '/compare/:slug'];
-// Markdown listed before text/html in Accept means the client prefers Markdown.
-const WANTS_MARKDOWN = [
-  { type: 'header' as const, key: 'accept', value: '^(?:(?!text/html).)*text/markdown.*$' },
-];
-
 const nextConfig: NextConfig = {
   logging: { incomingRequests: true },
   async rewrites() {
@@ -14,12 +9,6 @@ const nextConfig: NextConfig = {
       beforeFiles: [
         { source: '/index.md', destination: '/md/index' },
         { source: '/:path*.md', destination: '/md/:path*' },
-        { source: '/', has: WANTS_MARKDOWN, destination: '/md/index' },
-        ...TWIN_PAGES.map((source) => ({
-          source,
-          has: WANTS_MARKDOWN,
-          destination: `/md${source}`,
-        })),
       ],
     };
   },

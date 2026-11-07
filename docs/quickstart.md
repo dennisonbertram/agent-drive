@@ -20,6 +20,8 @@ npm install -g https://agentdrive.xyz/cli/agent-drive.tgz
 
 ```sh
 agent-drive login --name "my agent"
+# On a self-hosted installation, install from its origin and pass its API URL:
+#   agent-drive login --name "my agent" --api https://YOUR-ORIGIN/api
 ```
 
 5. Approve it. Open the link while signed in, check that the code matches the one the CLI printed,

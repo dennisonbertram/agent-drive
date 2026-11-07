@@ -38,7 +38,8 @@ const slugify = (s: string) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-const isBlock = (l: string) => /^(#{1,6} |```|\||\s*([-*]|\d+\.) )/.test(l);
+const MARK = /^\s*([-*]|\d+\.) /;
+const isBlock = (l: string) => /^(#{1,6} |```|\|)/.test(l) || MARK.test(l);
 const cells = (l: string) =>
   l
     .trim()
@@ -52,6 +53,7 @@ export function Markdown({ source }: { source: string }) {
   let i = 0;
   const key = () => `b${String(out.length)}`;
   while (i < lines.length) {
+    const before = i;
     const line = lines[i] ?? '';
     if (!line.trim()) {
       i++;
@@ -103,16 +105,16 @@ export function Markdown({ source }: { source: string }) {
           </table>
         </div>,
       );
-    } else if (/^\s*([-*]|\d+\.) /.test(line)) {
+    } else if (MARK.test(line)) {
       const ordered = /^\s*\d+\./.test(line);
       const items: string[] = [];
       const start = Number(line.match(/^\s*(\d+)\./)?.[1] ?? 1);
       while (i < lines.length) {
         const l = lines[i] ?? '';
-        if (/^([-*]|\d+\.) /.test(l)) items.push(l.replace(/^([-*]|\d+\.) /, ''));
+        if (MARK.test(l)) items.push(l.replace(MARK, ''));
         else if (l.trim() && items.length && !/^(#{1,6} |```|\|)/.test(l))
           items[items.length - 1] += ` ${l.trim()}`;
-        else if (!l.trim() && /^([-*]|\d+\.) /.test(lines[i + 1] ?? '')) {
+        else if (!l.trim() && MARK.test(lines[i + 1] ?? '')) {
           /* blank line inside a list */
         } else break;
         i++;
@@ -134,6 +136,7 @@ export function Markdown({ source }: { source: string }) {
         para.push((lines[i] ?? '').trim());
       out.push(<p key={key()}>{inline(para.join(' '), key())}</p>);
     }
+    if (i === before) i++; // backstop: always advance
   }
   return <>{out}</>;
 }

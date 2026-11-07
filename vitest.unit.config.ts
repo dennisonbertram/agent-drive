@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     include: [
       'packages/agent-drive/src/**/*.unit.test.ts',
