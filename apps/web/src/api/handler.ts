@@ -1880,8 +1880,11 @@ function consoleRouteAllowed(method: string, parts: string[]) {
   if (method === 'DELETE' && parts.length === 2 && parts[0] === 'keys') return true;
   if (method === 'POST' && parts.length === 3 && parts[0] === 'agents' && parts[2] === 'revoke')
     return true;
+  if (method === 'DELETE' && parts.length === 4 && parts[0] === 'drives' && parts[2] === 'shares')
+    return true;
   if (parts.length !== 3 || parts[0] !== 'drives') return false;
   if (method === 'POST' && parts[2] === 'key-backup') return true;
+  if ((method === 'GET' || method === 'POST') && parts[2] === 'shares') return true;
   if (
     method === 'GET' &&
     ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)
