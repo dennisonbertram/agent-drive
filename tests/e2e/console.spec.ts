@@ -278,8 +278,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await fileRow.getByRole('button', { name: /More actions/ }).click();
     await rowMenu(page).getByRole('button', { name: 'Versions' }).click();
     await page
-      .locator('.version-row')
-      .filter({ hasText: initialVersion.id })
+      .locator(`.version-row[data-version-id="${initialVersion.id}"]`)
       .getByRole('button', { name: 'Restore this version' })
       .click();
     const restoredDownload = page.waitForEvent('download');
@@ -289,18 +288,33 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
     await expect(fileRow).toHaveCount(0);
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    // From Trash the current version is the newest one, and it has no Restore button.
+    await page
+      .getByRole('row')
+      .filter({ hasText: '/outputs/artifact.bin' })
+      .getByRole('button', { name: 'Versions', exact: true })
+      .click();
+    const versionRows = page.locator('.version-row');
+    await expect(versionRows.first()).toContainText('Current version');
+    await expect(versionRows.first().getByRole('button')).toHaveCount(0);
+    expect(await versionRows.count()).toBeGreaterThan(1);
+    await expect(page.getByRole('button', { name: 'Restore this version' })).toHaveCount(
+      (await versionRows.count()) - 1,
+    );
+    await page.getByRole('button', { name: 'Close dialog' }).click();
     await page
       .getByRole('row')
       .filter({ hasText: '/outputs/artifact.bin' })
       .getByRole('button', { name: 'Restore', exact: true })
       .click();
     await expect(page.getByText('Nothing in the trash.')).toBeVisible();
+    await expect(page.locator('.toast').last()).toContainText('Restored “artifact.bin”.');
     await page.getByRole('button', { name: 'Usage', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Storage by drive' })).toBeVisible();
     await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
-    page.once('dialog', (dialog) => void dialog.accept());
     await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
     await expect(page.getByText('Revoked', { exact: true })).toBeVisible();
     const revoked = await cli(['whoami'], environment);
     expect(revoked.status).not.toBe(0);
@@ -1200,6 +1214,289 @@ test('console files: a folder over 1,000 files is capped and says so (mocked API
     );
   } finally {
     await cleanupUser(userId);
+  }
+});
+
+// Signs in a fresh test user, creates drives (key backed up, so the key chip stays short) and
+// uploads the given paths to each through the real CLI.
+async function seedRows(
+  context: import('@playwright/test').BrowserContext,
+  baseURL: string,
+  root: string,
+  userId: string,
+  drives: { name: string; files: string[] }[],
+) {
+  const login = await context.request.post('/api/test-session', {
+    headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+    data: { userId },
+  });
+  expect(login.status()).toBe(200);
+  const post = async <T>(path: string, data: unknown) =>
+    (await (
+      await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL } })
+    ).json()) as T;
+  const created = [];
+  for (const { name } of drives) created.push(await post<{ id: string }>('drives', { name }));
+  for (const { id } of created) await post(`drives/${id}/key-backup`, { method: 'file' });
+  const agent = await post<{ id: string; name: string }>('agents', { name: 'Row agent' });
+  const keys = [];
+  for (const label of ['Row key one', 'Row key two'])
+    keys.push(
+      await post<{ token: string }>('keys', {
+        label,
+        agentId: agent.id,
+        driveIds: created.map((item) => item.id),
+        scopes: ['read', 'write'],
+      }),
+    );
+  const localFile = join(root, 'note.txt');
+  await writeFile(localFile, 'row fixture', { mode: 0o600 });
+  const environment = {
+    ...process.env,
+    AGENT_DRIVE_API_URL: baseURL,
+    AGENT_DRIVE_API_KEY: keys[0]!.token,
+    AGENT_DRIVE_KEY: randomBytes(32).toString('base64url'),
+    AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+  };
+  for (const [index, { files }] of drives.entries())
+    for (const path of files) {
+      const upload = await cli(
+        ['put', localFile, path, '--drive', created[index]!.id],
+        environment,
+      );
+      expect(upload.status, `CLI upload failed: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    }
+  return { driveIds: created.map((item) => item.id), agentName: agent.name };
+}
+
+test('console row actions: Trash shows Undo at once and Undo restores on the original drive', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-undo-'));
+  try {
+    const { driveIds } = await seedRows(context, baseURL!, root, userId, [
+      { name: 'Undo A', files: ['/notes/a.md', '/notes/b.md', '/notes/c.md'] },
+      { name: 'Undo B', files: ['/other/x.md'] },
+    ]);
+    const [driveA, driveB] = driveIds as [string, string];
+    const rows = page.locator('.file-panel tbody tr');
+    const rowOf = (name: string) => rows.filter({ hasText: name });
+    const toast = page.locator('.toast').last();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/console?drive=${driveA}&path=%2Fnotes`);
+    await expect(rows).toHaveCount(3);
+
+    // 1. The toast and the hidden row appear before the slow delete finishes.
+    await page.route('**/drives/*/delete', (route) =>
+      setTimeout(() => void route.continue(), 1500),
+    );
+    await rowOf('a.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Moved “a.md” to Trash.' }),
+    ).toBeVisible({ timeout: 100 });
+    await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible({ timeout: 100 });
+    await expect(rowOf('a.md')).toHaveCount(0, { timeout: 100 });
+    // a.md was the last row, so focus moved to the row above it (b.md), not lost.
+    await expect(rowOf('b.md').locator('.file-row-name')).toBeFocused();
+
+    // 3. The toast is inside the viewport and right of the sidebar.
+    const box = (await toast.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(224);
+    expect(box.x + box.width).toBeLessThanOrEqual(1440);
+    expect(box.y + box.height).toBeLessThanOrEqual(900);
+
+    // 2. Switch drive, then Undo: it restores on drive A.
+    await page.getByTestId('drive-menu-button').click();
+    await page.getByRole('button', { name: /Undo B/ }).click();
+    await expect(page).toHaveURL(new RegExp(`drive=${driveB}`));
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect(toast).toContainText('Restored “a.md”.', { timeout: 15_000 });
+    await toast.getByRole('button', { name: 'Show file' }).click();
+    await expect(page).toHaveURL(new RegExp(`drive=${driveA}`));
+    await expect(page).toHaveURL(/path=%2Fnotes/);
+    await expect(rowOf('a.md')).toHaveCount(1);
+    await expect(rowOf('a.md').locator('.file-row-name')).toBeFocused();
+    await page.unroute('**/drives/*/delete');
+
+    // Phone width: the toast fits with 16 px margins.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await rowOf('c.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(toast).toBeVisible();
+    const phone = (await toast.boundingBox())!;
+    expect(phone.x).toBeGreaterThanOrEqual(0);
+    expect(phone.x + phone.width).toBeLessThanOrEqual(390);
+    expect(phone.y + phone.height).toBeLessThanOrEqual(844);
+    await toast.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(toast).toHaveCount(0);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // 4. A failed delete brings the row back and says so.
+    await page.route('**/drives/*/delete', (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'Storage is unavailable.' } }),
+      }),
+    );
+    await rowOf('b.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Could not move “b.md” to Trash.' }),
+    ).toBeVisible();
+    await expect(rowOf('b.md')).toHaveCount(1);
+    await page.unroute('**/drives/*/delete');
+
+    // Two Undo toasts coexist: trashing a second file keeps the first one's Undo.
+    while (await page.locator('.toast-dismiss').count())
+      await page.locator('.toast-dismiss').first().click();
+    await rowOf('b.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await rowOf('a.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(page.locator('.toast')).toHaveCount(2);
+    await expect(page.locator('.toast').first()).toContainText('“b.md”');
+    // One empty live region stays mounted and carries the text.
+    await expect(page.getByRole('status').filter({ hasText: /Moved/ })).toHaveText(
+      'Moved “a.md” to Trash.',
+    );
+    // Undo the first one by keyboard: the same button stays focused as "Show file".
+    const firstUndo = page.locator('.toast').first().getByRole('button', { name: 'Undo' });
+    await firstUndo.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.toast').first()).toContainText('Restored “b.md”.', {
+      timeout: 15_000,
+    });
+    await expect(
+      page.locator('.toast').first().getByRole('button', { name: 'Show file' }),
+    ).toBeFocused();
+    await expect(page.locator('.toast').nth(1)).toContainText('Moved “a.md” to Trash.');
+    while (await page.locator('.toast-dismiss').count())
+      await page.locator('.toast-dismiss').first().click();
+
+    // 5. The toast stays for 8 s, pauses on hover, and is gone after that.
+    await page.clock.install();
+    await rowOf('b.md')
+      .getByRole('button', { name: /More actions/ })
+      .click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(toast).toContainText('Moved “b.md” to Trash.');
+    await page.clock.runFor(7_500);
+    await expect(toast).toBeVisible();
+    await toast.hover();
+    await page.clock.runFor(20_000);
+    await expect(toast).toBeVisible();
+    await page.mouse.move(700, 100);
+    await page.clock.runFor(9_000);
+    await expect(toast).toHaveCount(0);
+  } finally {
+    await cleanupUser(userId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('console confirms: revoke agent names it and the key count; no Revoke at 0 keys', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(180_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-confirm-'));
+  try {
+    const { agentName } = await seedRows(context, baseURL!, root, userId, [
+      { name: 'Confirm drive', files: ['/a.md'] },
+    ]);
+    const nativeDialogs: string[] = [];
+    page.on('dialog', (dialog) => {
+      nativeDialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'Agents', exact: true }).click();
+    await page.getByRole('button', { name: 'Revoke access', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: `Revoke access for ${agentName}?` });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('2 active API keys stop working now.');
+    await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    // Cancel changes nothing.
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText('2 active keys')).toBeVisible();
+    await page.getByRole('button', { name: 'Revoke access', exact: true }).click();
+    await page.getByRole('button', { name: 'Revoke 2 keys', exact: true }).click();
+    await expect(page.locator('.toast')).toContainText(`Revoked access for ${agentName}.`);
+    await expect(page.getByText('Access revoked')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Revoke access', exact: true })).toHaveCount(0);
+
+    // A single key uses the key dialog.
+    await page.getByRole('button', { name: 'API keys', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Revoke', exact: true })).toHaveCount(2);
+    expect(nativeDialogs).toEqual([]);
+  } finally {
+    await cleanupUser(userId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('console row menu: arrow keys and spacing', async ({ page, context, baseURL }) => {
+  test.setTimeout(180_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-menu-'));
+  try {
+    await seedRows(context, baseURL!, root, userId, [{ name: 'Menu drive', files: ['/m.md'] }]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/console');
+    const opener = page.getByRole('button', { name: /More actions for m\.md/ });
+    await expect(opener).toBeVisible();
+    await opener.focus();
+    await page.keyboard.press('Enter');
+    const items = rowMenu(page).locator('button.menu-item');
+    await expect(items.first()).toBeFocused();
+    await expect(items.first()).toHaveText('Versions');
+    const count = await items.count();
+    for (let index = 1; index < count; index += 1) {
+      await page.keyboard.press('ArrowDown');
+      await expect(items.nth(index)).toBeFocused();
+    }
+    await expect(items.last()).toHaveText('Trash');
+    await page.keyboard.press('ArrowDown');
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press('End');
+    await expect(items.last()).toBeFocused();
+    // Trash sits apart from the item above it.
+    const above = (await items.nth(count - 2).boundingBox())!;
+    const trash = (await items.last().boundingBox())!;
+    expect(trash.y - (above.y + above.height)).toBeGreaterThanOrEqual(8);
+    await page.keyboard.press('Escape');
+    await expect(rowMenu(page)).toHaveCount(0);
+    await expect(opener).toBeFocused();
+
+    // The key chip menu answers the same keys.
+    await page.getByTestId('key-chip').click();
+    await expect(page.getByTestId('key-menu').locator('button').first()).toBeFocused();
+  } finally {
+    await cleanupUser(userId);
+    await rm(root, { recursive: true, force: true });
   }
 });
 

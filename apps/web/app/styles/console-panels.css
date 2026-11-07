@@ -354,6 +354,34 @@ dialog .banner.info {
   letter-spacing: -0.02em;
 }
 
+/* ---- confirm dialog and danger button ---- */
+.button.danger {
+  background: var(--danger, #b42318);
+  border-color: var(--line-strong, #111);
+  color: #fff;
+}
+.confirm {
+  display: grid;
+  gap: 20px;
+}
+.confirm p {
+  color: var(--ink-2, #3b3a37);
+  font-size: 14px;
+}
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+@media (max-width: 760px) {
+  .confirm-actions .button {
+    flex: 1 1 100%;
+    min-height: 44px;
+    white-space: normal;
+  }
+}
+
 /* ---- versions ---- */
 .version-row {
   display: flex;
@@ -363,8 +391,16 @@ dialog .banner.info {
   padding: 12px 0;
   border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
 }
+.version-file {
+  color: var(--ink, #111);
+  overflow-wrap: anywhere;
+}
+.version-file .muted {
+  color: var(--muted, #6b6963);
+}
 .version-row strong {
   font: 500 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  overflow-wrap: anywhere;
 }
 .version-row small,
 .version-row code {

@@ -748,6 +748,93 @@
 .row-actions .row-menu button.menu-item:hover {
   background: var(--paper-2, #f6f5f2);
 }
+.row-actions .row-menu button.menu-item.danger {
+  color: var(--danger, #b42318);
+}
+.menu-divider {
+  height: 1px;
+  margin: 8px 4px;
+  border: 0;
+  background: var(--line, rgba(17, 17, 17, 0.16));
+}
+
+/* toast: one short message with an optional action, bottom left of the content area */
+.toast-stack {
+  position: fixed;
+  z-index: 40;
+  left: calc(224px + 24px);
+  bottom: 24px;
+  display: grid;
+  gap: 8px;
+  width: min(480px, calc(100vw - 224px - 48px));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px 10px 16px;
+  border-radius: 8px;
+  background: var(--ink, #111);
+  color: #fff;
+  font: 500 13.5px/1.4 var(--sans, 'Inter Tight', system-ui, sans-serif);
+  box-shadow: 0 6px 24px rgba(17, 17, 17, 0.28);
+}
+.toast.error {
+  border-left: 4px solid var(--danger, #b42318);
+}
+.toast-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.toast button {
+  flex: none;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.toast button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+.toast .toast-action {
+  color: var(--sig, #ff4a1c);
+  font-weight: 600;
+}
+.toast button[aria-disabled='true'] {
+  background: none;
+  color: var(--code-muted, #a8a69f);
+  cursor: progress;
+}
+.toast button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+@media (max-width: 1100px) {
+  .toast-stack {
+    left: calc(184px + 24px);
+    width: min(480px, calc(100vw - 184px - 48px));
+  }
+}
+@media (max-width: 760px) {
+  .toast-stack {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    width: auto;
+  }
+  .toast {
+    min-height: 44px;
+  }
+  .toast button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
 
 /* empty and loading states */
 .console-main .empty {

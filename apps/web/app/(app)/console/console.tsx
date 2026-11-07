@@ -29,6 +29,9 @@ import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
 import { FileIcon } from './file-icon';
 import { MenuButton } from './menu-button';
+import { Toast, type Announcement, type ToastItem } from './toast';
+import { ConfirmBody } from './confirm-dialog';
+import { versionWhen } from '@/src/console/when';
 import {
   ROOT,
   childrenOf,
@@ -107,6 +110,7 @@ type ModalName =
   | 'driveReceipt'
   | 'keyReceipt'
   | 'versions'
+  | 'confirm'
   | 'preview'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
@@ -129,6 +133,10 @@ function pickDrive(list: { id: string }[]) {
   for (const id of [wanted, rememberedDrive()])
     if (id && list.some((item) => item.id === id)) return id;
   return list[0]?.id ?? '';
+}
+
+function baseName(path: string) {
+  return path.slice(path.lastIndexOf('/') + 1);
 }
 
 function shortDate(value?: string) {
@@ -244,10 +252,6 @@ function size(bytes: number) {
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
-}
-
-function date(value?: string) {
-  return value ? new Date(value).toLocaleString() : '—';
 }
 
 function deletedOn(value?: string) {
@@ -376,6 +380,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [modal, setModal] = useState<ModalName>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const toastSeq = useRef(0);
+  // Rows moved to Trash but not yet gone from a loaded list: "fileId:versionId" -> path.
+  const [hiddenRows, setHiddenRows] = useState<Map<string, { driveId: string; path: string }>>(
+    new Map(),
+  );
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    run: () => Promise<void>;
+  } | null>(null);
+  // A file to scroll to and focus once its folder has loaded ("Show file").
+  const focusRequest = useRef<{ driveId: string; path: string } | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
   const [driveReceipt, setDriveReceipt] = useState<{ id: string; key: string } | null>(null);
   const [keyReceipt, setKeyReceipt] = useState('');
@@ -423,7 +443,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Back and Forward change the drive in the URL; that wins over the last one chosen here.
   const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
-  const fileItems = filePage?.scope === fileScope ? filePage.items : [];
+  const fileItems = (filePage?.scope === fileScope ? filePage.items : []).filter(
+    (file) => !hiddenRows.has(`${selected}:${file.id}:${file.version_id}`),
+  );
   const countKeys = (agentId: string) =>
     apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
   const issuedBy = (id?: string | null) =>
@@ -571,6 +593,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const nav = crumbsRef.current;
     (nav?.querySelector<HTMLElement>('[aria-current="page"]') ?? nav)?.focus();
   }, [folder, view]);
+  // "Show file": once the file's folder has loaded, bring its row into view and focus it.
+  useEffect(() => {
+    const wanted = focusRequest.current;
+    if (!wanted || tab !== 'Files' || listStatus !== 'ready') return;
+    const cut = wanted.path.lastIndexOf('/');
+    const where = cut > 0 ? wanted.path.slice(0, cut) : ROOT;
+    if (selected !== wanted.driveId || folder !== where || view !== 'browse') return;
+    focusRequest.current = null;
+    const button = [...document.querySelectorAll<HTMLElement>('.file-panel .file-row-name')].find(
+      (item) => item.dataset.path === wanted.path,
+    );
+    button?.scrollIntoView({ block: 'nearest' });
+    button?.focus();
+  }, [focusTick, tab, listStatus, selected, folder, view]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
     if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
@@ -751,7 +787,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const bytes = await fetchPlaintext(selected, file.path, key);
     const name = file.path.split('/').at(-1) || 'download';
     save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-    setNotice(`${name} decrypted in your browser and downloaded.`);
+    showToast(`${name} decrypted in your browser and downloaded.`);
   }
 
   // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
@@ -820,11 +856,142 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal('versions');
   }
 
-  async function restore(path: string, versionId?: string) {
-    await api(`drives/${selected}/restore`, 'POST', { path, ...(versionId ? { versionId } : {}) });
+  const dismissToast = useCallback(
+    (id: number) => setToasts((current) => current.filter((item) => item.id !== id)),
+    [],
+  );
+  // Adds a toast (at most 3; the oldest goes first), or updates the one with `id` in place.
+  // A result that arrives after its toast was dismissed gets a new toast.
+  function showToast(
+    message: string,
+    extra: Partial<Omit<ToastItem, 'id' | 'rev' | 'message'>> = {},
+    id?: number,
+  ) {
+    const next = ++toastSeq.current;
+    const tone = extra.tone ?? 'info';
+    const opener = document.activeElement;
+    const returnTo =
+      opener instanceof HTMLElement && !opener.closest('.toast-stack') && opener !== document.body
+        ? opener
+        : null;
+    setToasts((current) => {
+      const item: ToastItem = { id: id ?? next, rev: next, message, returnTo, ...extra };
+      const at = id === undefined ? -1 : current.findIndex((entry) => entry.id === id);
+      if (at >= 0) return current.map((entry, index) => (index === at ? item : entry));
+      return [...current, item].slice(-3);
+    });
+    setAnnouncement({ text: message, tone, n: next });
+    return id ?? next;
+  }
+  const selectedNow = useRef(selected);
+  const tabNow = useRef(tab);
+  useEffect(() => {
+    selectedNow.current = selected;
+    tabNow.current = tab;
+  }, [selected, tab]);
+  function unhide(driveId: string, path: string, exactKey?: string) {
+    setHiddenRows((current) => {
+      const next = new Map(
+        [...current].filter(([key, hidden]) =>
+          exactKey ? key !== exactKey : !(hidden.driveId === driveId && hidden.path === path),
+        ),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }
+  // Go to the folder that holds a file, then scroll to its row and focus it.
+  function showFile(driveId: string, path: string) {
+    setTab('Files');
+    setSelected(driveId);
+    focusRequest.current = { driveId, path };
+    setFocusTick((value) => value + 1);
+    const cut = path.lastIndexOf('/');
+    go({ drive: driveId, path: cut > 0 ? path.slice(0, cut) : undefined, view: 'browse' });
+  }
+  function restoredToast(driveId: string, path: string, replaceId?: number) {
+    showToast(
+      `Restored “${baseName(path)}”.`,
+      {
+        action: {
+          label: 'Show file',
+          run: (id) => {
+            dismissToast(id);
+            showFile(driveId, path);
+          },
+        },
+      },
+      replaceId,
+    );
+  }
+
+  async function restore(driveId: string, path: string, versionId?: string) {
+    await api(`drives/${driveId}/restore`, 'POST', { path, ...(versionId ? { versionId } : {}) });
+    unhide(driveId, path);
     setModal(null);
     await refresh();
-    setNotice('Restored as a new version. Previous versions are preserved.');
+    restoredToast(driveId, path);
+  }
+
+  // Trash is instant: the row leaves at once, the request runs behind the toast, Undo restores.
+  function trashFile(file: FileEntry, row: HTMLElement | null) {
+    const driveId = selected;
+    const name = baseName(file.path);
+    const hideKey = `${driveId}:${file.id}:${file.version_id}`;
+    (
+      row?.nextElementSibling?.querySelector<HTMLElement>('.file-row-name') ??
+      row?.previousElementSibling?.querySelector<HTMLElement>('.file-row-name') ??
+      filterRef.current
+    )?.focus();
+    setHiddenRows((current) => new Map(current).set(hideKey, { driveId, path: file.path }));
+    let toastId = 0;
+    const moved = api(`drives/${driveId}/delete`, 'POST', { path: file.path }).then(
+      () => {
+        api<Usage>('usage')
+          .then(setUsage)
+          .catch(() => undefined);
+        // A Trash list that loaded while the delete was running would miss this file.
+        if (tabNow.current === 'Trash' && driveId === selectedNow.current)
+          setFileRefresh((value) => value + 1);
+        return true;
+      },
+      (reason: unknown) => {
+        unhide(driveId, file.path, hideKey);
+        // Update this file's own toast, never another file's.
+        showToast(
+          `Could not move “${name}” to Trash. ${reason instanceof Error ? reason.message : ''}`.trim(),
+          { tone: 'error' },
+          toastId,
+        );
+        return false;
+      },
+    );
+    toastId = showToast(`Moved “${name}” to Trash.`, {
+      action: {
+        label: 'Undo',
+        run: async (id) => {
+          if (!(await moved)) return;
+          try {
+            // No versionId: the same call as the Trash tab, so a newer write by an agent stays current.
+            await api(`drives/${driveId}/restore`, 'POST', { path: file.path });
+          } catch (reason) {
+            showToast(
+              `Could not restore “${name}”. ${reason instanceof Error ? reason.message : ''} It is still in Trash.`,
+              { tone: 'error' },
+              id,
+            );
+            return;
+          }
+          unhide(driveId, file.path, hideKey);
+          if (driveId === selectedNow.current) setFileRefresh((value) => value + 1);
+          restoredToast(driveId, file.path, id);
+        },
+      },
+    });
+  }
+
+  function askConfirm(next: NonNullable<typeof confirmState>) {
+    setConfirmState(next);
+    open('confirm');
   }
 
   function keyLoaded(key: string) {
@@ -1299,7 +1466,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     <button
                                       className="row-primary"
                                       disabled={busy}
-                                      onClick={() => void act(() => restore(file.path))}
+                                      onClick={() => void act(() => restore(selected, file.path))}
                                     >
                                       Restore
                                     </button>
@@ -1392,6 +1559,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       type="button"
                                       className="file-row-name"
                                       title={`Preview ${row.name}`}
+                                      data-path={file.path}
                                       onClick={() => {
                                         if (!busy) void openPreview(file);
                                       }}
@@ -1452,22 +1620,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                         >
                                           Versions
                                         </button>
+                                        <hr className="menu-divider" aria-hidden />
                                         <button
                                           type="button"
-                                          className="menu-item"
+                                          className="menu-item danger"
                                           onClick={(event) => {
+                                            const row = event.currentTarget.closest('tr');
                                             event.currentTarget
                                               .closest<HTMLElement>('[popover]')
                                               ?.hidePopover();
-                                            void act(async () => {
-                                              await api(`drives/${selected}/delete`, 'POST', {
-                                                path: file.path,
-                                              });
-                                              await refresh();
-                                              setNotice(
-                                                `Moved ${file.path} to Trash. Restore it from the Trash tab.`,
-                                              );
-                                            });
+                                            trashFile(file, row);
                                           }}
                                         >
                                           Trash
@@ -1546,6 +1708,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   </section>
                 </>
               )}
+              <Toast toasts={toasts} announcement={announcement} onDismiss={dismissToast} />
               {tab === 'Trash' && !drives.length && (
                 <section className="panel empty">
                   <h2>No drives yet.</h2>
@@ -1591,27 +1754,33 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         )}
                       </div>
                       <span className="badge">
-                        {countKeys(agent.id)} active {countKeys(agent.id) === 1 ? 'key' : 'keys'}
+                        {countKeys(agent.id) > 0
+                          ? `${countKeys(agent.id)} active ${countKeys(agent.id) === 1 ? 'key' : 'keys'}`
+                          : apiKeys.some((key) => key.agent_id === agent.id)
+                            ? 'Access revoked'
+                            : 'No API keys'}
                       </span>
-                      <button
-                        className="button secondary"
-                        disabled={busy}
-                        onClick={() =>
-                          void act(async () => {
-                            if (
-                              !window.confirm(
-                                `Revoke all API keys for ${agent.name}? This stops this agent’s current access.`,
-                              )
-                            )
-                              return;
-                            await api(`agents/${agent.id}/revoke`, 'POST', {});
-                            await refresh();
-                            setNotice(`All API keys for ${agent.name} have been revoked.`);
-                          })
-                        }
-                      >
-                        Revoke access
-                      </button>
+                      {countKeys(agent.id) > 0 && (
+                        <button
+                          className="button secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            const n = countKeys(agent.id);
+                            askConfirm({
+                              title: `Revoke access for ${agent.name}?`,
+                              message: `${n} active API ${n === 1 ? 'key stops' : 'keys stop'} working now. Commands and MCP sessions that use ${n === 1 ? 'it' : 'them'} fail at their next request. Files this agent wrote stay in your drives.`,
+                              confirmLabel: `Revoke ${n} ${n === 1 ? 'key' : 'keys'}`,
+                              run: async () => {
+                                await api(`agents/${agent.id}/revoke`, 'POST', {});
+                                await refresh();
+                                showToast(`Revoked access for ${agent.name}.`);
+                              },
+                            });
+                          }}
+                        >
+                          Revoke access
+                        </button>
+                      )}
                     </div>
                   ))}
                 </section>
@@ -1671,16 +1840,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           className="button secondary"
                           disabled={busy || Boolean(key.revoked_at)}
                           onClick={() =>
-                            void act(async () => {
-                              if (
-                                !window.confirm(
-                                  `Revoke ${key.label}? Commands using this key will stop working.`,
-                                )
-                              )
-                                return;
-                              await api(`keys/${key.id}`, 'DELETE');
-                              await refresh();
-                              setNotice('API key revoked. It can no longer authenticate.');
+                            askConfirm({
+                              title: `Revoke ${key.label}?`,
+                              message:
+                                'Commands using this key stop working at their next request. This cannot be undone.',
+                              confirmLabel: 'Revoke key',
+                              run: async () => {
+                                await api(`keys/${key.id}`, 'DELETE');
+                                await refresh();
+                                showToast(`Revoked ${key.label}.`);
+                              },
                             })
                           }
                         >
@@ -1814,6 +1983,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveReceipt: 'Your drive. Your key.',
               keyReceipt: 'Save your API key',
               versions: 'Version history',
+              confirm: confirmState?.title ?? '',
               preview: preview?.file.path.split('/').at(-1) ?? 'Preview',
             }[modal]
           }
@@ -2094,37 +2264,61 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               </button>
             </div>
           )}
+          {modal === 'confirm' && confirmState && (
+            <ConfirmBody
+              message={confirmState.message}
+              confirmLabel={confirmState.confirmLabel}
+              busy={busy}
+              onCancel={close}
+              onConfirm={() =>
+                void act(async () => {
+                  await confirmState.run();
+                  setModal(null);
+                })
+              }
+            />
+          )}
           {modal === 'versions' && (
             <div className="form-stack">
-              <p className="file-path">{selectedPath}</p>
-              <p>Restore creates a new current version. Existing history stays intact.</p>
-              {versions.map((version) => (
-                <div className="version-row" key={version.id}>
-                  <div>
+              <p className="version-file">
+                <strong>{baseName(selectedPath)}</strong>
+                <span className="muted">
+                  {' '}
+                  in {selectedPath.slice(0, selectedPath.lastIndexOf('/')) || '/'}
+                </span>
+              </p>
+              {versions.length > 1 && (
+                <p>Restore creates a new current version. Existing history stays intact.</p>
+              )}
+              {versions.map((version) => {
+                const current = version.id === (newestVersionId ?? versions[0]?.id);
+                return (
+                  <div className="version-row" key={version.id} data-version-id={version.id}>
                     <strong>
-                      {date(version.createdAt)}
-                      {version.id === newestVersionId ? ' · Current' : ''}
-                    </strong>
-                    <small>
-                      {size(version.ciphertextSize)} ·{' '}
+                      {current ? 'Current version · ' : ''}
+                      {versionWhen(version.createdAt)} · {size(version.ciphertextSize)} ·{' '}
                       {authorLabel(
                         agents.find((agent) => agent.id === version.agentId)?.name ??
                           version.agentId,
                       )}
-                    </small>
-                    <code>{version.id}</code>
+                    </strong>
+                    {!current && (
+                      <button
+                        className="button secondary"
+                        disabled={busy}
+                        onClick={() => void act(() => restore(selected, selectedPath, version.id))}
+                      >
+                        Restore this version
+                      </button>
+                    )}
                   </div>
-                  {version.id !== newestVersionId && (
-                    <button
-                      className="button secondary"
-                      disabled={busy}
-                      onClick={() => void act(() => restore(selectedPath, version.id))}
-                    >
-                      Restore this version
-                    </button>
-                  )}
-                </div>
-              ))}
+                );
+              })}
+              {versions.length === 1 && (
+                <p>
+                  This is the current version. Earlier versions appear here when the file changes.
+                </p>
+              )}
             </div>
           )}
         </Dialog>
