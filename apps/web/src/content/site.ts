@@ -1,6 +1,7 @@
 import { COMPARISONS, comparison, compareIndexMarkdown, comparisonMarkdown } from './compare';
 import { DOCS, docBody, docMeta } from './docs';
 import { homeMarkdown } from './home';
+import { LEGAL, legalMarkdown } from './legal';
 import { pricingMarkdown } from './pricing';
 
 /** HTML path for a Markdown slug ("index" is the homepage). */
@@ -26,6 +27,7 @@ export function getMarkdown(slug: string[], origin: string): string | null {
   if (rest.length) return null;
   if (a === 'index' && !b) return homeMarkdown(origin);
   if (a === 'pricing' && !b) return pricingMarkdown(origin);
+  if ((a === 'privacy' || a === 'terms') && !b) return legalMarkdown(a);
   if (a === 'docs') return b ? docMarkdown(b, origin) : docsIndexMarkdown(origin);
   if (a === 'compare') {
     if (!b) return compareIndexMarkdown(origin);
@@ -40,6 +42,7 @@ export function publicPaths(): string[] {
   return [
     '/',
     '/pricing',
+    ...LEGAL.map((p) => `/${p.slug}`),
     '/docs',
     ...DOCS.map((d) => `/docs/${d.slug}`),
     '/compare',
@@ -63,6 +66,8 @@ ${DOCS.map((d) => `- [${d.title}](${origin}/docs/${d.slug}.md): ${d.summary}`).j
 
 - [Home](${origin}/index.md): what Agent Drive is and how it works
 - [Pricing](${origin}/pricing.md): plans, limits and prices
+- [Privacy](${origin}/privacy.md): draft privacy policy
+- [Terms](${origin}/terms.md): draft terms of service
 - [Compare](${origin}/compare.md): when to use S3 or R2, git or GitHub, Dropbox or Google Drive instead
 ${COMPARISONS.map((c) => `- [${c.title}](${origin}/compare/${c.slug}.md): ${c.summary}`).join('\n')}
 

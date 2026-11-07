@@ -1,7 +1,15 @@
 import type { NextConfig } from 'next';
 
 // Public pages that have a Markdown twin. Keep in step with src/content/site.ts getMarkdown().
-const TWIN_PAGES = ['/pricing', '/docs', '/docs/:slug', '/compare', '/compare/:slug'];
+const TWIN_PAGES = [
+  '/pricing',
+  '/privacy',
+  '/terms',
+  '/docs',
+  '/docs/:slug',
+  '/compare',
+  '/compare/:slug',
+];
 const nextConfig: NextConfig = {
   logging: { incomingRequests: true },
   async rewrites() {

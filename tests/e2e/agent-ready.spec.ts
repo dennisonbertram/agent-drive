@@ -16,6 +16,8 @@ const QUESTIONS = [
 const PAGES: [string, string][] = [
   ['/', '/index.md'],
   ['/pricing', '/pricing.md'],
+  ['/privacy', '/privacy.md'],
+  ['/terms', '/terms.md'],
   ['/docs', '/docs.md'],
   ...DOCS.map((d): [string, string] => [`/docs/${d}`, `/docs/${d}.md`]),
   ['/compare', '/compare.md'],
@@ -45,7 +47,16 @@ test.describe('agent-ready site', () => {
     const res = await request.get('/sitemap.xml');
     expect(res.status()).toBe(200);
     const body = await res.text();
-    const urls = ['/', '/pricing', '/docs', '/compare', '/llms.txt', '/llms-full.txt'];
+    const urls = [
+      '/',
+      '/pricing',
+      '/privacy',
+      '/terms',
+      '/docs',
+      '/compare',
+      '/llms.txt',
+      '/llms-full.txt',
+    ];
     for (const d of DOCS) urls.push(`/docs/${d}`);
     for (const c of COMPARE) urls.push(`/compare/${c}`);
     for (const u of urls) expect(body).toContain(`<loc>${ORIGIN}${u === '/' ? '/' : u}</loc>`);
@@ -97,6 +108,18 @@ test.describe('agent-ready site', () => {
     await page.goto('/');
     const shown = await page.locator('.l-faq summary').allTextContents();
     expect(shown).toEqual(QUESTIONS);
+  });
+
+  test('legal pages render with a draft notice and footer links', async ({ page }) => {
+    for (const p of ['/privacy', '/terms']) {
+      const res = await page.goto(p);
+      expect(res?.status()).toBe(200);
+      await expect(page.getByTestId('draft-notice')).toContainText('Draft - under review');
+      await expect(page.locator('main')).toContainText('[TBD:');
+    }
+    await page.goto('/');
+    await expect(page.locator('footer a[href="/privacy"]')).toBeVisible();
+    await expect(page.locator('footer a[href="/terms"]')).toBeVisible();
   });
 
   test('/pricing.md and /pricing agree on every price and limit', async ({ request, page }) => {

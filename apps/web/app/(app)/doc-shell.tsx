@@ -35,6 +35,8 @@ export function DocShell({
             <Link href="/docs">Docs</Link>
             <Link href="/compare">Compare</Link>
             <Link href="/pricing">Pricing</Link>
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
           </nav>
         </footer>
       </div>
