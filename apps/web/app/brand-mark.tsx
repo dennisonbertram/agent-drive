@@ -35,13 +35,13 @@ export function BrandMark({
   const cls = `brand ${className}`.trim();
   const body = (
     <>
-      <BrandLogo /> Agent Drive
+      <BrandLogo /> <span className="brand-text">Agent Drive</span>
     </>
   );
   return href === null ? (
     <span className={cls}>{body}</span>
   ) : (
-    <Link href={href} className={cls}>
+    <Link href={href} className={cls} aria-label="Agent Drive">
       {body}
     </Link>
   );

@@ -786,8 +786,16 @@
     flex-direction: column;
   }
   .billing-links {
-    gap: 16px;
+    gap: 14px;
     font-size: 13px;
+    white-space: nowrap;
+  }
+  .billing-header .brand-text,
+  .billing-links .phone-hide {
+    display: none;
+  }
+  .billing-links a.billing-links-cta {
+    padding: 6px 10px;
   }
 }
 

@@ -182,7 +182,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await expect(page.getByTestId('key-chip')).not.toContainText('Not backed up');
     await expect(await keyMenu(page)).toContainText('Key backed up');
     await page.getByTestId('drive-menu-button').click();
-    const driveId = await page.getByTestId('drive-id').innerText();
+    const driveId = (await page.getByTestId('drive-id').getAttribute('title'))!;
     expect(backup.driveId).toBe(driveId);
 
     await page.getByRole('button', { name: 'Agents', exact: true }).click();
@@ -2423,6 +2423,60 @@ test('console share: a lost response does not create a second link', async ({
     expect(posts).toBe(1);
   } finally {
     await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});
+
+test('console polish: phone search row, account header, Drive ID, Restored toast', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(90_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const driveId = await seededDrive(context, baseURL!, userId, 'polish', [
+      { path: '/a.md', at: minutesAgo(5) },
+      { path: '/b.md', at: minutesAgo(4) },
+    ]);
+    // N1: search is a full-width, 44 px row on phones.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/console?drive=${driveId}`);
+    const search = page.getByLabel('Search this folder');
+    await expect(search).toBeVisible({ timeout: 30_000 });
+    const box = (await search.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(280);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
+    // N8: Drive ID is short, the full id is the title and the copy text.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByTestId('drive-menu-button').click();
+    await expect(page.getByTestId('drive-id')).toHaveText(`${driveId.slice(0, 8)}…`);
+    await expect(page.getByTestId('drive-id')).toHaveAttribute('title', driveId);
+    await page.keyboard.press('Escape');
+    // N7: restoring a file that is already in view offers no "Show file".
+    const row = page.locator('tr', { has: page.locator('[data-path="/a.md"]') });
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    const toast = page.locator('.toast').first();
+    await toast.getByRole('button', { name: 'Undo' }).click();
+    await expect(toast).toContainText('Restored', { timeout: 15_000 });
+    await expect(page.locator('[data-path="/a.md"]')).toBeVisible();
+    await expect(toast.getByRole('button', { name: 'Show file' })).toHaveCount(0);
+    // N3: account header fits one short row on phones.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/console/settings');
+    const header = page.locator('.billing-header');
+    await expect(header).toBeVisible({ timeout: 30_000 });
+    expect((await header.boundingBox())!.height).toBeLessThanOrEqual(64);
+    for (const name of ['Agent Drive', 'Billing & limits', 'Activity & deletion'])
+      await expect(header.getByRole('link', { name, exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      390,
+    );
+  } finally {
     await cleanupUser(userId);
   }
 });

@@ -421,6 +421,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     run: () => Promise<void>;
   } | null>(null);
   // A file to scroll to and focus once its folder has loaded ("Show file").
+  // The Restored toast waiting for its list to render: if the row is on screen, "Show file" goes.
+  const [restoredWatch, setRestoredWatch] = useState<{
+    id: number;
+    message: string;
+    driveId: string;
+    path: string;
+  } | null>(null);
   const focusRequest = useRef<{ driveId: string; path: string } | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
@@ -772,6 +779,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     // loadMore only reads current state through its closure; this runs after every page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTick, tab, listStatus, selected, folder, view, filePage, loadingMore, moreNow]);
+  // After the list renders: a restored file already in view needs no "Show file" button.
+  useEffect(() => {
+    if (!restoredWatch || tab !== 'Files' || listStatus !== 'ready') return;
+    const { id, message, driveId, path } = restoredWatch;
+    if (!toasts.some((item) => item.id === id && item.message === message)) {
+      setRestoredWatch(null);
+      return;
+    }
+    const row = [...document.querySelectorAll<HTMLElement>('.file-panel .file-row-name')].find(
+      (item) => item.dataset.path === path,
+    );
+    const rect = row?.getBoundingClientRect();
+    if (!rect || selected !== driveId || rect.top < 0 || rect.bottom > window.innerHeight) return;
+    setRestoredWatch(null);
+    showToast(message, {}, id);
+  }, [restoredWatch, toasts, tab, listStatus, selected, filePage, hiddenRows]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
     if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
@@ -959,7 +982,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const bytes = await fetchPlaintext(selected, file.path, key);
     const name = file.path.split('/').at(-1) || 'download';
     save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-    showToast(`${name} decrypted in your browser and downloaded.`);
+    showToast(`Download started: ${name}. Check your downloads.`);
   }
 
   // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
@@ -1085,19 +1108,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     go({ drive: driveId, path: cut > 0 ? path.slice(0, cut) : undefined, view: 'browse' });
   }
   function restoredToast(driveId: string, path: string, replaceId?: number) {
-    showToast(
-      `Restored “${baseName(path)}”.`,
+    const message = `Restored “${baseName(path)}”.`;
+    const id = showToast(
+      message,
       {
         action: {
           label: 'Show file',
-          run: (id) => {
-            dismissToast(id);
+          run: (toastId) => {
+            dismissToast(toastId);
             showFile(driveId, path);
           },
         },
       },
       replaceId,
     );
+    setRestoredWatch({ id, message, driveId, path });
   }
 
   async function restore(driveId: string, path: string, versionId?: string) {

@@ -16,11 +16,19 @@ export function AccountHeader({
     <header className="billing-header">
       <BrandMark href="/console" />
       <nav className="billing-links" aria-label="Account">
-        <Link href="/console/billing" aria-current={current === 'billing' ? 'page' : undefined}>
-          Billing &amp; limits
+        <Link
+          href="/console/billing"
+          aria-label="Billing &amp; limits"
+          aria-current={current === 'billing' ? 'page' : undefined}
+        >
+          Billing<span className="phone-hide"> &amp; limits</span>
         </Link>
-        <Link href="/console/settings" aria-current={current === 'settings' ? 'page' : undefined}>
-          Activity &amp; deletion
+        <Link
+          href="/console/settings"
+          aria-label="Activity &amp; deletion"
+          aria-current={current === 'settings' ? 'page' : undefined}
+        >
+          Activity<span className="phone-hide"> &amp; deletion</span>
         </Link>
         <Link className="billing-links-cta" href="/console">
           Back to files
