@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { AccountHeader } from '../account-header';
-import { formatBytes, MAX_UPLOAD } from '@/src/format/bytes';
+import { formatBytes, MAX_UPLOAD, perGbDollars, RATE_UNIT_NOTE } from '@/src/format/bytes';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 type Plan = {
@@ -322,7 +322,7 @@ export default function BillingClient({
                 <p className="eyebrow">
                   {billing.egressMeteringConfigured && !billing.egressNotMetered
                     ? 'OBSERVED DOWNLOADS'
-                    : 'DOWNLOADS THIS MONTH'}
+                    : 'DOWNLOADS AUTHORIZED THIS MONTH'}
                 </p>
                 <strong className="billing-number">
                   {billing.egressNotMetered
@@ -332,11 +332,11 @@ export default function BillingClient({
                       : formatBytes(billing.authorizedEgressBytes)}
                 </strong>
                 {billing.egressNotMetered ? (
-                  <p>{formatBytes(billing.authorizedEgressBytes)} downloaded this month</p>
+                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
                 ) : billing.egressMeteringConfigured ? (
                   <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
                 ) : (
-                  <p>Authorized downloads. Transfer reports are not set up on this server.</p>
+                  <p>Bytes approved for download; actual transfer isn’t metered.</p>
                 )}
                 {billing.egressMeteringConfigured && !billing.egressNotMetered && (
                   <small>
@@ -412,17 +412,17 @@ export default function BillingClient({
                 <div className="billing-card billing-rates">
                   <h3>Configured overage rates</h3>
                   <p>
-                    {money(rateCard.drive)} per extra drive/month · {money(rateCard.storage)} per
-                    extra GB stored/month ·{' '}
+                    {money(rateCard.drive)} per extra drive/month ·{' '}
+                    {perGbDollars(BigInt(rateCard.storage))} per extra GB stored/month ·{' '}
                     {billing.egressNotMetered
                       ? 'downloads not charged'
-                      : `${money(rateCard.egress)} per extra GB downloaded`}{' '}
+                      : `${perGbDollars(BigInt(rateCard.egress))} per extra GB downloaded`}{' '}
                     · {money(rateCard.operations)} per 1,000 extra operations.
                   </p>
                   <small>
                     Paid plans only. Storage and drives use the month’s peak allocation, not
-                    time-weighted usage. Each category rounds up to the nearest cent. Rates are
-                    fixed for the current plan period.
+                    time-weighted usage. {RATE_UNIT_NOTE} Each category rounds up to the nearest
+                    cent. Rates are fixed for the current plan period.
                   </small>
                 </div>
               )}

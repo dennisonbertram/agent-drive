@@ -6,6 +6,7 @@ import { SiteHeader } from '../../site-header';
 import { PLANS, type PlanName } from '@/src/billing/policy';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { JsonLd } from '@/src/content/json-ld';
+import { perGbDollars } from '@/src/format/bytes';
 import { money, PLAN_INCLUDES, planFacts } from '@/src/content/plans';
 import {
   DISCLOSURE,
@@ -105,11 +106,11 @@ export default async function PricingPage() {
                   </div>
                   <div>
                     <dt>Extra GB stored / month</dt>
-                    <dd>{money(rates.storage)}</dd>
+                    <dd>{perGbDollars(rates.storage)}</dd>
                   </div>
                   <div>
                     <dt>Extra GB downloaded</dt>
-                    <dd>{egressNotMetered ? 'Not charged' : money(rates.egress)}</dd>
+                    <dd>{egressNotMetered ? 'Not charged' : perGbDollars(rates.egress)}</dd>
                   </div>
                   <div>
                     <dt>Extra 1,000 API operations</dt>
