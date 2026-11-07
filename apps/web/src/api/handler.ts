@@ -94,7 +94,7 @@ const quotaControlledActions = new Set([
   'share.create',
 ]);
 // Reads the console user makes just by looking at a page. GET audit?consoleReads=0 hides them.
-const consoleReadActions = [
+export const consoleReadActions = [
   'drive.get',
   'drive.versions',
   'drive.recent',
@@ -291,7 +291,7 @@ function errorStatus(error: unknown) {
   return error instanceof ApiError ? error.status : 500;
 }
 
-function actionFor(method: string, parts: string[], bearer = false) {
+export function actionFor(method: string, parts: string[], bearer = false) {
   if (bearer && parts[0] === 'device' && parts.length === 2 && method === 'GET')
     return 'device.read';
   if (bearer && parts[0] === 'device' && parts.length === 3 && parts[2] === 'grant')
@@ -2018,7 +2018,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 
 type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
 
-function consoleRouteAllowed(method: string, parts: string[]) {
+export function consoleRouteAllowed(method: string, parts: string[]) {
   if (parts[0] === 'device') {
     if (parts.length === 2) return method === 'GET';
     return (

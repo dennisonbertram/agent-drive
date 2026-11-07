@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { auditLabel, errorLabel } from '@/src/console/audit-labels';
+import { keyDetail } from '@/src/console/audit-who';
 import { AccountHeader } from '../account-header';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -293,7 +294,9 @@ export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean
                     </td>
                     <td role="cell" data-label="Who">
                       {actor(event)}
-                      {event.keyLabel && <small>{event.keyLabel}</small>}
+                      {keyDetail(actor(event), event.keyLabel) && (
+                        <small>{keyDetail(actor(event), event.keyLabel)}</small>
+                      )}
                     </td>
                     <td role="cell" data-label="Result">
                       {event.outcome === 'pending' ? (
