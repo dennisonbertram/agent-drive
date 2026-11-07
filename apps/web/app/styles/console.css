@@ -1309,6 +1309,11 @@
   }
   .crumbs {
     gap: 2px;
+    /* wide enough for the drive, the up link and ~8 characters; otherwise the key chip wraps below */
+    flex: 1 0 11em;
+  }
+  .crumbs .crumb-last {
+    min-width: 8ch;
   }
   .crumbs .drive-menu {
     flex: none;

@@ -1040,10 +1040,39 @@ test('console files: browse folders like a drive', async ({ page, context, baseU
     ])
       expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     await expect(crumbNav.getByRole('link', { name: '2026', exact: true })).toBeHidden();
+    // Phone, drive not backed up (long key chip): the chip wraps below and nothing is cut off.
+    const bare = await post<{ id: string }>('drives', { name: 'C drive' });
+    await page.route('**/api/console/drives/*/list*', (route) =>
+      !route.request().url().includes(bare.id)
+        ? route.continue()
+        : route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              items: [{ id: 'f1', path: '/projects/acme/2026/q4/n.md', ciphertext_size: 9 }],
+              nextCursor: null,
+            }),
+          }),
+    );
+    await page.goto(`/console?drive=${bare.id}&path=/projects/acme/2026/q4`);
+    await expect(page.getByTestId('key-chip')).toContainText('Not backed up');
+    await expect(rows).toHaveCount(1);
+    for (const part of [
+      crumbNav.locator('[aria-current="page"]'),
+      page.getByTestId('drive-menu-button'),
+    ])
+      expect(await part.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(
+      await crumbNav.locator('[aria-current="page"]').evaluate((el) => el.clientWidth),
+    ).toBeGreaterThanOrEqual(20);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // Switching drive drops the folder from the URL.
-    await page.goto('/console?path=/inbox');
+    await page.goto(`/console?drive=${drive.id}&path=/inbox`);
     await expect(rows).toHaveCount(1);
     await page.getByTestId('drive-menu-button').click();
     await page.getByRole('button', { name: /B drive/ }).click();
