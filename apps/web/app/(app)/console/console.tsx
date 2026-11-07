@@ -794,8 +794,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (!rect || selected !== driveId || rect.top < 0 || rect.bottom > window.innerHeight) return;
     setRestoredWatch(null);
     showToast(message, {}, id);
-    // showToast only reads refs and stable setters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restoredWatch, toasts, tab, listStatus, selected, filePage, hiddenRows]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
