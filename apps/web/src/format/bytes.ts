@@ -21,3 +21,6 @@ export function formatBytes(value: number | bigint | string): string {
     .replace(/0+$/u, '');
   return `${whole}${frac ? `.${frac}` : ''} ${UNITS[i]}`;
 }
+
+/** Largest encrypted upload (5 GiB of ciphertext), in the same unit as every other size. */
+export const MAX_UPLOAD = formatBytes(5n * 1024n ** 3n);

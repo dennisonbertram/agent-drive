@@ -104,11 +104,11 @@ export default async function PricingPage() {
                     <dd>{money(rates.drive)}</dd>
                   </div>
                   <div>
-                    <dt>Extra GiB stored / month</dt>
+                    <dt>Extra GB stored / month</dt>
                     <dd>{money(rates.storage)}</dd>
                   </div>
                   <div>
-                    <dt>Extra GiB downloaded</dt>
+                    <dt>Extra GB downloaded</dt>
                     <dd>{egressNotMetered ? 'Not charged' : money(rates.egress)}</dd>
                   </div>
                   <div>

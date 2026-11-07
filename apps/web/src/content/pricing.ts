@@ -1,5 +1,6 @@
 import { billingRates, PLANS, type PlanName } from '../billing/policy';
 import { checkoutConfigured } from '../billing/providers';
+import { MAX_UPLOAD } from '../format/bytes';
 import { allPlanFacts, money, PLAN_INCLUDES } from './plans';
 
 export function publishedRates() {
@@ -15,7 +16,7 @@ export const DISCLOSURE = {
   checkoutDisabled:
     'Paid checkout is not enabled on this deployment. The Free plan is available when sign-in and storage are configured; the paid prices below describe the supported plans.',
   usage: [
-    'Limits apply across your account. All retained file versions count toward storage, including overwritten files and trash. Each encrypted upload can be at most 5 GiB; the original file must leave room for encryption overhead.',
+    `Limits apply across your account. All retained file versions count toward storage, including overwritten files and trash. Each encrypted upload can be at most ${MAX_UPLOAD}; the original file must leave room for encryption overhead.`,
     'Free accounts stop at their included allowances. Paid overages require a configured billing provider and active subscription. Drive and storage overages use the monthly high-water allocation, not hourly averages. Base prices are in USD, before applicable taxes.',
   ],
   noRates:
@@ -55,8 +56,8 @@ export function pricingMarkdown(origin: string): string {
   if (rates) {
     lines.push(
       `- Extra drive / month: ${money(rates.drive)}`,
-      `- Extra GiB stored / month: ${money(rates.storage)}`,
-      `- Extra GiB downloaded: ${notMetered ? 'Not charged' : money(rates.egress)}`,
+      `- Extra GB stored / month: ${money(rates.storage)}`,
+      `- Extra GB downloaded: ${notMetered ? 'Not charged' : money(rates.egress)}`,
       `- Extra 1,000 API operations: ${money(rates.operations)}`,
     );
   } else {

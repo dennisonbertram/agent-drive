@@ -1,11 +1,11 @@
-import { downloadsLabel, GIB, PLANS, type PlanName } from '../billing/policy';
+import { downloadsLabel, PLANS, type PlanName } from '../billing/policy';
+import { formatBytes } from '../format/bytes';
 
 /**
  * Plan text shared by /pricing, its Markdown twin and its JSON-LD, so the three cannot disagree.
  * Numbers come from PLANS in src/billing/policy.ts.
  */
-export const allowance = (bytes: bigint) =>
-  bytes >= 1024n * GIB ? `${String(bytes / (1024n * GIB))} TiB` : `${String(bytes / GIB)} GiB`;
+export const allowance = (bytes: bigint) => formatBytes(bytes);
 
 export const money = (cents: number | bigint) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(

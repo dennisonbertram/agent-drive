@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { BrandMark } from '../../../brand-mark';
+import { formatBytes, MAX_UPLOAD } from '@/src/format/bytes';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 type Plan = {
@@ -57,22 +58,6 @@ function dollars(cents: string) {
 function money(cents: string) {
   const [whole, fraction] = dollars(cents).split('.');
   return `$${BigInt(whole!).toLocaleString()}.${fraction}`;
-}
-
-function bytes(raw: string) {
-  const value = BigInt(raw);
-  for (const [unit, divisor] of [
-    ['TiB', 1024n ** 4n],
-    ['GiB', 1024n ** 3n],
-    ['MiB', 1024n ** 2n],
-    ['KiB', 1024n],
-  ] as const) {
-    if (value >= divisor) {
-      const scaled = (value * 10n) / divisor;
-      return `${scaled / 10n}.${scaled % 10n} ${unit}`;
-    }
-  }
-  return `${value} B`;
 }
 
 function centsInput(value: string) {
@@ -318,13 +303,13 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
               </article>
               <article className="billing-card">
                 <p className="eyebrow">RETAINED STORAGE</p>
-                <strong className="billing-number">{bytes(billing.storageBytes)}</strong>
+                <strong className="billing-number">{formatBytes(billing.storageBytes)}</strong>
                 <p>
-                  {bytes(billing.limits.storageBytes!)} included · {billing.drives} drives
+                  {formatBytes(billing.limits.storageBytes!)} included · {billing.drives} drives
                 </p>
                 <small>
                   All versions count, including trash. Monthly peak:{' '}
-                  {bytes(billing.peakStorageBytes)}.
+                  {formatBytes(billing.peakStorageBytes)}.
                 </small>
               </article>
               <article className="billing-card">
@@ -333,10 +318,10 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                   {billing.egressNotMetered
                     ? 'Not metered — provider does not charge egress'
                     : billing.egressMeteringConfigured
-                      ? bytes(billing.egressBytes)
+                      ? formatBytes(billing.egressBytes)
                       : 'Not connected'}
                 </strong>
-                <p>{bytes(billing.authorizedEgressBytes)} authorized this month</p>
+                <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
                 <small>
                   Actual transfer reports can be delayed or incomplete. Authorizations are not
                   charges.
@@ -371,8 +356,8 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                     </p>
                     <ul>
                       <li>{plan.drives} drives</li>
-                      <li>{bytes(plan.storageBytes)} encrypted storage</li>
-                      <li>{bytes(plan.egressBytes)} monthly download allowance</li>
+                      <li>{formatBytes(plan.storageBytes)} encrypted storage</li>
+                      <li>{formatBytes(plan.egressBytes)} monthly download allowance</li>
                       <li>{BigInt(plan.operations).toLocaleString()} monthly operations</li>
                     </ul>
                     <button
@@ -402,18 +387,18 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                 </p>
               )}
               <p className="billing-caption">
-                All plans include client-side encryption. 5 GiB maximum encrypted file size. Need a
-                custom enterprise plan? Contact your workspace operator.
+                All plans include client-side encryption. {MAX_UPLOAD} maximum encrypted file size.
+                Need a custom enterprise plan? Contact your workspace operator.
               </p>
               {rateCard && (
                 <div className="billing-card billing-rates">
                   <h3>Configured overage rates</h3>
                   <p>
                     {money(rateCard.drive)} per extra drive/month · {money(rateCard.storage)} per
-                    extra GiB stored/month ·{' '}
+                    extra GB stored/month ·{' '}
                     {billing.egressNotMetered
                       ? 'downloads not charged'
-                      : `${money(rateCard.egress)} per extra GiB downloaded`}{' '}
+                      : `${money(rateCard.egress)} per extra GB downloaded`}{' '}
                     · {money(rateCard.operations)} per 1,000 extra operations.
                   </p>
                   <small>
@@ -538,13 +523,13 @@ export default function BillingClient({ plans }: { plans: Plan[] }) {
                           {agent.name === '__console__' ? 'Console' : agent.name}
                         </td>
                         <td role="cell" data-label="Retained storage">
-                          {bytes(agent.storage_bytes)}
+                          {formatBytes(agent.storage_bytes)}
                         </td>
                         <td role="cell" data-label="Observed downloads">
                           {billing.egressNotMetered
                             ? 'Not metered — provider does not charge egress'
                             : billing.egressMeteringConfigured
-                              ? bytes(agent.egress_bytes)
+                              ? formatBytes(agent.egress_bytes)
                               : 'Not connected'}
                         </td>
                         <td role="cell" data-label="Operations">

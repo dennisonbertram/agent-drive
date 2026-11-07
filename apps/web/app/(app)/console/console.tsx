@@ -34,6 +34,7 @@ import { ConfirmBody } from './confirm-dialog';
 import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
 import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
+import { formatBytes } from '@/src/format/bytes';
 import {
   ROOT,
   childrenOf,
@@ -251,10 +252,7 @@ function authorLabel(name: string) {
 }
 
 function size(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  return formatBytes(bytes);
 }
 
 function deletedOn(value?: string) {
