@@ -1,5 +1,6 @@
 'use client';
 
+import { formatBytes } from '@/src/format/bytes';
 import Link from 'next/link';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { BrandMark } from '../../brand-mark';
@@ -42,20 +43,6 @@ const errorBodies: Record<string, string> = {
   share_expired: 'This link passed its expiry date. Ask the sender for a new link.',
 };
 const defaultErrorBody = 'This file cannot be opened right now. Ask the sender for a new link.';
-
-// TODO(P3): replace this local helper with the shared decimal `formatBytes` from
-// `@/src/format/bytes` (owned by agent-drive-r5-p3-billing). Same rule: 1 KB = 1000 B.
-function formatBytes(bytes: number) {
-  if (bytes < 1000) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let value = bytes / 1000;
-  let i = 0;
-  while (value >= 1000 && i < units.length - 1) {
-    value /= 1000;
-    i += 1;
-  }
-  return `${value.toFixed(1)} ${units[i]}`;
-}
 
 function plainSizeLabel(ciphertextSize: number) {
   try {
