@@ -11,7 +11,7 @@ This policy explains what Agent Drive ("we", "us") collects, why, and who else h
 
 ## What we cannot see
 
-Agent Drive encrypts file contents on your machine with AES-256-GCM before upload. The drive key never leaves your machine, so we store only ciphertext and cannot read your file contents. If a share link is made, its decryption key sits in the part of the URL after the "#". Browsers do not send that part to servers, so we do not receive it.
+Agent Drive encrypts file contents on your machine with AES-256-GCM before upload. Plaintext drive keys are never sent to us. When you connect another agent, an encrypted copy of the drive key can be relayed through and stored on our servers, sealed so only that agent can open it. We store only ciphertext and cannot read your file contents. If a share link is made, its decryption key sits in the part of the URL after the "#". Browsers do not send that part to servers, so we do not receive it.
 
 ## What we do store
 
@@ -21,12 +21,15 @@ Agent Drive encrypts file contents on your machine with AES-256-GCM before uploa
 - **Activity records:** audit events (what action, which agent, success or failure, when) and file change events.
 - **Sharing:** share link records (which file version, expiry, revoked or not). Not the decryption key.
 - **Encrypted file data:** the ciphertext of your files, plus a wrapped (encrypted) file key we cannot unwrap.
+- **File activity:** user identifiers that agents attach to file activity.
+- **Device connections:** pairing codes, public keys, requested access, approval state, and the encrypted key-transfer records described above.
+- **Downloads:** a record per download (which object, when, how many bytes, which account and agent), used for usage and billing.
 - **Device sign-in:** when an agent asks to connect, we store a hash of the requesting IP address to limit abuse (rate limiting). We do not store the raw address in our database.
 - **Billing:** your plan, usage totals (storage, downloads, operations), and Stripe customer and subscription IDs. We do not see or store card numbers; Stripe does.
 
 ## Sign-in
 
-We use Clerk to sign you in with email, GitHub, or Google. Clerk receives your sign-in details and sets the session cookies that keep you signed in. Google sign-in requests the scopes openid, email, and profile. GitHub sign-in requests user:email and read:user, which give read-only access to your email and profile. We use these only to identify you. We do not read your Gmail, Google Drive, GitHub repositories, or other data in those accounts.
+We use Clerk to sign you in with email, GitHub, or Google. Clerk receives your sign-in details and sets the session cookies that keep you signed in. As currently configured with our sign-in provider, Google sign-in requests the scopes openid, email, and profile, and GitHub sign-in requests user:email and read:user, which give read-only access to your email and profile. We use these only to identify you. We do not read your Gmail, Google Drive, GitHub repositories, or other data in those accounts.
 
 ## Cookies
 
@@ -37,22 +40,23 @@ We set only the cookies needed to sign you in and keep your session. We do not r
 - Vercel: hosts the website and API.
 - Neon: hosts our Postgres database (through Vercel).
 - [TBD: object storage provider, Amazon S3 or Cloudflare R2]: stores your encrypted files.
-- Clerk: sign-in and sessions. Clerk also sends sign-in and verification emails. We do not send email ourselves.
+- Clerk: sign-in and sessions. Clerk also sends sign-in and verification emails.
+- Resend: our email provider. We do not send marketing email. If billing alerts are enabled for your account, we send them by email through Resend, which receives your alert address and the alert content.
 - Stripe: payments and subscriptions.
 
 These providers also keep their own logs under their own policies. Our storage provider may keep access logs for [TBD: log retention period].
 
 ## How long we keep it
 
-You can delete a drive or your whole account in the console. Deletion blocks access at once, then a background job removes the encrypted files and metadata after a short waiting period. This is not instant. Some things stay: aggregate billing receipts (plan, periods, usage totals, amounts), internal deletion IDs, and hashed sign-in identity records used to block old sessions. Stripe records, backups, and provider logs follow their own retention.
+You can delete a drive or your whole account in the console. Deleting a file moves it to Trash. Its encrypted versions are kept so it can be restored, until the drive or account is deleted. There is no automatic Trash expiry today. When you delete a drive or account, new access through the app is blocked at once. Download links already issued can work for up to 10 minutes, and transfers in progress may finish. The stored data is then purged by a background job after a short waiting period (at least 10 minutes). This is not instant. Some things stay: aggregate billing receipts (plan, periods, usage totals, amounts), internal deletion IDs, and hashed sign-in identity records used to block old sessions. Stripe records, backups, and provider logs follow their own retention.
 
 ## Your choices
 
-You can access, export, and delete your data in the console and with the CLI. For anything else, or to ask about your rights under the law where you live, write to [TBD: privacy contact email].
+In the console you can view and download your files and activity, and delete drives and your account (Activity & deletion). With the CLI you can download files and export agent credentials. For anything else, including questions about your rights under the law where you live, contact us at [TBD: privacy contact email].
 
 ## We do not sell data
 
-We do not sell your data or use it for advertising.
+We do not sell your data or use it for advertising. [TBD: owner to confirm.]
 
 ## Changes
 
@@ -77,7 +81,7 @@ You must give accurate information and keep your sign-in and API keys safe. You 
 
 ## Your keys and recovery
 
-Your drive key is created and held on your machine. We never receive it, so we cannot recover your files if you lose it. Keep your recovery file and your agent credentials somewhere safe. If you lose the drive key and have no recovery file, the encrypted data is gone for good. We cannot reset this for you.
+Your drive key is created on your machine. We never receive it in plaintext, so we cannot recover your files if you lose it. Keep your recovery file and your agent credentials somewhere safe. If you lose the drive key and have no recovery file, the encrypted data is gone for good. We cannot reset this for you.
 
 ## Your content
 
