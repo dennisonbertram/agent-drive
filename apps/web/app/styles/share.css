@@ -88,6 +88,17 @@
   color: var(--ink, #111);
   overflow-wrap: anywhere;
 }
+.share-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.share-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted, #6b6963);
+}
 .share-window {
   flex: 1;
   display: flex;
@@ -155,7 +166,8 @@
 .share-paste-row input {
   flex: 1;
   min-width: 0;
-  min-height: 40px;
+  box-sizing: border-box;
+  height: 44px;
   padding: 0 10px;
   border: 1px solid var(--line-strong, #111);
   border-radius: 6px;
@@ -164,6 +176,7 @@
   font: 400 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
 }
 .share-card .button {
+  box-sizing: border-box;
   min-height: 40px;
   padding: 0 16px;
   border: 1px solid var(--line-strong, #111);
@@ -180,6 +193,27 @@
 .share-card .button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+.share-paste-row .button {
+  height: 44px;
+  white-space: nowrap;
+}
+.share-status {
+  min-height: 20px;
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 20px;
+  text-align: center;
+  color: var(--ink-2, #3b3a37);
+  overflow-wrap: anywhere;
+}
+.share-home {
+  display: inline-block;
+  margin-top: 16px;
+  font-size: 0.875rem;
+  color: var(--ink, #111);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .share-paste-problem {
   margin: 8px 0 0;
