@@ -32,7 +32,7 @@ import { MenuButton } from './menu-button';
 import { Toast, type Announcement, type ToastItem } from './toast';
 import { ConfirmBody } from './confirm-dialog';
 import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
-import type { ShareRow } from '@/src/console/share-link';
+import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import {
   ROOT,
@@ -386,6 +386,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const toastSeq = useRef(0);
+  const toastsNow = useRef<ToastItem[]>([]);
   // Rows moved to Trash but not yet gone from a loaded list: "fileId:versionId" -> path.
   const [hiddenRows, setHiddenRows] = useState<Map<string, { driveId: string; path: string }>>(
     new Map(),
@@ -915,6 +916,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setAnnouncement({ text: message, tone, n: next });
     return id ?? next;
   }
+  useEffect(() => {
+    toastsNow.current = toasts;
+  }, [toasts]);
   const selectedNow = useRef(selected);
   const tabNow = useRef(tab);
   useEffect(() => {
@@ -1037,8 +1041,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       ).length;
       if (!n) return;
       const message = `${movedText} Its ${n} share ${n === 1 ? 'link stops' : 'links stop'} working until you restore it.`;
-      const seq = ++toastSeq.current;
       // Only the still-unchanged toast: not one that was dismissed, or already replaced by Undo.
+      // Nothing is announced otherwise, so a screen reader never hears links stopped after an Undo.
+      if (!toastsNow.current.some((item) => item.id === toastId && item.message === movedText))
+        return;
+      const seq = ++toastSeq.current;
       setToasts((current) =>
         current.map((item) =>
           item.id === toastId && item.message === movedText ? { ...item, message, rev: seq } : item,
@@ -1108,16 +1115,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       }));
     }
   }
-  function updateShares(change: (items: ShareRow[]) => ShareRow[]) {
+  // Only the list of that drive: a result that arrives after a drive switch must not enter another list.
+  function updateShares(driveId: string, change: (items: ShareRow[]) => ShareRow[]) {
     setShares((current) => {
-      const value = current ? { ...current, items: change(current.items) } : current;
+      const value =
+        current?.driveId === driveId ? { ...current, items: change(current.items) } : current;
       sharesNow.current = value;
       return value;
     });
   }
   async function revokeShare(driveId: string, id: string) {
     const result = await api<{ revokedAt: string }>(`drives/${driveId}/shares/${id}`, 'DELETE');
-    updateShares((items) =>
+    updateShares(driveId, (items) =>
       items.map((row) =>
         row.id === id ? { ...row, revokedAt: result.revokedAt, status: 'revoked' } : row,
       ),
@@ -1695,7 +1704,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     </span>
                                   </td>
                                   <td className="row-actions-cell" role="cell">
-                                    {row.status === 'active' && (
+                                    {(row.status === 'active' || row.status === 'unavailable') && (
                                       <RevokeControl
                                         question={`Stop the link to ${name}?`}
                                         onRevoke={() => revokeShare(selected, row.id)}
@@ -2407,7 +2416,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               request={api}
               shares={shares}
               onReload={() => void loadShares(selected)}
-              onCreated={(row) => updateShares((items) => [row, ...items])}
+              onCreated={(forDrive, row) =>
+                updateShares(forDrive, (items) => addShareRow(items, row))
+              }
               onRevoke={(id) => revokeShare(selected, id)}
             />
           )}

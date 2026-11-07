@@ -1,10 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_EXPIRY,
   createShareLink,
+  recoverShareLink,
   type Request,
+  type ShareLink,
   type ShareExpiry,
   type ShareRow,
 } from '@/src/console/share-link';
@@ -29,7 +31,7 @@ export const STATUS_LABEL: Record<ShareRow['status'], string> = {
   active: 'Active',
   expired: 'Expired',
   revoked: 'Revoked',
-  unavailable: 'File in Trash',
+  unavailable: 'Unavailable (file in Trash)',
 };
 
 /** `Revoke`, then `Stop this link? [Revoke link] [Cancel]`. The API call and the list update belong to the caller. */
@@ -42,24 +44,45 @@ export function RevokeControl({
 }) {
   const [step, setStep] = useState<'idle' | 'confirm' | 'busy'>('idle');
   const [error, setError] = useState('');
+  const revoke = useRef<HTMLButtonElement>(null);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLSpanElement>(null);
+  // Keyboard focus follows the control: Revoke -> Revoke link, Cancel -> Revoke. Not on first render.
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    (step === 'confirm' ? confirm : revoke).current?.focus();
+  }, [step]);
   if (step === 'idle')
     return (
-      <button type="button" className="share-revoke" onClick={() => setStep('confirm')}>
+      <button
+        ref={revoke}
+        type="button"
+        className="share-revoke"
+        onClick={() => {
+          moved.current = true;
+          setStep('confirm');
+        }}
+      >
         Revoke
       </button>
     );
   return (
-    <span className="share-confirm" role="group" aria-label={question}>
+    <span ref={root} className="share-confirm" role="group" aria-label={question}>
       <span>{error || question}</span>
       <button
+        ref={confirm}
         type="button"
         className="button danger"
         disabled={step === 'busy'}
         onClick={async () => {
           setStep('busy');
           setError('');
+          // This control goes away once the row is revoked: focus the row's new status text instead.
+          const row = root.current?.closest('li, tr');
           try {
             await onRevoke();
+            setTimeout(() => row?.querySelector<HTMLElement>('.share-state')?.focus(), 0);
           } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Could not revoke the link.');
             setStep('confirm');
@@ -83,8 +106,6 @@ export function RevokeControl({
   );
 }
 
-type Link = { id: string; url: string; expiresAt: string; createdAt: string };
-
 /**
  * Body of the Share dialog. The file key exists only inside `link.url` (in its #k= fragment), in this
  * component's state: never in storage, the page URL, a toast, a console message or an error.
@@ -107,40 +128,82 @@ export function ShareDialog({
   request: Request;
   shares: SharesState | null;
   onReload: () => void;
-  onCreated: (row: ShareRow) => void;
+  onCreated: (driveId: string, row: ShareRow) => void;
   onRevoke: (id: string) => Promise<void>;
 }) {
   const [expiry, setExpiry] = useState<ShareExpiry>(DEFAULT_EXPIRY);
-  const [link, setLink] = useState<Link | null>(null);
+  const [link, setLink] = useState<ShareLink | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   // The one creation for this opening. A second click, or a retry after a clipboard failure, reuses it.
-  const creation = useRef<Promise<Link> | null>(null);
+  const creation = useRef<Promise<ShareLink> | null>(null);
+  // False once the dialog is gone (closed, idle lock, drive change). Every later step is cancelled: the
+  // clipboard promise rejects instead of resolving with the URL, and nothing is stored or reported.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   function start() {
-    if (!creation.current) {
-      const made = createShareLink(request, { origin, driveId, path, driveKey, expiry });
-      creation.current = made;
-      made.then(
-        (created) => {
-          setLink(created);
-          onCreated({
-            id: created.id,
+    if (creation.current) return creation.current;
+    const forDrive = driveId;
+    const began = Date.now();
+    const known = new Set((shares?.driveId === driveId ? shares.items : []).map((row) => row.id));
+    let prepared: { fileKey: string; versionId: string } | undefined;
+    const made = (async () => {
+      let created: ShareLink | null = null;
+      try {
+        created = await createShareLink(request, {
+          origin,
+          driveId,
+          path,
+          driveKey,
+          expiry,
+          onPrepared: (p) => {
+            prepared = p;
+          },
+        });
+      } catch (failure) {
+        // After the POST was sent, a lost response or a 5xx may still have created the link. Look for
+        // it before allowing another attempt, so a retry cannot make a second link.
+        if (prepared && alive.current) {
+          created = await recoverShareLink(request, {
+            origin,
+            driveId,
             path,
-            versionId: '',
-            expiresAt: created.expiresAt,
-            revokedAt: null,
-            createdAt: created.createdAt,
-            status: 'active',
-          });
-        },
-        () => {
-          if (creation.current === made) creation.current = null;
-        },
-      );
-    }
-    return creation.current;
+            ...prepared,
+            knownIds: known,
+            since: began - 60_000,
+          }).catch(() => null);
+          if (!created) {
+            throw new Error(
+              `${failure instanceof Error ? failure.message : 'Could not create the link.'} If you try again, check “Links for this file” first: the link may have been created.`,
+            );
+          }
+        } else throw failure;
+      }
+      if (!alive.current) throw new Error('The dialog was closed.');
+      setLink(created);
+      onCreated(forDrive, {
+        id: created.id,
+        path,
+        versionId: prepared?.versionId ?? '',
+        expiresAt: created.expiresAt,
+        revokedAt: null,
+        createdAt: created.createdAt,
+        status: 'active',
+      });
+      return created;
+    })();
+    creation.current = made;
+    made.catch(() => {
+      if (creation.current === made) creation.current = null;
+    });
+    return made;
   }
 
   async function copy() {
@@ -150,6 +213,8 @@ export function ShareDialog({
     setStatus('');
     // Created inside the click, so Safari keeps the user gesture while the link is still being made.
     const made = start();
+    const copied = (done: ShareLink) =>
+      alive.current && setStatus(`Link copied. It expires ${versionWhen(done.expiresAt)}.`);
     try {
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
         await navigator.clipboard.write([
@@ -160,23 +225,25 @@ export function ShareDialog({
       } else {
         await navigator.clipboard.writeText((await made).url);
       }
-      const done = await made;
-      setStatus(`Link copied. It expires ${versionWhen(done.expiresAt)}.`);
+      copied(await made);
     } catch (reason) {
       const done = await made.catch(() => null);
+      if (!alive.current) return;
       if (!done) {
         setError(reason instanceof Error ? reason.message : 'Could not create the link.');
       } else {
         // Some browsers refuse the promise form; plain text is the second try.
         try {
           await navigator.clipboard.writeText(done.url);
-          setStatus(`Link copied. It expires ${versionWhen(done.expiresAt)}.`);
+          copied(done);
         } catch {
-          setStatus('Copy failed. Select the link and copy it.');
+          setStatus(
+            'Copy failed. The browser blocked automatic copying. Select the link below and copy it yourself.',
+          );
         }
       }
     } finally {
-      setBusy(false);
+      if (alive.current) setBusy(false);
     }
   }
 
@@ -245,10 +312,10 @@ export function ShareDialog({
                 {' · '}
                 {row.status === 'expired' ? 'Expired' : `Expires ${versionWhen(row.expiresAt)}`}
               </span>
-              <span className="share-state" data-status={row.status}>
+              <span className="share-state" data-status={row.status} tabIndex={-1}>
                 {STATUS_LABEL[row.status]}
               </span>
-              {row.status === 'active' && (
+              {(row.status === 'active' || row.status === 'unavailable') && (
                 <RevokeControl question="Stop this link?" onRevoke={() => onRevoke(row.id)} />
               )}
             </li>

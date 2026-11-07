@@ -1799,6 +1799,7 @@ test('console share: one link with the key only in the fragment, revoke in place
     });
     page.on('console', (message) => consoleText.push(message.text()));
     page.on('pageerror', (error) => consoleText.push(String(error)));
+    await page.addInitScript(countClipboardWrites);
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`/console?drive=${drive.id}&path=%2Fs`);
@@ -1867,8 +1868,15 @@ test('console share: one link with the key only in the fragment, revoke in place
     const loadsBefore = shareListLoads;
     await links.nth(1).getByRole('button', { name: 'Revoke' }).click();
     await expect(links.nth(1)).toContainText('Stop this link?');
+    // Focus follows the control: Revoke -> Revoke link; Cancel -> back to Revoke.
+    await expect(links.nth(1).getByRole('button', { name: 'Revoke link' })).toBeFocused();
+    await links.nth(1).getByRole('button', { name: 'Cancel' }).click();
+    await expect(links.nth(1).getByRole('button', { name: 'Revoke', exact: true })).toBeFocused();
+    await links.nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
     await links.nth(1).getByRole('button', { name: 'Revoke link' }).click();
     await expect(links.nth(1)).toContainText('Revoked');
+    // After success focus lands on the new status text, not on <body>.
+    await expect(links.nth(1).locator('.share-state')).toBeFocused();
     expect(shareListLoads).toBe(loadsBefore);
     await expect(links.nth(0)).toContainText('Active');
     const revokedGuest = await browser.newContext();
@@ -1880,6 +1888,18 @@ test('console share: one link with the key only in the fragment, revoke in place
       await revokedGuest.close();
     }
     await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    // Closing the dialog leaves no key or key-bearing URL in the page, and no further clipboard writes.
+    const afterClose = await page.evaluate(() => ({
+      html: document.documentElement.outerHTML,
+      writes: (window as unknown as { __clipWrites: number }).__clipWrites,
+    }));
+    for (const secret of [url2.split('#k=')[1]!, url1.split('#k=')[1]!, '#k=', driveKey])
+      expect(afterClose.html).not.toContain(secret);
+    await page.waitForTimeout(500);
+    expect(
+      await page.evaluate(() => (window as unknown as { __clipWrites: number }).__clipWrites),
+    ).toBe(afterClose.writes);
 
     // 6. The Shared view lists both and survives a reload.
     await page.getByRole('button', { name: 'Shared', exact: true }).click();
@@ -1907,6 +1927,18 @@ test('console share: one link with the key only in the fragment, revoke in place
     await page.getByRole('button', { name: 'Shared', exact: true }).click();
     await expect(shared.filter({ hasText: 'Active' })).toHaveCount(1);
 
+    // 7b. A link whose file is in Trash is labelled and can still be revoked.
+    await page.goto(`/console?drive=${drive.id}&path=%2Fs`);
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Trash', exact: true }).click();
+    await expect(page.locator('.toast').last()).toContainText('Its 1 share link stops working');
+    await page.getByRole('button', { name: 'Shared', exact: true }).click();
+    const trashed = shared.filter({ hasText: 'Unavailable (file in Trash)' });
+    await expect(trashed).toHaveCount(1);
+    await trashed.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await trashed.getByRole('button', { name: 'Revoke link' }).click();
+    await expect(shared.filter({ hasText: 'Revoked' })).toHaveCount(2);
+
     // 8. Neither the drive key nor any file key crossed the network, console or storage.
     const fileKeys = [url1, url2].map((url) => url.split('#k=')[1]!);
     await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
@@ -1918,6 +1950,159 @@ test('console share: one link with the key only in the fragment, revoke in place
       const stored = await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]));
       expect(stored).not.toContain(fileKey);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});
+
+// Counts calls to the async clipboard so a test can prove nothing is written after a dialog closes.
+function countClipboardWrites() {
+  const w = window as unknown as { __clipWrites: number };
+  w.__clipWrites = 0;
+  for (const method of ['write', 'writeText'] as const) {
+    const original = navigator.clipboard[method].bind(navigator.clipboard);
+    Object.defineProperty(navigator.clipboard, method, {
+      configurable: true,
+      value: (...args: never[]) => {
+        w.__clipWrites += 1;
+        return (original as (...a: never[]) => Promise<void>)(...args);
+      },
+    });
+  }
+}
+
+async function seedShareDrive(
+  context: import('@playwright/test').BrowserContext,
+  baseURL: string,
+  root: string,
+  userId: string,
+) {
+  const driveKey = randomBytes(32).toString('base64url');
+  const login = await context.request.post('/api/test-session', {
+    headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+    data: { userId },
+  });
+  expect(login.status()).toBe(200);
+  const post = async <T>(path: string, data: unknown) =>
+    (await (
+      await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL } })
+    ).json()) as T;
+  const drive = await post<{ id: string }>('drives', { name: 'Share drive' });
+  const agent = await post<{ id: string }>('agents', { name: 'Share agent' });
+  const key = await post<{ token: string }>('keys', {
+    label: 'Share key',
+    agentId: agent.id,
+    driveIds: [drive.id],
+    scopes: ['read', 'write'],
+  });
+  const environment = {
+    ...process.env,
+    AGENT_DRIVE_API_URL: baseURL,
+    AGENT_DRIVE_API_KEY: key.token,
+    AGENT_DRIVE_KEY: driveKey,
+    AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+  };
+  const local = join(root, 'report.md');
+  await writeFile(local, 'share body', { mode: 0o600 });
+  const upload = await cli(['put', local, '/s/report.md', '--drive', drive.id], environment);
+  expect(upload.status, upload.stderr.slice(0, 300)).toBe(0);
+  const recovery = join(root, 'right.key.json');
+  await writeFile(
+    recovery,
+    JSON.stringify({ format: 'agent-drive-key-v1', driveId: drive.id, key: driveKey }),
+  );
+  return { driveId: drive.id, driveKey, recovery };
+}
+
+for (const how of ['closing the dialog', 'the idle lock'] as const) {
+  test(`console share: ${how} cancels an in-flight copy and nothing reaches the clipboard`, async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+    const root = await mkdtemp(join(tmpdir(), 'agent-drive-share-cancel-'));
+    try {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      const { driveId, recovery } = await seedShareDrive(context, baseURL!, root, userId);
+      await page.addInitScript(countClipboardWrites);
+      if (how === 'the idle lock') await page.clock.install();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      await page.route('**/drives/*/shares', async (route) => {
+        if (route.request().method() === 'POST') await gate;
+        await route.continue();
+      });
+      await page.goto(`/console?drive=${driveId}&path=%2Fs`);
+      const row = page.locator('.file-panel tbody tr').filter({ hasText: 'report.md' });
+      await row.getByRole('button', { name: /More actions/ }).click();
+      await rowMenu(page).getByRole('button', { name: 'Share', exact: true }).click();
+      await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+      const dialog = page.getByRole('dialog', { name: 'Share report.md' });
+      await expect(dialog).toBeVisible();
+      await page.evaluate(() => navigator.clipboard.writeText('sentinel'));
+      const baseline = await page.evaluate(
+        () => (window as unknown as { __clipWrites: number }).__clipWrites,
+      );
+      await dialog.getByRole('button', { name: 'Copy link' }).click();
+      if (how === 'the idle lock') await page.clock.fastForward('31:00');
+      else await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      release();
+      await page.waitForTimeout(1500);
+      // The clipboard still holds the sentinel; the key-bearing URL never reached it.
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('sentinel');
+      const html = await page.evaluate(() => document.documentElement.outerHTML);
+      expect(html).not.toContain('#k=');
+      // Only the one write started by the click itself: no write after the dialog went away.
+      expect(
+        await page.evaluate(() => (window as unknown as { __clipWrites: number }).__clipWrites),
+      ).toBe(baseline + 1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await cleanupUser(userId);
+    }
+  });
+}
+
+test('console share: a lost response does not create a second link', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-share-lost-'));
+  try {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const { driveId, recovery } = await seedShareDrive(context, baseURL!, root, userId);
+    let posts = 0;
+    await page.route('**/drives/*/shares', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      posts += 1;
+      // The server commits the share, then the browser never sees the answer.
+      if (posts === 1) {
+        await route.fetch();
+        return route.abort('failed');
+      }
+      return route.continue();
+    });
+    await page.goto(`/console?drive=${driveId}&path=%2Fs`);
+    const row = page.locator('.file-panel tbody tr').filter({ hasText: 'report.md' });
+    await row.getByRole('button', { name: /More actions/ }).click();
+    await rowMenu(page).getByRole('button', { name: 'Share', exact: true }).click();
+    await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+    const dialog = page.getByRole('dialog', { name: 'Share report.md' });
+    await dialog.getByRole('button', { name: 'Copy link' }).click();
+    // The dialog finds the link that was committed and copies it; it does not ask for a retry.
+    await expect(dialog.getByRole('status')).toContainText('Link copied.');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(
+      /\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/,
+    );
+    await expect(dialog.getByTestId('share-link-row')).toHaveCount(1);
+    expect(posts).toBe(1);
   } finally {
     await rm(root, { recursive: true, force: true });
     await cleanupUser(userId);
