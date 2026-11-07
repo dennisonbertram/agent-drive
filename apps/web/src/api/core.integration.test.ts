@@ -751,9 +751,9 @@ describe('Phase 1 core API', () => {
       await request(`/drives/${o.driveId}/shares`, o.token, 'POST', { path: '/u/a.bin' }),
     );
     const shareStatus = async () =>
-      (
-        await json(await request(`/drives/${o.driveId}/shares`, o.token))
-      ).items.find((item: { id: string }) => item.id === share.id).status;
+      (await json(await request(`/drives/${o.driveId}/shares`, o.token))).items.find(
+        (item: { id: string }) => item.id === share.id,
+      ).status;
     const state = async () =>
       (
         await pool.query('SELECT current_version_id, deleted_at FROM files WHERE drive_id = $1', [
