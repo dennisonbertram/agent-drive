@@ -4,7 +4,11 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { handleApiRequest, handleConsoleApiRequest } from '../api/handler';
+import {
+  handleApiRequest,
+  handleConsoleApiRequest,
+  handlePublicShareRequest,
+} from '../api/handler';
 
 const pool = new Pool({
   connectionString:
@@ -267,6 +271,72 @@ describe('Phase 4 console API', () => {
     const ids = `SELECT id FROM files WHERE drive_id = $1 AND path = '/outputs/m.bin'`;
     await pool.query(`DELETE FROM file_events WHERE file_id IN (${ids})`, [ownerDriveId]);
     await pool.query(`DELETE FROM files WHERE id IN (${ids})`, [ownerDriveId]);
+  });
+
+  it('console creates, lists and revokes share links with same-origin checks', async () => {
+    const driveId = ownerDriveId;
+    const shareFile = '/share-me.bin';
+    await pool.query('INSERT INTO files (drive_id, path) VALUES ($1, $2)', [driveId, shareFile]);
+    const file = (
+      await pool.query('SELECT id FROM files WHERE drive_id = $1 AND path = $2', [
+        driveId,
+        shareFile,
+      ])
+    ).rows[0].id as string;
+    const object = `console-share-${suffix}`;
+    const version = (
+      await pool.query(
+        `INSERT INTO versions (file_id, drive_id, object_key, ciphertext_size, wrapped_key, agent_id)
+         VALUES ($1, $2, $3, 100, $4, $5) RETURNING id`,
+        [file, driveId, object, 'w'.repeat(82), ownerConsoleAgentId],
+      )
+    ).rows[0].id as string;
+    await pool.query('UPDATE files SET current_version_id = $1 WHERE id = $2', [version, file]);
+    const base = `/drives/${driveId}/shares`;
+    const body = { path: shareFile, versionId: version };
+
+    const noOrigin = await consoleRequest(ownerUserId, base, 'POST', body, null);
+    expect((await json(noOrigin)).error.code).toBe('permission_denied');
+
+    const created = await consoleRequest(ownerUserId, base, 'POST', body);
+    expect(created.status).toBe(201);
+    const share = await json(created);
+    expect(share.versionId).toBe(version);
+
+    const status = async () =>
+      (await json(await consoleRequest(ownerUserId, base))).items.find(
+        (s: { id: string }) => s.id === share.id,
+      ).status;
+    expect(await status()).toBe('active');
+    await consoleRequest(ownerUserId, `/drives/${driveId}/delete`, 'POST', { path: shareFile });
+    expect(await status()).toBe('unavailable');
+    await pool.query('UPDATE files SET deleted_at = NULL WHERE id = $1', [file]);
+    expect(await status()).toBe('active');
+
+    // Another owner is refused on this drive (existing behaviour: permission_denied).
+    expect((await consoleRequest(otherUserId, base)).status).toBe(403);
+    expect((await consoleRequest(otherUserId, base, 'POST', body)).status).toBe(403);
+    expect((await consoleRequest(otherUserId, `${base}/${share.id}`, 'DELETE')).status).toBe(403);
+    // Routes outside the allow-list stay closed.
+    expect((await consoleRequest(ownerUserId, `${base}/${share.id}`, 'GET')).status).toBe(404);
+    expect((await consoleRequest(ownerUserId, `${base}/${share.id}`, 'POST', {})).status).toBe(404);
+    expect((await consoleRequest(ownerUserId, base, 'DELETE')).status).toBe(404);
+    expect((await consoleRequest(ownerUserId, `${base}/${share.id}/x`, 'DELETE')).status).toBe(404);
+
+    expect(
+      (await consoleRequest(ownerUserId, `${base}/${share.id}`, 'DELETE', undefined, null)).status,
+    ).toBe(403);
+    const revoked = await consoleRequest(ownerUserId, `${base}/${share.id}`, 'DELETE');
+    expect((await json(revoked)).revokedAt).toBeTruthy();
+    expect(await status()).toBe('revoked');
+
+    const publicShare = await handlePublicShareRequest(share.id as string, true);
+    expect((await json(publicShare)).error.code).toBe('share_revoked');
+    await pool.query('DELETE FROM shares WHERE drive_id = $1', [driveId]);
+    await pool.query('UPDATE files SET current_version_id = NULL WHERE id = $1', [file]);
+    await pool.query('DELETE FROM file_events WHERE file_id = $1', [file]);
+    await pool.query('DELETE FROM versions WHERE file_id = $1', [file]);
+    await pool.query('DELETE FROM files WHERE id = $1', [file]);
   });
 
   it('paginates trash, overrides submitted attribution, and reports isolated usage', async () => {
