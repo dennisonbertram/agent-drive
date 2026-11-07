@@ -7,11 +7,11 @@ import { CopyButton } from '../copy-button';
 /** Body of the "Load the key" dialog. Errors stay here so the dialog never changes size. */
 export function UnlockDialog({
   driveId,
-  pendingName,
+  pendingMessage,
   onKey,
 }: {
   driveId: string;
-  pendingName?: string | undefined;
+  pendingMessage?: string | undefined;
   onKey: (key: string) => void;
 }) {
   const [error, setError] = useState('');
@@ -48,7 +48,7 @@ export function UnlockDialog({
         Choose the recovery file for this drive. The key stays in this tab only. It is cleared when
         you reload, or after 30 minutes without use.
       </p>
-      {pendingName && <p>After the key loads, {pendingName} downloads.</p>}
+      {pendingMessage && <p>{pendingMessage}</p>}
       <div className="drop-box">
         <span className="button secondary">Choose recovery file</span>
         <small>or drop it here</small>

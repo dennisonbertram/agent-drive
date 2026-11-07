@@ -1499,3 +1499,239 @@ test('console row menu: arrow keys and spacing', async ({ page, context, baseURL
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('console preview: decrypts in the tab, never renders HTML or SVG, and revokes blob URLs', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-preview-'));
+  const driveKey = randomBytes(32).toString('base64url');
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'Preview drive' });
+    const agent = await post<{ id: string }>('agents', { name: 'Preview agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Preview key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: driveKey,
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    // A distinct sentinel per previewed file: none may appear in any request or console message.
+    const sentinels = Object.fromEntries(
+      [
+        'notes.md',
+        'evil.html',
+        'evil.svg',
+        'pixel.png',
+        'disguised.png',
+        'doc.pdf',
+        'swap.txt',
+      ].map((name) => [name, `SENTINEL-${name.replace('.', '-')}-${randomUUID()}`]),
+    ) as Record<string, string>;
+    const pdf = Buffer.from(
+      `%${sentinels['doc.pdf']}\n%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`,
+    );
+    const plaintext = {
+      'notes.md': `# Title\n<b>bold</b>\n${sentinels['notes.md']}\n`,
+      'evil.html': `<img src=x onerror="window.__pwned=1"><script>window.__pwned=1</script>${sentinels['evil.html']}`,
+      'evil.svg': `<svg xmlns="http://www.w3.org/2000/svg" onload="window.__pwned=1"/>${sentinels['evil.svg']}`,
+      'pixel.png': Buffer.concat([png, Buffer.from(sentinels['pixel.png']!)]),
+      'disguised.png': `<html><script>window.__pwned=1</script>${sentinels['disguised.png']}</html>`,
+      'swap.txt': sentinels['swap.txt']!,
+      'doc.pdf': pdf,
+      'big.log': Buffer.alloc(10.5 * 1024 * 1024, 'a'),
+    };
+    for (const [name, content] of Object.entries(plaintext)) {
+      const local = join(root, name);
+      await writeFile(local, content, { mode: 0o600 });
+      const upload = await cli(['put', local, `/p/${name}`, '--drive', drive.id], environment);
+      expect(upload.status, `upload ${name}: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    }
+    const recovery = join(root, 'right.key.json');
+    await writeFile(
+      recovery,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: drive.id, key: driveKey }),
+    );
+    await page.addInitScript(() => {
+      const w = window as unknown as { __made: string[]; __revoked: string[] };
+      w.__made = [];
+      w.__revoked = [];
+      (w as unknown as { __imgErrors: string[] }).__imgErrors = [];
+      window.addEventListener(
+        'error',
+        (event) => {
+          if (event.target instanceof HTMLImageElement)
+            (w as unknown as { __imgErrors: string[] }).__imgErrors.push(event.target.src);
+        },
+        true,
+      );
+      const make = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (blob: Blob | MediaSource) => {
+        const url = make(blob);
+        w.__made.push(`${(blob as Blob).type}|${url}`);
+        return url;
+      };
+      URL.revokeObjectURL = (url: string) => {
+        w.__revoked.push(url);
+        revoke(url);
+      };
+    });
+    // Every request (any URL, method, header, body) and every console message.
+    const requests: string[] = [];
+    const consoleText: string[] = [];
+    page.on('request', (request) =>
+      requests.push(
+        `${request.method()} ${request.url()} ${JSON.stringify(request.headers())} ${request.postData() ?? ''}`,
+      ),
+    );
+    page.on('console', (message) => consoleText.push(message.text()));
+    page.on('pageerror', (error) => consoleText.push(String(error)));
+
+    await page.goto('/console?path=/p');
+    const nameButton = (name: string) => page.getByTitle(`Preview ${name}`, { exact: true });
+    const preview = (name: string) => page.getByRole('dialog', { name });
+
+    // 1. No key: the unlock dialog says the file opens afterwards, then the text is escaped.
+    await nameButton('notes.md').click();
+    await expect(page.getByText('After the key loads, notes.md opens.')).toBeVisible();
+    await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+    await expect(preview('notes.md').locator('pre.preview-text')).toHaveText(
+      `# Title\n<b>bold</b>\n${sentinels['notes.md']}\n`,
+    );
+    await expect(preview('notes.md').locator('b')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // 2. HTML and SVG are source text. A PNG whose bytes are HTML is not rendered as HTML.
+    for (const name of ['evil.html', 'evil.svg']) {
+      await nameButton(name).click();
+      const panel = preview(name);
+      await expect(panel.locator('pre.preview-text')).toContainText(
+        name === 'evil.html' ? 'onerror="window.__pwned=1"' : 'onload="window.__pwned=1"',
+      );
+      await expect(panel.locator('iframe, img, svg, script')).toHaveCount(0);
+      expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+        undefined,
+      );
+      await page.keyboard.press('Escape');
+    }
+    await nameButton('disguised.png').click();
+    await expect(page.getByRole('dialog', { name: 'disguised.png' })).toBeVisible();
+    await expect(page.getByText('This image could not be shown.')).toBeVisible();
+    // A real image error event fired for the blob URL the console made for this file.
+    const madeNow = await page.evaluate(() => (window as unknown as { __made: string[] }).__made);
+    const disguisedUrl = madeNow.at(-1)!.split('|')[1];
+    expect(madeNow.at(-1)).toMatch(/^image\/png\|blob:/);
+    expect(
+      await page.evaluate(() => (window as unknown as { __imgErrors: string[] }).__imgErrors),
+    ).toContain(disguisedUrl);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+      undefined,
+    );
+    await page.keyboard.press('Escape');
+
+    // 3. A real image comes from a console-typed blob and is revoked on Esc.
+    await nameButton('pixel.png').click();
+    const image = preview('pixel.png').locator('img');
+    await expect(image).toBeVisible();
+    expect(await image.getAttribute('src')).toMatch(/^blob:/);
+    expect(await image.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+    const imageUrl = await image.getAttribute('src');
+    await page.keyboard.press('Escape');
+    expect(
+      await page.evaluate(() => (window as unknown as { __revoked: string[] }).__revoked),
+    ).toContain(imageUrl);
+    await expect(nameButton('pixel.png')).toBeFocused();
+
+    // 4. PDF: never embedded. Closing without opening revokes at once; opening goes to a tab
+    // with no opener, and the URL stays alive for the new tab.
+    await nameButton('doc.pdf').click();
+    await expect(preview('doc.pdf').getByText('PDF files open in a separate tab.')).toBeVisible();
+    await expect(page.locator('dialog iframe, dialog embed, dialog object')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await nameButton('doc.pdf').click();
+    const openPdf = preview('doc.pdf').getByRole('button', { name: 'Open PDF in new tab' });
+    await expect(openPdf).toBeEnabled();
+    const popupPromise = context.waitForEvent('page');
+    await openPdf.click();
+    const popup = await popupPromise;
+    expect(await popup.evaluate(() => window.opener)).toBeNull();
+    const pdfUrls = (
+      await page.evaluate(() => (window as unknown as { __made: string[] }).__made)
+    ).filter((entry) => entry.startsWith('application/pdf|'));
+    expect(pdfUrls).toHaveLength(2);
+    await page.keyboard.press('Escape');
+    const revokedNow = await page.evaluate(
+      () => (window as unknown as { __revoked: string[] }).__revoked,
+    );
+    expect(revokedNow).toContain(pdfUrls[0]!.split('|')[1]);
+    expect(revokedNow).not.toContain(pdfUrls[1]!.split('|')[1]);
+    await popup.close();
+
+    // 5. Over the cap: no request for the file.
+    const before = requests.length;
+    await nameButton('big.log').click();
+    await expect(page.getByText(/Too large to preview/)).toBeVisible();
+    expect(requests.slice(before).some((entry) => entry.includes('big.log'))).toBe(false);
+    await page.keyboard.press('Escape');
+
+    // 5b. The preview shows the version that was listed, even if an agent replaced the file
+    // after the list loaded: the request is pinned to that version id.
+    const swapLocal = join(root, 'swap-big.txt');
+    await writeFile(swapLocal, Buffer.alloc(10.5 * 1024 * 1024, 'b'));
+    const current = (await (
+      await context.request.get(
+        `/api/console/drives/${drive.id}/get?path=%2Fp%2Fswap.txt&metadataOnly=1`,
+      )
+    ).json()) as { id: string };
+    const swapped = await cli(
+      ['put', swapLocal, '/p/swap.txt', '--drive', drive.id, '--if-version', current.id],
+      environment,
+    );
+    expect(swapped.status, swapped.stderr.slice(0, 300)).toBe(0);
+    const beforeSwap = requests.length;
+    await nameButton('swap.txt').click();
+    await expect(preview('swap.txt').locator('pre.preview-text')).toHaveText(
+      sentinels['swap.txt']!,
+    );
+    expect(
+      requests
+        .slice(beforeSwap)
+        .some((entry) => /\/get\?path=%2Fp%2Fswap\.txt&versionId=/.test(entry)),
+    ).toBe(true);
+    await page.keyboard.press('Escape');
+
+    // 6. Neither the key nor any previewed plaintext crossed the network, console or storage.
+    await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
+    const outbound = [...requests, ...consoleText].join('\n');
+    expect(outbound).not.toContain(driveKey);
+    for (const value of [...Object.values(sentinels), '<b>bold</b>'])
+      expect(outbound).not.toContain(value);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});
