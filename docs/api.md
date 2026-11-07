@@ -44,7 +44,7 @@ overwrite does.
 `restore` with no `versionId`, or with the file's current version, undeletes a trashed file: it returns the existing version with 200, creates no version or copy, and does not check quota; on a live file it does nothing. Restoring any other version copies it as a new current version and returns 201.
 
 `recent` returns file-operation events (`put`, `copy`, `restore`, `move`, `delete`) in commit
-order (guaranteed for events written after migration 0015; older events are ordered by their timestamps). Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
+order. Pass the `latestCursor` from one response as `cursor` to get only newer events; with a
 cursor the order is exact and `since` is ignored. Without a cursor, the optional exclusive `since`
 timestamp compares with the transaction start time, so it is approximate. `latestCursor` is the last
 item's cursor, or the request cursor when there are no new events (`null` if none). Cursors from
@@ -56,11 +56,6 @@ the machine actor is taken from `x-agent-drive-machine`.
 
 Production API requests must use HTTPS based on the request URL protocol; forwarded headers cannot
 override this check. HTTP is allowed in local and test environments.
-
-Expired upload staging is cleaned opportunistically on new upload requests. Operators should also
-run `pnpm --dir apps/web maintenance:cleanup-expired-uploads` periodically for idle installations
-and configure a one-day object-store lifecycle rule limited to `staging/`. Immutable `objects/`
-must not be covered by that rule.
 
 Audit entries contain the authenticated key/account/agent IDs, fixed route action, outcome, safe
 error code, and HTTP status. They omit bodies, tokens, wrapped keys, object URLs, and paths. If the
@@ -78,7 +73,7 @@ outside the key's drives, returns 404. `GET /drives` includes `key_backup_at` an
 
 ## Device authorization (agent login)
 
-Full contract: `docs/agent-login.md` sections 2, 7, and 8. These endpoints use no API key.
+These endpoints use no API key.
 
 - `POST /api/oauth/device_authorization` with `client_name`, `machine` (optional), `public_key`,
   optional `known_drive_ids` (up to 20 UUIDs; JSON array, or repeated or comma-separated form
@@ -104,8 +99,8 @@ Full contract: `docs/agent-login.md` sections 2, 7, and 8. These endpoints use n
   account gets 30 device calls and 10 `not_found` results per 10 minutes; beyond that, 429
   `rate_limited`. Revoking an agent denies its approved but unredeemed requests.
 - A key missing a scope gets 403 `permission_denied`: `The API key lacks the "<scope>" scope.`
-- Grant by an existing agent (agent-login.md section 14). `GET /api/v1/device/:code` with a `delegate` key returns `{ user_code, client_name, machine, created_at, expires_at, public_key }` for a pending, unexpired request, else 404. `POST /api/v1/device/:code/grant` with `{ driveId, scopes, writePaths, sealedDriveKey: { epk, iv, ct } }` records an offer for the caller's account and returns `{ status: 'offered', revision }`; a repeat replaces the offer and raises the revision. It must pass `assertDelegation` (403). It does not approve: the human approves on `/connect`. Both routes share the console device-code budget per account: 30 calls, and 10 `not_found` results, per 10 minutes; past either, 429 `rate_limited`. Audit actions `device.read` and `device.grant`. The console `GET /device/:code` also returns `offer` and `offerRevision`; the approve body carries `offerRevision`, and a stale one returns 409 `The request changed; reload the page.`
+- Grant by an existing agent (delegation). `GET /api/v1/device/:code` with a `delegate` key returns `{ user_code, client_name, machine, created_at, expires_at, public_key }` for a pending, unexpired request, else 404. `POST /api/v1/device/:code/grant` with `{ driveId, scopes, writePaths, sealedDriveKey: { epk, iv, ct } }` records an offer for the caller's account and returns `{ status: 'offered', revision }`; a repeat replaces the offer and raises the revision. It must pass `assertDelegation` (403). It does not approve: the human approves on `/connect`. Both routes share the console device-code budget per account: 30 calls, and 10 `not_found` results, per 10 minutes; past either, 429 `rate_limited`. Audit actions `device.read` and `device.grant`. The console `GET /device/:code` also returns `offer` and `offerRevision`; the approve body carries `offerRevision`, and a stale one returns 409 `The request changed; reload the page.`
 - A key with `writePaths` (`POST /api/v1/keys` and the approve body accept `writePaths`: at most 16 canonical absolute paths, not `/`; `GET /keys` returns `write_paths`; `whoami` returns `writePaths`) may only put, move, copy, delete and restore at or under those paths, else 403 `permission_denied`: `The API key may only write under <paths>.` An empty list means no limit. Reads are not limited. The console is not affected.
 - Delegated `POST /api/v1/keys`: a key that holds `delegate` but not `manage` may call it with `agentName` (1 to 64 characters) instead of `agentId`, plus `label`, `driveIds`, `scopes` and optional `writePaths`. The request must pass `assertDelegation` (403 `A key cannot grant more than it holds.`; 403 naming the scope without `delegate`). The server always creates a new agent of that name; an existing name returns 409 `conflict`: `An agent named "<name>" already exists; choose another name.` `agentId` from such a caller returns 400. The key records `issued_by_agent_id` (the caller's agent), which `GET /keys` returns. `DELETE /keys/:id` (a `manage` call) revokes the issued key alone; revoking the issuer does not cascade. Audit action stays `keys.create`.
 - Audit actions: `device.authorize`, `device.token`, `console.device.read`,
-  `console.device.approve`, `console.device.deny`. Maintenance deletes requests older than 24 hours.
+  `console.device.approve`, `console.device.deny`.

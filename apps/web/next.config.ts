@@ -9,12 +9,6 @@ const WANTS_MARKDOWN = [
 
 const nextConfig: NextConfig = {
   logging: { incomingRequests: true },
-  // docs/*.md live outside apps/web; the allowlist in src/content/docs.ts decides which are read.
-  outputFileTracingIncludes: {
-    '/md/[...slug]': ['../../docs/*.md'],
-    '/docs/[slug]': ['../../docs/*.md'],
-    '/llms-full.txt': ['../../docs/*.md'],
-  },
   async rewrites() {
     return {
       beforeFiles: [
