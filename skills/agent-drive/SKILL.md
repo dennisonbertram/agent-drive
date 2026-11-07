@@ -53,7 +53,7 @@ paste the bundle into a chat, a file in a drive, or a log.
 ## Adding another agent
 
 Run `agent-drive login` on the new agent's machine. If the human has the drive's recovery file or
-credentials bundle, they choose "Add to an existing drive instead" on the approval page; their
+credentials bundle, they open Details on the approval page and choose "Use one of my drives instead"; their
 browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
 
 If the new agent has a shell and a human is present, let it run `agent-drive login`, then (if your
@@ -62,7 +62,7 @@ for read only). You seal the drive key to that login; the human clicks Approve o
 which shows the offer. Nothing secret is printed or sent in the clear.
 
 Which handoff when: `grant` (you hold `delegate`, new agent has a shell, human present); the
-human's "Add to an existing drive instead" on `/connect` (the human holds the recovery file or
+human opens Details on `/connect` and chooses "Use one of my drives instead" (the human holds the recovery file or
 bundle); `credentials issue` (a sandbox with no browser).
 
 A sandbox, CI job, or anything set up without a browser: if your key has `delegate` (check

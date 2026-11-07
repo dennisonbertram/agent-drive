@@ -470,7 +470,8 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
 ## 12. Add a first-time agent to an existing drive (handoff b)
 
 - When a request would create a new drive (`creates_drive`) and the account already has drives,
-  `/connect` shows the text button "Add to an existing drive instead". Reconnects do not show it.
+  `/connect` shows the text link "Use one of my drives instead (needs its recovery file)" inside the
+  collapsed Details section. Reconnects do not show it.
   The default one-click view is otherwise unchanged.
 - The human picks a drive and supplies its key in the browser: a pasted key or `adcred1.` bundle,
   or a recovery file or bundle file. The key is checked with `decodeDriveKey`, sealed to the
@@ -535,7 +536,7 @@ offer was withdrawn; run agent-drive login again.` No key is issued.
 - Budget: both bearer routes call `takeConsoleAttempt` for the caller's account (30 calls, 10
   `not_found`, per 10 minutes; 429 beyond that), the same budget as the console routes.
 - Which handoff when: `grant` for a new agent with a shell while a human is present and a
-  `delegate` holder has the drive; `/connect` "Add to an existing drive instead" when the human
+  `delegate` holder has the drive; on `/connect` the human opens Details and chooses "Use one of my drives instead" when the human
   holds recovery material; `credentials issue` (§13) for a sandbox with no browser.
 - Revoking the granting agent after exchange does not revoke the grantee; each key is revoked
   alone.

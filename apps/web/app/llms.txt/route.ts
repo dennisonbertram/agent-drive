@@ -86,8 +86,8 @@ approve again for each run.
 ## Adding another agent to your drive
 
 Run \`agent-drive login${api}\` on the new agent's machine. If the human has the drive's recovery file
-or credentials bundle, they choose "Add to an existing drive instead" on the approval page,
-pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
+or credentials bundle, they open Details on the approval page and choose "Use one of my drives instead" (needs the
+drive's recovery file), pick the drive, and give the key there. Their browser seals it to the new agent; Agent Drive
 never sees it. They can make the new agent read-only or limit its writes to one folder.
 
 If you already hold the drive and your key has \`delegate\`, and a human is present, let the new
@@ -97,8 +97,8 @@ You seal the drive key to that login; the human clicks Approve once on the page,
 "Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
 
 Which handoff when: the new agent has a shell and a human is present, use \`grant\` if you hold
-\`delegate\`, else the human's "Add to an existing drive instead" on the approval page (they need
-the recovery file); a sandbox with no browser, use \`credentials issue\`.
+\`delegate\`, else the human opens Details on the approval page and chooses "Use one of my drives
+instead" (they need the recovery file); a sandbox with no browser, use \`credentials issue\`.
 
 ## Several agents on one drive
 
