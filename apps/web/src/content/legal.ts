@@ -26,7 +26,7 @@ Agent Drive encrypts file contents on your machine with AES-256-GCM before uploa
 
 ## Sign-in
 
-We use Clerk to sign you in. Depending on how we configure it, you can use GitHub, Google, or email. Clerk receives your sign-in details and sets the session cookies that keep you signed in. If you choose Google, we use it only to identify you. We do not read your Gmail, Google Drive, or other Google data. [TBD: confirm the exact Google scopes requested in Clerk.]
+We use Clerk to sign you in with email, GitHub, or Google. Clerk receives your sign-in details and sets the session cookies that keep you signed in. Google sign-in requests the scopes openid, email, and profile. GitHub sign-in requests user:email and read:user, which give read-only access to your email and profile. We use these only to identify you. We do not read your Gmail, Google Drive, GitHub repositories, or other data in those accounts.
 
 ## Cookies
 
@@ -37,9 +37,8 @@ We set only the cookies needed to sign you in and keep your session. We do not r
 - Vercel: hosts the website and API.
 - Neon: hosts our Postgres database (through Vercel).
 - [TBD: object storage provider, Amazon S3 or Cloudflare R2]: stores your encrypted files.
-- Clerk: sign-in and sessions.
+- Clerk: sign-in and sessions. Clerk also sends sign-in and verification emails. We do not send email ourselves.
 - Stripe: payments and subscriptions.
-- Resend: sends billing emails, if enabled. [TBD: confirm email is enabled in production.]
 
 These providers also keep their own logs under their own policies. Our storage provider may keep access logs for [TBD: log retention period].
 
@@ -78,7 +77,7 @@ You must give accurate information and keep your sign-in and API keys safe. You 
 
 ## Your keys and recovery
 
-Your drive key is created and held on your machine. We never receive it, so we cannot recover your files if you lose it. Save your recovery file and passphrase somewhere safe. If you lose both, the encrypted data is gone for good. We cannot reset this for you.
+Your drive key is created and held on your machine. We never receive it, so we cannot recover your files if you lose it. Keep your recovery file and your agent credentials somewhere safe. If you lose the drive key and have no recovery file, the encrypted data is gone for good. We cannot reset this for you.
 
 ## Your content
 
