@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "installCommand": "pnpm --dir ../.. install --frozen-lockfile",
   "buildCommand": "pnpm --dir ../../packages/agent-drive build && mkdir -p public/cli && npm pack --pack-destination public/cli ../../packages/agent-drive && mv public/cli/agent-drive-*.tgz public/cli/agent-drive.tgz && pnpm build",
-  "git": { "deploymentEnabled": false },
+  "git": { "deploymentEnabled": { "**": false, "prod": true } },
   "crons": [
     { "path": "/api/cron/maintenance?job=cleanup", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/maintenance?job=billing", "schedule": "0 * * * *" }
