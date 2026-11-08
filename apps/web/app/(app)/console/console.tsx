@@ -1174,6 +1174,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     open('unlock');
     return undefined;
   }
+  function showTraces() {
+    go({ path: '/traces', view: 'recent' });
+    setFileRefresh((n) => n + 1);
+  }
   // Opens the webhook dialog; with a key it starts setting up straight away.
   function openTraces(key?: TracesKey) {
     setTracesResume(key);
@@ -1892,6 +1896,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               formatSize={size}
                               onSelect={selectDrive}
                               onNewDrive={() => open('drive')}
+                              onTraces={showTraces}
+                              onCapture={() => openTraces()}
                               disabled={busy || !ready}
                             />
                             {(sharedView ? [] : crumbs(folder)).map((crumb, index, all) => (
@@ -2019,10 +2025,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               type="button"
                               className="button secondary trace-btn"
                               data-testid="traces-link"
-                              onClick={() => {
-                                go({ path: '/traces', view: 'recent' });
-                                setFileRefresh((n) => n + 1);
-                              }}
+                              onClick={showTraces}
                             >
                               Traces
                             </button>

@@ -1117,14 +1117,13 @@
   }
   .toolbar-key {
     order: 1;
-    flex-wrap: wrap;
-    gap: 6px;
-    max-width: 100%;
   }
-  /* Traces and Capture sit beside the key chip so the phone header does not grow */
+  /* On phones Traces and Capture live in the drive menu, so the header is no taller than before */
   .toolbar-key .trace-btn {
-    padding: 0 6px;
-    font-size: 12px;
+    display: none;
+  }
+  .drive-menu .drive-trace-item {
+    display: grid;
   }
   .toolbar-key .drive-id,
   .toolbar-key .copy-button {
@@ -1350,6 +1349,9 @@
 .drive-menu.disabled .drive-menu-button {
   pointer-events: none;
   color: var(--muted, #6b6963);
+}
+.drive-trace-item {
+  display: none;
 }
 .drive-option {
   display: grid;

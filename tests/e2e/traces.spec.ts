@@ -247,3 +247,39 @@ test('traces: the dialog cannot be closed while a token is being created, and re
     await cleanupUser(userId);
   }
 });
+
+test('traces: on a phone the header buttons give way to the drive menu', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    const created = await context.request.post('/api/console/drives', {
+      data: { name: 'Trace drive' },
+      headers: { Origin: baseURL! },
+    });
+    const driveId = ((await created.json()) as { id: string }).id;
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/console?drive=${driveId}`);
+    await expect(page.getByTestId('traces-link')).toBeHidden();
+    await expect(page.getByTestId('capture-link')).toBeHidden();
+
+    await page.getByTestId('drive-menu-button').click();
+    await expect(page.getByRole('button', { name: 'Traces', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Traces', exact: true }).click();
+    await expect(page).toHaveURL(/path=%2Ftraces/);
+    await expect(page).toHaveURL(/view=recent/);
+
+    await page.getByTestId('drive-menu-button').click();
+    await page.getByRole('button', { name: 'Capture traces…' }).click();
+    await expect(dialog(page)).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
