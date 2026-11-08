@@ -623,10 +623,24 @@ export class AgentDriveClient {
       throw new TypeError('Create-only writes cannot include ifVersionId.');
     }
     const encrypted = await encryptFile(plaintext, this.keyFor(driveId));
+    return this.putEncrypted(driveId, path, encrypted.ciphertext, encrypted.wrappedKey, options);
+  }
+
+  /** Uploads bytes that were already encrypted with `encryptFile`. */
+  async putEncrypted(
+    driveId: string,
+    path: string,
+    ciphertext: Uint8Array<ArrayBuffer>,
+    wrappedKey: string,
+    options: PutOptions = {},
+  ) {
+    if (options.mode === 'create' && options.ifVersionId !== undefined) {
+      throw new TypeError('Create-only writes cannot include ifVersionId.');
+    }
     const body: Record<string, unknown> = {
       path,
-      ciphertextSize: encrypted.ciphertext.byteLength,
-      wrappedKey: encrypted.wrappedKey,
+      ciphertextSize: ciphertext.byteLength,
+      wrappedKey,
     };
     if (options.tags !== undefined) body.tags = options.tags;
     if (options.description !== undefined) body.description = options.description;
@@ -640,7 +654,7 @@ export class AgentDriveClient {
     }>(`drives/${encode(driveId)}/put`, { method: 'POST', body: JSON.stringify(body) });
     await this.storage(intent.uploadUrl, {
       method: 'PUT',
-      body: encrypted.ciphertext,
+      body: ciphertext,
       headers: { 'content-type': 'application/octet-stream' },
     });
     const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
