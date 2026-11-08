@@ -17,10 +17,14 @@ function fromB64u(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
+/** HKDF salt and the label used as both HKDF info and AES-GCM AAD. Default is the device seal. */
+export type SealContext = { salt: string; label: string };
+
 export async function sealDriveKey(
   agentPublicKey: string,
   driveId: string,
   driveKey: string,
+  context: SealContext = { salt: 'agent-drive-device-v1', label: driveId },
 ): Promise<SealedKey> {
   const subtle = globalThis.crypto.subtle;
   const raw = fromB64u(agentPublicKey);
@@ -41,8 +45,8 @@ export async function sealDriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: enc.encode('agent-drive-device-v1'),
-      info: enc.encode(driveId),
+      salt: enc.encode(context.salt),
+      info: enc.encode(context.label),
     },
     hkdf,
     { name: 'AES-GCM', length: 256 },
@@ -51,7 +55,7 @@ export async function sealDriveKey(
   );
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   const ct = await subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: enc.encode(driveId) },
+    { name: 'AES-GCM', iv, additionalData: enc.encode(context.label) },
     aes,
     enc.encode(driveKey),
   );
