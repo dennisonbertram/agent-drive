@@ -47,6 +47,11 @@ export function driveKeyFromRecoveryText(text: string, driveId: string): string 
   return file.key;
 }
 
+/** Where pasted text came from: a credentials bundle names its drive, a raw key does not. */
+export function keySource(text: string): 'bundle' | 'pasted' {
+  return text.trim().startsWith(BUNDLE_PREFIX) ? 'bundle' : 'pasted';
+}
+
 export function driveKeyFromPastedText(text: string, driveId: string): string {
   const pasted = text.trim();
   if (pasted.startsWith(BUNDLE_PREFIX)) return fromBundle(pasted, driveId);

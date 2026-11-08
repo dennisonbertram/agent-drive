@@ -48,6 +48,7 @@ const LABELS: Record<string, string> = {
   'console.drive.webhook_token.read': 'Viewed the webhook token',
   'console.drive.webhook_token.create': 'Created a webhook token',
   'console.drive.webhook_token.revoke': 'Revoked the webhook token',
+  'webhook.trace.ingest': 'Received a trace from OpenRouter',
   'whoami.read': 'Checked who the key belongs to',
   'billing.read': 'Viewed billing',
   'billing.statements.list': 'Viewed billing statements',

@@ -1,7 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { driveKeyFromPastedText, driveKeyFromRecoveryText } from '@/src/console/recovery-file';
+import {
+  driveKeyFromPastedText,
+  driveKeyFromRecoveryText,
+  keySource,
+} from '@/src/console/recovery-file';
+import type { Source } from '@/src/console/webhook-setup';
 import { CopyButton } from '../copy-button';
 import { NewPassphraseForm, PassphraseForm, ResetForm } from './vault-forms';
 
@@ -28,7 +33,7 @@ export function UnlockDialog({
 }: {
   driveId: string;
   pendingMessage?: string | undefined;
-  onKey: (key: string) => void;
+  onKey: (key: string, source: Exclude<Source, 'trusted'>) => void;
   mode: UnlockMode;
   onMode: (mode: UnlockMode) => void;
   vault: VaultActions;
@@ -67,7 +72,7 @@ export function UnlockDialog({
       // An oversize file is rejected without reading it; '' fails the same way as non-JSON.
       const text = file.size > 16_384 ? '' : await file.text();
       if (mine !== attempt.current) return;
-      onKey(driveKeyFromRecoveryText(text, driveId));
+      onKey(driveKeyFromRecoveryText(text, driveId), 'recovery-file');
     } catch (reason) {
       if (mine !== attempt.current) return;
       setError(reason instanceof Error ? reason.message : 'That file could not be read.');
@@ -147,7 +152,7 @@ export function UnlockDialog({
             setError('');
             attempt.current += 1;
             try {
-              onKey(driveKeyFromPastedText(pasted, driveId));
+              onKey(driveKeyFromPastedText(pasted, driveId), keySource(pasted));
             } catch (reason) {
               setError(reason instanceof Error ? reason.message : 'That key is not valid.');
             }

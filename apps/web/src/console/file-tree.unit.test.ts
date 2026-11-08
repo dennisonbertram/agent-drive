@@ -150,6 +150,8 @@ describe('crumbs, listPrefix, fileKind', () => {
   it('listPrefix', () => {
     expect(listPrefix('/')).toBeNull();
     expect(listPrefix('/a')).toBe('/a');
+    // The Traces button sends this prefix with the Recent request.
+    expect(listPrefix(folderFromParam('/traces'))).toBe('/traces');
   });
   it('fileKind', () => {
     expect(fileKind('A.MD')).toBe('text');

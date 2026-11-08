@@ -247,6 +247,17 @@ export class Vault {
     return { status: 'key', key };
   }
 
+  /** The drive key from its slot, unchecked: the caller verifies it (`verifyKey`) before relying on it. */
+  async slotKey(driveId: string): Promise<string | null> {
+    const epoch = this.epoch;
+    const slot = this.slots.get(driveId);
+    if (!slot || !this.privateKey) return null;
+    const key = await unsealFromAccount(this.privateKey, slot.keyId, driveId, slot.sealed).catch(
+      () => null,
+    );
+    return epoch === this.epoch ? key : null;
+  }
+
   /** True if `key` opens this wrapped file key (v2 through the drive's inbox record). */
   private async opens(driveId: string, wrapped: string, key: string) {
     let version: 1 | 2;
