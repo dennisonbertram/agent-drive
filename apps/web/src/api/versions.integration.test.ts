@@ -3,8 +3,11 @@ import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, type PoolClient } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { lockBillingAccount } from '../billing/ledger';
+import { CopyObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { handleApiRequest } from './handler';
+import { storageBucket, storageClient } from './storage';
 import { commitPut, putConflict } from './versions';
 
 const pool = new Pool({
@@ -194,5 +197,45 @@ describe('putConflict', () => {
       locked(f, (c) => putConflict(c, f.driveId, '/a.bin', 'create')),
     ).rejects.toMatchObject({ details: { state: 'trashed' } });
     expect(await versionCount()).toBe(1);
+  });
+});
+
+describe('commitIntent quota check', () => {
+  it('rejects a commit over the drive quota without copying any object', async () => {
+    const f = await fixture(100);
+    const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
+    await pool.query(
+      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes)
+       VALUES ($1, $2, 'q', encode(sha256(convert_to($3, 'UTF8')), 'hex'), $4::uuid[], ARRAY['write']::text[])`,
+      [f.accountId, f.agentId, token, [f.driveId]],
+    );
+    const call = (path: string, body: unknown) =>
+      handleApiRequest(
+        new Request(`http://agent-drive.test/api/v1/drives/${f.driveId}/${path}`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      );
+    const intent = await (
+      await call('put', { path: '/q.bin', ciphertextSize: 10, wrappedKey: 'k' })
+    ).json();
+    const upload = await fetch(intent.uploadUrl, { method: 'PUT', body: new Uint8Array(10) });
+    expect(upload.ok).toBe(true);
+    await pool.query('UPDATE drives SET quota_bytes = 5 WHERE id = $1', [f.driveId]);
+    const send = vi.spyOn(storageClient(), 'send');
+    const commit = await call('commit', { intentId: intent.intentId });
+    const copies = send.mock.calls.filter(([command]) => command instanceof CopyObjectCommand);
+    send.mockRestore();
+    expect(copies).toHaveLength(0);
+    expect(commit.status).toBe(413);
+    expect((await commit.json()).error.code).toBe('quota_exceeded');
+    const listed = await storageClient().send(
+      new ListObjectsV2Command({
+        Bucket: storageBucket(),
+        Prefix: `objects/${f.accountId}/${f.driveId}/`,
+      }),
+    );
+    expect(listed.Contents ?? []).toHaveLength(0);
   });
 });

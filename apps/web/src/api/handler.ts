@@ -42,7 +42,7 @@ import {
   presignedDownload,
   presignedUpload,
 } from './storage';
-import { commitPut, putConflict, type PutMode } from './versions';
+import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
@@ -1812,8 +1812,9 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
           : lockedIntent.conditional_mode === 'version'
             ? { baseVersionId: lockedIntent.base_version_id as string }
             : 'unconditional';
-      // Report a conflict before copying the staged object; commitPut re-checks under the same locks.
+      // Report a conflict or quota failure before copying the staged object; commitPut re-checks under the same locks.
       await putConflict(client, driveId, source.path, mode);
+      await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
       try {
         await copyObject(lockedIntent.staging_key, finalKey, stagedEtag);
       } catch (error) {

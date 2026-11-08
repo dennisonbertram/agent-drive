@@ -70,6 +70,18 @@ export async function putConflict(
   return file;
 }
 
+/** Throws quota_exceeded if adding `size` bytes of versions would exceed the drive quota. */
+export async function checkDriveQuota(client: PoolClient, driveId: string, size: number) {
+  const used = await client.query(
+    'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
+    [driveId],
+  );
+  const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
+  if (Number(used.rows[0].used) + size > Number(quota.rows[0].quota_bytes)) {
+    throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
+  }
+}
+
 /**
  * Records a new version of a file: conflict checks, drive quota, files and versions rows and the
  * 'put' event. The caller holds lockBillingAccount and the drive row FOR UPDATE, has run
@@ -78,14 +90,7 @@ export async function putConflict(
  */
 export async function commitPut(client: PoolClient, input: CommitPutInput): Promise<Row> {
   const file = await putConflict(client, input.driveId, input.path, input.mode);
-  const used = await client.query(
-    'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
-    [input.driveId],
-  );
-  const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [input.driveId]);
-  if (Number(used.rows[0].used) + input.ciphertextSize > Number(quota.rows[0].quota_bytes)) {
-    throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
-  }
+  await checkDriveQuota(client, input.driveId, input.ciphertextSize);
   const versionId = input.versionId ?? randomUUID();
   const fileId = (file?.id as string | undefined) ?? randomUUID();
   if (!file) {
