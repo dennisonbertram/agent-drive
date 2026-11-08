@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   decryptWithFileKey,
   encryptFile,
   generateDriveKey,
+  unwrapFileKey,
 } from '../../../../packages/agent-drive/src/crypto.ts';
+import {
+  createTraceInbox,
+  sealFileKeyToInbox,
+} from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   addShareRow,
   createShareLink,
@@ -172,5 +177,39 @@ describe('recoverShareLink', () => {
       args,
     );
     expect(none).toBeNull();
+  });
+});
+
+describe('createShareLink with a trace inbox', () => {
+  const DRIVE = '33333333-3333-4333-8333-333333333333';
+  const base = (driveKey: string) => ({
+    origin: 'https://drive.test',
+    driveId: DRIVE,
+    path: '/t.json',
+    driveKey,
+    expiry: '7d' as const,
+  });
+
+  it('v2 envelope: loads the inbox and puts the unsealed file key in the fragment', async () => {
+    const { driveKey, ciphertext, plaintext, request } = await setup();
+    const v1 = (await request<{ wrappedKey: string }>('x')).wrappedKey;
+    const record = await createTraceInbox(DRIVE, driveKey);
+    const v2 = await sealFileKeyToInbox(await unwrapFileKey(v1, driveKey), {
+      driveId: DRIVE,
+      ...record,
+    });
+    const v2Request: Request = async <T>(path: string, method = 'GET', body?: unknown) =>
+      method === 'GET' ? ({ id: 'ver-1', wrappedKey: v2 } as T) : request<T>(path, method, body);
+    const inbox = vi.fn(async () => record);
+    const link = await createShareLink(v2Request, { ...base(driveKey), inbox });
+    expect(inbox).toHaveBeenCalledWith(DRIVE);
+    expect(await decryptWithFileKey(ciphertext, link.url.split('#k=')[1]!)).toEqual(plaintext);
+  });
+
+  it('v1 envelope never calls the loader', async () => {
+    const { driveKey, request } = await setup();
+    const inbox = vi.fn(async () => null);
+    await createShareLink(request, { ...base(driveKey), inbox });
+    expect(inbox).not.toHaveBeenCalled();
   });
 });

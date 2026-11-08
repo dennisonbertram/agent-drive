@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   DEFAULT_EXPIRY,
   createShareLink,
@@ -116,6 +117,7 @@ export function ShareDialog({
   driveKey,
   origin,
   request,
+  inbox,
   shares,
   onReload,
   onCreated,
@@ -126,6 +128,7 @@ export function ShareDialog({
   driveKey: string;
   origin: string;
   request: Request;
+  inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
   shares: SharesState | null;
   onReload: () => void;
   onCreated: (driveId: string, row: ShareRow) => void;
@@ -163,6 +166,7 @@ export function ShareDialog({
           path,
           driveKey,
           expiry,
+          inbox,
           onPrepared: (p) => {
             prepared = p;
           },
