@@ -28,6 +28,8 @@ export type VaultDeps = {
   strict: VaultRequest;
   /** Wrapped file key of the newest version of `path`, from the versions route. */
   envelope: (driveId: string, path: string) => Promise<string>;
+  /** Any live file of the drive, to check a key against. Undefined for an empty drive. */
+  anyPath: (driveId: string) => Promise<string | undefined>;
   onLocked?: ((reason: LockReason) => void) | undefined;
   onChange?: (() => void) | undefined;
 };
@@ -242,28 +244,30 @@ export class Vault {
   }
 
   /**
-   * Seals a drive key the user supplied into the account. With `path`, the key must first open
-   * that file's wrapped key. An existing slot is replaced only by a verified key.
+   * Seals a drive key into the account. Unless `trusted` (generated in this tab), the key must
+   * first open the wrapped key of a real file: `path`, else any file of the drive. A key that
+   * cannot be checked, or fails, is never sealed. `live` can cancel the write.
    */
   async addKey(
     driveId: string,
     key: string,
-    path?: string,
+    opts: { path?: string; trusted?: boolean; live?: () => boolean } = {},
   ): Promise<'added' | 'same' | 'skipped' | 'stale'> {
     const epoch = this.epoch;
+    const alive = () => epoch === this.epoch && (opts.live?.() ?? true);
     const record = this.record;
     const privateKey = this.privateKey;
     if (!record || !privateKey) return 'skipped';
-    let verified = false;
-    if (path !== undefined) {
+    if (!opts.trusted) {
       try {
+        const path = opts.path ?? (await this.deps.anyPath(driveId));
+        if (path === undefined) return 'skipped';
         await unwrapFileKey(await this.deps.envelope(driveId, path), key);
       } catch {
         return 'skipped';
       }
-      verified = true;
     }
-    if (epoch !== this.epoch) return 'stale';
+    if (!alive()) return 'stale';
     const existing = this.slots.get(driveId);
     if (existing) {
       const current = await unsealFromAccount(
@@ -273,10 +277,9 @@ export class Vault {
         existing.sealed,
       ).catch(() => null);
       if (current === key) return 'same';
-      if (!verified) return 'skipped';
     }
     const sealed = await sealToAccount(record.publicKey, record.id, driveId, key);
-    if (epoch !== this.epoch) return 'stale';
+    if (!alive()) return 'stale';
     try {
       const result = (await this.deps.request(`drives/${driveId}/account-key`, 'POST', {
         keyId: record.id,
@@ -310,21 +313,27 @@ export class Vault {
   /** Creates the account key, unlocks, and seals the given drive keys. */
   async setup(
     passphrase: string,
-    keys: Record<string, string>,
+    keys: Record<string, { key: string; trusted: boolean }>,
   ): Promise<{ added: number; total: number } | null> {
     const epoch = this.epoch;
+    const seq = this.unlockSeq;
+    // Checked after every await: Lock, idle, reset or a closed dialog cancel the whole setup.
+    const live = () => epoch === this.epoch && seq === this.unlockSeq;
     if (!this.accountId) await this.load();
+    if (!live()) return null;
     const { record, privateKey } = await createAccountKey(this.accountId, passphrase);
-    if (epoch !== this.epoch) return null;
+    if (!live()) return null;
+    const print = await fingerprint(record.publicKey);
+    if (!live()) return null;
     await this.deps.strict('account-key', 'POST', {
       id: record.id,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,
       kdf: record.kdf,
     });
-    if (epoch !== this.epoch) return null;
+    if (!live()) return null;
     this.record = record;
-    this.fingerprint = await fingerprint(record.publicKey);
+    this.fingerprint = print;
     this.privateKey = privateKey;
     this.slots = new Map();
     this.seen.set(record.id, record.wrapGeneration);
@@ -332,8 +341,10 @@ export class Vault {
     this.emit();
     let added = 0;
     const entries = Object.entries(keys);
-    for (const [driveId, key] of entries) {
-      if ((await this.addKey(driveId, key).catch(() => 'skipped')) === 'added') added += 1;
+    for (const [driveId, { key, trusted }] of entries) {
+      if (!live()) return null;
+      const result = await this.addKey(driveId, key, { trusted, live }).catch(() => 'skipped');
+      if (result === 'added') added += 1;
     }
     return { added, total: entries.length };
   }
@@ -341,12 +352,14 @@ export class Vault {
   /** Re-wraps the same private key under a new passphrase. Returns false if locked meanwhile. */
   async change(oldPassphrase: string, newPassphrase: string): Promise<boolean> {
     const epoch = this.epoch;
+    const seq = this.unlockSeq;
+    const live = () => epoch === this.epoch && seq === this.unlockSeq;
     const record = this.record;
     if (!record) throw new Error('No passphrase is set up.');
     const next = await this.withPassphrase(oldPassphrase, (p) =>
       rewrapAccountKey(record, this.accountId, p, newPassphrase),
     );
-    if (epoch !== this.epoch) return false;
+    if (!live()) return false;
     try {
       const result = (await this.deps.strict('account-key', 'PATCH', {
         expectedKeyId: record.id,
@@ -355,7 +368,7 @@ export class Vault {
         kdf: next.kdf,
       })) as { accountKey: unknown };
       const saved = await parseAccountKeyRecord(result.accountKey, this.accountId);
-      if (epoch !== this.epoch) return false;
+      if (!live()) return false;
       this.record = saved;
       this.seen.set(saved.id, saved.wrapGeneration);
       this.emit();

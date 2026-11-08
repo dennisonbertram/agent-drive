@@ -122,15 +122,14 @@ export function NewPassphraseForm({
     }
     const next = own ? first : generated;
     const previous = old;
+    // Typed values leave state before the slow work starts; a failure means typing them again.
+    setOld('');
+    setFirst('');
+    setSecond('');
     setBusy(true);
     const message = await onSubmit(previous, next);
     setBusy(false);
     if (message) setError(message);
-    else {
-      setOld('');
-      setFirst('');
-      setSecond('');
-    }
   }
 
   const ready = own ? first !== '' && second !== '' : saved;
@@ -233,6 +232,8 @@ export function NewPassphraseForm({
           disabled={busy}
           onClick={() => {
             setOwn((value) => !value);
+            setFirst('');
+            setSecond('');
             setError('');
           }}
         >

@@ -135,6 +135,12 @@ const openMenu = async (page: Page) => {
   if (!(await page.getByTestId('key-menu').isVisible())) await chip(page).click();
   return page.getByTestId('key-menu');
 };
+// Two animation frames: the page has run the continuation of a response it just received.
+const settle = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
+  );
 const dialogPassphrase = (page: Page) => page.getByLabel('Passphrase', { exact: true });
 
 // Loads drive A's key from its recovery file, then sets up a generated passphrase.
@@ -395,8 +401,10 @@ test('Lock while a file key is being verified: no key, no preview', async ({
     await expect(chip(page)).toContainText('Unlocked');
     await (await openMenu(page)).getByRole('button', { name: 'Lock' }).click();
     await expect(chip(page)).toContainText('Locked');
+    const stale = page.waitForResponse((r) => /\/versions\?/.test(r.url()));
     release();
-    await page.waitForTimeout(800);
+    await stale;
+    await settle(page);
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
     await expect(chip(page)).toContainText('Locked');
     // Nothing was cached: the next action asks for the passphrase again.
@@ -432,8 +440,10 @@ test('leaving while the slots are loading installs nothing and resumes nothing',
     // Browser Back closes the prompt and cancels the pending file.
     await page.evaluate(() => history.back());
     await expect(page.getByRole('dialog')).toHaveCount(0);
+    const stale = page.waitForResponse((r) => /account-key\/slots/.test(r.url()));
     release();
-    await page.waitForTimeout(800);
+    await stale;
+    await settle(page);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(chip(page)).toContainText('Locked');
   });
@@ -459,6 +469,108 @@ test('30 minutes idle locks the vault and closes the preview', async ({
     await expect(
       page.getByText('Locked after 30 minutes without use. Enter your passphrase to continue.'),
     ).toBeVisible();
+  });
+});
+
+test('idle closes the unlock dialog and drops what was typed', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    await page.clock.install();
+    await page.reload();
+    await nameButton(page, 'note.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.clock.fastForward('31:00');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(chip(page)).toContainText('Locked');
+    await nameButton(page, 'note.txt').click();
+    await expect(dialogPassphrase(page)).toHaveValue('');
+  });
+});
+
+test('setup seals only keys that open a real file, and closing cancels it', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    await page.goto(`/console?drive=${seeded.a.id}`);
+    // A recovery key that is wrong for the drive.
+    await nameButton(page, 'note.txt').click();
+    await page.getByText('Paste a key instead').click();
+    await page
+      .getByLabel(/^Drive key or credentials bundle/)
+      .fill(randomBytes(32).toString('base64url'));
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await page.keyboard.press('Escape');
+    // Setup, cancelled while the account key is being saved.
+    await (await openMenu(page)).getByRole('button', { name: 'Set up passphrase unlock' }).click();
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    let held!: () => void;
+    const reached = new Promise<void>((done) => (held = done));
+    await page.route('**/api/console/account-key', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      held();
+      await gate;
+      await route.continue();
+    });
+    await page.getByLabel('I saved it').check();
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
+    await reached;
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    const created = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && /account-key$/.test(r.url()),
+    );
+    release();
+    await created;
+    await settle(page);
+    await expect(chip(page)).not.toContainText('Unlocked');
+    await page.unroute('**/api/console/account-key');
+  });
+});
+
+test('setup skips a loaded key that fails its file', async ({ page, context, baseURL }) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    await page.goto(`/console?drive=${seeded.a.id}`);
+    await nameButton(page, 'note.txt').click();
+    await page.getByText('Paste a key instead').click();
+    await page
+      .getByLabel(/^Drive key or credentials bundle/)
+      .fill(randomBytes(32).toString('base64url'));
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await page.keyboard.press('Escape');
+    await (await openMenu(page)).getByRole('button', { name: 'Set up passphrase unlock' }).click();
+    await page.getByLabel('I saved it').check();
+    await page.getByRole('button', { name: 'Create', exact: true }).click();
+    await expect(page.getByText('Passphrase set up. 0 drives added to your account.')).toBeVisible({
+      timeout: 60_000,
+    });
+  });
+});
+
+test('a key loaded from a recovery file while locked shows Key loaded, and Lock clears it', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    await setUpPassphrase(page, seeded);
+    await page.reload();
+    await (await openMenu(page)).getByRole('button', { name: 'Load key' }).click();
+    await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.a));
+    await expect(chip(page)).toContainText('Key loaded');
+    const menu = await openMenu(page);
+    await expect(menu.getByRole('button', { name: 'Forget key' })).toBeVisible();
+    await menu.getByRole('button', { name: 'Lock', exact: true }).click();
+    await expect(chip(page)).toContainText('Locked');
   });
 });
 

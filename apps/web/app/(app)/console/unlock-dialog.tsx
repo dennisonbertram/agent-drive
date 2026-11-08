@@ -36,6 +36,18 @@ export function UnlockDialog({
 }) {
   const [error, setError] = useState('');
   const [pasted, setPasted] = useState('');
+  const root = useRef<HTMLDivElement>(null);
+  // The dialog only focuses its first field when it opens; a mode change needs the same.
+  const firstMode = useRef(true);
+  useEffect(() => {
+    if (firstMode.current) {
+      firstMode.current = false;
+      return;
+    }
+    root.current
+      ?.querySelector<HTMLElement>('[data-autofocus], input:not([type=checkbox]):not([readonly])')
+      ?.focus();
+  }, [mode]);
 
   // Only the latest attempt for this open dialog may load a key. Closing the dialog, changing
   // drive, choosing again or pasting invalidates reads still in flight.
@@ -64,7 +76,7 @@ export function UnlockDialog({
 
   if (mode === 'passphrase')
     return (
-      <div className="unlock">
+      <div className="unlock" ref={root}>
         <PassphraseForm
           email={vault.email}
           onUnlock={vault.onUnlock}
@@ -75,7 +87,7 @@ export function UnlockDialog({
     );
   if (mode === 'setup')
     return (
-      <div className="unlock">
+      <div className="unlock" ref={root}>
         <NewPassphraseForm
           email={vault.email}
           submitLabel="Create"
@@ -86,7 +98,7 @@ export function UnlockDialog({
     );
   if (mode === 'change')
     return (
-      <div className="unlock">
+      <div className="unlock" ref={root}>
         <NewPassphraseForm
           current
           email={vault.email}
@@ -98,13 +110,13 @@ export function UnlockDialog({
     );
   if (mode === 'reset')
     return (
-      <div className="unlock">
+      <div className="unlock" ref={root}>
         <ResetForm onReset={vault.onReset} />
       </div>
     );
 
   return (
-    <div className="unlock">
+    <div className="unlock" ref={root}>
       {recoveryNote && <p role="status">{recoveryNote}</p>}
       <p>
         Choose the recovery file for this drive. The key stays in this tab only. It is cleared when

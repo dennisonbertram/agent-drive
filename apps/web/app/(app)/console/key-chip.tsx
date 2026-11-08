@@ -49,7 +49,7 @@ export function KeyChip({
       label={
         <>
           <span className={`key-dot ${dot}`} aria-hidden />
-          {vault === 'locked'
+          {vault === 'locked' && !hasKey
             ? 'Locked'
             : vault === 'unlocked'
               ? 'Unlocked'
@@ -63,7 +63,9 @@ export function KeyChip({
       {hasVault && (
         <p>
           {vault === 'locked'
-            ? 'Locked. Your passphrase opens the drives you added to your account.'
+            ? hasKey
+              ? 'Locked, but this drive’s key is loaded in this tab.'
+              : 'Locked. Your passphrase opens the drives you added to your account.'
             : hasKey
               ? 'Unlocked. This drive’s key is loaded in this tab.'
               : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
@@ -122,7 +124,7 @@ export function KeyChip({
           </button>
         </div>
       )}
-      {hasKey && !hasVault && (
+      {hasKey && vault !== 'unlocked' && (
         <button
           type="button"
           className="button secondary"
@@ -146,18 +148,20 @@ export function KeyChip({
           Set up passphrase unlock
         </button>
       )}
+      {(vault === 'unlocked' || (hasVault && hasKey)) && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onLock();
+          }}
+        >
+          Lock
+        </button>
+      )}
       {vault === 'unlocked' && (
         <>
-          <button
-            type="button"
-            className="button secondary"
-            onClick={(event) => {
-              closeMenu(event);
-              vaultActions.onLock();
-            }}
-          >
-            Lock
-          </button>
           <button
             type="button"
             className="button secondary"

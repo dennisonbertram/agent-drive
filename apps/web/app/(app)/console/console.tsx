@@ -438,6 +438,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           if (!wrapped) throw new Error('The file’s key could not be read.');
           return wrapped;
         },
+        anyPath: async (driveId) => {
+          const result = await api<{ items: { path: string; kind?: string }[] }>(
+            `drives/${driveId}/list?limit=1`,
+          );
+          return result.items.find((item) => item.kind !== 'folder')?.path;
+        },
         onLocked: (reason) => lockedRef.current(reason),
         onChange: () => bumpVault(),
       }),
@@ -446,6 +452,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [recoveryNote, setRecoveryNote] = useState('');
   // Increases when the drive changes, the unlock dialog closes, or a new action waits for a key.
   const actionEpoch = useRef(0);
+  // Drives whose key this tab generated itself; those are sealed without a file check.
+  const trustedDrives = useRef(new Set<string>());
   const [tab, setTab] = useState<Tab>('Files');
   const [drives, setDrives] = useState<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -896,14 +904,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // running holds its key and finishes.
   const anyKey = Object.keys(driveKeys).length > 0;
   const vaultOpen = vault.status === 'unlocked';
+  const unlockOpen = modal === 'unlock';
   // Everything that depends on a key goes away at once. Called by Lock, idle and stale records.
   function lockAll(message: string) {
     actionEpoch.current += 1;
     // Plaintext must not stay on screen after the key is cleared.
     previewRequest.current += 1;
     setPreview(null);
-    setModal((current) => (current === 'preview' || current === 'share' ? null : current));
+    // Closing the dialogs unmounts them, which clears typed passphrases and pasted keys and
+    // cancels any recovery-file read still in flight.
+    setModal((current) =>
+      current === 'preview' || current === 'share' || current === 'unlock' ? null : current,
+    );
     setPendingAction(null);
+    trustedDrives.current.clear();
     setDriveKeys({});
     setKeylineConfirm('');
     setNotice(message);
@@ -917,10 +931,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           : '',
     );
   useEffect(() => {
-    if (!anyKey && !vaultOpen) return;
+    if (!anyKey && !vaultOpen && !unlockOpen) return;
     const lock = startIdleLock({
       onIdle: () => {
-        if (vault.status === 'unlocked') vault.lock('idle');
+        if (vault.status === 'unlocked' || vault.status === 'locked') vault.lock('idle');
         else
           lockAll(
             'The key was cleared after 30 minutes without use. You’ll be asked for the recovery file at the next download.',
@@ -933,7 +947,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       idleLock.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anyKey, vaultOpen]);
+  }, [anyKey, vaultOpen, unlockOpen]);
   // Load the passphrase record once. Unmounting (leaving the page) drops the account key.
   useEffect(() => {
     void vault.load();
@@ -1055,7 +1069,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
     // Skipped by the vault itself if it is locked before the write.
-    if (vault.status === 'unlocked') void vault.addKey(created.id, key);
+    trustedDrives.current.add(created.id);
+    if (vault.status === 'unlocked') void vault.addKey(created.id, key, { trusted: true });
     setDriveReceipt({ id: created.id, key });
     setReceiptSaved(false);
     setSaved(false);
@@ -1104,7 +1119,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   async function addToAccount(driveId: string, key: string, path?: string) {
-    const result = await vault.addKey(driveId, key, path).catch(() => 'skipped' as const);
+    const result = await vault
+      .addKey(driveId, key, {
+        ...(path === undefined ? {} : { path }),
+        trusted: trustedDrives.current.has(driveId),
+      })
+      .catch(() => 'skipped' as const);
     if (result === 'added') setNotice('Added to your account. Next time your passphrase opens it.');
   }
 
@@ -1481,7 +1501,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
   async function setUpPassphrase(_old: string, passphrase: string) {
     try {
-      const result = await vault.setup(passphrase, driveKeys);
+      const result = await vault.setup(
+        passphrase,
+        Object.fromEntries(
+          Object.entries(driveKeys).map(([id, key]) => [
+            id,
+            { key, trusted: trustedDrives.current.has(id) },
+          ]),
+        ),
+      );
       if (!result) return '';
       setModal(null);
       setNotice(

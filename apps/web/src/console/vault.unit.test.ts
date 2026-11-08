@@ -40,7 +40,11 @@ function deferred<T>() {
 }
 
 type Routes = Record<string, (method: string, body: unknown) => unknown>;
-function makeVault(routes: Routes = {}, envelopeOf: () => Promise<string> = async () => envelope) {
+function makeVault(
+  routes: Routes = {},
+  envelopeOf: () => Promise<string> = async () => envelope,
+  anyPath: () => Promise<string | undefined> = async () => '/a.txt',
+) {
   const locked: LockReason[] = [];
   const calls: { path: string; method: string; body: unknown }[] = [];
   const request = async (path: string, method = 'GET', body?: unknown) => {
@@ -54,6 +58,7 @@ function makeVault(routes: Routes = {}, envelopeOf: () => Promise<string> = asyn
     request,
     strict: request,
     envelope: envelopeCalls,
+    anyPath,
     onLocked: (reason) => locked.push(reason),
   });
   return { vault, locked, calls, envelopeCalls };
@@ -111,10 +116,12 @@ describe('Vault', () => {
 
   it('returns stale, not a key, when Lock happens during verification', async () => {
     const gate = deferred<string>();
-    const { vault } = makeVault(base(), () => gate.promise);
+    const { vault, envelopeCalls } = makeVault(base(), () => gate.promise);
     await vault.load();
     await vault.unlock(PASSPHRASE);
     const pending = vault.keyFor(DRIVE, '/a.txt');
+    // Lock only after the envelope request has been issued.
+    await vi.waitFor(() => expect(envelopeCalls).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     vault.lock('idle');
     gate.resolve(envelope);
     expect(await pending).toEqual({ status: 'stale' });
@@ -142,17 +149,20 @@ describe('Vault', () => {
     await vault.load();
     await vault.unlock(PASSPHRASE);
     // Unverifiable key while a slot exists: no write.
-    expect(await vault.addKey(DRIVE, driveKey)).toBe('skipped');
+    const empty = makeVault(routes, undefined, async () => undefined);
+    await empty.vault.load();
+    await empty.vault.unlock(PASSPHRASE);
+    expect(await empty.vault.addKey(DRIVE, driveKey)).toBe('skipped');
     expect(posts).toHaveLength(0);
     // Verified key: replaces revision 4.
-    expect(await vault.addKey(DRIVE, driveKey, '/a.txt')).toBe('added');
+    expect(await vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('added');
     expect(posts[0]).toMatchObject({ keyId: record.id, expectedRevision: 4 });
     expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
     // A key that fails its own file is never stored.
     const wrongFile = makeVault(routes, async () => otherEnvelope);
     await wrongFile.vault.load();
     await wrongFile.vault.unlock(PASSPHRASE);
-    expect(await wrongFile.vault.addKey(DRIVE, driveKey, '/a.txt')).toBe('skipped');
+    expect(await wrongFile.vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('skipped');
   }, 60_000);
 
   it('locks when the server says the passphrase changed elsewhere', async () => {
@@ -167,7 +177,9 @@ describe('Vault', () => {
     const { vault, locked } = makeVault(routes);
     await vault.load();
     await vault.unlock(PASSPHRASE);
-    expect(await vault.addKey('44444444-4444-4444-8444-444444444444', driveKey)).toBe('stale');
+    expect(
+      await vault.addKey('44444444-4444-4444-8444-444444444444', driveKey, { trusted: true }),
+    ).toBe('stale');
     expect(locked).toEqual(['stale']);
     expect(vault.status).toBe('locked');
   }, 30_000);
@@ -182,6 +194,91 @@ describe('Vault', () => {
     await vault.load();
     generation = 1;
     await expect(vault.unlock(PASSPHRASE)).rejects.toThrow('looks older');
+  }, 30_000);
+});
+
+describe('Vault setup', () => {
+  const noVault = (extra: Routes = {}) => {
+    const posts: string[] = [];
+    const routes: Routes = {
+      whoami: () => ({ accountId: ACCOUNT }),
+      'account-key': () => ({ accountKey: null }),
+      'drives/': (_m, body) => {
+        posts.push(JSON.stringify(body));
+        return { revision: 1 };
+      },
+      ...extra,
+    };
+    return { posts, ...makeVault(routes) };
+  };
+  const keys = { [DRIVE]: { key: driveKey, trusted: false } };
+
+  it('never seals a key that does not open a real file', async () => {
+    const wrong = makeVault(
+      {
+        whoami: () => ({ accountId: ACCOUNT }),
+        'account-key': () => ({ accountKey: null }),
+        'drives/': () => {
+          throw new Error('must not write');
+        },
+      },
+      async () => otherEnvelope,
+    );
+    await wrong.vault.load();
+    const result = await wrong.vault.setup(PASSPHRASE, keys);
+    expect(result).toEqual({ added: 0, total: 1 });
+    expect(
+      wrong.calls.some((call) => call.path.startsWith('drives/') && call.method === 'POST'),
+    ).toBe(false);
+  }, 30_000);
+
+  it('seals a checked key and a trusted one', async () => {
+    const { vault, posts } = noVault();
+    await vault.load();
+    const result = await vault.setup(PASSPHRASE, {
+      [DRIVE]: { key: driveKey, trusted: false },
+      '44444444-4444-4444-8444-444444444444': { key: otherKey, trusted: true },
+    });
+    expect(result).toEqual({ added: 2, total: 2 });
+    expect(posts).toHaveLength(2);
+  }, 30_000);
+
+  it('does nothing when Lock happens during the fingerprint', async () => {
+    const { vault, posts } = noVault();
+    await vault.load();
+    const gate = deferred<ArrayBuffer>();
+    const digest = vi
+      .spyOn(globalThis.crypto.subtle, 'digest')
+      .mockImplementationOnce(() => gate.promise);
+    const pending = vault.setup(PASSPHRASE, keys);
+    await vi.waitFor(() => expect(digest).toHaveBeenCalled(), { timeout: 10_000 });
+    vault.lock('manual');
+    gate.resolve(new ArrayBuffer(32));
+    expect(await pending).toBeNull();
+    expect(vault.status).toBe('none');
+    expect(posts).toHaveLength(0);
+  }, 30_000);
+
+  it('is cancelled by a closed dialog while the account key is being saved', async () => {
+    const gate = deferred<unknown>();
+    // Delay only the create (strict calls use the same request stub).
+    const delayed = makeVault({
+      whoami: () => ({ accountId: ACCOUNT }),
+      'account-key': (method) => (method === 'POST' ? gate.promise : { accountKey: null }),
+      'drives/': () => ({ revision: 1 }),
+    });
+    await delayed.vault.load();
+    const pending = delayed.vault.setup(PASSPHRASE, keys);
+    await vi.waitFor(
+      () => expect(delayed.calls.some((call) => call.method === 'POST')).toBe(true),
+      { timeout: 10_000 },
+    );
+    delayed.vault.cancelUnlock();
+    gate.resolve({});
+    expect(await pending).toBeNull();
+    expect(delayed.vault.status).toBe('none');
+    expect(delayed.vault.slotCount).toBe(0);
+    expect(delayed.calls.filter((call) => call.path.startsWith('drives/'))).toHaveLength(0);
   }, 30_000);
 });
 
