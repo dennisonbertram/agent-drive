@@ -38,6 +38,7 @@ import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
+import { runCapture } from './capture.js';
 
 function parse(raw: string[]) {
   return parseArgs({
@@ -172,6 +173,20 @@ export function parseShareExpiry(value: string | undefined, now = Date.now()) {
 }
 
 async function run(command: string, raw: string[]) {
+  if (command === 'capture') {
+    // The wrapped command has its own flags, so only the part before `--` is parsed here.
+    const split = raw.indexOf('--');
+    const flags = parse(split < 0 ? raw : raw.slice(0, split));
+    const wrapped = split < 0 ? [] : raw.slice(split + 1);
+    if (flags.positionals.length || !wrapped.length)
+      throw new Error('Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]');
+    process.exitCode = await runCapture({
+      command: wrapped,
+      ...(flags.values.agent ? { agent: flags.values.agent } : {}),
+      ...(flags.values.drive?.[0] ? { drive: flags.values.drive[0] } : {}),
+    });
+    return;
+  }
   const args = parse(raw);
   if (command === 'login') {
     const apiUrl = await resolveLoginApiUrl(args.values.api);
@@ -648,6 +663,7 @@ Commands:
   credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
   credentials status                    Which drive keys are backed up, when, and how
   skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent
+  capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]   Run an agent with its LLM calls saved as encrypted traces under /traces
   mcp
 
 Without installing: npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>
@@ -656,7 +672,9 @@ Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
 memory, never written to disk; its drives count as backed up).
 `;
-if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
+// For `capture`, only flags before `--` are ours; the rest belongs to the wrapped command.
+const ownArgs = name === 'capture' && raw.includes('--') ? raw.slice(0, raw.indexOf('--')) : raw;
+if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);
 } else if (name === 'mcp') {
   runMcp().catch(() => {

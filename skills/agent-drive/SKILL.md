@@ -82,6 +82,7 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
 - To see what other agents changed, keep the `latestCursor` from `recent` in your own session state (never in the drive) and pass it back; each event names the author agent; use `--wait` only while you are actually waiting for another agent.
 - `backup LOCAL_DIRECTORY [--prefix P] [--dry-run]`
+- `capture [--drive ID] [--agent NAME] -- COMMAND ...` runs an agent (for example `claude` or `codex` in API-key mode) and saves its model calls as encrypted traces under `/traces/<agent>/`. Run it yourself only when the user asks; it falls back to running COMMAND unwrapped with one warning.
 - `whoami`, `check`, `credentials ...`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
 

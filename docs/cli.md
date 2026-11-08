@@ -134,6 +134,52 @@ keyed by server, drive, prefix, and relative path, lets later runs skip unchange
 Symlinks are skipped, and one failing file does not stop the rest. It prints
 `backup uploaded=N unchanged=N failed=N` and exits 1 if any file failed.
 
+## Capture
+
+`agent-drive capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]` runs COMMAND with a local proxy on
+`127.0.0.1` (random port) and sets `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/anthropic` and
+`OPENAI_BASE_URL=http://127.0.0.1:<port>/openai` in the child's environment only. Requests are forwarded
+unchanged to `api.anthropic.com` or `api.openai.com` and streamed back as they arrive. A redacted copy of
+each exchange is encrypted with the drive key and saved to
+`/traces/<agent>/<YYYY-MM-DD>/<HHMMSS.mmm>Z_<model>_<id>.json` with the tags `trace`, `agent:<agent>` and
+`model:<model>`. `--agent` defaults to the command's basename (lowercase letters, digits, `.`, `_`, `-`;
+at most 40 characters). The command's exit code is passed through.
+
+**What is captured.** HTTP calls to the Anthropic and OpenAI APIs made by an agent that honors the base-URL
+variables, such as `claude` and `codex` in API-key mode. Each file holds the method, path, an allowlisted set
+of headers (no `authorization`, `x-api-key`, cookies or any other header), and the request and response
+bodies. Streaming responses are stored as a list of SSE events. Each body is cut at 4 MiB and each file is kept
+under 9 MiB; cut parts are named in the `truncated` list. Everything you send to the model, including any secrets you paste into a prompt, is saved in the trace, encrypted with your drive key. Values of query parameters whose names look like credentials (`key`, `token`, `secret`, `auth`, `signature`) are replaced with `[redacted]`, and request URLs are never printed with their query string.
+
+**What is not captured.** The Claude desktop app and editor extensions, other traffic from the agent (updates,
+telemetry), Codex websocket transport, Codex ChatGPT-login mode, and agents already pointed at another gateway.
+
+**When COMMAND runs unwrapped.** The agent always runs. If capture cannot start (no saved API credentials, no
+drive key, the port or spool directory is unavailable), or the agent already has a provider configured
+(`ANTHROPIC_BASE_URL` for `claude`, `OPENAI_BASE_URL` or a `-c model_provider`, `-c model_providers.*`,
+`--config` or `--profile`/`-p` argument for `codex`, either variable for other commands), the CLI prints one
+`capture disabled: <reason>; running <command> without capture` line and runs COMMAND with its environment and
+arguments unchanged. Nothing in a shell profile, Claude settings or `~/.codex/config.toml` is ever written.
+
+**Codex flags.** For a command named `codex`, these are added before your arguments:
+`-c model_providers.agent_drive_capture.name="Agent Drive capture"`,
+`-c model_providers.agent_drive_capture.base_url="http://127.0.0.1:<port>/openai/v1"`,
+`-c model_providers.agent_drive_capture.env_key="OPENAI_API_KEY"`,
+`-c model_providers.agent_drive_capture.wire_api="responses"`,
+`-c model_providers.agent_drive_capture.supports_websockets=false` and
+`-c model_provider="agent_drive_capture"`.
+
+**Spool.** Encrypted traces are written to `<config-path>.state/capture/<driveId>/` (directory mode 0700, files
+0600; ciphertext plus a small JSON sidecar, never plaintext) and uploaded in the background with create-only
+writes. The spool holds at most about 512 MiB (the cap is approximate when several capture processes share a spool); past that, new traces are not saved and are counted as
+`spool full`. Traces that cannot be uploaded (offline, 5xx, 429) stay and are retried on a later run; a stop
+condition (invalid key, no permission, no quota) leaves them for the next run, and traces the server rejects
+as invalid are moved to `invalid/`. Each request is also logged to stderr as
+`capture: <METHOD> <path> <status> <ms>ms <captured | not captured: reason>`.
+
+At exit the CLI waits up to 5 s for pending captures and 10 s in total for uploads, then prints
+`capture: <uploaded> uploaded, <queued> queued (<MiB> MiB in <spool dir>), <dropped> not captured (<reasons>), <invalid> invalid`.
+
 ## MCP server
 
 `agent-drive mcp` serves `whoami`, `put`, `get` (inline text up to 64 KiB, read-only), `download` (writes a new local file at `outputPath`, never overwrites), `list`, `move`, `copy`, `delete`, `versions`,

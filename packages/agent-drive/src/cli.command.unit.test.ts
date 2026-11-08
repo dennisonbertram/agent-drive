@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -208,5 +208,174 @@ describe('credentials issue drive default', () => {
     await prepare({ [A]: 'https://x.test', [B]: 'https://other.test' }, [A, B]);
     await issueCredentials({ name: 'n', stdout: true }, sink, createKey as never);
     expect((createKey.mock.calls as unknown[][])[0]?.[2]).toEqual([A]);
+  });
+});
+
+describe('capture command', () => {
+  async function capture(
+    argv: string[],
+    options: { saved?: Saved | 'none'; env?: Record<string, string> } = {},
+  ) {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-capture-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    for (const name of [
+      'AGENT_DRIVE_CREDENTIALS',
+      'AGENT_DRIVE_API_URL',
+      'AGENT_DRIVE_API_KEY',
+      'AGENT_DRIVE_KEY',
+      'ANTHROPIC_BASE_URL',
+      'OPENAI_BASE_URL',
+    ])
+      vi.stubEnv(name, '');
+    for (const [name, value] of Object.entries(options.env ?? {})) vi.stubEnv(name, value);
+    const saved = options.saved ?? one;
+    if (saved !== 'none')
+      await writeConfig({
+        apiUrl: 'https://x.test/api',
+        apiKey: 'tok',
+        driveKeys: saved.keys,
+        driveKeyOrigins: saved.origins,
+      });
+    const err: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stderr, 'write').mockImplementation((s) => (err.push(String(s)), true));
+    vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', 'agent-drive', 'capture', ...argv]);
+    process.exitCode = undefined;
+    vi.resetModules();
+    await import('./cli.js');
+    await vi.waitFor(() => expect(process.exitCode).not.toBeUndefined(), { timeout: 15_000 });
+    return { err: err.join(''), dir, code: process.exitCode };
+  }
+  const dumpEnv = (file: string, code = 0) => [
+    process.execPath,
+    '-e',
+    `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify(process.env)); process.exit(${code})`,
+  ];
+  const disabled = (err: string) =>
+    err.split('\n').filter((l) => l.startsWith('capture disabled:'));
+
+  it('runs the child with both base URLs, passes its exit code, and leaves the parent env alone', async () => {
+    const file = join(tmpdir(), `capture-env-${Date.now()}.json`);
+    dirs.push(file);
+    const r = await capture(['--drive', A, '--', ...dumpEnv(file, 3)]);
+    expect(r.code).toBe(3);
+    const env = JSON.parse(await readFile(file, 'utf8')) as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/anthropic$/u);
+    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/openai$/u);
+    expect(process.env.ANTHROPIC_BASE_URL).toBe('');
+    expect(process.env.OPENAI_BASE_URL).toBe('');
+    expect(disabled(r.err)).toEqual([]);
+    expect(r.err).toMatch(/capture: 0 uploaded, 0 queued .* 0 not captured \(none\), 0 invalid/u);
+  });
+
+  it('completely unconfigured: the child still runs, with one capture disabled line', async () => {
+    const file = join(tmpdir(), `capture-env-u-${Date.now()}.json`);
+    dirs.push(file);
+    const r = await capture(['--', ...dumpEnv(file, 0)], { saved: 'none' });
+    expect(r.code).toBe(0);
+    const env = JSON.parse(await readFile(file, 'utf8')) as Record<string, string>;
+    expect(env.ANTHROPIC_BASE_URL ?? '').toBe('');
+    expect(disabled(r.err).length).toBe(1);
+    expect(disabled(r.err)[0]).toContain('API configuration is missing');
+  });
+
+  it('configured but no drive key: the child runs unwrapped with one capture disabled line', async () => {
+    const r = await capture(['--drive', B, '--', process.execPath, '-e', 'process.exit(0)']);
+    expect(r.code).toBe(0);
+    expect(disabled(r.err).length).toBe(1);
+    expect(disabled(r.err)[0]).toContain('no drive key');
+  });
+
+  it('does not override an existing provider setting', async () => {
+    const file = join(tmpdir(), `capture-env-o-${Date.now()}.json`);
+    dirs.push(file);
+    const bin = await mkdtemp(join(tmpdir(), 'agent-drive-bin-'));
+    dirs.push(bin);
+    const argsFile = join(bin, 'args.json');
+    for (const name of ['claude', 'codex']) {
+      await writeFile(
+        join(bin, name),
+        `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify({argv: process.argv.slice(2), env: process.env}));\n`,
+        { mode: 0o755 },
+      );
+    }
+    const claude = await capture(['--drive', A, '--', join(bin, 'claude'), 'hi'], {
+      env: { ANTHROPIC_BASE_URL: 'http://gateway.test' },
+    });
+    expect(disabled(claude.err).length).toBe(1);
+    expect(disabled(claude.err)[0]).toContain('ANTHROPIC_BASE_URL is already set');
+    const seen = JSON.parse(await readFile(argsFile, 'utf8')) as { env: Record<string, string> };
+    expect(seen.env.ANTHROPIC_BASE_URL).toBe('http://gateway.test');
+    const codex = await capture(['--drive', A, '--', join(bin, 'codex'), 'exec'], {
+      env: { OPENAI_BASE_URL: 'http://gateway.test' },
+    });
+    expect(disabled(codex.err).length).toBe(1);
+    const profile = await capture(['--drive', A, '--', join(bin, 'codex'), '--profile', 'work']);
+    expect(disabled(profile.err)[0]).toContain('--profile');
+    expect((JSON.parse(await readFile(argsFile, 'utf8')) as { argv: string[] }).argv).toEqual([
+      '--profile',
+      'work',
+    ]);
+  });
+
+  it('prepends the six provider flags for codex', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'agent-drive-bin-'));
+    dirs.push(bin);
+    const argsFile = join(bin, 'args.json');
+    await writeFile(
+      join(bin, 'codex'),
+      `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));\n`,
+      { mode: 0o755 },
+    );
+    const r = await capture(['--drive', A, '--', join(bin, 'codex'), 'exec', 'hello']);
+    expect(r.code).toBe(0);
+    const argv = JSON.parse(await readFile(argsFile, 'utf8')) as string[];
+    expect(argv.filter((a) => a === '-c').length).toBe(6);
+    expect(argv.slice(-2)).toEqual(['exec', 'hello']);
+    expect(argv).toContain('model_provider="agent_drive_capture"');
+    expect(argv.some((a) => /base_url="http:\/\/127\.0\.0\.1:\d+\/openai\/v1"/u.test(a))).toBe(
+      true,
+    );
+  });
+
+  it('rejects a missing -- and an invalid --agent without running anything', async () => {
+    const noSeparator = await capture(['--drive', A, 'echo']);
+    expect(noSeparator.code).toBe(1);
+    expect(noSeparator.err).toContain('Usage: capture');
+    const bad = await capture(['--agent', 'Bad Name', '--', process.execPath, '-e', '0']);
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain('--agent');
+  });
+
+  it('does not print a codex override value', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'agent-drive-bin-'));
+    dirs.push(bin);
+    await writeFile(join(bin, 'codex'), `#!${process.execPath}\n`, { mode: 0o755 });
+    const r = await capture([
+      '--drive',
+      A,
+      '--',
+      join(bin, 'codex'),
+      '-c',
+      'model_providers.foo.experimental_bearer_token="SECRET-VALUE"',
+    ]);
+    expect(disabled(r.err).length).toBe(1);
+    expect(r.err).not.toContain('SECRET-VALUE');
+    expect(disabled(r.err)[0]).toContain('model_providers.foo.experimental_bearer_token');
+  });
+
+  it('runs the child when --help comes after --', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-help-'));
+    dirs.push(dir);
+    const marker = join(dir, 'ran.json');
+    const script = join(dir, 'child.js');
+    await writeFile(
+      script,
+      `require('fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify(process.argv.slice(2))); process.exit(5);`,
+    );
+    const r = await capture(['--drive', A, '--', process.execPath, script, '--help']);
+    expect(r.code).toBe(5);
+    expect(JSON.parse(await readFile(marker, 'utf8'))).toEqual(['--help']);
   });
 });

@@ -244,3 +244,40 @@ describe('AgentDriveClient transport guards', () => {
     });
   });
 });
+
+describe('AgentDriveClient.putEncrypted', () => {
+  it('uploads given ciphertext as-is with one intent, one PUT and one commit', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ? { url: String(input), init } : { url: String(input) });
+      if (calls.length === 1)
+        return new Response(
+          JSON.stringify({
+            intentId: 'i',
+            uploadUrl: 'http://127.0.0.1:9000/u',
+            ciphertextSize: 3,
+          }),
+          { status: 201 },
+        );
+      if (calls.length === 2) return new Response('', { status: 200 });
+      return new Response(JSON.stringify({ version: { id: 'v', path: '/x' } }), { status: 201 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    const ciphertext = new Uint8Array([1, 2, 3]);
+    await client.putEncrypted('d', '/x', ciphertext, 'WRAPPED', { mode: 'create', tags: ['t'] });
+    expect(calls.length).toBe(3);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      path: '/x',
+      ciphertextSize: 3,
+      wrappedKey: 'WRAPPED',
+      tags: ['t'],
+      ifVersionId: null,
+    });
+    expect(calls[1]?.init?.body).toBe(ciphertext);
+    expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({ intentId: 'i' });
+  });
+});
