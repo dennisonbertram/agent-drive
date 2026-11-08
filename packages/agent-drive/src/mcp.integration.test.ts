@@ -150,7 +150,7 @@ beforeAll(async () => {
     env: process.env,
     stdio: 'pipe',
   });
-  execFileSync('pnpm', ['--filter', 'agent-drive', 'build'], {
+  execFileSync('pnpm', ['--filter', '@dennisonbertram/agent-drive', 'build'], {
     cwd: process.cwd(),
     env: process.env,
     stdio: 'pipe',

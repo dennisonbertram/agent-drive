@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { GET } from './route';
 
 describe('GET /llms.txt', () => {
-  it('serves plain text with the origin-specific instruction and install URL', async () => {
+  it('serves plain text with the origin-specific instruction and the npm install command', async () => {
     const res = await GET(new Request('https://example.test/llms.txt'));
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     const body = await res.text();
     expect(body).toContain('Set up Agent Drive: https://example.test/llms.txt');
-    expect(body).toContain('npm install -g https://example.test/cli/agent-drive.tgz');
-    expect(body).toContain('npx -y https://example.test/cli/agent-drive.tgz');
+    expect(body).toContain('npm install -g @dennisonbertram/agent-drive');
+    expect(body).toContain('npx -y @dennisonbertram/agent-drive@latest');
     expect(body).toContain('agent-drive login --name');
     expect(body).toContain('agent-drive check');
     expect(body).toContain('check ok');
@@ -49,7 +49,7 @@ describe('GET /llms.txt', () => {
   it('adds --api to login commands for a non-default origin only', async () => {
     const other = await (await GET(new Request('http://localhost:3100/llms.txt'))).text();
     expect(other).toContain('login --name "<your agent name>" --api http://localhost:3100/api');
-    expect(other).toContain('npx -y http://localhost:3100/cli/agent-drive.tgz login --name');
+    expect(other).toContain('npx -y @dennisonbertram/agent-drive@latest login --name');
     expect(other).toContain('agent-drive login --api http://localhost:3100/api` on the new');
     for (const line of other.split('\n').filter((l) => /agent-drive login|\blogin --name/u.test(l)))
       expect(line, line).toContain('--api http://localhost:3100/api');

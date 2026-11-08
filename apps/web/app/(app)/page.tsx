@@ -89,7 +89,7 @@ export default async function Home() {
   const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
   const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
   const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
-  const install = `npm install -g ${proto}://${host}/cli/agent-drive.tgz`;
+  const install = `npm install -g @dennisonbertram/agent-drive`;
   const paid = paidAvailable();
   const plans = [
     ['Free', PLANS.free],

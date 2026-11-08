@@ -23,7 +23,7 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter agent-drive build
+      - run: pnpm --filter @dennisonbertram/agent-drive build
       - run: pnpm exec vitest run --config vitest.unit.config.ts packages/agent-drive
       - name: Tag matches package version
         run: |

@@ -43,9 +43,9 @@ destructive mirror.
 
 ## Install, device login, and backup
 
-Install from the site: `npm install -g https://agentdrive.xyz/cli/agent-drive.tgz`, or run
-without installing: `npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>`. The
-Vercel build packs `packages/agent-drive` into `apps/web/public/cli/agent-drive.tgz`. The default
+Install from npm: `npm install -g @dennisonbertram/agent-drive`, or run without installing:
+`npx -y @dennisonbertram/agent-drive@latest <command>`. To install the agent skill through skills.sh instead, run
+`npx skills add dennisonbertram/agent-drive`. The default
 API URL is `https://agentdrive.xyz/api` (override with `--api` or `AGENT_DRIVE_API_URL`).
 
 `agent-drive login [--name AGENT] [--no-browser]` runs the OAuth device flow when no

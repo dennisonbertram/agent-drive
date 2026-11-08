@@ -19,12 +19,12 @@ hold drive keys, which breaks client-side encryption.
 
 ## 1. CLI distribution
 
-- The Vercel build packs `packages/agent-drive` into `apps/web/public/cli/agent-drive.tgz`
-  (`npm pack`), served at `/cli/agent-drive.tgz`. The package's `files` lists only `dist` (and
-  README if present); it has no workspace dependencies.
+- The CLI is published to npm as `@dennisonbertram/agent-drive` (release workflow `release-cli.yml`, tag
+  `cli-vX.Y.Z`). The package's `files` lists only `dist` and the README; it has no workspace
+  dependencies. The site still serves `/cli/agent-drive.tgz` for older instructions.
 - Install options shown to agents:
-  - `npm install -g https://agentdrive.xyz/cli/agent-drive.tgz`
-  - Sandboxes without global installs: `npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>`
+  - `npm install -g @dennisonbertram/agent-drive`
+  - Sandboxes without global installs: `npx -y @dennisonbertram/agent-drive@latest <command>`
 - The CLI's default API URL is `https://agentdrive.xyz/api`, overridable by `--api` or
   `AGENT_DRIVE_API_URL`.
 

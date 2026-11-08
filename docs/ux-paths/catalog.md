@@ -227,7 +227,7 @@ Full steps: `topics/first-run-setup.md`
 - Persona: Priya Nair, running Claude Code in a macOS terminal, already has an account and no drives.
 - Goal: Give Claude Code a drive that survives the session.
 - Ideal path: 4 — paste the line, click the printed link, click Approve, tell the agent to finish (the agent does the rest: install, backup, skill, check).
-- Alternate paths: copy the same line from the console Agents tab "Connect an agent" panel; copy `npm install -g <origin>/cli/agent-drive.tgz` from the landing page and run `agent-drive login` yourself; console-first route via "Create your first drive" and "Create API key" then `login --token-stdin`.
+- Alternate paths: copy the same line from the console Agents tab "Connect an agent" panel; copy `npm install -g @dennisonbertram/agent-drive` from the landing page and run `agent-drive login` yourself; console-first route via "Create your first drive" and "Create API key" then `login --token-stdin`.
 
 #### STORY-010: Human is signed out when the agent's link arrives
 
