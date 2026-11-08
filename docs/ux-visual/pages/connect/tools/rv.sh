@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: rv.sh W H N  -- fresh account e2e_connect_N: reconnect, approved, denied captures
 W=$1; H=$2; N=$3; T=$(cd "$(dirname "$0")" && pwd); V=${W}x${H}; S=ux-visual-connect; U=http://localhost:3230
-SECRET=$(cat <scratchpad>)
+SECRET=$(cat "$UX_SCRATCH")
 ab(){ agent-browser --session $S "$@" >/dev/null; }
 clickbtn(){ agent-browser --session $S eval "[...document.querySelectorAll('button')].find(b=>b.textContent.includes('$1')).click(); 1" >/dev/null; }
 ab set viewport $W $H; ab open $U/; sleep 2

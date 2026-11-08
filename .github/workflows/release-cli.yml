@@ -3,7 +3,6 @@ name: Release CLI
 on:
   push:
     tags: ['cli-v*']
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,7 +26,6 @@ jobs:
       - run: pnpm --filter agent-drive build
       - run: pnpm exec vitest run --config vitest.unit.config.ts packages/agent-drive
       - name: Tag matches package version
-        if: startsWith(github.ref, 'refs/tags/cli-v')
         run: |
           v=$(node -p "require('./packages/agent-drive/package.json').version")
           test "${GITHUB_REF_NAME}" = "cli-v${v}" || { echo "tag ${GITHUB_REF_NAME} != cli-v${v}"; exit 1; }

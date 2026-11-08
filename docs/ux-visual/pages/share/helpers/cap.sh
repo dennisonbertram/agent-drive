@@ -1,14 +1,14 @@
 #!/bin/zsh
 # Share page capture. Keys come from the seed folder files at run time (not stored here).
-cd <repo>/docs/ux-visual/pages/share
-S=<scratchpad>
+cd "$AGENT_DRIVE_REPO"/docs/ux-visual/pages/share
+S="$UX_SCRATCH"
 ab() { agent-browser --session ux-visual-share "$@"; }
 READY=$(cat $S/ux-seed/share-url.txt); RID=${${READY#*/s/}%%#*}; RKEY=${READY#*#k=}
 REV=$(node -e "console.log('http://localhost:3500/s/zjMqPymz_D-UauiIoqOQ1A#k=HOXOCMke84aSSsSr72gMdGMF5o9Xv_5JYvSQdkZbTOc')")
 WKEY=HOXOCMke84aSSsSr72gMdGMF5o9Xv_5JYvSQdkZbTOc
 B=http://localhost:3500
-LA=$(cat $HOME/.claude/…)
-GA=$(cat $HOME/.claude/…)
+LA=$(cat "$UX_SKILL_DIR")
+GA=$(cat "$UX_SKILL_DIR")
 [ -f audit.json ] || echo '{}' > audit.json
 shoot() {
   ab eval "document.querySelector('nextjs-portal')?.remove(); document.fonts.ready.then(()=>1)" >/dev/null
