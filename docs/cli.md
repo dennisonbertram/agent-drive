@@ -70,7 +70,16 @@ key. A `permission_denied` error about a missing scope adds a hint to run `agent
 
 The drive key lives only in the config file, so lose the machine and the files cannot be opened.
 
-- `agent-drive credentials export (--to PATH [--force] | --stdout)` writes a bundle:
+- `agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)`
+  writes a bundle. Offer the targets in this order: 1Password, the clipboard (for Apple Passwords or
+  another password manager), then a file outside the repo. `--to 1password` (alias `op`) checks
+  `op whoami`, then creates an item through `op item create -` with the bundle in a concealed field
+  on stdin (never in argv, never on disk); if `op` is missing or signed out it prints what to run,
+  exits non-zero, and records nothing. `--to clipboard` copies with `pbcopy`, `wl-copy`/`xclip`, or
+  `clip.exe`, waits 60 seconds, then clears the clipboard only if it still holds the bundle
+  (`--keep-clipboard` skips this); with no clipboard tool it fails. Both record the backup, so
+  `check` passes. A file named `1password`, `op` or `clipboard` needs a path like `./clipboard`.
+  The file form:
   `adcred1.` plus base64url of `{"v":1,"apiUrl","apiKey","driveKeys","driveKeyOrigins"}`. `--to`
   writes a mode `0600` file and refuses an existing path without `--force`. `--stdout` prints only
   when stdout is not a terminal (pipe it to a secret store), waits for stdout to drain, and fails on
@@ -79,7 +88,7 @@ The drive key lives only in the config file, so lose the machine and the files c
   ever prints. A `--to` export records `keyBackup: { "<driveId>": { at, method } }` in the config and
   then calls `POST /v1/drives/:id/key-backup` with `{ method }` for each drive; a failed call is
   only a warning. A `--stdout` export records nothing; run
-  `agent-drive credentials export --stdout | <secret store> && agent-drive credentials confirm`
+  `agent-drive credentials export --stdout | <your tool> && agent-drive credentials confirm`
   (`confirm [--method stdout]` records the backup and reports it). Use `set -o pipefail` so a failed
   store stops `confirm`. A login that replaces the API key clears all backup records (the exported
   bundle holds the revoked key) and says so; `check` then asks for a new export.

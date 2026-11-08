@@ -20,14 +20,15 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('[mcp_servers.agent-drive]');
     expect(body).toContain('[mcp_servers.agent-drive.tools.put]');
     expect(body).toContain('Back up your credentials');
-    expect(body).toContain('agent-drive credentials export --to');
-    expect(body).toContain('agent-drive credentials export --stdout |');
-    expect(body).toContain('<your secret store> && agent-drive credentials confirm');
-    expect(body).toContain(
-      'gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm',
-    );
-    expect(body).toContain('gh secret set AGENT_DRIVE_CREDENTIALS');
-    expect(body).toContain('vercel env add AGENT_DRIVE_CREDENTIALS production');
+    const one = body.indexOf('agent-drive credentials export --to 1password');
+    const clip = body.indexOf('agent-drive credentials export --to clipboard');
+    const file = body.indexOf('agent-drive credentials export --to <a file outside the repo>');
+    expect(one).toBeGreaterThan(-1);
+    expect(clip).toBeGreaterThan(one);
+    expect(file).toBeGreaterThan(clip);
+    expect(body).toContain('Apple Passwords');
+    expect(body).not.toContain('gh secret set');
+    expect(body).not.toContain('vercel env add');
     expect(body).toContain('agent-drive skill install');
     expect(body).toContain('agent-drive skill install --target <dir>');
     expect(body).toContain('~/.claude/skills or ~/.codex/skills');

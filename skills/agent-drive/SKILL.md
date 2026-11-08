@@ -39,13 +39,14 @@ names, tags, descriptions, and attribution stay visible to the service.
 The drive key exists only in this machine's config. Back it up before the machine goes away:
 
 ```sh
-agent-drive credentials export --to <path that survives>       # file, mode 600
-agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm
-#   --stdout alone records nothing; `confirm` records it only after the store succeeded
+# Offer these in this order and let the user choose. Each one counts as the backup.
+agent-drive credentials export --to 1password                  # 1Password (`op` installed and signed in)
+agent-drive credentials export --to clipboard                  # then the user pastes it into Apple Passwords or another manager; cleared after 60 s
+agent-drive credentials export --to <a file outside the repo>  # file, mode 600
 agent-drive credentials status                                 # what is backed up
 ```
 
-In a sandbox, keep the bundle in your secret store and set `AGENT_DRIVE_CREDENTIALS` to it; it is
+In a sandbox, keep the bundle in the user's password manager or the platform's secret store and set `AGENT_DRIVE_CREDENTIALS` to it; it is
 read in memory and counts as backed up. `agent-drive credentials import --from <path>` restores
 it. `agent-drive check` fails with "drive key not backed up" until this is done. Never print or
 paste the bundle into a chat, a file in a drive, or a log.

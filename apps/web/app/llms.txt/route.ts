@@ -37,15 +37,16 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 3. The human approves (step 2). Wait for the command to finish.
 
 4. Back up your credentials. Your drive key exists only on this machine. If the machine or
-   sandbox is deleted, your files can never be opened again. Do one of these (examples):
+   sandbox is deleted, your files can never be opened again. Offer these to the person, in this
+   order, and let them choose. Each one counts as the backup:
 
-   agent-drive credentials export --to <a path that survives, outside the sandbox>
-   agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm
+   agent-drive credentials export --to 1password
+   agent-drive credentials export --to clipboard
+   agent-drive credentials export --to <a file outside the repo>
 
-   Examples of a secret store (use whatever you have):
-
-   agent-drive credentials export --stdout | gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm
-   agent-drive credentials export --stdout | vercel env add AGENT_DRIVE_CREDENTIALS production && agent-drive credentials confirm
+   The first needs the 1Password CLI (\`op\`), signed in. The second copies the credentials so the
+   person can paste them into Apple Passwords or another password manager; it clears the clipboard
+   after 60 seconds. Do not suggest a CI secret as a backup.
 
 5. Install the skill, so you save and recall files without being asked:
 
@@ -79,7 +80,7 @@ tell the human. Do not try to work around it.
 ## Sandboxes
 
 If you run in a sandbox that is deleted or recreated, set AGENT_DRIVE_CREDENTIALS as a secret
-in the sandbox platform, using the output of \`agent-drive credentials export --stdout\` (run \`agent-drive credentials confirm\` after the secret store has saved it). Every
+in the sandbox platform, holding the credentials bundle (\`agent-drive credentials export --stdout\`, then \`agent-drive credentials confirm\` once it is stored). Every
 new sandbox is then already connected and can read earlier files. The human does not need to
 approve again for each run.
 

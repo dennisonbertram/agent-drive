@@ -350,7 +350,18 @@ human never handles the key.
 
 ### Credentials bundle
 
-- `agent-drive credentials export (--to <path> | --stdout)` writes a bundle.
+- `agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to <path> | --stdout)` writes a bundle.
+  Offer the targets to the user in this order: 1Password, the clipboard (for Apple Passwords or
+  another password manager), then a file outside the repo.
+  - `--to 1password` (alias `--to op`) runs `op whoami`, then `op item create [--vault NAME] -` with
+    an item JSON template on stdin (title `Agent Drive – <drive ids>`, bundle in a concealed field).
+    The bundle is never in argv and never on disk. If `op` is missing or signed out, nothing is
+    exported or recorded, and the command prints what to run and exits non-zero.
+  - `--to clipboard` copies with `pbcopy` (macOS), `wl-copy` or `xclip` (Linux), or `clip.exe`
+    (Windows, WSL). The CLI waits 60 seconds, then clears the clipboard only if it still holds the
+    bundle; `--keep-clipboard` skips that. With no clipboard tool it fails and records nothing.
+  - A file named `1password`, `op` or `clipboard` needs a path such as `./clipboard`.
+  - Both targets record `keyBackup` like a file export (method `stdout`), so `check` passes.
   - Contents: base64url of JSON `{"v":1,"apiUrl","apiKey","driveKeys":{id:key},"driveKeyOrigins":{id:origin}}`, prefixed `adcred1.`.
   - `--to` writes the file with mode 600 and refuses an existing path unless `--force`.
   - `--to` writes through a temp file in the same directory (O_EXCL, O_NOFOLLOW, mode 600) and
@@ -380,7 +391,7 @@ human never handles the key.
 ### Enforcement
 
 - `login` and `drive create`, when they create a new drive key, end with:
-  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Until then `agent-drive check` will not pass.
+  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (then paste it into Apple Passwords or another password manager), or `agent-drive credentials export --to <a file outside the repo>`. Until then `agent-drive check` will not pass.
 - `check` prints `check ok` only when every usable drive key is backed up. Otherwise it exits 1
   with "drive key not backed up" plus the commands above.
 - `whoami` includes `keyBackup`.
