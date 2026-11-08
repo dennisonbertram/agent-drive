@@ -21,6 +21,14 @@ export {
   decodeDriveKey,
   encodeBase64Url,
   encryptFile,
+  envelopeVersion,
   generateDriveKey,
   unwrapFileKey,
 } from './crypto.js';
+export {
+  createTraceInbox,
+  sealFileKeyToInbox,
+  unsealFileKeyFromInbox,
+  unwrapInboxPrivateKey,
+} from './trace-inbox.js';
+export type { TraceInbox, TraceInboxRecord } from './trace-inbox.js';
