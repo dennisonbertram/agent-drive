@@ -13,8 +13,12 @@ import {
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handleApiRequest } from '../../../apps/web/src/api/handler.js';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { runCheck } from './check.js';
 import { AgentDriveClient } from './client.js';
-import { generateDriveKey } from './crypto.js';
+import { decodeDriveKey, generateDriveKey } from './crypto.js';
+import { seal } from './crypto-format.js';
+import { createTraceInbox, sealFileKeyToInbox } from './trace-inbox.js';
 
 const databaseUrl =
   process.env.DATABASE_URL ??
@@ -804,6 +808,55 @@ describe('Phase 2 client and CLI against the real API and services', () => {
     expect(wrongKey.status).not.toBe(0);
     await expect(lstat(wrongOutput)).rejects.toMatchObject({ code: 'ENOENT' });
   }, 120_000);
+
+  it('reads a version-2 (trace inbox) file through get and check', async () => {
+    const manager = new AgentDriveClient({ apiUrl, apiKey: managementToken });
+    const agent = await manager.createAgent(`v2-client-${randomUUID()}`);
+    const drive = await manager.createDrive(`v2-client-${randomUUID()}`);
+    const driveKey = generateDriveKey();
+    const token = (await manager.createKey(agent.id, 'v2-client', [drive.id], ['read', 'write']))
+      .token!;
+    const record = await createTraceInbox(drive.id, driveKey);
+    await database.query(
+      `INSERT INTO drive_trace_inboxes (drive_id,account_id,key_id,public_key,wrapped_private_key)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [drive.id, accountId, record.keyId, record.publicKey, record.wrappedPrivateKey],
+    );
+    const fileKey = generateDriveKey();
+    const json = JSON.stringify({ otlp: { marker: randomUUID() } });
+    const ciphertext = await seal(
+      new TextEncoder().encode(json),
+      decodeDriveKey(fileKey),
+      randomBytes(8),
+    );
+    const wrappedKey = await sealFileKeyToInbox(fileKey, { driveId: drive.id, ...record });
+    const versionId = randomUUID();
+    const path = '/traces/openrouter/fixture.json';
+    const objectKey = `objects/${accountId}/${drive.id}/${versionId}`;
+    await storage.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: ciphertext }));
+    const fileId = (
+      await database.query<{ id: string }>(
+        'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+        [drive.id, path],
+      )
+    ).rows[0]!.id;
+    await database.query(
+      `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [versionId, fileId, drive.id, objectKey, ciphertext.length, wrappedKey, agent.id],
+    );
+    await database.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, versionId]);
+    await database.query(
+      `INSERT INTO file_events (drive_id,file_id,operation,path,version_id,agent_id)
+       VALUES ($1,$2,'put',$3,$4,$5)`,
+      [drive.id, fileId, path, versionId, agent.id],
+    );
+    const client = new AgentDriveClient({ apiUrl, apiKey: token, driveKey });
+    expect(new TextDecoder().decode((await client.get(drive.id, path)).bytes)).toBe(json);
+    expect(await runCheck(client, drive.id)).toBe(`check ok drive=${drive.id}`);
+    const wrong = new AgentDriveClient({ apiUrl, apiKey: token, driveKey: generateDriveKey() });
+    await expect(wrong.get(drive.id, path)).rejects.toMatchObject({ code: 'decryption_failed' });
+  }, 60_000);
 });
 
 async function mkdirSafe(path: string) {
