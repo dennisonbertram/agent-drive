@@ -1,7 +1,7 @@
 #!/bin/bash
 # usage: vp.sh W H NEWCODE RECODE   [skipentry]
 W=$1; H=$2; NEWC=$3; RECC=$4
-SC=/Users/dennison/develop/agent-drive-t1/docs/ux-visual/pages/connect/tools
+SC=<repo>/docs/ux-visual/pages/connect/tools
 S=ux-visual-connect; V=${W}x${H}; U=http://localhost:3230
 ab(){ agent-browser --session $S "$@" >/dev/null; }
 clickbtn(){ agent-browser --session $S eval "[...document.querySelectorAll('button')].find(b=>b.textContent.includes('$1')).click(); 1" >/dev/null; }

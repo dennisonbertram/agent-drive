@@ -1,14 +1,14 @@
 #!/bin/zsh
 # Share page capture. Keys come from the seed folder files at run time (not stored here).
-cd /Users/dennison/develop/agent-drive-ux2/docs/ux-visual/pages/share
-S=/private/tmp/claude-501/-Users-dennison-develop-agent-drive/72e5153f-f1c9-4e4b-819b-255bec507e75/scratchpad
+cd <repo>/docs/ux-visual/pages/share
+S=<scratchpad>
 ab() { agent-browser --session ux-visual-share "$@"; }
 READY=$(cat $S/ux-seed/share-url.txt); RID=${${READY#*/s/}%%#*}; RKEY=${READY#*#k=}
 REV=$(node -e "console.log('http://localhost:3500/s/zjMqPymz_D-UauiIoqOQ1A#k=HOXOCMke84aSSsSr72gMdGMF5o9Xv_5JYvSQdkZbTOc')")
 WKEY=HOXOCMke84aSSsSr72gMdGMF5o9Xv_5JYvSQdkZbTOc
 B=http://localhost:3500
-LA=$(cat /Users/dennison/.claude/skills/ux-visual/references/layout-audit.js)
-GA=$(cat /Users/dennison/.claude/skills/ux-walker/references/geometry-audit.js)
+LA=$(cat $HOME/.claude/…)
+GA=$(cat $HOME/.claude/…)
 [ -f audit.json ] || echo '{}' > audit.json
 shoot() {
   ab eval "document.querySelector('nextjs-portal')?.remove(); document.fonts.ready.then(()=>1)" >/dev/null
