@@ -36,6 +36,7 @@ describe('core API contract', () => {
         "GET|POST /api/console/drives/:id/trace-inbox",
         "GET|POST|DELETE /api/console/drives/:id/webhook-token",
         "POST /api/stripe/webhook",
+        "POST /api/webhooks/openrouter/:driveId",
       ]
     `);
   });

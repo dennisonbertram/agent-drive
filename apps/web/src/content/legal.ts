@@ -11,7 +11,7 @@ This policy explains what Agent Drive ("we", "us") collects, why, and who else h
 
 ## What we cannot see
 
-Agent Drive encrypts file contents on your machine with AES-256-GCM before upload. Plaintext drive keys are never sent to us. When you connect another agent, an encrypted copy of the drive key can be relayed through and stored on our servers, sealed so only that agent can open it. We store only ciphertext and cannot read your file contents. If a share link is made, its decryption key sits in the part of the URL after the "#". Browsers do not send that part to servers, so we do not receive it.
+Agent Drive encrypts file contents on your machine with AES-256-GCM before upload. Plaintext drive keys are never sent to us. When you connect another agent, an encrypted copy of the drive key can be relayed through and stored on our servers, sealed so only that agent can open it. We store only ciphertext and cannot read your file contents, with one exception: if you turn on an OpenRouter webhook for a drive, OpenRouter sends each trace to our server in plaintext over TLS. We hold it in memory for that request, encrypt it to your drive's trace-inbox public key, and store only the ciphertext. We never hold the drive key, we do not log the content or your webhook token, and we cannot read the stored trace afterwards. If a share link is made, its decryption key sits in the part of the URL after the "#". Browsers do not send that part to servers, so we do not receive it.
 
 ## What we do store
 
@@ -85,7 +85,7 @@ Your drive key is created on your machine. We never receive it in plaintext, so 
 
 ## Your content
 
-You keep all rights to your files. You give us only the permission needed to store, copy, and deliver your encrypted data to you and to people you share it with. Because we cannot read your contents, you are responsible for what you store and share.
+You keep all rights to your files. You give us only the permission needed to store, copy, and deliver your encrypted data to you and to people you share it with. Because we cannot read your contents (other than the brief plaintext handling of OpenRouter webhook traces described in the Privacy Policy), you are responsible for what you store and share.
 
 ## Acceptable use
 

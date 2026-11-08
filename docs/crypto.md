@@ -98,4 +98,6 @@ All base64url is unpadded and canonical.
 
 Webhook payloads are plaintext on the server while the request is in transit. The service
 encrypts the file to the inbox public key, but it never holds the drive key and cannot read
-the file afterwards.
+the file afterwards. `POST /api/webhooks/openrouter/:driveId` (`apps/web/src/api/trace-webhook.ts`)
+is the only route that does this: it reads the OpenRouter trace once, in memory, seals it with a
+random file key, wraps that key as envelope v2, and logs nothing from the body or the token.

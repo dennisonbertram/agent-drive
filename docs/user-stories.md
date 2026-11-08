@@ -14,8 +14,9 @@ used through an MCP server, a CLI, and a skill that teaches agents when and how
 to use it. The model is AgentMail: one call there creates an inbox; one call
 here creates a drive.
 
-**File contents are encrypted on the client before upload.** The Agent Drive
-server and S3 only ever hold ciphertext. The encryption key stays with the
+**File contents are encrypted on the client before upload** (except opt-in
+OpenRouter webhook traces, which the server encrypts on receipt). The Agent Drive
+server and S3 only ever hold ciphertext at rest. The encryption key stays with the
 customer.
 
 AgentMail reference point (third-party pricing pages, not verified against
@@ -235,9 +236,13 @@ and sub-accounts, AgentMail attachment integration.
 - **First customer:** indie and agent developers, self-serve.
 - **Payment:** a human pays (Stripe subscription plus usage).
 - **Storage:** our own hosted S3.
-- **Product framing:** Google Drive for agents. Agent transcripts and training
-  traces are not part of the product.
-- **Encryption:** file contents are encrypted on the client before upload.
+- **Product framing:** Google Drive for agents. Trace capture is opt-in: a drive
+  owner can send agent traces (for example an OpenRouter webhook) into
+  `/traces/...`. Training-data use of traces is not part of the product.
+- **Encryption:** file contents are encrypted on the client before upload, with
+  one exception: an OpenRouter webhook delivers its trace to the server in
+  plaintext over TLS, and the server encrypts it to the drive's trace-inbox
+  public key on receipt, never holding the drive key.
 
 ## Open questions
 
