@@ -202,6 +202,52 @@ describe('webhook token', () => {
     expect(await json(await consoleCall(f.userId, tokenPath))).toEqual({ token: null });
   });
 
+  it('DELETE waits for a concurrent rotation and then revokes the new token', async () => {
+    const f = await fixture();
+    const tokenPath = `drives/${f.driveId}/webhook-token`;
+    await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());
+    const first = await json(await consoleCall(f.userId, tokenPath, 'POST'));
+    // Play the rotation by hand: hold the drive lock, revoke A, insert B, and commit only after
+    // DELETE is observed waiting on that lock.
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [f.driveId]);
+      await holder.query('UPDATE drive_webhook_tokens SET revoked_at = now() WHERE id = $1', [
+        first.id,
+      ]);
+      const agent = await holder.query(
+        "SELECT id FROM agents WHERE account_id = $1 AND name = 'openrouter'",
+        [f.accountId],
+      );
+      await holder.query(
+        `INSERT INTO drive_webhook_tokens (drive_id, account_id, agent_id, token_hash)
+         VALUES ($1, $2, $3, $4)`,
+        [f.driveId, f.accountId, agent.rows[0].id, tokenHash(randomUUID())],
+      );
+      const pid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+      const deleting = consoleCall(f.userId, tokenPath, 'DELETE');
+      for (let i = 0; i < 100; i += 1) {
+        const blocked = await pool.query(
+          'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+          [pid],
+        );
+        if (blocked.rowCount) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      await holder.query('COMMIT');
+      const res = await deleting;
+      expect(res.status).toBe(200);
+    } finally {
+      holder.release();
+    }
+    const active = await pool.query(
+      'SELECT 1 FROM drive_webhook_tokens WHERE drive_id = $1 AND revoked_at IS NULL',
+      [f.driveId],
+    );
+    expect(active.rowCount).toBe(0);
+  });
+
   it('cascades when the drive is deleted', async () => {
     const f = await fixture();
     await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());

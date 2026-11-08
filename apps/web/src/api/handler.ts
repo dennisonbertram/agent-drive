@@ -1958,13 +1958,18 @@ async function traceEndpoint(
     );
   }
   if (method === 'DELETE') {
-    const result = await getPool().query(
-      `UPDATE drive_webhook_tokens SET revoked_at = now()
-        WHERE drive_id = $1 AND account_id = $2 AND revoked_at IS NULL RETURNING revoked_at`,
-      [driveId, auth.accountId],
-    );
-    if (!result.rows[0]) throw new ApiError('not_found', 'No active webhook token.');
-    return response({ revokedAt: result.rows[0].revoked_at });
+    // Same drive lock as rotation, so a revoke cannot miss a token that a rotation just inserted.
+    const revoked = await withTransaction(async (client) => {
+      await lockVaultDrive(client, auth.accountId, driveId);
+      const result = await client.query(
+        `UPDATE drive_webhook_tokens SET revoked_at = now()
+          WHERE drive_id = $1 AND account_id = $2 AND revoked_at IS NULL RETURNING revoked_at`,
+        [driveId, auth.accountId],
+      );
+      return result.rows[0] as Row | undefined;
+    });
+    if (!revoked) throw new ApiError('not_found', 'No active webhook token.');
+    return response({ revokedAt: revoked.revoked_at });
   }
   throw new ApiError('not_found', 'Endpoint not found.');
 }
