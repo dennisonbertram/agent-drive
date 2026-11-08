@@ -3,16 +3,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { driveKeyFromPastedText, driveKeyFromRecoveryText } from '@/src/console/recovery-file';
 import { CopyButton } from '../copy-button';
+import { NewPassphraseForm, PassphraseForm, ResetForm } from './vault-forms';
+
+export type UnlockMode = 'passphrase' | 'recovery' | 'setup' | 'change' | 'reset';
+export type VaultActions = {
+  email: string;
+  /** True when a passphrase exists for this account, so recovery mode can offer it. */
+  hasVault: boolean;
+  onUnlock: (passphrase: string) => Promise<string>;
+  onSetup: (_old: string, passphrase: string) => Promise<string>;
+  onChange: (oldPassphrase: string, newPassphrase: string) => Promise<string>;
+  onReset: () => Promise<string>;
+};
 
 /** Body of the "Load the key" dialog. Errors stay here so the dialog never changes size. */
 export function UnlockDialog({
   driveId,
   pendingMessage,
   onKey,
+  mode,
+  onMode,
+  vault,
+  recoveryNote,
 }: {
   driveId: string;
   pendingMessage?: string | undefined;
   onKey: (key: string) => void;
+  mode: UnlockMode;
+  onMode: (mode: UnlockMode) => void;
+  vault: VaultActions;
+  recoveryNote?: string | undefined;
 }) {
   const [error, setError] = useState('');
   const [pasted, setPasted] = useState('');
@@ -42,8 +62,50 @@ export function UnlockDialog({
     }
   }
 
+  if (mode === 'passphrase')
+    return (
+      <div className="unlock">
+        <PassphraseForm
+          email={vault.email}
+          onUnlock={vault.onUnlock}
+          onRecovery={() => onMode('recovery')}
+          note={pendingMessage}
+        />
+      </div>
+    );
+  if (mode === 'setup')
+    return (
+      <div className="unlock">
+        <NewPassphraseForm
+          email={vault.email}
+          submitLabel="Create"
+          busyLabel="Creating… this takes a few seconds."
+          onSubmit={vault.onSetup}
+        />
+      </div>
+    );
+  if (mode === 'change')
+    return (
+      <div className="unlock">
+        <NewPassphraseForm
+          current
+          email={vault.email}
+          submitLabel="Change passphrase"
+          busyLabel="Changing… this takes a few seconds."
+          onSubmit={vault.onChange}
+        />
+      </div>
+    );
+  if (mode === 'reset')
+    return (
+      <div className="unlock">
+        <ResetForm onReset={vault.onReset} />
+      </div>
+    );
+
   return (
     <div className="unlock">
+      {recoveryNote && <p role="status">{recoveryNote}</p>}
       <p>
         Choose the recovery file for this drive. The key stays in this tab only. It is cleared when
         you reload, or after 30 minutes without use.
@@ -97,6 +159,13 @@ export function UnlockDialog({
         <code>agent-drive credentials export</code>, then choose or paste what it gives you.{' '}
         <CopyButton text="agent-drive credentials export" label="Copy credentials export command" />
       </p>
+      {vault.hasVault && (
+        <p>
+          <button type="button" className="button secondary" onClick={() => onMode('passphrase')}>
+            Use my passphrase instead
+          </button>
+        </p>
+      )}
     </div>
   );
 }

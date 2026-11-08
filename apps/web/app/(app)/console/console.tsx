@@ -1,12 +1,13 @@
 'use client';
 
-import { UserButton } from '@clerk/nextjs';
+import { UserButton, useReverification, useUser } from '@clerk/nextjs';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   Fragment,
   useCallback,
   useEffect,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -24,7 +25,8 @@ import { ListState } from './list-state';
 import '../../styles/console.css';
 import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
-import { UnlockDialog } from './unlock-dialog';
+import { UnlockDialog, type UnlockMode } from './unlock-dialog';
+import { Vault, vaultRequest, type LockReason } from '@/src/console/vault';
 import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
 import { FileIcon } from './file-icon';
@@ -393,7 +395,57 @@ function SortHeader({
   );
 }
 
+const IDLE_MESSAGE = 'Locked after 30 minutes without use. Enter your passphrase to continue.';
+const NOT_IN_ACCOUNT =
+  'This drive isn’t in your account yet. Load its recovery file once and it will be added.';
+const MISMATCH =
+  'The saved key for this drive doesn’t open this file. Load its recovery file to replace it.';
+const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
+function useClerkIdentity() {
+  const { user } = useUser();
+  return { userId: user?.id ?? null, email: user?.primaryEmailAddress?.emailAddress ?? '' };
+}
+function useNoIdentity() {
+  return { userId: null as string | null, email: '' };
+}
+// Clerk's reverification cancel, or any other failure, as one line for a form.
+function vaultFailure(reason: unknown, doing: string) {
+  if ((reason as { code?: string } | null)?.code === 'reverification_cancelled')
+    return `Confirm it’s you to ${doing}.`;
+  return reason instanceof Error ? reason.message : 'Something went wrong. Please try again.';
+}
+
 export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
+  // clerkEnabled is constant for the life of the deployment, so the hook order never changes.
+  const useIdentity = clerkEnabled ? useClerkIdentity : useNoIdentity;
+  const identity = useIdentity();
+  const useWrap = (clerkEnabled ? useReverification : passThrough) as typeof passThrough;
+  const strictRequest = useWrap(vaultRequest);
+  const strictRef = useRef(strictRequest);
+  strictRef.current = strictRequest;
+  const lockedRef = useRef<(reason: LockReason) => void>(() => {});
+  const [, bumpVault] = useReducer((count: number) => count + 1, 0);
+  const [vault] = useState(
+    () =>
+      new Vault({
+        request: (path, method, body) => api(path, method, body),
+        strict: (path, method, body) => strictRef.current(path, method, body),
+        envelope: async (driveId, path) => {
+          const result = await api<{ items: { wrappedKey?: string }[] }>(
+            `drives/${driveId}/versions?path=${encodeURIComponent(path)}&limit=1`,
+          );
+          const wrapped = result.items[0]?.wrappedKey;
+          if (!wrapped) throw new Error('The file’s key could not be read.');
+          return wrapped;
+        },
+        onLocked: (reason) => lockedRef.current(reason),
+        onChange: () => bumpVault(),
+      }),
+  );
+  const [unlockMode, setUnlockMode] = useState<UnlockMode>('recovery');
+  const [recoveryNote, setRecoveryNote] = useState('');
+  // Increases when the drive changes, the unlock dialog closes, or a new action waits for a key.
+  const actionEpoch = useRef(0);
   const [tab, setTab] = useState<Tab>('Files');
   const [drives, setDrives] = useState<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -554,6 +606,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = loadedFiles.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
+  const vaultState =
+    vault.status === 'locked' || vault.status === 'unlocked' ? vault.status : 'none';
   const sharedNow = shares?.driveId === selected ? shares : null;
   const sharedShown = (sharedNow?.items ?? [])
     .filter((row) => row.path.toLowerCase().includes(query))
@@ -739,12 +793,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
       );
       setPendingAction(null);
+      actionEpoch.current += 1;
+      vault.cancelUnlock();
       previewRequest.current += 1;
       setPreview(null);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [vault]);
   // After opening a folder by link, keep keyboard users' place at the current folder.
   useEffect(() => {
     if (!focusCrumb.current) return;
@@ -835,22 +891,40 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => window.removeEventListener('beforeunload', warn);
   }, [driveReceipt, keyReceipt]);
 
-  // Clear every key after 30 minutes without use. Never touches driveReceipt: that dialog holds
-  // the only copy of a new drive's key. A download already running holds its key and finishes.
+  // Clear every key (and the account private key) after 30 minutes without use. Never touches
+  // driveReceipt: that dialog holds the only copy of a new drive's key. A download already
+  // running holds its key and finishes.
   const anyKey = Object.keys(driveKeys).length > 0;
+  const vaultOpen = vault.status === 'unlocked';
+  // Everything that depends on a key goes away at once. Called by Lock, idle and stale records.
+  function lockAll(message: string) {
+    actionEpoch.current += 1;
+    // Plaintext must not stay on screen after the key is cleared.
+    previewRequest.current += 1;
+    setPreview(null);
+    setModal((current) => (current === 'preview' || current === 'share' ? null : current));
+    setPendingAction(null);
+    setDriveKeys({});
+    setKeylineConfirm('');
+    setNotice(message);
+  }
+  lockedRef.current = (reason) =>
+    lockAll(
+      reason === 'idle'
+        ? IDLE_MESSAGE
+        : reason === 'stale'
+          ? 'Your passphrase was changed elsewhere. Enter it again to continue.'
+          : '',
+    );
   useEffect(() => {
-    if (!anyKey) return;
+    if (!anyKey && !vaultOpen) return;
     const lock = startIdleLock({
       onIdle: () => {
-        // Plaintext must not stay on screen after the key is cleared.
-        previewRequest.current += 1;
-        setPreview(null);
-        setModal((current) => (current === 'preview' || current === 'share' ? null : current));
-        setDriveKeys({});
-        setKeylineConfirm('');
-        setNotice(
-          'The key was cleared after 30 minutes without use. You’ll be asked for the recovery file at the next download.',
-        );
+        if (vault.status === 'unlocked') vault.lock('idle');
+        else
+          lockAll(
+            'The key was cleared after 30 minutes without use. You’ll be asked for the recovery file at the next download.',
+          );
       },
     });
     idleLock.current = lock;
@@ -858,7 +932,28 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       lock.stop();
       idleLock.current = null;
     };
-  }, [anyKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyKey, vaultOpen]);
+  // Load the passphrase record once. Unmounting (leaving the page) drops the account key.
+  useEffect(() => {
+    void vault.load();
+    return () => vault.clear();
+  }, [vault]);
+  // Sign-out or another user in the same tab: nothing from the old user may stay.
+  const lastUser = useRef(identity.userId);
+  useEffect(() => {
+    if (lastUser.current === identity.userId) return;
+    const hadUser = lastUser.current !== null;
+    lastUser.current = identity.userId;
+    if (!hadUser) return;
+    vault.clear();
+    lockAll('');
+    void vault.load();
+  }, [identity.userId, vault]);
+  // A key prompt or resume belongs to one drive.
+  useEffect(() => {
+    actionEpoch.current += 1;
+  }, [selected]);
 
   async function act(operation: () => Promise<void>) {
     setBusy(true);
@@ -883,6 +978,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   function close() {
     if (!busy) {
       setPendingAction(null);
+      actionEpoch.current += 1;
+      vault.cancelUnlock();
       closePreview();
       setShareFile(null);
       setModal(null);
@@ -925,6 +1022,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
     );
     setPendingAction(null);
+    actionEpoch.current += 1;
+    vault.cancelUnlock();
     closePreview();
     go({ drive: id, path: undefined });
   }
@@ -955,6 +1054,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         'A drive with this name already exists. Load its original drive key instead.',
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
+    // Skipped by the vault itself if it is locked before the write.
+    if (vault.status === 'unlocked') void vault.addKey(created.id, key);
     setDriveReceipt({ id: created.id, key });
     setReceiptSaved(false);
     setSaved(false);
@@ -963,12 +1064,53 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     selectDrive(created.id);
   }
 
-  async function download(file: FileEntry, key = driveKeys[selected]) {
-    if (!key) {
-      setPendingAction({ driveId: selected, file, kind: 'download' });
-      open('unlock');
-      return;
+  // The drive key for a file action: the tab's copy, else the account's slot (verified against
+  // this file). With neither, asks for it and returns undefined; the action resumes through
+  // keyLoaded or the passphrase dialog. Returns undefined, doing nothing, if Lock, a drive change
+  // or a newer action happened while it waited.
+  async function keyFor(
+    file: FileEntry,
+    kind: 'download' | 'preview' | 'share',
+  ): Promise<string | undefined> {
+    const driveId = selected;
+    const cached = driveKeys[driveId];
+    if (cached) {
+      if (vault.status === 'unlocked' && !vault.hasSlot(driveId))
+        void addToAccount(driveId, cached, file.path);
+      return cached;
     }
+    let note = '';
+    if (vault.status === 'unlocked') {
+      note = NOT_IN_ACCOUNT;
+      if (vault.hasSlot(driveId)) {
+        const mark = actionEpoch.current;
+        const epoch = vault.epochNow;
+        const result = await vault.keyFor(driveId, file.path);
+        if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
+        if (result.status === 'key') {
+          setDriveKeys((current) => ({ ...current, [driveId]: result.key }));
+          return result.key;
+        }
+        if (result.status === 'stale') return undefined;
+        note = result.status === 'mismatch' ? MISMATCH : NOT_IN_ACCOUNT;
+      }
+    }
+    actionEpoch.current += 1;
+    setPendingAction({ driveId, file, kind });
+    setRecoveryNote(note);
+    setUnlockMode(vault.status === 'locked' ? 'passphrase' : 'recovery');
+    open('unlock');
+    return undefined;
+  }
+
+  async function addToAccount(driveId: string, key: string, path?: string) {
+    const result = await vault.addKey(driveId, key, path).catch(() => 'skipped' as const);
+    if (result === 'added') setNotice('Added to your account. Next time your passphrase opens it.');
+  }
+
+  async function download(file: FileEntry, key?: string) {
+    key ??= await keyFor(file, 'download');
+    if (!key) return;
     setDownloadingId(file.id);
     try {
       await decryptAndSave(file, key);
@@ -1010,12 +1152,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setPreview(null);
   }
 
-  async function openPreview(file: FileEntry, key = driveKeys[selected]) {
-    if (!key) {
-      setPendingAction({ driveId: selected, file, kind: 'preview' });
-      open('unlock');
-      return;
-    }
+  async function openPreview(file: FileEntry, key?: string) {
+    key ??= await keyFor(file, 'preview');
+    if (!key) return;
     const name = file.path.split('/').at(-1) || file.path;
     const mine = ++previewRequest.current;
     const show = (view: PreviewView) => {
@@ -1297,12 +1436,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       ),
     );
   }
-  function openShare(file: FileEntry, key = driveKeys[selected]) {
-    if (!key) {
-      setPendingAction({ driveId: selected, file, kind: 'share' });
-      open('unlock');
-      return;
-    }
+  async function openShare(file: FileEntry, key?: string) {
+    key ??= await keyFor(file, 'share');
+    if (!key) return;
     setShareFile(file);
     void loadShares(selected);
     open('share');
@@ -1313,10 +1449,76 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setPendingAction(null);
     setDriveKeys((current) => ({ ...current, [selected]: key }));
     setModal(null);
+    // A key the user supplied also goes into the account, once it opens a real file.
+    if (vault.status === 'unlocked')
+      void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path);
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
-    else if (pending.kind === 'share') openShare(pending.file, key);
+    else if (pending.kind === 'share') void openShare(pending.file, key);
     else void act(() => download(pending.file, key));
+  }
+
+  function resume(pending: NonNullable<typeof pendingAction>) {
+    if (pending.kind === 'preview') void openPreview(pending.file);
+    else if (pending.kind === 'share') void openShare(pending.file);
+    else void act(() => download(pending.file));
+  }
+
+  async function unlockWithPassphrase(passphrase: string) {
+    const mark = actionEpoch.current;
+    const pending = pendingAction;
+    try {
+      if (!(await vault.unlock(passphrase))) return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'unlock');
+    }
+    setModal(null);
+    // Closed, changed drive or locked meanwhile: stay unlocked, resume nothing.
+    if (mark !== actionEpoch.current || !pending || pending.driveId !== selected) return '';
+    setPendingAction(null);
+    resume(pending);
+    return '';
+  }
+  async function setUpPassphrase(_old: string, passphrase: string) {
+    try {
+      const result = await vault.setup(passphrase, driveKeys);
+      if (!result) return '';
+      setModal(null);
+      setNotice(
+        result.total
+          ? `Passphrase set up. ${count(result.added, 'drive')} added to your account.`
+          : 'Passphrase set up. Load each drive’s recovery file once to add it.',
+      );
+      return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'set up the passphrase');
+    }
+  }
+  async function changePassphrase(oldPassphrase: string, newPassphrase: string) {
+    try {
+      if (!(await vault.change(oldPassphrase, newPassphrase))) return '';
+      setModal(null);
+      setNotice('Passphrase changed. Use the new one from now on.');
+      return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'change the passphrase');
+    }
+  }
+  async function resetPassphrase() {
+    try {
+      await vault.reset();
+      setUnlockMode('setup');
+      return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'reset the passphrase');
+    }
+  }
+  function openVaultDialog(mode: UnlockMode) {
+    setPendingAction(null);
+    actionEpoch.current += 1;
+    setRecoveryNote('');
+    setUnlockMode(mode);
+    open('unlock');
   }
 
   function saveRecoveryFile(driveId: string, key: string) {
@@ -1724,9 +1926,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             backupText={backupText}
                             confirming={keylineConfirm === selected}
                             busy={busy}
-                            onLoad={() => {
-                              setPendingAction(null);
-                              open('unlock');
+                            onLoad={() => openVaultDialog('recovery')}
+                            vault={vaultState}
+                            fingerprint={vault.fingerprint}
+                            vaultActions={{
+                              onSetup: () => openVaultDialog('setup'),
+                              onUnlock: () => openVaultDialog('passphrase'),
+                              onLock: () => vault.lock('manual'),
+                              onChange: () => openVaultDialog('change'),
+                              onReset: () => openVaultDialog('reset'),
                             }}
                             onDownload={() => {
                               saveRecoveryFile(selected, driveKeys[selected]!);
@@ -2052,7 +2260,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                             event.currentTarget
                                               .closest<HTMLElement>('[popover]')
                                               ?.hidePopover();
-                                            openShare(file);
+                                            void openShare(file);
                                           }}
                                         >
                                           Share
@@ -2476,7 +2684,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           title={
             {
               drive: 'Create a drive',
-              unlock: `Load the key for ${drive?.name ?? 'this drive'}`,
+              unlock: {
+                recovery: `Load the key for ${drive?.name ?? 'this drive'}`,
+                passphrase: 'Unlock with your passphrase',
+                setup: 'Set up passphrase unlock',
+                change: 'Change passphrase',
+                reset: 'Reset passphrase',
+              }[unlockMode],
               agent: 'Create an agent',
               connect: 'Connect an agent',
               key: 'Create API key',
@@ -2588,7 +2802,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveId={selected}
               pendingMessage={
                 pendingAction
-                  ? `After the key loads, ${
+                  ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, ${
                       pendingAction.kind === 'share'
                         ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
                         : `${pendingAction.file.path.split('/').at(-1)} ${
@@ -2598,6 +2812,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   : undefined
               }
               onKey={keyLoaded}
+              mode={unlockMode}
+              onMode={(mode) => {
+                setRecoveryNote('');
+                setUnlockMode(mode);
+              }}
+              recoveryNote={recoveryNote}
+              vault={{
+                email: identity.email,
+                hasVault: vault.status === 'locked',
+                onUnlock: unlockWithPassphrase,
+                onSetup: setUpPassphrase,
+                onChange: changePassphrase,
+                onReset: resetPassphrase,
+              }}
             />
           )}
           {modal === 'preview' && preview && (

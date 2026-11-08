@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useReverification } from '@clerk/nextjs';
 import { auditLabel, errorLabel } from '@/src/console/audit-labels';
 import { keyDetail } from '@/src/console/audit-who';
+import { fingerprint } from '@/src/console/account-key';
 import { AccountHeader } from '../account-header';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -97,6 +98,50 @@ function actor(event: Audit) {
   if (event.userId) return 'You';
   if (event.action === 'share.access') return 'Someone with a share link';
   return event.agentName ?? 'Not signed in';
+}
+
+// Status only. Setting up, unlocking, changing and resetting all happen in Files.
+function PassphraseStatus() {
+  const [status, setStatus] = useState<'loading' | 'error' | 'none' | { text: string }>('loading');
+  useEffect(() => {
+    let mounted = true;
+    void (async () => {
+      try {
+        const { accountKey } = await api<{
+          accountKey: { publicKey: string; createdAt: string } | null;
+        }>('account-key');
+        if (!accountKey) return mounted && setStatus('none');
+        const slots = await api<Page<unknown>>('account-key/slots?limit=100');
+        const drives = `${slots.items.length}${slots.nextCursor ? '+' : ''}`;
+        if (mounted)
+          setStatus({
+            text: `Passphrase set up ${new Date(accountKey.createdAt).toLocaleDateString()}, fingerprint ${await fingerprint(accountKey.publicKey)}, ${drives} ${drives === '1' ? 'drive' : 'drives'} added.`,
+          });
+      } catch {
+        if (mounted) setStatus('error');
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+  return (
+    <section className="billing-card" aria-labelledby="passphrase-heading">
+      <h2 id="passphrase-heading">Passphrase unlock</h2>
+      <p data-testid="passphrase-status">
+        {status === 'loading'
+          ? 'Loading…'
+          : status === 'error'
+            ? 'Couldn’t load the passphrase status.'
+            : status === 'none'
+              ? 'Not set up.'
+              : status.text}
+      </p>
+      <Link className="button secondary" href="/console">
+        Manage in Files
+      </Link>
+    </section>
+  );
 }
 
 export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean }) {
@@ -348,6 +393,7 @@ export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean
             </button>
           )}
         </section>
+        <PassphraseStatus />
         <section className="billing-card settings-danger" aria-labelledby="delete-heading">
           <p className="eyebrow">PERMANENT ACTIONS</p>
           <h2 id="delete-heading">Delete your data</h2>
