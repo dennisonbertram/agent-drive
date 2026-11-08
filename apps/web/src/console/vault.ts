@@ -2,7 +2,12 @@
 // Pure TypeScript with injected requests, so it runs under Node tests. React state lives in
 // console.tsx. Nothing here touches browser storage, URLs or logs, and no error message ever
 // contains a passphrase, a drive key or a private key.
-import { unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import { inboxFor } from './share-link';
+import {
+  unwrapInboxPrivateKey,
+  type TraceInboxRecord,
+} from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   createAccountKey,
   fingerprint,
@@ -30,6 +35,8 @@ export type VaultDeps = {
   envelope: (driveId: string, path: string) => Promise<string>;
   /** Any live file of the drive, to check a key against. Undefined for an empty drive. */
   anyPath: (driveId: string) => Promise<string | undefined>;
+  /** The drive's trace inbox record, or null when it has none. */
+  inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
   onLocked?: ((reason: LockReason) => void) | undefined;
   onChange?: (() => void) | undefined;
 };
@@ -235,12 +242,54 @@ export class Vault {
     if (epoch !== this.epoch) return { status: 'stale' };
     const wrapped = await this.deps.envelope(driveId, path);
     if (epoch !== this.epoch) return { status: 'stale' };
-    try {
-      await unwrapFileKey(wrapped, key);
-    } catch {
-      return { status: 'mismatch' };
-    }
+    if (!(await this.opens(driveId, wrapped, key))) return { status: 'mismatch' };
+    if (epoch !== this.epoch) return { status: 'stale' };
     return { status: 'key', key };
+  }
+
+  /** True if `key` opens this wrapped file key (v2 through the drive's inbox record). */
+  private async opens(driveId: string, wrapped: string, key: string) {
+    let version: 1 | 2;
+    try {
+      version = envelopeVersion(wrapped);
+    } catch {
+      return false;
+    }
+    let inbox: ReturnType<typeof inboxFor> | undefined;
+    if (version === 2) {
+      const record = await this.deps.inbox(driveId);
+      if (!record) return false;
+      inbox = inboxFor(driveId, record);
+    }
+    try {
+      await unwrapFileKey(wrapped, key, inbox);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Says what a drive key opens: a file envelope, else the trace inbox of a drive with no files.
+   * 'unverifiable' means the drive has neither.
+   */
+  async verifyKey(
+    driveId: string,
+    key: string,
+  ): Promise<'file' | 'inbox' | 'mismatch' | 'unverifiable'> {
+    const path = await this.deps.anyPath(driveId);
+    if (path !== undefined) {
+      const wrapped = await this.deps.envelope(driveId, path);
+      return (await this.opens(driveId, wrapped, key)) ? 'file' : 'mismatch';
+    }
+    const record = await this.deps.inbox(driveId);
+    if (!record) return 'unverifiable';
+    try {
+      await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
+      return 'inbox';
+    } catch {
+      return 'mismatch';
+    }
   }
 
   /**
@@ -260,9 +309,13 @@ export class Vault {
     if (!record || !privateKey) return 'skipped';
     if (!opts.trusted) {
       try {
-        const path = opts.path ?? (await this.deps.anyPath(driveId));
-        if (path === undefined) return 'skipped';
-        await unwrapFileKey(await this.deps.envelope(driveId, path), key);
+        if (opts.path !== undefined) {
+          if (!(await this.opens(driveId, await this.deps.envelope(driveId, opts.path), key)))
+            return 'skipped';
+        } else {
+          const result = await this.verifyKey(driveId, key);
+          if (result !== 'file' && result !== 'inbox') return 'skipped';
+        }
       } catch {
         return 'skipped';
       }
