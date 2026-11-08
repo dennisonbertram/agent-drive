@@ -42,6 +42,7 @@ import {
   presignedDownload,
   presignedUpload,
 } from './storage';
+import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
 import { cleanupExpiredUploads } from './upload-cleanup';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
@@ -91,6 +92,7 @@ const quotaControlledActions = new Set([
   'drive.put',
   'drive.commit',
   'drive.get',
+  'drive.trace_inbox.read',
   'drive.list',
   'drive.versions',
   'drive.recent',
@@ -371,6 +373,14 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     'GET:search': 'drive.search',
     'GET:trash': 'drive.trash',
   };
+  if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'trace-inbox') {
+    if (method === 'GET') return 'drive.trace_inbox.read';
+    if (method === 'POST') return 'console.drive.trace_inbox.create';
+  }
+  if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'webhook-token') {
+    const action = { GET: 'read', POST: 'create', DELETE: 'revoke' }[method];
+    if (action) return `console.drive.webhook_token.${action}`;
+  }
   if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'shares')
     return `share.${method === 'POST' ? 'create' : method === 'GET' ? 'list' : 'unknown'}`;
   if (parts.length === 4 && parts[0] === 'drives' && parts[2] === 'shares') return 'share.revoke';
@@ -1796,54 +1806,15 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       });
       if (new Date(lockedIntent.expires_at).getTime() < Date.now())
         throw new ApiError('conflict', 'The upload intent has expired.');
-      const fileResult = await client.query(
-        'SELECT id, current_version_id, deleted_at FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE',
-        [driveId, source.path],
-      );
-      const file = fileResult.rows[0] as Row | undefined;
-      const currentVersionId = (file?.current_version_id as string | undefined) ?? null;
-      const trashedMessage = 'The file is in the trash. Restore it, or write with overwrite.';
-      if (lockedIntent.conditional_mode === 'create' && file) {
-        if (file.deleted_at)
-          throw new ApiError('conflict', trashedMessage, 409, {
-            state: 'trashed',
-            currentVersionId,
-          });
-        throw new ApiError('conflict', 'The file already exists.', 409, {
-          state: 'exists',
-          currentVersionId,
-        });
-      }
-      if (lockedIntent.conditional_mode === 'version') {
-        if (!file)
-          throw new ApiError('conflict', 'There is no file at this path.', 409, {
-            state: 'absent',
-            currentVersionId: null,
-          });
-        if (file.deleted_at)
-          throw new ApiError('conflict', trashedMessage, 409, {
-            state: 'trashed',
-            currentVersionId,
-          });
-        if (file.current_version_id !== lockedIntent.base_version_id)
-          throw new ApiError(
-            'conflict',
-            'The file changed since the conditional write was prepared.',
-            409,
-            { state: 'changed', currentVersionId },
-          );
-      }
-      const used = await client.query(
-        'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
-        [driveId],
-      );
-      const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
-      if (
-        Number(used.rows[0].used) + Number(lockedIntent.ciphertext_size) >
-        Number(quota.rows[0].quota_bytes)
-      ) {
-        throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
-      }
+      const mode: PutMode =
+        lockedIntent.conditional_mode === 'create'
+          ? 'create'
+          : lockedIntent.conditional_mode === 'version'
+            ? { baseVersionId: lockedIntent.base_version_id as string }
+            : 'unconditional';
+      // Report a conflict or quota failure before copying the staged object; commitPut re-checks under the same locks.
+      await putConflict(client, driveId, source.path, mode);
+      await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
       try {
         await copyObject(lockedIntent.staging_key, finalKey, stagedEtag);
       } catch (error) {
@@ -1860,58 +1831,26 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         throw error;
       }
       copied = true;
-      const fileId = file?.id ?? randomUUID();
-      if (!file) {
-        await client.query(
-          'INSERT INTO files (id, drive_id, path, current_version_id) VALUES ($1,$2,$3,$4)',
-          [fileId, driveId, lockedIntent.path, versionId],
-        );
-      } else {
-        await client.query(
-          'UPDATE files SET current_version_id = $1, deleted_at = NULL WHERE id = $2',
-          [versionId, fileId],
-        );
-      }
-      await client.query(
-        `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id,machine_id,user_id,tags,description)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-        [
-          versionId,
-          fileId,
-          driveId,
-          finalKey,
-          lockedIntent.ciphertext_size,
-          lockedIntent.wrapped_key,
-          lockedIntent.agent_id,
-          lockedIntent.machine_id,
-          lockedIntent.user_id,
-          lockedIntent.tags,
-          lockedIntent.description,
-        ],
-      );
+      const version = await commitPut(client, {
+        accountId: auth.accountId,
+        driveId,
+        path: lockedIntent.path,
+        objectKey: finalKey,
+        ciphertextSize: Number(lockedIntent.ciphertext_size),
+        wrappedKey: lockedIntent.wrapped_key,
+        agentId: lockedIntent.agent_id,
+        machineId: lockedIntent.machine_id,
+        userId: lockedIntent.user_id,
+        tags: lockedIntent.tags,
+        description: lockedIntent.description,
+        mode,
+        versionId,
+      });
       await client.query('UPDATE upload_intents SET committed_version_id = $1 WHERE id = $2', [
         versionId,
         intentId,
       ]);
-      await client.query(
-        `INSERT INTO file_events
-          (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
-         VALUES ($1, $2, 'put', $3, $4, $5, $6, $7)`,
-        [
-          driveId,
-          fileId,
-          lockedIntent.path,
-          versionId,
-          lockedIntent.agent_id,
-          lockedIntent.machine_id,
-          lockedIntent.user_id,
-        ],
-      );
-      const version = await client.query(
-        'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
-        [versionId],
-      );
-      return { version: version.rows[0] as Row, idempotent: false };
+      return { version, idempotent: false };
     });
     if (result.idempotent) return response({ version: rowVersion(result.version) });
     await deleteObject(source.staging_key).catch(() => undefined);
@@ -1920,6 +1859,119 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     if (copied) await deleteObject(finalKey).catch(() => undefined);
     throw error;
   }
+}
+
+function traceInboxOutput(row: Row | undefined) {
+  return {
+    inbox: row
+      ? {
+          keyId: row.key_id,
+          publicKey: row.public_key,
+          wrappedPrivateKey: row.wrapped_private_key,
+          createdAt: row.created_at,
+        }
+      : null,
+  };
+}
+
+// Trace inbox (bearer read + console create) and webhook token (console only) for one drive.
+async function traceEndpoint(
+  request: Request,
+  auth: Auth,
+  driveId: string,
+  operation: 'trace-inbox' | 'webhook-token',
+  url: URL,
+  console: boolean,
+) {
+  const method = request.method;
+  if (operation === 'trace-inbox' && method === 'GET') {
+    need(auth, 'read', driveId);
+    await ensureDrive(auth, driveId);
+    const result = await getPool().query('SELECT * FROM drive_trace_inboxes WHERE drive_id = $1', [
+      driveId,
+    ]);
+    return response(traceInboxOutput(result.rows[0]));
+  }
+  if (!console) throw new ApiError('not_found', 'Endpoint not found.');
+  await ensureDrive(auth, driveId);
+  if (operation === 'trace-inbox') {
+    const body = await jsonBody(request);
+    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey']);
+    const keyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
+    const publicKey = ecPointField(body.publicKey, 'publicKey');
+    const wrappedPrivateKey = wrappedPrivateKeyField(body.wrappedPrivateKey);
+    const created = await withTransaction(async (client) => {
+      await lockVaultDrive(client, auth.accountId, driveId);
+      const inserted = await client.query(
+        `INSERT INTO drive_trace_inboxes (drive_id, account_id, key_id, public_key, wrapped_private_key)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT DO NOTHING
+         RETURNING *`,
+        [driveId, auth.accountId, keyId, publicKey, wrappedPrivateKey],
+      );
+      return inserted.rows[0] as Row | undefined;
+    });
+    if (!created) throw new ApiError('conflict', 'A trace inbox already exists for this drive.');
+    return response(traceInboxOutput(created), 201);
+  }
+  if (method === 'GET') {
+    const result = await getPool().query(
+      'SELECT id, created_at FROM drive_webhook_tokens WHERE drive_id = $1 AND revoked_at IS NULL',
+      [driveId],
+    );
+    const row = result.rows[0] as Row | undefined;
+    return response({ token: row ? { id: row.id, createdAt: row.created_at } : null });
+  }
+  if (method === 'POST') {
+    const token = `adw_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
+    const created = await withTransaction(async (client) => {
+      await lockVaultDrive(client, auth.accountId, driveId);
+      const inbox = await client.query('SELECT 1 FROM drive_trace_inboxes WHERE drive_id = $1', [
+        driveId,
+      ]);
+      if (!inbox.rowCount) throw new ApiError('conflict', 'Create the trace inbox first.');
+      const agent = await client.query(
+        `INSERT INTO agents (account_id, name) VALUES ($1, 'openrouter')
+         ON CONFLICT (account_id, name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [auth.accountId],
+      );
+      await client.query(
+        'UPDATE drive_webhook_tokens SET revoked_at = now() WHERE drive_id = $1 AND revoked_at IS NULL',
+        [driveId],
+      );
+      const inserted = await client.query(
+        `INSERT INTO drive_webhook_tokens (drive_id, account_id, agent_id, token_hash)
+         VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
+        [driveId, auth.accountId, agent.rows[0].id, hashToken(token)],
+      );
+      return inserted.rows[0] as Row;
+    });
+    return response(
+      {
+        id: created.id,
+        token,
+        url: `${url.origin}/api/webhooks/openrouter/${driveId}`,
+        createdAt: created.created_at,
+      },
+      201,
+    );
+  }
+  if (method === 'DELETE') {
+    // Same drive lock as rotation, so a revoke cannot miss a token that a rotation just inserted.
+    const revoked = await withTransaction(async (client) => {
+      await lockVaultDrive(client, auth.accountId, driveId);
+      const result = await client.query(
+        `UPDATE drive_webhook_tokens SET revoked_at = now()
+          WHERE drive_id = $1 AND account_id = $2 AND revoked_at IS NULL RETURNING revoked_at`,
+        [driveId, auth.accountId],
+      );
+      return result.rows[0] as Row | undefined;
+    });
+    if (!revoked) throw new ApiError('not_found', 'No active webhook token.');
+    return response({ revokedAt: revoked.revoked_at });
+  }
+  throw new ApiError('not_found', 'Endpoint not found.');
 }
 
 async function fileEndpoint(
@@ -2339,6 +2391,8 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
   if (method === 'POST' && parts[2] === 'key-backup') return true;
   if ((method === 'POST' || method === 'DELETE') && parts[2] === 'account-key') return true;
   if ((method === 'GET' || method === 'POST') && parts[2] === 'shares') return true;
+  if ((method === 'GET' || method === 'POST') && parts[2] === 'trace-inbox') return true;
+  if (['GET', 'POST', 'DELETE'].includes(method) && parts[2] === 'webhook-token') return true;
   if (
     method === 'GET' &&
     ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)
@@ -2424,6 +2478,20 @@ async function handleRequest(request: Request, mode: RequestMode) {
       if (!/^[A-Za-z0-9_-]{22}$/u.test(relative[3]!))
         throw new ApiError('validation_error', 'share id is invalid.');
       output = await revokeShare(request, auth, relative[1]!, relative[3]!);
+    } else if (
+      relative[0] === 'drives' &&
+      relative.length === 3 &&
+      (relative[2] === 'trace-inbox' || relative[2] === 'webhook-token')
+    ) {
+      uuid(relative[1], 'drive id');
+      output = await traceEndpoint(
+        request,
+        auth,
+        relative[1]!,
+        relative[2],
+        url,
+        mode.kind === 'console',
+      );
     } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
       output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url);
