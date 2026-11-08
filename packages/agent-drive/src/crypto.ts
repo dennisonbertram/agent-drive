@@ -117,7 +117,13 @@ export async function unwrapFileKey(
     if (envelopeVersion(wrappedKey) === 2) {
       if (!inbox) throw new DriveCryptoError('inbox_key_required', INBOX_REQUIRED);
       const privateKey = await unwrapInboxPrivateKey(inbox, driveKey as string);
-      return await unsealFileKeyFromInbox(wrappedKey, privateKey, inbox.keyId, inbox.driveId);
+      return await unsealFileKeyFromInbox(
+        wrappedKey,
+        privateKey,
+        inbox.keyId,
+        inbox.driveId,
+        inbox.publicKey,
+      );
     }
     const envelope = decodeBase64Url(wrappedKey);
     if (envelope.length !== 61) throw new Error('Invalid wrapped key.');

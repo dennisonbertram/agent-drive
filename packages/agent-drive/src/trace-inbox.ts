@@ -18,7 +18,9 @@ export type SealRandom = { ephemeral?: CryptoKeyPair; iv?: Uint8Array };
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 const wrapAad = (i: TraceInbox) =>
   enc.encode(`agent-drive:trace-inbox:v1:${i.driveId}:${i.keyId}:${i.publicKey}`);
-const label = (keyId: string, driveId: string) => enc.encode(`${keyId}:${driveId}`);
+/** HKDF info and AES-GCM AAD: binds the drive, key id, serialized epk and recipient public key. */
+const label = (keyId: string, driveId: string, epk: Uint8Array, publicKey: string) =>
+  enc.encode(`${keyId}:${driveId}:${encodeBase64Url(epk)}:${publicKey}`);
 
 async function importPublicPoint(value: unknown): Promise<CryptoKey> {
   if (typeof value !== 'string' || value.length !== 87) throw new Error('point');
@@ -95,11 +97,16 @@ export async function unwrapInboxPrivateKey(inbox: TraceInbox, driveKey: string)
   );
 }
 
-async function sealKey(bits: ArrayBuffer, keyId: string, driveId: string, usage: KeyUsage) {
+async function sealKey(bits: ArrayBuffer, context: Uint8Array, usage: KeyUsage) {
   const subtle = crypto.subtle;
   const hkdf = await subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
   return subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: enc.encode(SEAL_SALT), info: label(keyId, driveId) },
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: enc.encode(SEAL_SALT),
+      info: context as Uint8Array<ArrayBuffer>,
+    },
     hkdf,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -120,22 +127,20 @@ export async function sealFileKeyToInbox(
   const point = await importPublicPoint(inbox.publicKey);
   const ephemeral = random.ephemeral ?? (await subtle.generateKey(EC, true, ['deriveBits']));
   const bits = await subtle.deriveBits({ name: 'ECDH', public: point }, ephemeral.privateKey, 256);
-  const aes = await sealKey(bits, inbox.keyId, inbox.driveId, 'encrypt');
+  const rawEpk = new Uint8Array(await subtle.exportKey('raw', ephemeral.publicKey));
+  const context = label(inbox.keyId, inbox.driveId, rawEpk, inbox.publicKey);
+  const aes = await sealKey(bits, context, 'encrypt');
   const iv = random.iv ?? crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(
     await subtle.encrypt(
-      {
-        name: 'AES-GCM',
-        iv: iv as Uint8Array<ArrayBuffer>,
-        additionalData: label(inbox.keyId, inbox.driveId),
-      },
+      { name: 'AES-GCM', iv: iv as Uint8Array<ArrayBuffer>, additionalData: context },
       aes,
       enc.encode(fileKey),
     ),
   );
   const out = new Uint8Array(137);
   out[0] = 2;
-  out.set(new Uint8Array(await subtle.exportKey('raw', ephemeral.publicKey)), 1);
+  out.set(rawEpk, 1);
   out.set(iv, 66);
   out.set(ct, 78);
   return encodeBase64Url(out);
@@ -147,17 +152,24 @@ export async function unsealFileKeyFromInbox(
   privateKey: CryptoKey,
   keyId: string,
   driveId: string,
+  publicKey: string,
 ): Promise<string> {
   if (!isUuid(driveId) || !isUuid(keyId)) throw new Error('Invalid trace inbox record.');
+  await importPublicPoint(publicKey);
   if (envelope.length !== 183) throw new Error('Invalid wrapped key.');
   const bytes = decodeBase64Url(envelope);
   if (bytes.length !== 137 || bytes[0] !== 2) throw new Error('Invalid wrapped key.');
   const subtle = crypto.subtle;
-  const epk = await subtle.importKey('raw', bytes.slice(1, 66), EC, false, []);
+  const rawEpk = bytes.slice(1, 66);
+  // Only the canonical uncompressed form: the hybrid 0x07 prefix and the negated point would
+  // otherwise derive the same ECDH secret.
+  if (rawEpk[0] !== 4) throw new Error('Invalid wrapped key.');
+  const epk = await subtle.importKey('raw', rawEpk, EC, false, []);
   const bits = await subtle.deriveBits({ name: 'ECDH', public: epk }, privateKey, 256);
+  const context = label(keyId, driveId, rawEpk, publicKey);
   const plain = await subtle.decrypt(
-    { name: 'AES-GCM', iv: bytes.slice(66, 78), additionalData: label(keyId, driveId) },
-    await sealKey(bits, keyId, driveId, 'decrypt'),
+    { name: 'AES-GCM', iv: bytes.slice(66, 78), additionalData: context },
+    await sealKey(bits, context, 'decrypt'),
     bytes.slice(78),
   );
   const fileKey = new TextDecoder().decode(plain);

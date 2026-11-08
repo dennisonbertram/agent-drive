@@ -49,7 +49,9 @@ describe('trace inbox frozen vectors', () => {
 
   it('opens the frozen envelope', async () => {
     const key = await unwrapInboxPrivateKey(inbox, v.driveKey);
-    expect(await unsealFileKeyFromInbox(v.envelope, key, v.keyId, v.driveId)).toBe(v.fileKey);
+    expect(await unsealFileKeyFromInbox(v.envelope, key, v.keyId, v.driveId, v.publicKey)).toBe(
+      v.fileKey,
+    );
   });
 });
 
@@ -59,13 +61,15 @@ describe('trace inbox round trip and failures', () => {
     const rec = await createTraceInbox(v.driveId, driveKey);
     const env = await sealFileKeyToInbox(v.fileKey, { driveId: v.driveId, ...rec });
     const key = await unwrapInboxPrivateKey({ driveId: v.driveId, ...rec }, driveKey);
-    expect(await unsealFileKeyFromInbox(env, key, rec.keyId, v.driveId)).toBe(v.fileKey);
+    expect(await unsealFileKeyFromInbox(env, key, rec.keyId, v.driveId, rec.publicKey)).toBe(
+      v.fileKey,
+    );
   });
 
   it('rejects tampering with epk, iv and ct, and a wrong driveId or keyId', async () => {
     const key = await unwrapInboxPrivateKey(inbox, v.driveKey);
     const open = (env: string, keyId = v.keyId, driveId = v.driveId) =>
-      unsealFileKeyFromInbox(env, key, keyId, driveId);
+      unsealFileKeyFromInbox(env, key, keyId, driveId, v.publicKey);
     await expect(open(flip(v.envelope, 20))).rejects.toThrow(); // epk
     await expect(open(flip(v.envelope, 90))).rejects.toThrow(); // iv
     await expect(open(flip(v.envelope, 150))).rejects.toThrow(); // ct

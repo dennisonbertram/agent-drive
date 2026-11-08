@@ -163,6 +163,44 @@ describe('wrapped-key envelope v2 through the public API', () => {
     ).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 
+  describe('ephemeral key malleability', () => {
+    const P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
+    const bytesOf = (s: string) => Uint8Array.from(Buffer.from(s, 'base64url'));
+    const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64url');
+    const open = (wrappedKey: string, inbox: Parameters<typeof unwrapFileKey>[2]) =>
+      unwrapFileKey(wrappedKey, vector.driveKey, inbox);
+    const inbox = {
+      driveId: vector.driveId,
+      keyId: vector.keyId,
+      publicKey: vector.publicKey,
+      wrappedPrivateKey: vector.wrappedPrivateKey,
+    };
+
+    it('opens the unmodified vector', async () => {
+      expect(await open(vector.envelope, inbox)).toBe(vector.fileKey);
+    });
+
+    it('rejects a negated ephemeral point', async () => {
+      const bytes = bytesOf(vector.envelope);
+      const y = BigInt('0x' + Buffer.from(bytes.slice(34, 66)).toString('hex'));
+      bytes.set(Buffer.from((P - y).toString(16).padStart(64, '0'), 'hex'), 34);
+      await expect(open(b64(bytes), inbox)).rejects.toMatchObject({ code: 'decryption_failed' });
+    });
+
+    it('rejects a hybrid (0x07) point prefix', async () => {
+      const bytes = bytesOf(vector.envelope);
+      bytes[1] = 7;
+      await expect(open(b64(bytes), inbox)).rejects.toMatchObject({ code: 'decryption_failed' });
+    });
+
+    it('rejects an ephemeral point swapped in from another valid envelope', async () => {
+      const other = await sealFileKeyToInbox(vector.fileKey, inbox);
+      const bytes = bytesOf(vector.envelope);
+      bytes.set(bytesOf(other).slice(1, 66), 1);
+      await expect(open(b64(bytes), inbox)).rejects.toMatchObject({ code: 'decryption_failed' });
+    });
+  });
+
   it('refuses cross-drive substitution', async () => {
     const key = generateDriveKey();
     const a = await sealedFor(driveA, key);

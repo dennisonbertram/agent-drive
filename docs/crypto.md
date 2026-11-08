@@ -87,7 +87,10 @@ All base64url is unpadded and canonical.
 - **Envelope v2.** `0x02 || epk(65) || iv(12) || ct(59)`, 137 bytes, 183 characters. `epk` is an
   ephemeral raw P-256 point. `ct` is the 43-character base64url file key plus a 16-byte tag. The
   key agreement is ECDH, then HKDF-SHA-256 with salt `agent-drive-trace-inbox-v1`. HKDF info and
-  AES-GCM AAD are both UTF-8 `{keyId}:{driveId}`. Envelope v1 (82 characters, drive-key wrapped)
+  AES-GCM AAD are both UTF-8 `{keyId}:{driveId}:{epk}:{publicKey}`, where `epk` is the 87-character
+  base64url of the envelope's ephemeral point and `publicKey` is the inbox public key. This binds
+  the serialized point, so a negated or re-encoded `epk` does not open. A reader also rejects any
+  `epk` whose first byte is not `0x04`. Envelope v1 (82 characters, drive-key wrapped)
   and the ADRV v1 body format are unchanged.
 - **Reading.** `envelopeVersion(wrappedKey)` returns 1 or 2. `unwrapFileKey` and `decryptFile`
   take an optional `inbox` record. A v2 envelope without one fails with `inbox_key_required`.
