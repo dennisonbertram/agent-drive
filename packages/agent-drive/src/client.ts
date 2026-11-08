@@ -1,4 +1,11 @@
-import { decryptFile, encryptFile, unwrapFileKey } from './crypto.js';
+import {
+  DriveCryptoError,
+  decryptFile,
+  encryptFile,
+  envelopeVersion,
+  unwrapFileKey,
+} from './crypto.js';
+import type { TraceInbox, TraceInboxRecord } from './trace-inbox.js';
 import type { SealedDriveKey } from './seal.js';
 
 export type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -355,6 +362,38 @@ export class AgentDriveClient {
     return response;
   }
 
+  private readonly inboxes = new Map<string, TraceInboxRecord>();
+
+  /** The drive's trace inbox record, or null. Only a found record is cached (an inbox may be created later). */
+  async traceInbox(driveId: string): Promise<TraceInboxRecord | null> {
+    const cached = this.inboxes.get(driveId);
+    if (cached) return cached;
+    const { inbox } = await this.request<{
+      inbox: (TraceInboxRecord & { createdAt?: string }) | null;
+    }>(`drives/${encode(driveId)}/trace-inbox`);
+    if (!inbox) return null;
+    const record = {
+      keyId: inbox.keyId,
+      publicKey: inbox.publicKey,
+      wrappedPrivateKey: inbox.wrappedPrivateKey,
+    };
+    this.inboxes.set(driveId, record);
+    return record;
+  }
+
+  /** For a v2 envelope: the inbox record bound to the requested drive. v1 never calls the server. */
+  private async inboxFor(driveId: string, wrappedKey: string): Promise<TraceInbox | undefined> {
+    if (envelopeVersion(wrappedKey) !== 2) return undefined;
+    const record = await this.traceInbox(driveId);
+    if (!record) {
+      throw new DriveCryptoError(
+        'inbox_key_required',
+        `This file was sealed to the trace inbox of drive ${driveId}, but that drive has no trace inbox.`,
+      );
+    }
+    return { driveId, ...record };
+  }
+
   private keyFor(driveId: string) {
     return driveKeyFor(this.options.driveKey, driveId);
   }
@@ -583,7 +622,11 @@ export class AgentDriveClient {
     const selected = await this.request<{ id: string; wrappedKey: string }>(
       `drives/${encode(driveId)}/get?${query.toString()}`,
     );
-    const fileKey = await unwrapFileKey(selected.wrappedKey, this.keyFor(driveId));
+    const fileKey = await unwrapFileKey(
+      selected.wrappedKey,
+      this.keyFor(driveId),
+      await this.inboxFor(driveId, selected.wrappedKey),
+    );
     const created = await this.request<{
       id: string;
       path: string;
@@ -680,7 +723,12 @@ export class AgentDriveClient {
     );
     const response = await this.storage(metadata.downloadUrl);
     const ciphertext = new Uint8Array(await response.arrayBuffer());
-    const bytes = await decryptFile(ciphertext, metadata.wrappedKey, this.keyFor(driveId));
+    const bytes = await decryptFile(
+      ciphertext,
+      metadata.wrappedKey,
+      this.keyFor(driveId),
+      await this.inboxFor(driveId, metadata.wrappedKey),
+    );
     return { bytes, version: metadata };
   }
 
