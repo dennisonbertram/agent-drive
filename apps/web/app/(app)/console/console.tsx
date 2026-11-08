@@ -16,8 +16,9 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
-import { decryptFile, generateDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
-import { validateDownloadUrl } from '@/src/share/url';
+import { generateDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
+import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
+import { loadInbox, openVersion, type InboxCache } from '@/src/console/open-version';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
 import { DriveMenu } from './drive-menu';
@@ -425,6 +426,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   strictRef.current = strictRequest;
   const lockedRef = useRef<(reason: LockReason) => void>(() => {});
   const [, bumpVault] = useReducer((count: number) => count + 1, 0);
+  const inboxCache = useRef<InboxCache>(new Map());
+  const loadDriveInbox = (id: string) => loadInbox(api, inboxCache.current, id);
   const [vault] = useState(
     () =>
       new Vault({
@@ -444,6 +447,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           );
           return result.items.find((item) => item.kind !== 'folder')?.path;
         },
+        inbox: async (driveId) =>
+          (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
         onLocked: (reason) => lockedRef.current(reason),
         onChange: () => bumpVault(),
       }),
@@ -1157,14 +1162,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
       `drives/${driveId}/get?path=${encodeURIComponent(path)}${versionId ? `&versionId=${versionId}` : ''}`,
     );
-    const url = validateDownloadUrl(metadata.downloadUrl);
-    const response = await fetch(url, {
-      credentials: 'omit',
-      redirect: 'error',
-      cache: 'no-store',
-    }).catch(() => null);
-    if (!response?.ok) throw new Error('The encrypted file could not be downloaded.');
-    return decryptFile(new Uint8Array(await response.arrayBuffer()), metadata.wrappedKey, key);
+    return openVersion(api, driveId, metadata, key, inboxCache.current);
   }
 
   function closePreview() {
@@ -2895,6 +2893,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           )}
           {modal === 'share' && shareFile && driveKeys[selected] && (
             <ShareDialog
+              inbox={loadDriveInbox}
               driveId={selected}
               path={shareFile.path}
               driveKey={driveKeys[selected]}

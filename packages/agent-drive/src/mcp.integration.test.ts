@@ -16,7 +16,10 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handleApiRequest, handlePublicShareRequest } from '../../../apps/web/src/api/handler.js';
 import { AgentDriveClient } from './client.js';
-import { generateDriveKey } from './crypto.js';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { decodeDriveKey, decryptWithFileKey, generateDriveKey } from './crypto.js';
+import { seal } from './crypto-format.js';
+import { createTraceInbox, sealFileKeyToInbox } from './trace-inbox.js';
 import { driveKeyEnvironmentName } from './config.js';
 
 const databaseUrl =
@@ -239,6 +242,63 @@ describe('MCP product tools over stdio', () => {
       } finally {
         await none.client.close();
       }
+    } finally {
+      await mcp.client.close();
+    }
+  }, 60_000);
+  it('reads and shares a version-2 (trace inbox) file', async () => {
+    const record = await createTraceInbox(driveId, driveKey);
+    await database.query(
+      `INSERT INTO drive_trace_inboxes (drive_id,account_id,key_id,public_key,wrapped_private_key)
+       VALUES ($1,$2,$3,$4,$5)`,
+      [driveId, accountId, record.keyId, record.publicKey, record.wrappedPrivateKey],
+    );
+    const fileKey = generateDriveKey();
+    const text = `TRACE-${randomUUID()}`;
+    const ciphertext = await seal(
+      new TextEncoder().encode(text),
+      decodeDriveKey(fileKey),
+      randomBytes(8),
+    );
+    const wrappedKey = await sealFileKeyToInbox(fileKey, { driveId, ...record });
+    const versionId = randomUUID();
+    const path = '/traces/v2.txt';
+    const objectKey = `objects/${accountId}/${driveId}/${versionId}`;
+    await storage.send(new PutObjectCommand({ Bucket: bucket, Key: objectKey, Body: ciphertext }));
+    const agentId = (
+      await database.query<{ id: string }>('SELECT id FROM agents WHERE account_id=$1 LIMIT 1', [
+        accountId,
+      ])
+    ).rows[0]!.id;
+    const fileId = (
+      await database.query<{ id: string }>(
+        'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+        [driveId, path],
+      )
+    ).rows[0]!.id;
+    await database.query(
+      `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [versionId, fileId, driveId, objectKey, ciphertext.length, wrappedKey, agentId],
+    );
+    await database.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, versionId]);
+    const mcp = await openMcp(scopedToken, driveKey);
+    try {
+      const got = await call(mcp.client, 'get', { driveId, path });
+      expect((got.value.data as { text: string }).text).toBe(text);
+      const share = await call(mcp.client, 'share', {
+        driveId,
+        path,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+      expect(share.result.isError).not.toBe(true);
+      const url = new URL((share.value.data as { url: string }).url);
+      const sharedKey = url.hash.slice('#k='.length);
+      const meta = (await (
+        await fetch(`${apiUrl}/api/shares/${url.pathname.split('/').pop()}`)
+      ).json()) as { downloadUrl: string };
+      const sealed = new Uint8Array(await (await fetch(meta.downloadUrl)).arrayBuffer());
+      expect(new TextDecoder().decode(await decryptWithFileKey(sealed, sharedKey))).toBe(text);
     } finally {
       await mcp.client.close();
     }

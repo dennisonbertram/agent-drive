@@ -1,4 +1,15 @@
-import { unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import type { TraceInboxRecord } from '../../../../packages/agent-drive/src/trace-inbox.ts';
+
+export const MISSING_INBOX = 'This trace was sealed to a trace inbox this drive no longer has.';
+
+/** Builds the inbox from explicit fields so a driveId inside the server record cannot win. */
+export const inboxFor = (driveId: string, record: TraceInboxRecord) => ({
+  driveId,
+  keyId: record.keyId,
+  publicKey: record.publicKey,
+  wrappedPrivateKey: record.wrappedPrivateKey,
+});
 
 export type ShareExpiry = '1h' | '24h' | '7d' | '30d';
 export const DEFAULT_EXPIRY: ShareExpiry = '7d';
@@ -86,6 +97,8 @@ export async function createShareLink(
     path: string;
     driveKey: string;
     expiry: ShareExpiry;
+    /** Loads the drive's trace inbox record; only called for a version-2 envelope. */
+    inbox?: (driveId: string) => Promise<TraceInboxRecord | null>;
     now?: number;
     // Called once the file key is unwrapped and the POST is about to be sent: from then on a failure
     // can mean the server created the link, so the caller keeps what it needs to look for it.
@@ -97,7 +110,13 @@ export async function createShareLink(
     `${drive}/get?path=${encodeURIComponent(args.path)}&metadataOnly=1`,
   );
   // Unwrap before the POST so a wrong drive key fails without creating a share.
-  const fileKey = await unwrapFileKey(meta.wrappedKey, args.driveKey);
+  let inbox;
+  if (envelopeVersion(meta.wrappedKey) === 2) {
+    const record = await args.inbox?.(args.driveId);
+    if (!record) throw new Error(MISSING_INBOX);
+    inbox = inboxFor(args.driveId, record);
+  }
+  const fileKey = await unwrapFileKey(meta.wrappedKey, args.driveKey, inbox);
   args.onPrepared?.({ fileKey, versionId: meta.id });
   const created = await request<{ id: string; expiresAt: string; createdAt: string }>(
     `${drive}/shares`,

@@ -1,6 +1,15 @@
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { encryptFile, generateDriveKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import {
+  encryptFile,
+  generateDriveKey,
+  unwrapFileKey,
+} from '../../../../packages/agent-drive/src/crypto.ts';
+import {
+  createTraceInbox,
+  sealFileKeyToInbox,
+  type TraceInboxRecord,
+} from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import { createAccountKey, sealToAccount, type AccountKeyRecord } from './account-key';
 import { Vault, vaultRequest, type LockReason } from './vault';
 
@@ -14,12 +23,22 @@ const otherKey = generateDriveKey();
 let envelope: string;
 let otherEnvelope: string;
 let goodSlot: unknown;
+const OTHER_DRIVE = '44444444-4444-4444-8444-444444444444';
+let inboxRecord: TraceInboxRecord;
+let otherDriveRecord: TraceInboxRecord;
+let v2Envelope: string;
 let badSlot: unknown;
 
 beforeAll(async () => {
   record = (await createAccountKey(ACCOUNT, PASSPHRASE)).record;
   envelope = (await encryptFile(new Uint8Array([1, 2, 3]), driveKey)).wrappedKey;
   otherEnvelope = (await encryptFile(new Uint8Array([1, 2, 3]), otherKey)).wrappedKey;
+  inboxRecord = await createTraceInbox(DRIVE, driveKey);
+  otherDriveRecord = await createTraceInbox(OTHER_DRIVE, driveKey);
+  v2Envelope = await sealFileKeyToInbox(await unwrapFileKey(envelope, driveKey), {
+    driveId: DRIVE,
+    ...inboxRecord,
+  });
   const slot = async (key: string) => ({
     driveId: DRIVE,
     keyId: record.id,
@@ -44,6 +63,7 @@ function makeVault(
   routes: Routes = {},
   envelopeOf: () => Promise<string> = async () => envelope,
   anyPath: () => Promise<string | undefined> = async () => '/a.txt',
+  inbox: () => Promise<TraceInboxRecord | null> = async () => null,
 ) {
   const locked: LockReason[] = [];
   const calls: { path: string; method: string; body: unknown }[] = [];
@@ -59,6 +79,7 @@ function makeVault(
     strict: request,
     envelope: envelopeCalls,
     anyPath,
+    inbox,
     onLocked: (reason) => locked.push(reason),
   });
   return { vault, locked, calls, envelopeCalls };
@@ -300,5 +321,99 @@ describe('vaultRequest', () => {
       status: 409,
     });
     vi.unstubAllGlobals();
+  });
+
+  describe('trace inbox (envelope v2)', () => {
+    const noFile = async () => undefined;
+    const withInbox = (record: TraceInboxRecord | null) => async () => record;
+
+    it('verifyKey checks a v1 file', async () => {
+      const { vault } = makeVault();
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
+      expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
+    });
+
+    it('verifyKey checks a v2 file through the inbox', async () => {
+      const { vault } = makeVault({}, async () => v2Envelope, undefined, withInbox(inboxRecord));
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
+      expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
+    });
+
+    it('verifyKey on an empty drive uses the inbox, or is unverifiable without one', async () => {
+      const a = makeVault({}, undefined, noFile, withInbox(inboxRecord)).vault;
+      expect(await a.verifyKey(DRIVE, driveKey)).toBe('inbox');
+      expect(await a.verifyKey(DRIVE, otherKey)).toBe('mismatch');
+      const b = makeVault({}, undefined, noFile, withInbox(null)).vault;
+      expect(await b.verifyKey(DRIVE, driveKey)).toBe('unverifiable');
+    });
+
+    it("verifyKey rejects another drive's inbox record", async () => {
+      const { vault } = makeVault({}, undefined, noFile, withInbox(otherDriveRecord));
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('mismatch');
+    });
+
+    it('keyFor opens a v2 envelope with the right key and not a wrong one', async () => {
+      const good = makeVault(base(), async () => v2Envelope, undefined, withInbox(inboxRecord));
+      await good.vault.load();
+      await good.vault.unlock(PASSPHRASE);
+      expect(await good.vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+      const bad = makeVault(
+        base(badSlot),
+        async () => v2Envelope,
+        undefined,
+        withInbox(inboxRecord),
+      );
+      await bad.vault.load();
+      await bad.vault.unlock(PASSPHRASE);
+      expect(await bad.vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'mismatch' });
+    });
+
+    it('empty drive with an inbox: addKey adds the right key and skips a wrong one', async () => {
+      const routes: Routes = {
+        ...base({ ...(goodSlot as object), driveId: OTHER_DRIVE }),
+        [`drives/${DRIVE}/account-key`]: () => ({ revision: 1 }),
+      };
+      const { vault } = makeVault(routes, undefined, noFile, withInbox(inboxRecord));
+      await vault.load();
+      await vault.unlock(PASSPHRASE);
+      expect(await vault.addKey(DRIVE, otherKey)).toBe('skipped');
+      expect(await vault.addKey(DRIVE, driveKey)).toBe('added');
+    });
+
+    it('empty drive without an inbox: addKey still skips', async () => {
+      const { vault } = makeVault(base(), undefined, noFile);
+      await vault.load();
+      await vault.unlock(PASSPHRASE);
+      expect(await vault.addKey(DRIVE, driveKey)).toBe('skipped');
+    });
+
+    it('a driveId inside the server record cannot override the requested drive', async () => {
+      const sealedToOther = await sealFileKeyToInbox(await unwrapFileKey(envelope, driveKey), {
+        driveId: OTHER_DRIVE,
+        ...otherDriveRecord,
+      });
+      const forged = { ...otherDriveRecord, driveId: OTHER_DRIVE } as TraceInboxRecord;
+      expect(
+        await makeVault({}, undefined, noFile, withInbox(forged)).vault.verifyKey(DRIVE, driveKey),
+      ).toBe('mismatch');
+      expect(
+        await makeVault(
+          {},
+          async () => sealedToOther,
+          undefined,
+          withInbox(forged),
+        ).vault.verifyKey(DRIVE, driveKey),
+      ).toBe('mismatch');
+    });
+
+    it('a truncated envelope is a mismatch, not a rejection', async () => {
+      const short = envelope.slice(0, 40);
+      const { vault } = makeVault({}, async () => short);
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('mismatch');
+      const keyed = makeVault(base(), async () => short);
+      await keyed.vault.load();
+      await keyed.vault.unlock(PASSPHRASE);
+      expect(await keyed.vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'mismatch' });
+    });
   });
 });
