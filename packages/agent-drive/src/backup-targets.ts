@@ -77,55 +77,54 @@ export async function exportTo1Password(
 
 type Cmd = [string, string[]];
 type Tool = { copy: Cmd; paste: Cmd; clear: Cmd };
-const WIN_PASTE: Cmd = ['powershell.exe', ['-NoProfile', '-Command', 'Get-Clipboard']];
+const PS = (script: string): Cmd => ['powershell.exe', ['-NoProfile', '-Command', script]];
 
-function tools(deps: TargetDeps): Tool[] {
-  if (deps.platform === 'darwin')
-    return [{ copy: ['pbcopy', []], paste: ['pbpaste', []], clear: ['pbcopy', []] }];
-  if (deps.platform === 'win32')
-    return [{ copy: ['clip', []], paste: WIN_PASTE, clear: ['clip', []] }];
-  return [
-    {
-      copy: ['wl-copy', []],
-      paste: ['wl-paste', ['--no-newline']],
-      clear: ['wl-copy', ['--clear']],
-    },
-    {
-      copy: ['xclip', ['-selection', 'clipboard']],
-      paste: ['xclip', ['-selection', 'clipboard', '-o']],
-      clear: ['xclip', ['-selection', 'clipboard']],
-    },
-    ...(deps.env.WSL_DISTRO_NAME
-      ? [{ copy: ['clip.exe', []], paste: WIN_PASTE, clear: ['clip.exe', []] } as Tool]
-      : []),
-  ];
+/** macOS and Windows only. wl-copy leaves a temp file and xclip forks, which hangs a runner. */
+function tool(platform: NodeJS.Platform): Tool | undefined {
+  if (platform === 'darwin')
+    return { copy: ['pbcopy', []], paste: ['pbpaste', []], clear: ['pbcopy', []] };
+  if (platform === 'win32')
+    return {
+      copy: ['clip', []],
+      paste: PS('Get-Clipboard'),
+      clear: PS('Set-Clipboard -Value $null'),
+    };
+  return undefined;
 }
 
-/** Copies the bundle with the first clipboard tool present. Returns a function that clears it later. */
+export type ClearResult = 'cleared' | 'unchanged' | 'kept' | 'failed';
+
+/**
+ * Copies the bundle and starts the 60-second clear at once. `clearing` never rejects; await it
+ * to keep the process alive until the clipboard is handled.
+ */
 export async function copyToClipboard(bundle: string, keep: boolean, deps: TargetDeps) {
-  for (const tool of tools(deps)) {
-    try {
-      if ((await deps.run(tool.copy[0], tool.copy[1], bundle)).code !== 0) continue;
-    } catch (error) {
-      if (missing(error)) continue;
-      throw error;
-    }
-    // Waiting in-process needs no background process or temp file holding the secret, and the
-    // compare-then-clear stays in one place. Ceiling: Ctrl-C during the wait leaves it copied.
-    return async () => {
-      if (keep) return false;
-      await deps.sleep(CLIPBOARD_CLEAR_SECONDS * 1000);
-      try {
-        const now = await deps.run(tool.paste[0], tool.paste[1]);
-        if (now.code !== 0 || now.stdout.replace(/\r?\n$/u, '') !== bundle) return false;
-        await deps.run(tool.clear[0], tool.clear[1], '');
-        return true;
-      } catch {
-        return false;
-      }
-    };
+  const found = tool(deps.platform);
+  if (!found)
+    throw new Error(
+      'The clipboard target works on macOS and Windows only. Use `--to 1password` or `--to <a file outside the repo>` instead.',
+    );
+  try {
+    if ((await deps.run(found.copy[0], found.copy[1], bundle)).code !== 0) throw new Error();
+  } catch {
+    throw new Error(
+      `Could not copy to the clipboard with ${found.copy[0]}. Nothing was exported. Use \`--to 1password\` or \`--to <a file outside the repo>\` instead.`,
+    );
   }
-  throw new Error(
-    'No clipboard tool found (pbcopy on macOS; wl-copy or xclip on Linux; clip.exe on Windows or WSL). Nothing was exported. Use `--to <path>` instead.',
-  );
+  // Waiting in-process needs no background process or temp file holding the secret.
+  // Ceiling: Ctrl-C during the wait leaves it copied. If something else is copied in the same
+  // instant as the compare, that may be cleared too.
+  const clearing = (async (): Promise<ClearResult> => {
+    if (keep) return 'kept';
+    await deps.sleep(CLIPBOARD_CLEAR_SECONDS * 1000);
+    try {
+      const now = await deps.run(found.paste[0], found.paste[1]);
+      if (now.code !== 0) return 'failed';
+      if (now.stdout.replace(/\r?\n$/u, '') !== bundle) return 'unchanged';
+      return (await deps.run(found.clear[0], found.clear[1], '')).code === 0 ? 'cleared' : 'failed';
+    } catch {
+      return 'failed';
+    }
+  })();
+  return clearing;
 }

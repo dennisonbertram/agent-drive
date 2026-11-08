@@ -265,20 +265,23 @@ async function run(command: string, raw: string[]) {
         },
         { isTTY: Boolean(process.stdout.isTTY), write: writeStdout },
       );
-      if (result.target) {
+      if (result.target === '1password') {
         await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
-        if (result.target === '1password')
-          process.stderr.write(
-            `Saved the credentials for ${result.driveIds.length} drive(s) to 1Password.\n`,
-          );
-        else {
-          process.stderr.write(
+        process.stderr.write(
+          `Saved the credentials for ${result.driveIds.length} drive(s) to 1Password.\n`,
+        );
+        return;
+      }
+      if (result.target === 'clipboard') {
+        process.stderr.write(
+          `Copied the credentials to the clipboard. Paste them into Apple Passwords or your password manager, then run \`agent-drive credentials confirm\`.${
             args.values['keep-clipboard']
-              ? 'Copied the credentials to the clipboard. Save them in Apple Passwords or another password manager; the clipboard is not cleared (--keep-clipboard).\n'
-              : `Copied the credentials to the clipboard. Save them in Apple Passwords or another password manager now; the clipboard is cleared in ${CLIPBOARD_CLEAR_SECONDS} seconds.\n`,
-          );
-          await result.afterBackup?.();
-        }
+              ? ' The clipboard is not cleared (--keep-clipboard).'
+              : ` The clipboard is cleared in ${CLIPBOARD_CLEAR_SECONDS} seconds.`
+          }\n`,
+        );
+        if ((await result.clearing) === 'failed')
+          process.stderr.write('Could not clear the clipboard; clear it yourself.\n');
         return;
       }
       if (result.method === 'stdout') {

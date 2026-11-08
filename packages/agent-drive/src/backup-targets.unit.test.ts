@@ -1,10 +1,16 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
 import { readConfig, writeConfig } from './config.js';
-import { decodeBundle, exportCredentials, loadConfig, unbackedUp } from './credentials.js';
+import {
+  confirmCredentials,
+  decodeBundle,
+  exportCredentials,
+  loadConfig,
+  unbackedUp,
+} from './credentials.js';
 import { type TargetDeps } from './backup-targets.js';
 
 const D1 = '11111111-1111-4111-8111-111111111111';
@@ -132,58 +138,52 @@ describe('export --to clipboard', () => {
     const { deps, calls } = fake(() => ({ code: 0 }), platform);
     await exportCredentials({ to: 'clipboard', keepClipboard: true }, stdoutNotTty, deps);
     expect(calls[0]!.command).toBe(tool);
-    expect(calls[0]!.args).toEqual([]);
     expect(decodeBundle(calls[0]!.input!).apiKey).toBe('tok');
   });
 
-  it('prefers wl-copy on Linux, then xclip, then clip.exe under WSL', async () => {
+  it('refuses on Linux and WSL, suggesting 1Password or a file', async () => {
     await setup();
-    const wl = fake(() => ({ code: 0 }), 'linux');
-    await exportCredentials({ to: 'clipboard', keepClipboard: true }, stdoutNotTty, wl.deps);
-    expect(wl.calls[0]!.command).toBe('wl-copy');
-
-    const x = fake((c) => {
-      if (c.command === 'wl-copy') throw enoent();
-      return { code: 0 };
-    }, 'linux');
-    await exportCredentials({ to: 'clipboard', keepClipboard: true }, stdoutNotTty, x.deps);
-    expect(x.calls.map((c) => c.command)).toEqual(['wl-copy', 'xclip']);
-
-    const w = fake(
-      (c) => {
-        if (c.command !== 'clip.exe') throw enoent();
-        return { code: 0 };
-      },
-      'linux',
-      { WSL_DISTRO_NAME: 'Ubuntu' },
-    );
-    await exportCredentials({ to: 'clipboard', keepClipboard: true }, stdoutNotTty, w.deps);
-    expect(w.calls.at(-1)!.command).toBe('clip.exe');
+    for (const env of [{}, { WSL_DISTRO_NAME: 'Ubuntu' }]) {
+      const { deps, calls } = fake(() => ({ code: 0 }), 'linux', env);
+      await expect(exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps)).rejects.toThrow(
+        /--to 1password[\s\S]*file/u,
+      );
+      expect(calls).toEqual([]);
+    }
+    expect((await readConfig()).pendingExport).toBeFalsy();
   });
 
-  it('fails cleanly with no clipboard tool and records nothing', async () => {
-    await setup();
-    const { deps } = fake(() => {
-      throw enoent();
-    }, 'linux');
-    await expect(exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps)).rejects.toThrow(
-      /No clipboard tool/u,
-    );
-    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
-  });
-
-  it('records the backup and never writes the bundle to stdout', async () => {
+  it('does not record a backup; confirm does', async () => {
     await setup();
     const out: string[] = [];
     const { deps } = fake(() => ({ code: 0 }));
     const result = await exportCredentials(
-      { to: 'clipboard' },
+      { to: 'clipboard', keepClipboard: true },
       { isTTY: false, write: async (s) => void out.push(s) },
       deps,
     );
     expect(out).toEqual([]);
     expect(JSON.stringify(result)).not.toContain('adcred1.');
+    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
+    await confirmCredentials('stdout');
     expect(unbackedUp(await loadConfig(), [D1])).toEqual([]);
+  });
+
+  it('starts the clear timer before the config is written, and keeps it if that fails', async () => {
+    await setup();
+    const order: string[] = [];
+    const { deps } = fake((c) => {
+      order.push(c.command);
+      return { code: 0, stdout: c.command === 'pbpaste' ? 'x' : '' };
+    });
+    deps.sleep = async () => void order.push('sleep');
+    // Read-only config directory: writeConfig fails after the copy.
+    const dir = join(process.env.AGENT_DRIVE_CONFIG!, '..');
+    await chmod(dir, 0o500);
+    await expect(exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps)).rejects.toThrow();
+    expect(order.slice(0, 2)).toEqual(['pbcopy', 'sleep']);
+    expect(order).toContain('pbpaste');
+    await chmod(dir, 0o700);
   });
 
   it('clears after 60 seconds only when the clipboard still holds the bundle', async () => {
@@ -195,9 +195,22 @@ describe('export --to clipboard', () => {
       return { code: 0 };
     });
     const result = await exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps);
-    expect(await result.afterBackup!()).toBe(true);
+    expect(await result.clearing).toBe('cleared');
     expect(sleeps).toEqual([60_000]);
     expect(calls.at(-1)).toMatchObject({ command: 'pbcopy', input: '' });
+  });
+
+  it('clears with PowerShell on Windows', async () => {
+    await setup();
+    let held = '';
+    const { deps, calls } = fake((c) => {
+      if (c.command === 'clip') held = c.input ?? '';
+      if (c.args.join(' ').includes('Get-Clipboard')) return { code: 0, stdout: `${held}\r\n` };
+      return { code: 0 };
+    }, 'win32');
+    const result = await exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps);
+    expect(await result.clearing).toBe('cleared');
+    expect(calls.at(-1)!.args.join(' ')).toContain('Set-Clipboard');
   });
 
   it('leaves the clipboard alone when it changed', async () => {
@@ -206,8 +219,23 @@ describe('export --to clipboard', () => {
       c.command === 'pbpaste' ? { code: 0, stdout: 'something else' } : { code: 0 },
     );
     const result = await exportCredentials({ to: 'clipboard' }, stdoutNotTty, deps);
-    expect(await result.afterBackup!()).toBe(false);
+    expect(await result.clearing).toBe('unchanged');
     expect(calls.filter((c) => c.command === 'pbcopy')).toHaveLength(1);
+  });
+
+  it('reports failure when the clipboard cannot be read or cleared', async () => {
+    await setup();
+    let held = '';
+    const bad = fake((c) => {
+      if (c.command === 'pbcopy' && c.input) held = c.input;
+      if (c.command === 'pbcopy' && c.input === '') return { code: 1 };
+      return { code: 0, stdout: held };
+    });
+    const first = await exportCredentials({ to: 'clipboard' }, stdoutNotTty, bad.deps);
+    expect(await first.clearing).toBe('failed');
+    const unreadable = fake((c) => ({ code: c.command === 'pbpaste' ? 1 : 0 }));
+    const second = await exportCredentials({ to: 'clipboard' }, stdoutNotTty, unreadable.deps);
+    expect(await second.clearing).toBe('failed');
   });
 
   it('--keep-clipboard skips clearing', async () => {
@@ -218,7 +246,7 @@ describe('export --to clipboard', () => {
       stdoutNotTty,
       deps,
     );
-    expect(await result.afterBackup!()).toBe(false);
+    expect(await result.clearing).toBe('kept');
     expect(sleeps).toEqual([]);
   });
 });

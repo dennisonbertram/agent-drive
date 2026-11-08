@@ -39,10 +39,11 @@ names, tags, descriptions, and attribution stay visible to the service.
 The drive key exists only in this machine's config. Back it up before the machine goes away:
 
 ```sh
-# Offer these in this order and let the user choose. Each one counts as the backup.
-agent-drive credentials export --to 1password                  # 1Password (`op` installed and signed in)
-agent-drive credentials export --to clipboard                  # then the user pastes it into Apple Passwords or another manager; cleared after 60 s
-agent-drive credentials export --to <a file outside the repo>  # file, mode 600
+# Offer these in this order and let the user choose.
+agent-drive credentials export --to 1password                  # 1Password (`op` installed and signed in); recorded at once
+agent-drive credentials export --to clipboard                  # macOS and Windows: copy; the user pastes it into Apple Passwords or another manager; cleared after 60 s
+agent-drive credentials confirm                                # then record the clipboard backup
+agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>   # file, mode 600
 agent-drive credentials status                                 # what is backed up
 ```
 

@@ -31,7 +31,7 @@ export type Bundle = {
 };
 
 export const BACKUP_HINT =
-  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (then paste it into Apple Passwords or another password manager), or `agent-drive credentials export --to <a file outside the repo>`. Until then `agent-drive check` will not pass.";
+  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), or `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>`. Until then `agent-drive check` will not pass.";
 
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
@@ -283,17 +283,33 @@ export async function exportCredentials(
     driveKeys,
     driveKeyOrigins: config.driveKeyOrigins ?? {},
   });
-  if (target) {
-    let afterBackup: (() => Promise<boolean>) | undefined;
-    if (target === '1password')
-      await exportTo1Password(bundle, `Agent Drive – ${ids.join(', ')}`, options.vault, deps);
-    else afterBackup = await copyToClipboard(bundle, Boolean(options.keepClipboard), deps);
-    // Recorded as 'stdout' (a secret store), a method the server already accepts.
+  const done = <M extends 'file' | 'stdout'>(method: M) => ({
+    method,
+    target: undefined,
+    clearing: undefined,
+    driveIds: ids,
+    apiUrl,
+    apiKey,
+  });
+  if (target === '1password') {
+    await exportTo1Password(bundle, `Agent Drive – ${ids.join(', ')}`, options.vault, deps);
     const at = new Date().toISOString();
     await writeConfig({
       keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method: 'stdout' }])),
     });
-    return { method: 'stdout' as const, target, afterBackup, driveIds: ids, apiUrl, apiKey };
+    return { ...done('stdout'), target };
+  }
+  if (target === 'clipboard') {
+    // The clear timer starts at once and stays alive if the config write fails.
+    const clearing = await copyToClipboard(bundle, Boolean(options.keepClipboard), deps);
+    try {
+      // Not a backup yet: `credentials confirm` records it after the user saved it.
+      await writeConfig({ pendingExport: pendingFor(apiKey, ids) });
+    } catch (error) {
+      await clearing;
+      throw error;
+    }
+    return { ...done('stdout'), target, clearing };
   }
   if (options.to) {
     await writeBundleFile(options.to, bundle, options.force);
@@ -301,25 +317,11 @@ export async function exportCredentials(
     await writeConfig({
       keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method: 'file' }])),
     });
-    return {
-      method: 'file' as const,
-      target: undefined,
-      afterBackup: undefined,
-      driveIds: ids,
-      apiUrl,
-      apiKey,
-    };
+    return done('file');
   }
   await io.write(`${bundle}\n`);
   await writeConfig({ pendingExport: pendingFor(apiKey, ids) });
-  return {
-    method: 'stdout' as const,
-    target: undefined,
-    afterBackup: undefined,
-    driveIds: ids,
-    apiUrl,
-    apiKey,
-  };
+  return done('stdout');
 }
 
 /**

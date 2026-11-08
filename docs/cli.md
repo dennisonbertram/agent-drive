@@ -72,13 +72,17 @@ The drive key lives only in the config file, so lose the machine and the files c
 
 - `agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)`
   writes a bundle. Offer the targets in this order: 1Password, the clipboard (for Apple Passwords or
-  another password manager), then a file outside the repo. `--to 1password` (alias `op`) checks
+  another password manager), then a file outside the sandbox, on a path that survives it. `--to 1password` (alias `op`) checks
   `op whoami`, then creates an item through `op item create -` with the bundle in a concealed field
   on stdin (never in argv, never on disk); if `op` is missing or signed out it prints what to run,
-  exits non-zero, and records nothing. `--to clipboard` copies with `pbcopy`, `wl-copy`/`xclip`, or
-  `clip.exe`, waits 60 seconds, then clears the clipboard only if it still holds the bundle
-  (`--keep-clipboard` skips this); with no clipboard tool it fails. Both record the backup, so
-  `check` passes. A file named `1password`, `op` or `clipboard` needs a path like `./clipboard`.
+  exits non-zero, and records nothing; on success it records the backup, so `check` passes.
+  `--to clipboard` works on macOS (`pbcopy`, `pbpaste`) and Windows (`clip`, PowerShell
+  `Get-Clipboard`/`Set-Clipboard`) only; on Linux and WSL it exits non-zero and suggests
+  `--to 1password` or a file. It records nothing: paste the bundle into a password manager, then run
+  `agent-drive credentials confirm`. It waits 60 seconds, then clears the clipboard only if it still
+  holds the bundle (`--keep-clipboard` skips this), and prints "Could not clear the clipboard; clear
+  it yourself" if the clear fails. The compare and the clear are two steps, so if you copy something
+  else in that same instant it may be cleared too. A file named `1password`, `op` or `clipboard` needs a path like `./clipboard`.
   The file form:
   `adcred1.` plus base64url of `{"v":1,"apiUrl","apiKey","driveKeys","driveKeyOrigins"}`. `--to`
   writes a mode `0600` file and refuses an existing path without `--force`. `--stdout` prints only

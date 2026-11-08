@@ -38,15 +38,16 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
 4. Back up your credentials. Your drive key exists only on this machine. If the machine or
    sandbox is deleted, your files can never be opened again. Offer these to the person, in this
-   order, and let them choose. Each one counts as the backup:
+   order, and let them choose:
 
    agent-drive credentials export --to 1password
    agent-drive credentials export --to clipboard
-   agent-drive credentials export --to <a file outside the repo>
+   agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>
 
-   The first needs the 1Password CLI (\`op\`), signed in. The second copies the credentials so the
-   person can paste them into Apple Passwords or another password manager; it clears the clipboard
-   after 60 seconds. Do not suggest a CI secret as a backup.
+   The first needs the 1Password CLI (\`op\`), signed in, and counts as the backup at once. The
+   second (macOS and Windows) copies the credentials: the person pastes them into Apple Passwords
+   or another password manager, then you run \`agent-drive credentials confirm\` to record the
+   backup. The clipboard is cleared after 60 seconds. Do not suggest a CI secret as a backup.
 
 5. Install the skill, so you save and recall files without being asked:
 

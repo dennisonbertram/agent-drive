@@ -33,12 +33,14 @@ Offer these choices in this order and let the person pick:
 
 ```sh
 agent-drive credentials export --to 1password     # 1Password (needs the `op` CLI, signed in)
-agent-drive credentials export --to clipboard     # then paste into Apple Passwords or another password manager
-agent-drive credentials export --to /a/path/outside/the/repo   # a file, mode 600
+agent-drive credentials export --to clipboard     # macOS and Windows: copy, paste into Apple Passwords or another manager, then:
+agent-drive credentials confirm                   # records the clipboard backup
+agent-drive credentials export --to /a/path/outside/the/sandbox/that/survives   # a file, mode 600
 ```
 
 `--to clipboard` clears the clipboard after 60 seconds if it still holds the credentials (add
-`--keep-clipboard` to skip that). Each of these counts as the backup, so `agent-drive check` passes.
+`--keep-clipboard` to skip that). 1Password and the file record the backup at once; the clipboard
+records it when you run `confirm`. Then `agent-drive check` passes.
 
 7. Check that it worked. Setup is complete only when this prints `check ok`.
 

@@ -22,11 +22,14 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('Back up your credentials');
     const one = body.indexOf('agent-drive credentials export --to 1password');
     const clip = body.indexOf('agent-drive credentials export --to clipboard');
-    const file = body.indexOf('agent-drive credentials export --to <a file outside the repo>');
+    const file = body.indexOf(
+      'agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>',
+    );
     expect(one).toBeGreaterThan(-1);
     expect(clip).toBeGreaterThan(one);
     expect(file).toBeGreaterThan(clip);
     expect(body).toContain('Apple Passwords');
+    expect(body).toContain('agent-drive credentials confirm');
     expect(body).not.toContain('gh secret set');
     expect(body).not.toContain('vercel env add');
     expect(body).toContain('agent-drive skill install');
