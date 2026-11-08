@@ -19,7 +19,7 @@ hold drive keys, which breaks client-side encryption.
 
 ## 1. CLI distribution
 
-- The CLI is published to npm as `agent-drive` (release workflow `release-cli.yml`, tag
+- The CLI is published to npm as `@dennisonbertram/agent-drive` (release workflow `release-cli.yml`, tag
   `cli-vX.Y.Z`). The package's `files` lists only `dist` and the README; it has no workspace
   dependencies. The site still serves `/cli/agent-drive.tgz` for older instructions.
 - Install options shown to agents:
