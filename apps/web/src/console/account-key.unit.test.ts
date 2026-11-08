@@ -2,6 +2,7 @@ import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   checkPassphrase,
+  normalizeGeneratedPassphrase,
   createAccountKey,
   fingerprint,
   generatePassphrase,
@@ -349,5 +350,42 @@ describe('checkPassphrase', () => {
 
   it('counts a letter-and-digit mix without treating 9a as a sequence', () => {
     expect(checkPassphrase('Zk8m9aQp2xLvbTrN', email)).toEqual({ ok: true });
+  });
+});
+
+describe('oversized stored values', () => {
+  it('rejects a multi-megabyte salt or wrapper without decoding it', async () => {
+    const r = RECORD_VECTOR.record;
+    const huge = 'A'.repeat(8_000_000);
+    const atobSpy = vi.spyOn(globalThis, 'atob');
+    const start = Date.now();
+    await expect(
+      parseAccountKeyRecord({ ...r, kdf: { ...r.kdf, salt: huge } }, ACCOUNT),
+    ).rejects.toThrow(/newer version/u);
+    await expect(parseAccountKeyRecord({ ...r, wrappedPrivateKey: huge }, ACCOUNT)).rejects.toThrow(
+      /newer version/u,
+    );
+    await expect(
+      parseSlot({
+        driveId: SLOT_VECTOR.driveId,
+        keyId: SLOT_VECTOR.keyId,
+        format: 1,
+        revision: 1,
+        sealed: { ...SLOT_VECTOR.sealed, ct: huge },
+      }),
+    ).rejects.toThrow(/newer version/u);
+    // Other fields may be decoded; the huge one must never be.
+    expect(atobSpy.mock.calls.every(([v]) => v.length < 1000)).toBe(true);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+});
+
+describe('normalizeGeneratedPassphrase', () => {
+  it('normalizes only the generated format', () => {
+    expect(normalizeGeneratedPassphrase('abcd-efgh jkmn-pqrs-tvwx')).toBe('ABCDEFGHJKMNPQRSTVWX');
+    expect(normalizeGeneratedPassphrase('ABCD EFGH JKMN PQRS TVWX')).toBe('ABCDEFGHJKMNPQRSTVWX');
+    expect(normalizeGeneratedPassphrase('my own long passphrase')).toBe('my own long passphrase');
+    expect(normalizeGeneratedPassphrase('abcd-efgh-ilou-pqrs-tvwx')).toBe('abcd-efgh-ilou-pqrs-tvwx');
+    expect(normalizeGeneratedPassphrase('ABCDEFGHJKMNPQRSTVW')).toBe('ABCDEFGHJKMNPQRSTVW');
   });
 });

@@ -86,7 +86,16 @@ export async function parseAccountKeyRecord(
       wrapGeneration < 1
     )
       throw new Error('generation');
+    // Check encoded lengths first so a huge stored value is never decoded.
+    if (typeof kdf.salt !== 'string' || kdf.salt.length !== 22) throw new Error('salt');
     if (unb64u(kdf.salt).length !== 16) throw new Error('salt');
+    // 61..285 decoded bytes is 82..380 base64url characters.
+    if (
+      typeof wrappedPrivateKey !== 'string' ||
+      wrappedPrivateKey.length < 82 ||
+      wrappedPrivateKey.length > 380
+    )
+      throw new Error('wrapped');
     const wrapped = unb64u(wrappedPrivateKey);
     // version(1) + iv(12) + tag(16) + PKCS#8 length n, 32 <= n <= 256.
     if (wrapped[0] !== 1 || wrapped.length < 1 + 12 + 16 + 32 || wrapped.length > 1 + 12 + 16 + 256)
@@ -370,4 +379,13 @@ export function checkPassphrase(passphrase: string, accountEmail = ''): Passphra
   if (COMMON.some((word) => lower.includes(word)))
     return { ok: false, reason: 'it contains a common word' };
   return { ok: true };
+}
+
+/**
+ * Strips spaces and dashes and uppercases, but only when the input is a generated passphrase
+ * (exactly 20 Crockford symbols after stripping). Anything else is returned unchanged.
+ */
+export function normalizeGeneratedPassphrase(input: string): string {
+  const stripped = input.replace(/[\s-]/gu, '').toUpperCase();
+  return /^[0-9A-HJKMNP-TV-Z]{20}$/u.test(stripped) ? stripped : input;
 }
