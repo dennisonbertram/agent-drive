@@ -3018,6 +3018,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               onReady={(key, source) => {
                 setDriveKeys((current) => ({ ...current, [selected]: key }));
                 if (source !== 'trusted') keySources.current.set(selected, source);
+                // The token creates the openrouter agent: reload so its traces show that author.
+                void refresh();
                 // The inbox may be new: drop a cached "no inbox" so v2 files open.
                 inboxCache.current.delete(selected);
                 if (vault.status === 'unlocked') void addToAccount(selected, key);

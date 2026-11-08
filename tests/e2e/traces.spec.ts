@@ -153,6 +153,8 @@ test('traces: Traces view, webhook setup with key checks, upload order, manageme
     await expect(rows.nth(0)).toContainText('model-b');
     await expect(rows.nth(1)).toContainText('model-a');
     await expect(rows.nth(0)).toContainText('/traces/openrouter/2026-11-08');
+    // The agent list was loaded before the webhook created the openrouter agent.
+    await expect(rows.nth(0)).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
 
     // The preview needs the key: it was cached when the bundle loaded.
     await rows.nth(1).locator('[title^="Preview "]').click();
