@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { driveKeyFromPastedText, driveKeyFromRecoveryText } from './recovery-file';
+import { driveKeyFromPastedText, driveKeyFromRecoveryText, keySource } from './recovery-file';
 
 const key = randomBytes(32).toString('base64url');
 const file = (driveId: string, k = key) =>
@@ -50,5 +50,13 @@ describe('driveKeyFromRecoveryText', () => {
     );
     expect(driveKeyFromPastedText(` ${key}\n`, 'd1')).toBe(key);
     for (const text of messages) expect(text).not.toMatch(/base64url|32-byte/);
+  });
+});
+
+describe('keySource', () => {
+  it('is bundle for adcred1. text and pasted otherwise', () => {
+    expect(keySource(bundle({ v: 1, driveKeys: { d1: key } }))).toBe('bundle');
+    expect(keySource(`  ${bundle({ v: 1, driveKeys: {} })}\n`)).toBe('bundle');
+    expect(keySource(key)).toBe('pasted');
   });
 });

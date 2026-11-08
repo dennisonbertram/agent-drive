@@ -972,3 +972,64 @@ dialog.preview > .dialog-heading + * {
     text-align: right;
   }
 }
+
+/* ---- traces dialog ---- */
+.traces-dialog {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  width: min(480px, calc(100vw - 96px));
+}
+.traces-dialog > p,
+.traces-dialog > h3 {
+  margin: 0;
+}
+.trace-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.trace-command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  border-radius: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.trace-token {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  border-bottom: 1px solid var(--line-soft, rgba(18, 18, 17, 0.09));
+  font-size: 13px;
+}
+.trace-token .share-when {
+  flex: 1 1 100%;
+}
+.trace-created {
+  display: grid;
+  gap: 10px;
+}
+.trace-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.trace-link {
+  min-height: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+@media (max-width: 600px) {
+  .traces-dialog {
+    width: auto;
+  }
+}

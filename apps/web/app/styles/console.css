@@ -1118,6 +1118,13 @@
   .toolbar-key {
     order: 1;
   }
+  /* On phones Traces and Capture live in the drive menu, so the header is no taller than before */
+  .toolbar-key .trace-btn {
+    display: none;
+  }
+  .drive-menu .drive-trace-item {
+    display: grid;
+  }
   .toolbar-key .drive-id,
   .toolbar-key .copy-button {
     display: none;
@@ -1342,6 +1349,9 @@
 .drive-menu.disabled .drive-menu-button {
   pointer-events: none;
   color: var(--muted, #6b6963);
+}
+.drive-trace-item {
+  display: none;
 }
 .drive-option {
   display: grid;

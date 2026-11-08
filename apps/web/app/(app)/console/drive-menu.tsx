@@ -13,6 +13,8 @@ export function DriveMenu({
   selected,
   onSelect,
   onNewDrive,
+  onTraces,
+  onCapture,
   disabled,
   formatSize,
 }: {
@@ -21,6 +23,9 @@ export function DriveMenu({
   selected: string;
   onSelect: (id: string) => void;
   onNewDrive: () => void;
+  /** Phone only: the header buttons are hidden there, so the menu offers the same two actions. */
+  onTraces?: () => void;
+  onCapture?: () => void;
   disabled?: boolean;
   formatSize: (bytes: number) => string;
 }) {
@@ -36,6 +41,30 @@ export function DriveMenu({
         ariaLabel={`Drive: ${current?.name ?? 'none'}`}
         label={<>{current?.name ?? 'Choose a drive'} ▾</>}
       >
+        {onTraces && (
+          <button
+            type="button"
+            className="drive-option drive-trace-item"
+            onClick={(event) => {
+              closeMenu(event);
+              onTraces();
+            }}
+          >
+            Traces
+          </button>
+        )}
+        {onCapture && (
+          <button
+            type="button"
+            className="drive-option drive-trace-item"
+            onClick={(event) => {
+              closeMenu(event);
+              onCapture();
+            }}
+          >
+            Capture traces…
+          </button>
+        )}
         {drives.map((item) => {
           const stats = usage?.drives.find((entry) => entry.id === item.id);
           return (

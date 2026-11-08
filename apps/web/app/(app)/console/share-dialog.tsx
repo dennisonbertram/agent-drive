@@ -38,9 +38,11 @@ export const STATUS_LABEL: Record<ShareRow['status'], string> = {
 /** `Revoke`, then `Stop this link? [Revoke link] [Cancel]`. The API call and the list update belong to the caller. */
 export function RevokeControl({
   question,
+  confirmLabel = 'Revoke link',
   onRevoke,
 }: {
   question: string;
+  confirmLabel?: string;
   onRevoke: () => Promise<void>;
 }) {
   const [step, setStep] = useState<'idle' | 'confirm' | 'busy'>('idle');
@@ -90,7 +92,7 @@ export function RevokeControl({
           }
         }}
       >
-        Revoke link
+        {confirmLabel}
       </button>
       <button
         type="button"

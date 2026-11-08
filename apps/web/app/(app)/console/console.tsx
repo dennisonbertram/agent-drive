@@ -27,6 +27,8 @@ import '../../styles/console.css';
 import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
+import { TracesDialog, type TracesKey } from './traces-dialog';
+import { keySourceFor, type Source } from '@/src/console/webhook-setup';
 import { Vault, vaultRequest, type LockReason } from '@/src/console/vault';
 import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
@@ -124,6 +126,7 @@ type ModalName =
   | 'confirm'
   | 'preview'
   | 'share'
+  | 'traces'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
 // Trash and a search in a folder load at most this many rows; the list says so when it stops early.
@@ -458,7 +461,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Increases when the drive changes, the unlock dialog closes, or a new action waits for a key.
   const actionEpoch = useRef(0);
   // Drives whose key this tab generated itself; those are sealed without a file check.
-  const trustedDrives = useRef(new Set<string>());
+  const trustedDrives = useRef(new Map<string, string>());
+  // Where each cached drive key came from; a raw pasted key cannot be matched to an empty drive.
+  const keySources = useRef(new Map<string, Source>());
   const [tab, setTab] = useState<Tab>('Files');
   const [drives, setDrives] = useState<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -501,11 +506,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [saved, setSaved] = useState(false);
   const [downloadingId, setDownloadingId] = useState('');
   // The row whose Download or Preview asked for the key; it continues once the key loads.
-  const [pendingAction, setPendingAction] = useState<{
-    driveId: string;
-    file: FileEntry;
-    kind: 'download' | 'preview' | 'share';
-  } | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    | { driveId: string; file: FileEntry; kind: 'download' | 'preview' | 'share' }
+    // The webhook setup needs a key but no file.
+    | { driveId: string; kind: 'webhook' }
+    | null
+  >(null);
+  // The key the unlock dialog just loaded for the webhook dialog, handed over once as it opens.
+  const [tracesBusy, setTracesBusy] = useState(false);
+  const [tracesResume, setTracesResume] = useState<TracesKey | undefined>();
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
   const previewRequest = useRef(0);
@@ -685,12 +694,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     void (async () => {
       const searched = tab === 'Files' && Boolean(searchTerm);
       const browse = tab === 'Files' && view === 'browse';
-      const prefix = browse ? listPrefix(folder) : null;
+      const recent = tab === 'Files' && view === 'recent';
+      // Recent lists the newest changes under the open folder (all of them at the root).
+      const prefix = browse || recent ? listPrefix(folder) : null;
       const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
       // Browse is one page of the folder's own rows. Recent is the newest 100 changes.
       // Trash and a search in a folder page on up to LIST_CAP rows.
       const wholeList = tab === 'Trash' || (searched && browse);
-      const recent = tab === 'Files' && view === 'recent';
       const items: FileEntry[] = [];
       let cursor: string | null = null;
       let capped = false;
@@ -803,7 +813,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       setFilter('');
       // A key prompt belongs to the drive it was opened for.
       setModal((current) =>
-        current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
+        current === 'unlock' || current === 'preview' || current === 'share' || current === 'traces'
+          ? null
+          : current,
       );
       setPendingAction(null);
       actionEpoch.current += 1;
@@ -919,10 +931,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     // Closing the dialogs unmounts them, which clears typed passphrases and pasted keys and
     // cancels any recovery-file read still in flight.
     setModal((current) =>
-      current === 'preview' || current === 'share' || current === 'unlock' ? null : current,
+      current === 'preview' || current === 'share' || current === 'unlock' || current === 'traces'
+        ? null
+        : current,
     );
     setPendingAction(null);
+    setTracesResume(undefined);
     trustedDrives.current.clear();
+    keySources.current.clear();
     setDriveKeys({});
     setKeylineConfirm('');
     setNotice(message);
@@ -1038,7 +1054,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setSelected(id);
     setNotice('');
     setModal((current) =>
-      current === 'unlock' || current === 'preview' || current === 'share' ? null : current,
+      current === 'unlock' || current === 'preview' || current === 'share' || current === 'traces'
+        ? null
+        : current,
     );
     setPendingAction(null);
     actionEpoch.current += 1;
@@ -1074,7 +1092,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
     // Skipped by the vault itself if it is locked before the write.
-    trustedDrives.current.add(created.id);
+    trustedDrives.current.set(created.id, key);
     if (vault.status === 'unlocked') void vault.addKey(created.id, key, { trusted: true });
     setDriveReceipt({ id: created.id, key });
     setReceiptSaved(false);
@@ -1109,6 +1127,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
         if (result.status === 'key') {
           setDriveKeys((current) => ({ ...current, [driveId]: result.key }));
+          keySources.current.set(driveId, 'vault');
           return result.key;
         }
         if (result.status === 'stale') return undefined;
@@ -1123,11 +1142,57 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return undefined;
   }
 
+  // The drive key for the webhook dialog, which needs no file: the tab's copy, else the account's
+  // slot. With neither, asks for it (the dialog comes back through keyLoaded or the passphrase).
+  async function webhookKey(): Promise<TracesKey | undefined> {
+    const driveId = selected;
+    const cached = driveKeys[driveId];
+    if (cached)
+      return {
+        key: cached,
+        source: keySourceFor(
+          trustedDrives.current.get(driveId),
+          keySources.current.get(driveId),
+          cached,
+        ),
+      };
+    if (vault.status === 'unlocked' && vault.hasSlot(driveId)) {
+      const mark = actionEpoch.current;
+      const epoch = vault.epochNow;
+      const key = await vault.slotKey(driveId);
+      if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
+      if (key) {
+        setDriveKeys((current) => ({ ...current, [driveId]: key }));
+        keySources.current.set(driveId, 'vault');
+        return { key, source: 'vault' };
+      }
+    }
+    actionEpoch.current += 1;
+    setPendingAction({ driveId, kind: 'webhook' });
+    setRecoveryNote(vault.status === 'unlocked' ? NOT_IN_ACCOUNT : '');
+    setUnlockMode(vault.status === 'locked' ? 'passphrase' : 'recovery');
+    open('unlock');
+    return undefined;
+  }
+  function showTraces() {
+    go({ path: '/traces', view: 'recent' });
+    setFileRefresh((n) => n + 1);
+  }
+  // Opens the webhook dialog; with a key it starts setting up straight away.
+  function openTraces(key?: TracesKey) {
+    setTracesResume(key);
+    open('traces');
+  }
+  async function resumeWebhook() {
+    const found = await webhookKey();
+    if (found) openTraces(found);
+  }
+
   async function addToAccount(driveId: string, key: string, path?: string) {
     const result = await vault
       .addKey(driveId, key, {
         ...(path === undefined ? {} : { path }),
-        trusted: trustedDrives.current.has(driveId),
+        trusted: trustedDrives.current.get(driveId) === key,
       })
       .catch(() => 'skipped' as const);
     if (result === 'added') setNotice('Added to your account. Next time your passphrase opens it.');
@@ -1462,11 +1527,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     open('share');
   }
 
-  function keyLoaded(key: string) {
+  function keyLoaded(key: string, source: Exclude<Source, 'trusted'>) {
     const pending = pendingAction;
     setPendingAction(null);
-    setDriveKeys((current) => ({ ...current, [selected]: key }));
     setModal(null);
+    // The webhook dialog caches the key only after it has proven the key belongs to this drive.
+    if (pending?.kind === 'webhook') {
+      if (pending.driveId === selected) openTraces({ key, source });
+      return;
+    }
+    setDriveKeys((current) => ({ ...current, [selected]: key }));
+    keySources.current.set(selected, source);
     // A key the user supplied also goes into the account, once it opens a real file.
     if (vault.status === 'unlocked')
       void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path);
@@ -1477,7 +1548,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   function resume(pending: NonNullable<typeof pendingAction>) {
-    if (pending.kind === 'preview') void openPreview(pending.file);
+    if (pending.kind === 'webhook') void resumeWebhook();
+    else if (pending.kind === 'preview') void openPreview(pending.file);
     else if (pending.kind === 'share') void openShare(pending.file);
     else void act(() => download(pending.file));
   }
@@ -1504,7 +1576,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         Object.fromEntries(
           Object.entries(driveKeys).map(([id, key]) => [
             id,
-            { key, trusted: trustedDrives.current.has(id) },
+            { key, trusted: trustedDrives.current.get(id) === key },
           ]),
         ),
       );
@@ -1824,6 +1896,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               formatSize={size}
                               onSelect={selectDrive}
                               onNewDrive={() => open('drive')}
+                              onTraces={showTraces}
+                              onCapture={() => openTraces()}
                               disabled={busy || !ready}
                             />
                             {(sharedView ? [] : crumbs(folder)).map((crumb, index, all) => (
@@ -1946,42 +2020,60 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </div>
                       <div className="toolbar-key">
                         {tab === 'Files' && (
-                          <KeyChip
-                            hasKey={hasKey}
-                            backedUp={Boolean(drive?.key_backup_at)}
-                            backupText={backupText}
-                            confirming={keylineConfirm === selected}
-                            busy={busy}
-                            onLoad={() => openVaultDialog('recovery')}
-                            vault={vaultState}
-                            fingerprint={vault.fingerprint}
-                            vaultActions={{
-                              onSetup: () => openVaultDialog('setup'),
-                              onUnlock: () => openVaultDialog('passphrase'),
-                              onLock: () => vault.lock('manual'),
-                              onChange: () => openVaultDialog('change'),
-                              onReset: () => openVaultDialog('reset'),
-                            }}
-                            onDownload={() => {
-                              saveRecoveryFile(selected, driveKeys[selected]!);
-                              setKeylineConfirm(selected);
-                            }}
-                            onSaved={() =>
-                              void act(async () => {
+                          <>
+                            <button
+                              type="button"
+                              className="button secondary trace-btn"
+                              data-testid="traces-link"
+                              onClick={showTraces}
+                            >
+                              Traces
+                            </button>
+                            <button
+                              type="button"
+                              className="button secondary trace-btn"
+                              data-testid="capture-link"
+                              onClick={() => openTraces()}
+                            >
+                              Capture…
+                            </button>
+                            <KeyChip
+                              hasKey={hasKey}
+                              backedUp={Boolean(drive?.key_backup_at)}
+                              backupText={backupText}
+                              confirming={keylineConfirm === selected}
+                              busy={busy}
+                              onLoad={() => openVaultDialog('recovery')}
+                              vault={vaultState}
+                              fingerprint={vault.fingerprint}
+                              vaultActions={{
+                                onSetup: () => openVaultDialog('setup'),
+                                onUnlock: () => openVaultDialog('passphrase'),
+                                onLock: () => vault.lock('manual'),
+                                onChange: () => openVaultDialog('change'),
+                                onReset: () => openVaultDialog('reset'),
+                              }}
+                              onDownload={() => {
+                                saveRecoveryFile(selected, driveKeys[selected]!);
+                                setKeylineConfirm(selected);
+                              }}
+                              onSaved={() =>
+                                void act(async () => {
+                                  setKeylineConfirm('');
+                                  await recordBackup(selected);
+                                })
+                              }
+                              onForget={() => {
+                                setDriveKeys((current) => {
+                                  const next = { ...current };
+                                  delete next[selected];
+                                  return next;
+                                });
                                 setKeylineConfirm('');
-                                await recordBackup(selected);
-                              })
-                            }
-                            onForget={() => {
-                              setDriveKeys((current) => {
-                                const next = { ...current };
-                                delete next[selected];
-                                return next;
-                              });
-                              setKeylineConfirm('');
-                              setNotice('Drive key removed from this browser session.');
-                            }}
-                          />
+                                setNotice('Drive key removed from this browser session.');
+                              }}
+                            />
+                          </>
                         )}
                       </div>
                     </div>
@@ -2321,6 +2413,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           <>
                             <h3>Nothing in the trash.</h3>
                             <p>Deleted files appear here until permanently removed.</p>
+                          </>
+                        ) : view === 'recent' && folder === '/traces' ? (
+                          <>
+                            <h3>No traces yet.</h3>
+                            <p>
+                              Run an agent through <code>agent-drive capture</code>, or{' '}
+                              <button
+                                type="button"
+                                className="share-revoke trace-link"
+                                onClick={() => openTraces()}
+                              >
+                                add an OpenRouter webhook
+                              </button>
+                              .
+                            </p>
                           </>
                         ) : view === 'recent' ? (
                           <>
@@ -2726,11 +2833,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               confirm: confirmState?.title ?? '',
               preview: preview?.file.path.split('/').at(-1) ?? 'Preview',
               share: `Share ${shareFile ? baseName(shareFile.path) : ''}`,
+              traces: 'Capture traces',
             }[modal]
           }
           className={modal === 'preview' ? 'preview' : undefined}
           onClose={close}
-          closable={!busy && modal !== 'driveReceipt' && modal !== 'keyReceipt'}
+          closable={
+            !busy &&
+            !(modal === 'traces' && tracesBusy) &&
+            modal !== 'driveReceipt' &&
+            modal !== 'keyReceipt'
+          }
         >
           {modal !== 'unlock' && errorBanner}
           {modal === 'drive' && (
@@ -2827,15 +2940,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             <UnlockDialog
               driveId={selected}
               pendingMessage={
-                pendingAction
-                  ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, ${
-                      pendingAction.kind === 'share'
-                        ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
-                        : `${pendingAction.file.path.split('/').at(-1)} ${
-                            pendingAction.kind === 'preview' ? 'opens' : 'downloads'
-                          }`
-                    }.`
-                  : undefined
+                pendingAction?.kind === 'webhook'
+                  ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, you can set up the OpenRouter webhook.`
+                  : pendingAction
+                    ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, ${
+                        pendingAction.kind === 'share'
+                          ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
+                          : `${pendingAction.file.path.split('/').at(-1)} ${
+                              pendingAction.kind === 'preview' ? 'opens' : 'downloads'
+                            }`
+                      }.`
+                    : undefined
               }
               onKey={keyLoaded}
               mode={unlockMode}
@@ -2905,6 +3020,26 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 updateShares(forDrive, (items) => addShareRow(items, row))
               }
               onRevoke={(id) => revokeShare(selected, id)}
+            />
+          )}
+          {modal === 'traces' && (
+            <TracesDialog
+              driveId={selected}
+              origin={origin}
+              request={api}
+              verify={(id, key) => vault.verifyKey(id, key)}
+              getKey={webhookKey}
+              onBusy={setTracesBusy}
+              resumeWith={tracesResume}
+              onReady={(key, source) => {
+                setDriveKeys((current) => ({ ...current, [selected]: key }));
+                if (source !== 'trusted') keySources.current.set(selected, source);
+                // The token creates the openrouter agent: reload so its traces show that author.
+                void refresh();
+                // The inbox may be new: drop a cached "no inbox" so v2 files open.
+                inboxCache.current.delete(selected);
+                if (vault.status === 'unlocked') void addToAccount(selected, key);
+              }}
             />
           )}
           {modal === 'connect' && <ConnectAgentBody />}

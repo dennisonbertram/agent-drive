@@ -42,3 +42,14 @@ describe('errorLabel', () => {
     expect(errorLabel(null)).toBe('error');
   });
 });
+
+describe('trace capture actions', () => {
+  it.each([
+    'drive.trace_inbox.read',
+    'console.drive.trace_inbox.create',
+    'console.drive.webhook_token.read',
+    'console.drive.webhook_token.create',
+    'console.drive.webhook_token.revoke',
+    'webhook.trace.ingest',
+  ])('labels %s', (action) => expect(auditLabel(action)).not.toBe('Other request'));
+});
