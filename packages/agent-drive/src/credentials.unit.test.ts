@@ -294,8 +294,8 @@ describe('review fixes', () => {
 
   it('--key-file exempts only the checked drive from the backup requirement', () => {
     const keys = { [D1]: true, [D2]: true };
-    expect(backupCandidates(keys, D1, '/k', {})).toEqual([D2]);
-    expect(backupCandidates(keys, D1, undefined, {})).toEqual([D1, D2]);
+    expect(backupCandidates(keys, D1, '/k', {} as NodeJS.ProcessEnv)).toEqual([D2]);
+    expect(backupCandidates(keys, D1, undefined, {} as NodeJS.ProcessEnv)).toEqual([D1, D2]);
   });
 
   it('rejects bundles with invalid fields', () => {
