@@ -13,6 +13,9 @@ export function KeyChip({
   onSaved,
   onForget,
   busy,
+  vault,
+  fingerprint,
+  vaultActions,
 }: {
   hasKey: boolean;
   backedUp: boolean;
@@ -23,8 +26,19 @@ export function KeyChip({
   onSaved: () => void;
   onForget: () => void;
   busy: boolean;
+  /** 'none' also covers a failed load, so the chip behaves exactly as before. */
+  vault: 'none' | 'locked' | 'unlocked';
+  fingerprint: string;
+  vaultActions: {
+    onSetup: () => void;
+    onUnlock: () => void;
+    onLock: () => void;
+    onChange: () => void;
+    onReset: () => void;
+  };
 }) {
-  const dot = !backedUp ? 'danger' : hasKey ? 'ok' : 'idle';
+  const hasVault = vault !== 'none';
+  const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
   return (
@@ -35,21 +49,53 @@ export function KeyChip({
       label={
         <>
           <span className={`key-dot ${dot}`} aria-hidden />
-          {hasKey ? 'Key loaded' : 'Key needed'}
+          {vault === 'locked' && !hasKey
+            ? 'Locked'
+            : vault === 'unlocked'
+              ? 'Unlocked'
+              : hasKey
+                ? 'Key loaded'
+                : 'Key needed'}
           {!backedUp && ' · Not backed up'}
         </>
       }
     >
-      <p>
-        {hasKey
-          ? 'Key loaded in this tab.'
-          : 'Key not loaded. Downloads ask for your recovery file.'}
-      </p>
+      {hasVault && (
+        <p>
+          {vault === 'locked'
+            ? hasKey
+              ? 'Locked, but this drive’s key is loaded in this tab.'
+              : 'Locked. Your passphrase opens the drives you added to your account.'
+            : hasKey
+              ? 'Unlocked. This drive’s key is loaded in this tab.'
+              : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
+          <small data-testid="vault-fingerprint">Fingerprint {fingerprint}</small>
+        </p>
+      )}
+      {!hasVault && (
+        <p>
+          {hasKey
+            ? 'Key loaded in this tab.'
+            : 'Key not loaded. Downloads ask for your recovery file.'}
+        </p>
+      )}
       <p>
         {backedUp
           ? backupText
           : 'Not backed up. If the agent’s machine is lost, these files can’t be opened.'}
       </p>
+      {vault === 'locked' && (
+        <button
+          type="button"
+          className="button primary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onUnlock();
+          }}
+        >
+          Unlock with passphrase
+        </button>
+      )}
       {!hasKey && (
         <button
           type="button"
@@ -78,7 +124,7 @@ export function KeyChip({
           </button>
         </div>
       )}
-      {hasKey && (
+      {hasKey && vault !== 'unlocked' && (
         <button
           type="button"
           className="button secondary"
@@ -88,6 +134,56 @@ export function KeyChip({
           }}
         >
           Forget key
+        </button>
+      )}
+      {vault === 'none' && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onSetup();
+          }}
+        >
+          Set up passphrase unlock
+        </button>
+      )}
+      {(vault === 'unlocked' || (hasVault && hasKey)) && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onLock();
+          }}
+        >
+          Lock
+        </button>
+      )}
+      {vault === 'unlocked' && (
+        <>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={(event) => {
+              closeMenu(event);
+              vaultActions.onChange();
+            }}
+          >
+            Change passphrase
+          </button>
+        </>
+      )}
+      {hasVault && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onReset();
+          }}
+        >
+          Forgot or exposed passphrase?
         </button>
       )}
     </MenuButton>
