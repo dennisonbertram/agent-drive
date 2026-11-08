@@ -5,12 +5,23 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { POST } from '../../app/api/webhooks/openrouter/[driveId]/route';
+import * as versions from './versions';
+
+vi.mock('./storage', async (original) => {
+  const actual = await original<typeof import('./storage')>();
+  return { ...actual, putObject: vi.fn(actual.putObject) };
+});
+vi.mock('./versions', async (original) => {
+  const actual = await original<typeof import('./versions')>();
+  return { ...actual, commitPut: vi.fn(actual.commitPut) };
+});
 import { decryptFile, generateDriveKey } from '../../../../packages/agent-drive/src/crypto.js';
 import { encryptedSize } from '../../../../packages/agent-drive/src/crypto-format.js';
 import { createTraceInbox } from '../../../../packages/agent-drive/src/trace-inbox.js';
 import { responseForError } from './errors';
 import { ingestOpenRouterTrace } from './trace-webhook';
-import { storageBucket, storageClient } from './storage';
+import { putObject, storageBucket, storageClient } from './storage';
 
 const pool = new Pool({
   connectionString:
@@ -262,7 +273,9 @@ describe('openrouter webhook ingest', () => {
       span({ startTimeUnixNano: '1705312800000000000' }),
     ]);
     expect((await post(f, multi)).status).toBe(201);
+    vi.mocked(putObject).mockClear();
     const again = await post(f, multi, { date: 'Tue, 16 Jan 2024 00:00:00 GMT' });
+    expect(putObject).not.toHaveBeenCalled(); // detected before any S3 write
     expect(again.status).toBe(200);
     expect(await again.json()).toEqual({ ok: true, stored: 0, duplicate: true });
 
@@ -315,7 +328,9 @@ describe('openrouter webhook ingest', () => {
     const size = encryptedSize(jsonLength);
 
     const tight = await fixture({ quotaBytes: size - 1 });
+    vi.mocked(putObject).mockClear();
     const rejected = await post(tight, body);
+    expect(putObject).not.toHaveBeenCalled(); // rejected before any S3 write
     expect(rejected.status).toBe(413);
     expect((await rejected.json()).error.code).toBe('quota_exceeded');
     expect((await counts(tight)).objects).toBe(0);
@@ -341,6 +356,39 @@ describe('openrouter webhook ingest', () => {
     const response = await post(f, withTime());
     expect(response.status).toBe(409);
     expect(await counts(f)).toMatchObject({ objects: 0, versions: 0, audit: 0 });
+  });
+
+  it('deletes the uploaded object when the commit fails after the upload', async () => {
+    const f = await fixture();
+    vi.mocked(versions.commitPut).mockImplementationOnce(async () => {
+      expect((await objectKeys(f)).length).toBe(1); // the object was uploaded first
+      throw new Error('boom');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const response = await post(f, withTime());
+    expect(response.status).toBe(500);
+    expect(await counts(f)).toMatchObject({ objects: 0, versions: 0, events: 0, audit: 0 });
+    // A retry of the same body then succeeds.
+    expect((await post(f, withTime())).status).toBe(201);
+  });
+
+  it('serves the same results through the route handler', async () => {
+    const f = await fixture();
+    const call = (auth: string | null) =>
+      POST(
+        new Request(`https://agent-drive.test/api/webhooks/openrouter/${f.driveId}`, {
+          method: 'POST',
+          headers: auth ? { authorization: `Bearer ${auth}` } : {},
+          body: JSON.stringify(withTime()),
+        }),
+        { params: Promise.resolve({ driveId: f.driveId }) },
+      );
+    const denied = await call('adw_wrong');
+    expect(denied.status).toBe(401);
+    expect((await denied.json()).error.code).toBe('unauthorized');
+    const stored = await call(f.token);
+    expect(stored.status).toBe(201);
+    expect((await stored.json()).stored).toBe(1);
   });
 
   it('rejects plain http in production', async () => {

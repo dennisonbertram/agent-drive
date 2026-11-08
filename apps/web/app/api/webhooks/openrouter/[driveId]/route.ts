@@ -1,4 +1,4 @@
-import { ingestOpenRouterTrace } from '@/src/api/trace-webhook';
+import { ingestOpenRouterTrace } from '../../../../../src/api/trace-webhook';
 import { responseForError } from '../../../../../src/api/errors';
 
 export const runtime = 'nodejs';

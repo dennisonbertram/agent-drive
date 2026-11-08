@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { ingestOpenRouterTrace } = vi.hoisted(() => ({ ingestOpenRouterTrace: vi.fn() }));
-vi.mock('@/src/api/trace-webhook', () => ({ ingestOpenRouterTrace }));
+vi.mock('../../../../../src/api/trace-webhook', () => ({ ingestOpenRouterTrace }));
 
 import { ApiError } from '../../../../../src/api/errors';
 import { POST } from './route';
