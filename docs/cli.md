@@ -182,6 +182,8 @@ At exit the CLI waits up to 5 s for pending captures and 10 s in total for uploa
 
 ## MCP server
 
+Traces that arrive through the OpenRouter webhook are sealed to the drive's trace inbox rather than to the drive key. `get`, `download` and `share` open them with the same drive key: the client fetches the drive's inbox record once per process and unwraps the inbox private key locally. The MCP `get` tool returns at most 64 KiB inline, and traces are often larger, so use `download` for large traces.
+
 `agent-drive mcp` serves `whoami`, `put`, `get` (inline text up to 64 KiB, read-only), `download` (writes a new local file at `outputPath`, never overwrites), `list`, `move`, `copy`, `delete`, `versions`,
 `restore`, `search`, `recent` and `share`. `driveId` is optional: it defaults to the only drive key
 saved for the current API origin (same rule as the CLI's `--drive`); with several, the error lists

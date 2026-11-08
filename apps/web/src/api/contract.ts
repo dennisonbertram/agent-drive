@@ -30,6 +30,7 @@ export const API_CONTRACT = [
   'GET|POST /api/console/drives/:id/trace-inbox',
   'GET|POST|DELETE /api/console/drives/:id/webhook-token',
   'POST /api/stripe/webhook',
+  'POST /api/webhooks/openrouter/:driveId',
 ] as const;
 
 export type ApiContract = (typeof API_CONTRACT)[number];

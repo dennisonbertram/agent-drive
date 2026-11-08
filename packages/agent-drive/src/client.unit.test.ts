@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentDriveClient, AgentDriveApiError } from './client.js';
+import { decodeDriveKey, encryptFile, generateDriveKey } from './crypto.js';
+import { seal } from './crypto-format.js';
+import { createTraceInbox, sealFileKeyToInbox } from './trace-inbox.js';
 
 describe('AgentDriveClient transport guards', () => {
   it('rejects remote HTTP and API credentials or fragments', () => {
@@ -279,5 +282,84 @@ describe('AgentDriveClient.putEncrypted', () => {
     });
     expect(calls[1]?.init?.body).toBe(ciphertext);
     expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({ intentId: 'i' });
+  });
+});
+
+describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
+  const driveA = '11111111-2222-4333-8444-555555555555';
+  const driveB = '22222222-2222-4333-8444-555555555555';
+  const plaintext = new TextEncoder().encode('{"otlp":{}}');
+
+  async function v2File(driveId: string, driveKey: string) {
+    const record = await createTraceInbox(driveId, driveKey);
+    const fileKey = generateDriveKey();
+    const ciphertext = await seal(
+      plaintext,
+      decodeDriveKey(fileKey),
+      Uint8Array.from({ length: 8 }, (_, i) => i),
+    );
+    const wrappedKey = await sealFileKeyToInbox(fileKey, { driveId, ...record });
+    return { ciphertext, wrappedKey, record };
+  }
+
+  function setup(
+    file: { ciphertext: Uint8Array; wrappedKey: string },
+    inbox: unknown,
+    key: string,
+  ) {
+    const paths: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      paths.push(url.pathname);
+      if (url.pathname.endsWith('/trace-inbox')) return Response.json({ inbox });
+      if (url.pathname.endsWith('/get'))
+        return Response.json({
+          id: 'v',
+          wrappedKey: file.wrappedKey,
+          downloadUrl: 'http://127.0.0.1:9000/o',
+        });
+      return new Response(file.ciphertext as unknown as BodyInit);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      driveKey: key,
+      fetch: fetcher,
+    });
+    return { client, paths };
+  }
+
+  it('fetches the inbox once for two reads', async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    const { client, paths } = setup(file, { ...file.record, createdAt: 'now' }, key);
+    expect((await client.get(driveA, '/t')).bytes).toEqual(plaintext);
+    expect((await client.get(driveA, '/t')).bytes).toEqual(plaintext);
+    expect(paths.filter((p) => p.endsWith('/trace-inbox'))).toHaveLength(1);
+  });
+
+  it('never fetches the inbox for a v1 file', async () => {
+    const key = generateDriveKey();
+    const file = await encryptFile(plaintext, key);
+    const { client, paths } = setup(file, null, key);
+    expect((await client.get(driveA, '/t')).bytes).toEqual(plaintext);
+    expect(paths.some((p) => p.endsWith('/trace-inbox'))).toBe(false);
+  });
+
+  it('names the drive when the inbox is missing', async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    const { client } = setup(file, null, key);
+    const error = await client.get(driveA, '/t').catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'inbox_key_required' });
+    expect((error as Error).message).toContain(driveA);
+  });
+
+  it("rejects another drive's inbox record", async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    const other = await v2File(driveB, key);
+    const { client } = setup(file, other.record, key);
+    await expect(client.get(driveA, '/t')).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 });

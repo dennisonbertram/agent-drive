@@ -163,3 +163,23 @@ only read the inbox. Every other route below returns 404 on `/api/v1`.
 
 Tokens belong to the account's `openrouter` agent, which is created on first use. Deleting a drive
 removes its inbox and tokens.
+
+### OpenRouter webhook
+
+`POST /api/webhooks/openrouter/:driveId` (not under `/api/v1`; auth is the drive's webhook token as
+`Authorization: Bearer adw_...`). HTTPS only in production (403 otherwise). The body is OTLP JSON,
+at most 4 MiB (413 `validation_error`). The token is checked first: a missing, wrong, revoked or
+other-drive token is 401, even with `X-Test-Connection`. After that:
+
+| Case                                | Response                                                        |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `X-Test-Connection` header          | 200 `{ ok: true }`, nothing stored or charged                   |
+| Not a JSON object, or no spans      | 200 `{ ok: true, stored: 0 }`                                   |
+| Stored                              | 201 `{ ok: true, stored: 1, path }` under `/traces/openrouter/` |
+| Same body delivered again           | 200 `{ ok: true, stored: 0, duplicate: true }`                  |
+| Drive has no trace inbox            | 409                                                             |
+| Drive quota or plan budget exceeded | 413 `quota_exceeded` or 402, normal error body                  |
+
+The path is a pure function of the body (earliest span start, model, SHA-256 prefix), so a retry
+maps to the same path. The server sees the payload in plaintext for the length of the request, then
+stores it sealed to the drive's inbox key (see `docs/crypto.md`). Audit action: `webhook.trace.ingest`.
