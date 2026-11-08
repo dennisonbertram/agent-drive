@@ -985,7 +985,7 @@ async function accountKeyEndpoint(
       keyId: row.account_key_id as string,
       format: row.format as number,
       sealed: row.sealed as unknown,
-      revision: row.revision as number,
+      revision: Number(row.revision),
     }));
     const last = items[items.length - 1];
     return response({
@@ -1014,26 +1014,28 @@ async function accountKeyEndpoint(
           'SELECT revision FROM account_key_slots WHERE drive_id = $1 FOR UPDATE',
           [driveId],
         );
-        const current = existing.rows[0]?.revision as number | undefined;
+        const current =
+          existing.rows[0] === undefined ? undefined : Number(existing.rows[0].revision);
         if (expectedRevision === null) {
           if (current !== undefined)
             throw new ApiError('conflict', 'This drive was already added. Reload the page.');
-          await client.query(
+          const inserted = await client.query(
             `INSERT INTO account_key_slots (drive_id, account_id, account_key_id, format, sealed)
-             VALUES ($1, $2, $3, 1, $4::jsonb)`,
+             VALUES ($1, $2, $3, 1, $4::jsonb) RETURNING revision`,
             [driveId, auth.accountId, key.id, JSON.stringify(sealed)],
           );
-          return 1;
+          return Number(inserted.rows[0].revision);
         }
         if (current !== expectedRevision)
           throw new ApiError('conflict', 'This drive changed elsewhere. Reload the page.');
-        await client.query(
+        const replaced = await client.query(
           `UPDATE account_key_slots
-              SET sealed = $2::jsonb, revision = revision + 1, updated_at = now()
-            WHERE drive_id = $1`,
+              SET sealed = $2::jsonb, revision = nextval('account_key_slot_revision_seq'),
+                  updated_at = now()
+            WHERE drive_id = $1 RETURNING revision`,
           [driveId, JSON.stringify(sealed)],
         );
-        return current + 1;
+        return Number(replaced.rows[0].revision);
       });
       return response({ revision });
     }
@@ -1050,7 +1052,7 @@ async function accountKeyEndpoint(
         );
         if (!existing.rows[0])
           throw new ApiError('not_found', 'This drive is not in your account key.');
-        if (existing.rows[0].revision !== expectedRevision)
+        if (Number(existing.rows[0].revision) !== expectedRevision)
           throw new ApiError('conflict', 'This drive changed elsewhere. Reload the page.');
         await client.query('DELETE FROM account_key_slots WHERE drive_id = $1', [driveId]);
       });

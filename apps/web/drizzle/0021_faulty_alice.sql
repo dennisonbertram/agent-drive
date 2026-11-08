@@ -1,10 +1,11 @@
+CREATE SEQUENCE "public"."account_key_slot_revision_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1;--> statement-breakpoint
 CREATE TABLE "account_key_slots" (
 	"drive_id" uuid PRIMARY KEY NOT NULL,
 	"account_id" uuid NOT NULL,
 	"account_key_id" uuid NOT NULL,
 	"format" smallint NOT NULL,
 	"sealed" jsonb NOT NULL,
-	"revision" integer DEFAULT 1 NOT NULL,
+	"revision" bigint DEFAULT nextval('account_key_slot_revision_seq') NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "account_key_slots_format_check" CHECK ("account_key_slots"."format" = 1),

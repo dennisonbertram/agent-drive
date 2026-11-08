@@ -1,5 +1,5 @@
 {
-  "id": "136094d3-6150-4e78-bb41-f4a916fbaadc",
+  "id": "61e83b94-7ee5-43e4-96d6-b7cd24884b1a",
   "prevId": "a5453797-2c4f-44f3-bc65-9b12e04ca2d3",
   "version": "7",
   "dialect": "postgresql",
@@ -40,10 +40,10 @@
         },
         "revision": {
           "name": "revision",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 1
+          "default": "nextval('account_key_slot_revision_seq')"
         },
         "created_at": {
           "name": "created_at",
@@ -3624,7 +3624,18 @@
   },
   "enums": {},
   "schemas": {},
-  "sequences": {},
+  "sequences": {
+    "public.account_key_slot_revision_seq": {
+      "name": "account_key_slot_revision_seq",
+      "schema": "public",
+      "increment": "1",
+      "startWith": "1",
+      "minValue": "1",
+      "maxValue": "9223372036854775807",
+      "cache": "1",
+      "cycle": false
+    }
+  },
   "roles": {},
   "policies": {},
   "views": {},

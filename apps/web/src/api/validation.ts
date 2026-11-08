@@ -383,7 +383,7 @@ export function sealedSlotField(value: unknown) {
 
 export function positiveRevision(value: unknown, name: string, nullable: boolean): number | null {
   if (value === null && nullable) return null;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 2147483647)
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1)
     throw new ApiError(
       'validation_error',
       `${name} must be a positive integer${nullable ? ' or null' : ''}.`,

@@ -87,21 +87,37 @@ async function setup(f: { userId: string }) {
   return body;
 }
 
-/** Hold a transaction's lock so a request started now must wait; waits until it does. */
-async function held(accountId: string, work: (client: PoolClient) => Promise<void>) {
+/**
+ * Holds a row lock inside a transaction on its own connection, so a request must pause inside the
+ * vault transaction (after authentication) on exactly that lock. Waiting is keyed on this
+ * connection's backend pid, never on "any blocked backend".
+ */
+async function held(
+  lockSql: string,
+  params: unknown[],
+  work: (client: PoolClient) => Promise<void>,
+) {
   const client = await pool.connect();
   await client.query('BEGIN');
-  await client.query('SELECT id FROM accounts WHERE id = $1 FOR UPDATE', [accountId]);
+  const pid = (await client.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+  await client.query(lockSql, params);
   return {
     client,
-    async waitForBlocked() {
-      for (let i = 0; i < 100; i += 1) {
-        const r = await pool.query(
-          "SELECT count(*)::int AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
-        );
-        if (r.rows[0].n > 0) return;
+    /** depth 1: n backends wait on the holder; depth 2: n backends wait on those waiters. */
+    async waitForBlocked(n = 1, depth = 1) {
+      const direct = 'SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))';
+      const sql =
+        depth === 1
+          ? `SELECT count(*)::int AS n FROM (${direct}) w`
+          : `SELECT count(*)::int AS n FROM pg_stat_activity a
+              WHERE pg_blocking_pids(a.pid) && ARRAY(${direct})`;
+      for (let i = 0; i < 200; i += 1) {
+        const r = await pool.query(sql, [pid]);
+        if (r.rows[0].n >= n) return;
         await new Promise((resolveWait) => setTimeout(resolveWait, 20));
       }
+      await client.query('ROLLBACK');
+      client.release();
       throw new Error('The request never blocked on the held lock.');
     },
     async finish() {
@@ -117,6 +133,9 @@ async function held(accountId: string, work: (client: PoolClient) => Promise<voi
     },
   };
 }
+
+const keyLock = 'SELECT id FROM account_keys WHERE account_id = $1 FOR UPDATE';
+const noop = async () => undefined;
 
 beforeAll(async () => {
   await migrate(drizzle(pool), { migrationsFolder: resolve(process.cwd(), 'apps/web/drizzle') });
@@ -352,7 +371,8 @@ describe('account key: slot routes', () => {
       sealed: s1,
     });
     expect(created.status).toBe(200);
-    expect(await json(created)).toEqual({ revision: 1 });
+    const r1 = (await json(created)).revision as number;
+    expect(r1).toBeGreaterThan(0);
     expect(
       (
         await call(f.userId, path(d0), 'POST', {
@@ -364,17 +384,23 @@ describe('account key: slot routes', () => {
     ).toBe(409);
     const s2 = sealed();
     expect(
-      (await call(f.userId, path(d0), 'POST', { keyId: body.id, expectedRevision: 5, sealed: s2 }))
-        .status,
+      (
+        await call(f.userId, path(d0), 'POST', {
+          keyId: body.id,
+          expectedRevision: r1 + 1_000_000,
+          sealed: s2,
+        })
+      ).status,
     ).toBe(409);
     const replaced = await call(f.userId, path(d0), 'POST', {
       keyId: body.id,
-      expectedRevision: 1,
+      expectedRevision: r1,
       sealed: s2,
     });
-    expect(await json(replaced)).toEqual({ revision: 2 });
+    const r2 = (await json(replaced)).revision as number;
+    expect(r2).toBeGreaterThan(r1);
     expect(
-      (await call(f.userId, path(d1), 'POST', { keyId: body.id, expectedRevision: 1, sealed: s2 }))
+      (await call(f.userId, path(d1), 'POST', { keyId: body.id, expectedRevision: r1, sealed: s2 }))
         .status,
     ).toBe(409);
     await call(f.userId, path(d1), 'POST', {
@@ -391,7 +417,7 @@ describe('account key: slot routes', () => {
     const list = await json(await call(f.userId, 'account-key/slots'));
     expect(list.items).toHaveLength(3);
     const first = list.items.find((i: { driveId: string }) => i.driveId === d0);
-    expect(first).toEqual({ driveId: d0, keyId: body.id, format: 1, sealed: s2, revision: 2 });
+    expect(first).toEqual({ driveId: d0, keyId: body.id, format: 1, sealed: s2, revision: r2 });
     const paged = await json(await call(f.userId, 'account-key/slots?limit=2'));
     expect(paged.items).toHaveLength(2);
     expect(paged.nextCursor).toBeTruthy();
@@ -405,18 +431,38 @@ describe('account key: slot routes', () => {
     expect(rest.nextCursor).toBeNull();
 
     expect(
-      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: 1 })).status,
+      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: r1 })).status,
     ).toBe(409);
     expect(
-      (await call(f.userId, path(d0), 'DELETE', { keyId: randomUUID(), expectedRevision: 2 }))
+      (await call(f.userId, path(d0), 'DELETE', { keyId: randomUUID(), expectedRevision: r2 }))
         .status,
     ).toBe(409);
     expect(
-      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: 2 })).status,
+      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: r2 })).status,
     ).toBe(200);
     expect(
-      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: 2 })).status,
+      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: r2 })).status,
     ).toBe(404);
+    // A deleted-then-recreated slot never reuses an old revision, so a stale tab still gets 409.
+    const recreated = await call(f.userId, path(d0), 'POST', {
+      keyId: body.id,
+      expectedRevision: null,
+      sealed: sealed(),
+    });
+    const r3 = (await json(recreated)).revision as number;
+    expect(r3).toBeGreaterThan(r2);
+    expect(
+      (await call(f.userId, path(d0), 'DELETE', { keyId: body.id, expectedRevision: r2 })).status,
+    ).toBe(409);
+    expect(
+      (
+        await call(f.userId, path(d0), 'POST', {
+          keyId: body.id,
+          expectedRevision: r2,
+          sealed: sealed(),
+        })
+      ).status,
+    ).toBe(409);
     const drives = await pool.query(
       'SELECT key_backup_at, key_backup_method FROM drives WHERE id = ANY($1::uuid[])',
       [f.driveIds],
@@ -538,11 +584,11 @@ describe('account key: deletion hooks', () => {
   });
 });
 
-describe('account key: races (two connections)', () => {
+describe('account key: races (two connections, paused inside the vault transaction)', () => {
   it('two concurrent PATCHes: exactly one succeeds', async () => {
     const f = await fixture();
     const body = await setup(f);
-    const hold = await held(f.accountId, async () => undefined);
+    const hold = await held(keyLock, [f.accountId], noop);
     const patch = () =>
       call(f.userId, 'account-key', 'PATCH', {
         expectedKeyId: body.id,
@@ -551,21 +597,22 @@ describe('account key: races (two connections)', () => {
         kdf: kdf(),
       });
     const both = Promise.all([patch(), patch()]);
-    await hold.waitForBlocked();
+    // The second PATCH queues behind the first waiter, so it waits on that waiter, not the holder.
+    await hold.waitForBlocked(1, 1);
+    await hold.waitForBlocked(1, 2);
     await hold.finish();
-    const statuses = (await both).map((r) => r.status).sort();
-    expect(statuses).toEqual([200, 409]);
+    expect((await both).map((r) => r.status).sort()).toEqual([200, 409]);
     const row = await pool.query('SELECT wrap_generation FROM account_keys WHERE account_id = $1', [
       f.accountId,
     ]);
     expect(row.rows[0].wrap_generation).toBe(2);
   });
 
-  it('a delayed reset after another tab reset and recreated: 409 and the new key survives', async () => {
+  it('a reset that waits while another tab resets and recreates fails and the new key survives', async () => {
     const f = await fixture(1);
     const old = await setup(f);
     const fresh = createBody();
-    const hold = await held(f.accountId, async (client) => {
+    const hold = await held(keyLock, [f.accountId], async (client) => {
       await client.query('DELETE FROM account_keys WHERE account_id = $1', [f.accountId]);
       await client.query(
         `INSERT INTO account_keys (id, account_id, format, public_key, wrapped_private_key, kdf_name, kdf_iterations, kdf_salt)
@@ -573,36 +620,48 @@ describe('account key: races (two connections)', () => {
         [fresh.id, f.accountId, fresh.publicKey, fresh.wrappedPrivateKey, fresh.kdf.salt],
       );
     });
-    const delayed = call(f.userId, 'account-key', 'DELETE', {
+    const waiting = call(f.userId, 'account-key', 'DELETE', {
       expectedKeyId: old.id,
       confirmation: 'RESET',
     });
     await hold.waitForBlocked();
     await hold.finish();
-    expect((await delayed).status).toBe(409);
+    // Its row lock wakes on a deleted row, so it sees no key (404). It must never delete the new one.
+    expect((await waiting).status).toBe(404);
     const row = await pool.query('SELECT id FROM account_keys WHERE account_id = $1', [
       f.accountId,
     ]);
     expect(row.rows.map((r) => r.id)).toEqual([fresh.id]);
+    // A reset that arrives after the recreate sees the new key and gets 409.
+    const late = await call(f.userId, 'account-key', 'DELETE', {
+      expectedKeyId: old.id,
+      confirmation: 'RESET',
+    });
+    expect(late.status).toBe(409);
   });
 
-  it('a slot delete after a replacement: 409 and the replacement survives', async () => {
+  it('a slot delete that waits while the slot is replaced: 409 and the replacement survives', async () => {
     const f = await fixture(1);
     const body = await setup(f);
     const path = `drives/${f.driveIds[0]}/account-key`;
-    await call(f.userId, path, 'POST', {
+    const put = await call(f.userId, path, 'POST', {
       keyId: body.id,
       expectedRevision: null,
       sealed: sealed(),
     });
+    const r1 = (await json(put)).revision as number;
     const replacement = sealed();
-    const hold = await held(f.accountId, async (client) => {
-      await client.query(
-        'UPDATE account_key_slots SET sealed = $2::jsonb, revision = revision + 1 WHERE drive_id = $1',
-        [f.driveIds[0], JSON.stringify(replacement)],
-      );
-    });
-    const del = call(f.userId, path, 'DELETE', { keyId: body.id, expectedRevision: 1 });
+    const hold = await held(
+      'SELECT drive_id FROM account_key_slots WHERE drive_id = $1 FOR UPDATE',
+      [f.driveIds[0]],
+      async (client) => {
+        await client.query(
+          "UPDATE account_key_slots SET sealed = $2::jsonb, revision = nextval('account_key_slot_revision_seq') WHERE drive_id = $1",
+          [f.driveIds[0], JSON.stringify(replacement)],
+        );
+      },
+    );
+    const del = call(f.userId, path, 'DELETE', { keyId: body.id, expectedRevision: r1 });
     await hold.waitForBlocked();
     await hold.finish();
     expect((await del).status).toBe(409);
@@ -610,19 +669,21 @@ describe('account key: races (two connections)', () => {
       'SELECT revision, sealed FROM account_key_slots WHERE drive_id = $1',
       [f.driveIds[0]],
     );
-    expect(row.rows[0].revision).toBe(2);
+    expect(Number(row.rows[0].revision)).toBeGreaterThan(r1);
     expect(row.rows[0].sealed).toEqual(replacement);
   });
 
-  it('a slot insert against drive deletion leaves no slot, in either order', async () => {
-    // Deletion commits first while the slot write waits.
+  it('a slot insert waiting on the drive row while the drive is marked deleting: 404, no slot', async () => {
     const a = await fixture(1);
     const keyA = await setup(a);
-    const hold = await held(a.accountId, async (client) => {
-      await client.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [a.driveIds[0]]);
-      await client.query('UPDATE drives SET deleting_at = now() WHERE id = $1', [a.driveIds[0]]);
-      await client.query('DELETE FROM account_key_slots WHERE drive_id = $1', [a.driveIds[0]]);
-    });
+    const hold = await held(
+      'SELECT id FROM drives WHERE id = $1 FOR UPDATE',
+      [a.driveIds[0]],
+      async (client) => {
+        await client.query('UPDATE drives SET deleting_at = now() WHERE id = $1', [a.driveIds[0]]);
+        await client.query('DELETE FROM account_key_slots WHERE drive_id = $1', [a.driveIds[0]]);
+      },
+    );
     const put = call(a.userId, `drives/${a.driveIds[0]}/account-key`, 'POST', {
       keyId: keyA.id,
       expectedRevision: null,
@@ -635,10 +696,44 @@ describe('account key: races (two connections)', () => {
       (await pool.query('SELECT 1 FROM account_key_slots WHERE account_id = $1', [a.accountId]))
         .rowCount,
     ).toBe(0);
+  });
 
-    // The slot write commits first, then the real deletion removes it.
+  it('real slot write and real drive deletion, slot first: both statuses known, no slot remains', async () => {
+    const c = await fixture(1);
+    const keyC = await setup(c);
+    const nameC = (await pool.query('SELECT name FROM drives WHERE id = $1', [c.driveIds[0]]))
+      .rows[0].name;
+    // The slot write pauses on the drive row (step 3, holding the account share lock). The real
+    // deletion then waits on the account row behind it, so the slot commits first.
+    const hold = await held(
+      'SELECT id FROM drives WHERE id = $1 FOR UPDATE',
+      [c.driveIds[0]],
+      noop,
+    );
+    const put = call(c.userId, `drives/${c.driveIds[0]}/account-key`, 'POST', {
+      keyId: keyC.id,
+      expectedRevision: null,
+      sealed: sealed(),
+    });
+    await hold.waitForBlocked();
+    const del = call(c.userId, `drives/${c.driveIds[0]}`, 'DELETE', { confirmation: nameC });
+    await hold.waitForBlocked(1, 2);
+    await hold.finish();
+    expect([(await put).status, (await del).status]).toEqual([200, 202]);
+    expect(
+      (await pool.query('SELECT 1 FROM account_key_slots WHERE account_id = $1', [c.accountId]))
+        .rowCount,
+    ).toBe(0);
+  });
+
+  it('a slot write after a completed drive deletion: 404, no slot', async () => {
     const b = await fixture(1);
     const keyB = await setup(b);
+    const name = (await pool.query('SELECT name FROM drives WHERE id = $1', [b.driveIds[0]]))
+      .rows[0].name;
+    expect(
+      (await call(b.userId, `drives/${b.driveIds[0]}`, 'DELETE', { confirmation: name })).status,
+    ).toBe(202);
     expect(
       (
         await call(b.userId, `drives/${b.driveIds[0]}/account-key`, 'POST', {
@@ -647,70 +742,54 @@ describe('account key: races (two connections)', () => {
           sealed: sealed(),
         })
       ).status,
-    ).toBe(200);
-    const name = (await pool.query('SELECT name FROM drives WHERE id = $1', [b.driveIds[0]]))
-      .rows[0].name;
-    expect(
-      (await call(b.userId, `drives/${b.driveIds[0]}`, 'DELETE', { confirmation: name })).status,
-    ).toBe(202);
+    ).toBe(404);
     expect(
       (await pool.query('SELECT 1 FROM account_key_slots WHERE account_id = $1', [b.accountId]))
         .rowCount,
     ).toBe(0);
-
-    // Real endpoints racing: whatever the order, no slot row remains.
-    const c = await fixture(1);
-    const keyC = await setup(c);
-    const nameC = (await pool.query('SELECT name FROM drives WHERE id = $1', [c.driveIds[0]]))
-      .rows[0].name;
-    await Promise.all([
-      call(c.userId, `drives/${c.driveIds[0]}/account-key`, 'POST', {
-        keyId: keyC.id,
-        expectedRevision: null,
-        sealed: sealed(),
-      }),
-      call(c.userId, `drives/${c.driveIds[0]}`, 'DELETE', { confirmation: nameC }),
-    ]);
-    expect(
-      (await pool.query('SELECT 1 FROM account_key_slots WHERE account_id = $1', [c.accountId]))
-        .rowCount,
-    ).toBe(0);
   });
 
-  it('a slot insert against account deletion leaves no key or slot, in either order', async () => {
-    const a = await fixture(1);
-    const keyA = await setup(a);
-    const hold = await held(a.accountId, async (client) => {
-      await client.query('UPDATE accounts SET deleting_at = now() WHERE id = $1', [a.accountId]);
-      await client.query('DELETE FROM account_keys WHERE account_id = $1', [a.accountId]);
-    });
-    const put = call(a.userId, `drives/${a.driveIds[0]}/account-key`, 'POST', {
-      keyId: keyA.id,
+  it('real slot write and real account deletion, slot first: both statuses known, nothing remains', async () => {
+    const c = await fixture(1);
+    const keyC = await setup(c);
+    // The slot write pauses on the key row (step 2, holding the account share lock); the real
+    // account deletion waits on the account row behind it.
+    const hold = await held(keyLock, [c.accountId], noop);
+    const put = call(c.userId, `drives/${c.driveIds[0]}/account-key`, 'POST', {
+      keyId: keyC.id,
       expectedRevision: null,
       sealed: sealed(),
     });
     await hold.waitForBlocked();
+    const del = call(c.userId, 'account', 'DELETE', { confirmation: 'DELETE MY ACCOUNT' });
+    await hold.waitForBlocked(1, 2);
     await hold.finish();
-    expect((await put).status).toBe(409);
-    for (const table of ['account_keys', 'account_key_slots'])
-      expect(
-        (await pool.query(`SELECT 1 FROM ${table} WHERE account_id = $1`, [a.accountId])).rowCount,
-        table,
-      ).toBe(0);
-
-    const c = await fixture(1);
-    const keyC = await setup(c);
-    await Promise.all([
-      call(c.userId, `drives/${c.driveIds[0]}/account-key`, 'POST', {
-        keyId: keyC.id,
-        expectedRevision: null,
-        sealed: sealed(),
-      }),
-      call(c.userId, 'account', 'DELETE', { confirmation: 'DELETE MY ACCOUNT' }),
-    ]);
+    expect([(await put).status, (await del).status]).toEqual([200, 202]);
     for (const table of ['account_keys', 'account_key_slots'])
       expect(
         (await pool.query(`SELECT 1 FROM ${table} WHERE account_id = $1`, [c.accountId])).rowCount,
+        table,
+      ).toBe(0);
+  });
+
+  it('a slot write after a completed account deletion: 409, nothing remains', async () => {
+    const a = await fixture(1);
+    const keyA = await setup(a);
+    expect(
+      (await call(a.userId, 'account', 'DELETE', { confirmation: 'DELETE MY ACCOUNT' })).status,
+    ).toBe(202);
+    expect(
+      (
+        await call(a.userId, `drives/${a.driveIds[0]}/account-key`, 'POST', {
+          keyId: keyA.id,
+          expectedRevision: null,
+          sealed: sealed(),
+        })
+      ).status,
+    ).toBe(409);
+    for (const table of ['account_keys', 'account_key_slots'])
+      expect(
+        (await pool.query(`SELECT 1 FROM ${table} WHERE account_id = $1`, [a.accountId])).rowCount,
         table,
       ).toBe(0);
   });

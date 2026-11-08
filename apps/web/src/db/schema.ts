@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  pgSequence,
   pgTable,
   primaryKey,
   smallint,
@@ -126,6 +127,10 @@ export const accountKeys = pgTable(
   ],
 );
 
+// Slot revisions come from one sequence, so a deleted-then-recreated slot never repeats an old
+// revision and a stale expectedRevision from another tab cannot match the new slot.
+export const accountKeySlotRevisions = pgSequence('account_key_slot_revision_seq');
+
 export const accountKeySlots = pgTable(
   'account_key_slots',
   {
@@ -134,7 +139,9 @@ export const accountKeySlots = pgTable(
     accountKeyId: uuid('account_key_id').notNull(),
     format: smallint('format').notNull(),
     sealed: jsonb('sealed').$type<{ epk: string; iv: string; ct: string }>().notNull(),
-    revision: integer('revision').notNull().default(1),
+    revision: bigint('revision', { mode: 'number' })
+      .notNull()
+      .default(sql`nextval('account_key_slot_revision_seq')`),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },
