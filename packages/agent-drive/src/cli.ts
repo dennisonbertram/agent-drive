@@ -36,6 +36,7 @@ import {
 } from './config.js';
 import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
+import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
 import { runCapture } from './capture.js';
@@ -77,6 +78,8 @@ function parse(raw: string[]) {
       to: { type: 'string' },
       from: { type: 'string' },
       force: { type: 'boolean' },
+      vault: { type: 'string' },
+      'keep-clipboard': { type: 'boolean' },
       stdout: { type: 'boolean' },
       'read-only': { type: 'boolean' },
       method: { type: 'string' },
@@ -257,9 +260,30 @@ async function run(command: string, raw: string[]) {
           ...(args.values.to ? { to: args.values.to } : {}),
           ...(args.values.force ? { force: true } : {}),
           ...(args.values.stdout ? { stdout: true } : {}),
+          ...(args.values.vault ? { vault: args.values.vault } : {}),
+          ...(args.values['keep-clipboard'] ? { keepClipboard: true } : {}),
         },
         { isTTY: Boolean(process.stdout.isTTY), write: writeStdout },
       );
+      if (result.target === '1password') {
+        await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
+        process.stderr.write(
+          `Saved the credentials for ${result.driveIds.length} drive(s) to 1Password.\n`,
+        );
+        return;
+      }
+      if (result.target === 'clipboard') {
+        process.stderr.write(
+          `Copied the credentials to the clipboard. Paste them into Apple Passwords or your password manager, then run \`agent-drive credentials confirm\`.${
+            args.values['keep-clipboard']
+              ? ' The clipboard is not cleared (--keep-clipboard).'
+              : ` The clipboard is cleared in ${CLIPBOARD_CLEAR_SECONDS} seconds.`
+          }\n`,
+        );
+        if ((await result.clearing) === 'failed')
+          process.stderr.write('Could not clear the clipboard; clear it yourself.\n');
+        return;
+      }
       if (result.method === 'stdout') {
         // The bundle owns stdout, so notes go to stderr. Nothing is recorded until `confirm`.
         process.stderr.write(
@@ -329,7 +353,7 @@ async function run(command: string, raw: string[]) {
       });
     }
     throw new Error(
-      'Usage: credentials export (--to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
+      'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
   if (command === 'grant') {
@@ -656,7 +680,8 @@ Commands:
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
   grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...   Seal this machine's drive key for the login showing CODE; the owner then approves it on /connect
-  credentials export (--to PATH [--force] | --stdout)   Back up the API key and drive keys (bundle "adcred1.…")
+  credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
+                                        Back up the API key and drive keys (bundle "adcred1.…"). Offer 1Password first, then the clipboard (for Apple Passwords or another manager), then a file outside the repo
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
                                         Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
