@@ -310,3 +310,83 @@ export function queryValue(url: URL, name: string, max = 256) {
   }
   return value;
 }
+
+function canonicalBytes(value: unknown, name: string): Buffer {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024)
+    throw new ApiError('validation_error', `${name} must be unpadded base64url.`);
+  const bytes = Buffer.from(value, 'base64url');
+  if (!/^[A-Za-z0-9_-]+$/u.test(value) || bytes.toString('base64url') !== value)
+    throw new ApiError('validation_error', `${name} must be canonical unpadded base64url.`);
+  return bytes;
+}
+
+/** Rejects fields outside `allowed`. The server stores opaque records and only checks structure. */
+export function onlyFields(body: Record<string, unknown>, allowed: string[], name = 'body') {
+  const unknown = Object.keys(body).find((field) => !allowed.includes(field));
+  if (unknown !== undefined)
+    throw new ApiError('validation_error', `Unknown field in ${name}: ${unknown.slice(0, 64)}.`);
+}
+
+/** A raw uncompressed P-256 point: 65 bytes starting with 0x04 (not checked to be on the curve). */
+export function ecPointField(value: unknown, name: string): string {
+  const bytes = canonicalBytes(value, name);
+  if (bytes.length !== 65 || bytes[0] !== 4)
+    throw new ApiError('validation_error', `${name} must be a 65-byte uncompressed point.`);
+  return value as string;
+}
+
+export function fixedBytesField(value: unknown, name: string, length: number): string {
+  if (canonicalBytes(value, name).length !== length)
+    throw new ApiError('validation_error', `${name} must be ${length} bytes.`);
+  return value as string;
+}
+
+/** Wrapped account private key, format 1: 0x01 || iv(12) || ciphertext with tag (16 + 32..256). */
+export function wrappedPrivateKeyField(value: unknown, name = 'wrappedPrivateKey'): string {
+  const bytes = canonicalBytes(value, name);
+  if (bytes[0] !== 1 || bytes.length < 1 + 12 + 16 + 32 || bytes.length > 1 + 12 + 16 + 256)
+    throw new ApiError('validation_error', `${name} has an invalid format or length.`);
+  return value as string;
+}
+
+export const ACCOUNT_KEY_KDF_NAME = 'PBKDF2-SHA256';
+
+export function kdfField(value: unknown) {
+  const kdf = objectBody(value);
+  onlyFields(kdf, ['name', 'iterations', 'salt'], 'kdf');
+  if (kdf.name !== ACCOUNT_KEY_KDF_NAME)
+    throw new ApiError('validation_error', `kdf.name must be "${ACCOUNT_KEY_KDF_NAME}".`);
+  const iterations = kdf.iterations;
+  if (
+    typeof iterations !== 'number' ||
+    !Number.isInteger(iterations) ||
+    iterations < 600_000 ||
+    iterations > 2_000_000
+  )
+    throw new ApiError(
+      'validation_error',
+      'kdf.iterations must be an integer from 600000 to 2000000.',
+    );
+  return { iterations, salt: fixedBytesField(kdf.salt, 'kdf.salt', 16) };
+}
+
+/** Drive key sealed to the account key: { epk (65 bytes), iv (12), ct (43 + 16 tag) }. */
+export function sealedSlotField(value: unknown) {
+  const sealed = objectBody(value);
+  onlyFields(sealed, ['epk', 'iv', 'ct'], 'sealed');
+  return {
+    epk: ecPointField(sealed.epk, 'sealed.epk'),
+    iv: fixedBytesField(sealed.iv, 'sealed.iv', 12),
+    ct: fixedBytesField(sealed.ct, 'sealed.ct', 59),
+  };
+}
+
+export function positiveRevision(value: unknown, name: string, nullable: boolean): number | null {
+  if (value === null && nullable) return null;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > 2147483647)
+    throw new ApiError(
+      'validation_error',
+      `${name} must be a positive integer${nullable ? ' or null' : ''}.`,
+    );
+  return value;
+}

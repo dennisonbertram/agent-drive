@@ -113,3 +113,33 @@ These endpoints use no API key.
 - Delegated `POST /api/v1/keys`: a key that holds `delegate` but not `manage` may call it with `agentName` (1 to 64 characters) instead of `agentId`, plus `label`, `driveIds`, `scopes` and optional `writePaths`. The request must pass `assertDelegation` (403 `A key cannot grant more than it holds.`; 403 naming the scope without `delegate`). The server always creates a new agent of that name; an existing name returns 409 `conflict`: `An agent named "<name>" already exists; choose another name.` `agentId` from such a caller returns 400. The key records `issued_by_agent_id` (the caller's agent), which `GET /keys` returns. `DELETE /keys/:id` (a `manage` call) revokes the issued key alone; revoking the issuer does not cascade. Audit action stays `keys.create`.
 - Audit actions: `device.authorize`, `device.token`, `console.device.read`,
   `console.device.approve`, `console.device.deny`.
+
+## Account key (passphrase unlock, console only)
+
+Clerk-session routes under `/api/console/`. There are no bearer routes: agents, the CLI and MCP
+never see the public key, the wrapped private key or slots. The server stores opaque records and
+checks structure and size only. It never receives a passphrase, KEK, private key, drive key or
+plaintext. Slots are not backups and never touch `key_backup_at` / `key_backup_method`.
+
+**strict** routes need a recent Clerk `strict` reverification. When it is missing they return
+exactly Clerk's `reverificationErrorResponse('strict')` (403) so `useReverification` can recover.
+`DELETE /api/console/account` is now **strict** too. Test auth always counts as reverified.
+
+| Route                                 | Body, response                                                                                                                                                                                                                                             | Audit action                       |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `GET /account-key`                    | `{ accountKey: { id, accountId, format, publicKey, wrappedPrivateKey, wrapGeneration, kdf: { name, iterations, salt }, createdAt, updatedAt } \| null }`                                                                                                   | `console.account_key.read`         |
+| `POST /account-key` (**strict**)      | `{ id, publicKey, wrappedPrivateKey, kdf }` returns 201 with the record. 409 if one exists.                                                                                                                                                                | `console.account_key.create`       |
+| `PATCH /account-key` (**strict**)     | `{ expectedKeyId, expectedGeneration, wrappedPrivateKey, kdf }` returns the record with `wrapGeneration + 1`. 409 unless both match; 404 if none.                                                                                                          | `console.account_key.update`       |
+| `DELETE /account-key` (**strict**)    | `{ expectedKeyId, confirmation: "RESET" }` returns `{ deletedSlots }`. 409 if the id is not current; 404 if none.                                                                                                                                          | `console.account_key.reset`        |
+| `GET /account-key/slots?limit&cursor` | `{ items: [{ driveId, keyId, format, sealed, revision }], nextCursor }` for live drives, ordered by drive id                                                                                                                                               | `console.account_key.slots`        |
+| `POST /drives/:id/account-key`        | `{ keyId, expectedRevision: number \| null, sealed: { epk, iv, ct } }` returns `{ revision }`. `null` creates (409 if a slot exists); a number replaces that revision (409 otherwise). 409 if `keyId` is not current; 404 for a foreign or deleting drive. | `console.drive.account_key.put`    |
+| `DELETE /drives/:id/account-key`      | `{ keyId, expectedRevision }` returns `{ deleted: true }`. 409 on a stale key or revision; 404 if no slot.                                                                                                                                                 | `console.drive.account_key.delete` |
+
+Validation: unknown fields are 400. All base64url values are canonical and unpadded. `publicKey` and
+`sealed.epk` are 65 bytes starting with `0x04`; `kdf.name` is `PBKDF2-SHA256`; `kdf.iterations` is an
+integer from 600000 to 2000000; `kdf.salt` is 16 bytes; `wrappedPrivateKey` is `0x01 || iv(12) ||
+ciphertext+tag` of 1+12+16+32..256 bytes; `sealed.iv` is 12 bytes and `sealed.ct` is 59 bytes.
+
+Writes lock the account row (shared, `deleting_at` must be null, else 409), then the account key
+row, then for slot routes the drive row (`deleting_at` must be null, else 404). Drive deletion
+removes the drive's slot; account deletion removes the account key (slots cascade).

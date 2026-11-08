@@ -148,6 +148,13 @@
       "when": 1794067927654,
       "tag": "0020_lean_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794097060121,
+      "tag": "0021_glorious_quicksilver",
+      "breakpoints": true
     }
   ]
 }

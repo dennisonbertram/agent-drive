@@ -53,6 +53,7 @@ async function consoleRequest(userId: string, path: string, method = 'GET', body
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
     userId,
+    true,
   );
 }
 

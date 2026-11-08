@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { getPool, withTransaction } from '../db/client';
+import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { ApiError, errorFromDatabase, responseForError } from './errors';
 import {
   boundedSize,
@@ -8,8 +9,15 @@ import {
   decodeCursor,
   escapeLikeLiteral,
   encodeCursor,
+  ecPointField,
   escapedLike,
   jsonBody,
+  kdfField,
+  onlyFields,
+  positiveRevision,
+  sealedSlotField,
+  wrappedPrivateKeyField,
+  ACCOUNT_KEY_KDF_NAME,
   MAX_QUERY_LENGTH,
   optionalString,
   page,
@@ -100,6 +108,7 @@ export const consoleReadActions = [
   'drive.recent',
   'drive.search',
   'drive.trash',
+  'console.account_key.slots',
 ];
 
 function hashToken(token: string) {
@@ -304,6 +313,23 @@ export function actionFor(method: string, parts: string[], bearer = false) {
   if (parts.length === 1 && parts[0] === 'deletions' && method === 'GET')
     return 'console.deletions.list';
   if (parts.length === 1 && parts[0] === 'audit' && method === 'GET') return 'console.audit.list';
+  if (parts[0] === 'account-key') {
+    if (parts.length === 1)
+      return (
+        {
+          GET: 'console.account_key.read',
+          POST: 'console.account_key.create',
+          PATCH: 'console.account_key.update',
+          DELETE: 'console.account_key.reset',
+        }[method] ?? 'unknown'
+      );
+    if (parts.length === 2 && parts[1] === 'slots' && method === 'GET')
+      return 'console.account_key.slots';
+  }
+  if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'account-key') {
+    if (method === 'POST') return 'console.drive.account_key.put';
+    if (method === 'DELETE') return 'console.drive.account_key.delete';
+  }
   if (parts.length === 1 && parts[0] === 'account' && method === 'DELETE')
     return 'console.account.delete';
   if (parts.length === 2 && parts[0] === 'drives' && method === 'DELETE')
@@ -796,7 +822,251 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
   return undefined;
 }
 
-async function consoleEndpoint(request: Request, auth: Auth, parts: string[], url: URL) {
+function accountKeyOutput(row: Row) {
+  return {
+    accountKey: {
+      id: row.id,
+      accountId: row.account_id,
+      format: row.format,
+      publicKey: row.public_key,
+      wrappedPrivateKey: row.wrapped_private_key,
+      wrapGeneration: row.wrap_generation,
+      kdf: { name: row.kdf_name, iterations: row.kdf_iterations, salt: row.kdf_salt },
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    },
+  };
+}
+
+// Locking rule for every vault write: account row (shared) -> account key row -> drive row.
+// Account and drive deletion take the same rows exclusively, so a write either commits before
+// them (and they remove it) or waits and then sees deleting_at / a missing key.
+async function lockVault(client: PoolClient, accountId: string) {
+  const account = await client.query('SELECT deleting_at FROM accounts WHERE id = $1 FOR SHARE', [
+    accountId,
+  ]);
+  if (!account.rows[0]) throw new ApiError('not_found', 'Account not found.');
+  if (account.rows[0].deleting_at) throw new ApiError('conflict', 'The account is being deleted.');
+  const key = await client.query('SELECT * FROM account_keys WHERE account_id = $1 FOR UPDATE', [
+    accountId,
+  ]);
+  return key.rows[0] as Row | undefined;
+}
+
+async function lockVaultDrive(client: PoolClient, accountId: string, driveId: string) {
+  const drive = await client.query(
+    'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+    [driveId, accountId],
+  );
+  if (!drive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+}
+
+const staleKeyMessage = 'Your passphrase was changed elsewhere. Reload the page.';
+
+async function accountKeyEndpoint(
+  request: Request,
+  auth: Auth,
+  parts: string[],
+  url: URL,
+  reverified: boolean,
+): Promise<Response | undefined> {
+  const method = request.method;
+  if (parts[0] === 'account-key' && parts.length === 1) {
+    if (method === 'GET') {
+      const result = await getPool().query('SELECT * FROM account_keys WHERE account_id = $1', [
+        auth.accountId,
+      ]);
+      return response(result.rows[0] ? accountKeyOutput(result.rows[0]) : { accountKey: null });
+    }
+    if (!reverified) return reverificationErrorResponse('strict');
+    const body = await jsonBody(request);
+    if (method === 'POST') {
+      onlyFields(body, ['id', 'publicKey', 'wrappedPrivateKey', 'kdf']);
+      const id = uuid(typeof body.id === 'string' ? body.id : undefined, 'id');
+      const publicKey = ecPointField(body.publicKey, 'publicKey');
+      const wrappedPrivateKey = wrappedPrivateKeyField(body.wrappedPrivateKey);
+      const kdf = kdfField(body.kdf);
+      const created = await withTransaction(async (client) => {
+        await lockVault(client, auth.accountId);
+        const inserted = await client.query(
+          `INSERT INTO account_keys
+             (id, account_id, format, public_key, wrapped_private_key, kdf_name, kdf_iterations, kdf_salt)
+           VALUES ($1, $2, 1, $3, $4, $5, $6, $7)
+           ON CONFLICT DO NOTHING
+           RETURNING *`,
+          [
+            id,
+            auth.accountId,
+            publicKey,
+            wrappedPrivateKey,
+            ACCOUNT_KEY_KDF_NAME,
+            kdf.iterations,
+            kdf.salt,
+          ],
+        );
+        return inserted.rows[0] as Row | undefined;
+      });
+      if (!created)
+        throw new ApiError('conflict', 'A passphrase is already set up. Reload the page.');
+      return response(accountKeyOutput(created), 201);
+    }
+    if (method === 'PATCH') {
+      onlyFields(body, ['expectedKeyId', 'expectedGeneration', 'wrappedPrivateKey', 'kdf']);
+      const expectedKeyId = uuid(
+        typeof body.expectedKeyId === 'string' ? body.expectedKeyId : undefined,
+        'expectedKeyId',
+      );
+      const expectedGeneration = positiveRevision(
+        body.expectedGeneration,
+        'expectedGeneration',
+        false,
+      );
+      const wrappedPrivateKey = wrappedPrivateKeyField(body.wrappedPrivateKey);
+      const kdf = kdfField(body.kdf);
+      const updated = await withTransaction(async (client) => {
+        const key = await lockVault(client, auth.accountId);
+        if (!key) throw new ApiError('not_found', 'No passphrase is set up.');
+        if (key.id !== expectedKeyId || key.wrap_generation !== expectedGeneration)
+          throw new ApiError('conflict', staleKeyMessage);
+        const result = await client.query(
+          `UPDATE account_keys
+              SET wrapped_private_key = $2, kdf_iterations = $3, kdf_salt = $4,
+                  wrap_generation = wrap_generation + 1, updated_at = now()
+            WHERE id = $1 RETURNING *`,
+          [key.id, wrappedPrivateKey, kdf.iterations, kdf.salt],
+        );
+        return result.rows[0] as Row;
+      });
+      return response(accountKeyOutput(updated));
+    }
+    if (method === 'DELETE') {
+      onlyFields(body, ['expectedKeyId', 'confirmation']);
+      const expectedKeyId = uuid(
+        typeof body.expectedKeyId === 'string' ? body.expectedKeyId : undefined,
+        'expectedKeyId',
+      );
+      if (body.confirmation !== 'RESET')
+        throw new ApiError('validation_error', 'confirmation must be "RESET".');
+      return response(
+        await withTransaction(async (client) => {
+          const key = await lockVault(client, auth.accountId);
+          if (!key) throw new ApiError('not_found', 'No passphrase is set up.');
+          if (key.id !== expectedKeyId) throw new ApiError('conflict', staleKeyMessage);
+          const slots = await client.query(
+            'DELETE FROM account_key_slots WHERE account_key_id = $1',
+            [key.id],
+          );
+          await client.query('DELETE FROM account_keys WHERE id = $1', [key.id]);
+          return { deletedSlots: slots.rowCount ?? 0 };
+        }),
+      );
+    }
+    return undefined;
+  }
+  if (parts[0] === 'account-key' && parts[1] === 'slots' && parts.length === 2) {
+    const { limit, cursor } = page(url);
+    const decoded = decodeCursor(cursor, 'name');
+    const params: unknown[] = [auth.accountId];
+    let clause = 's.account_id = $1';
+    if (decoded) {
+      params.push(decoded.id);
+      clause += ` AND s.drive_id > $${params.length}`;
+    }
+    params.push(limit + 1);
+    const rows = await getPool().query(
+      `SELECT s.drive_id, s.account_key_id, s.format, s.sealed, s.revision
+         FROM account_key_slots s
+         JOIN drives d ON d.id = s.drive_id AND d.account_id = s.account_id AND d.deleting_at IS NULL
+        WHERE ${clause} ORDER BY s.drive_id LIMIT $${params.length}`,
+      params,
+    );
+    const items = rows.rows.slice(0, limit).map((row) => ({
+      driveId: row.drive_id as string,
+      keyId: row.account_key_id as string,
+      format: row.format as number,
+      sealed: row.sealed as unknown,
+      revision: row.revision as number,
+    }));
+    const last = items[items.length - 1];
+    return response({
+      items,
+      nextCursor:
+        rows.rows.length > limit && last
+          ? encodeCursor({ value: last.driveId, id: last.driveId })
+          : null,
+    });
+  }
+  if (parts[0] === 'drives' && parts[2] === 'account-key' && parts.length === 3) {
+    const driveId = uuid(parts[1], 'drive id');
+    const body = await jsonBody(request);
+    const keyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
+    if (method === 'POST') {
+      onlyFields(body, ['keyId', 'expectedRevision', 'sealed']);
+      if (!('expectedRevision' in body))
+        throw new ApiError('validation_error', 'expectedRevision is required.');
+      const expectedRevision = positiveRevision(body.expectedRevision, 'expectedRevision', true);
+      const sealed = sealedSlotField(body.sealed);
+      const revision = await withTransaction(async (client) => {
+        const key = await lockVault(client, auth.accountId);
+        if (!key || key.id !== keyId) throw new ApiError('conflict', staleKeyMessage);
+        await lockVaultDrive(client, auth.accountId, driveId);
+        const existing = await client.query(
+          'SELECT revision FROM account_key_slots WHERE drive_id = $1 FOR UPDATE',
+          [driveId],
+        );
+        const current = existing.rows[0]?.revision as number | undefined;
+        if (expectedRevision === null) {
+          if (current !== undefined)
+            throw new ApiError('conflict', 'This drive was already added. Reload the page.');
+          await client.query(
+            `INSERT INTO account_key_slots (drive_id, account_id, account_key_id, format, sealed)
+             VALUES ($1, $2, $3, 1, $4::jsonb)`,
+            [driveId, auth.accountId, key.id, JSON.stringify(sealed)],
+          );
+          return 1;
+        }
+        if (current !== expectedRevision)
+          throw new ApiError('conflict', 'This drive changed elsewhere. Reload the page.');
+        await client.query(
+          `UPDATE account_key_slots
+              SET sealed = $2::jsonb, revision = revision + 1, updated_at = now()
+            WHERE drive_id = $1`,
+          [driveId, JSON.stringify(sealed)],
+        );
+        return current + 1;
+      });
+      return response({ revision });
+    }
+    if (method === 'DELETE') {
+      onlyFields(body, ['keyId', 'expectedRevision']);
+      const expectedRevision = positiveRevision(body.expectedRevision, 'expectedRevision', false);
+      await withTransaction(async (client) => {
+        const key = await lockVault(client, auth.accountId);
+        if (!key || key.id !== keyId) throw new ApiError('conflict', staleKeyMessage);
+        await lockVaultDrive(client, auth.accountId, driveId);
+        const existing = await client.query(
+          'SELECT revision FROM account_key_slots WHERE drive_id = $1 FOR UPDATE',
+          [driveId],
+        );
+        if (!existing.rows[0])
+          throw new ApiError('not_found', 'This drive is not in your account key.');
+        if (existing.rows[0].revision !== expectedRevision)
+          throw new ApiError('conflict', 'This drive changed elsewhere. Reload the page.');
+        await client.query('DELETE FROM account_key_slots WHERE drive_id = $1', [driveId]);
+      });
+      return response({ deleted: true });
+    }
+  }
+  return undefined;
+}
+
+async function consoleEndpoint(
+  request: Request,
+  auth: Auth,
+  parts: string[],
+  url: URL,
+  reverified: boolean,
+) {
   if (parts.length === 1 && parts[0] === 'deletions' && request.method === 'GET') {
     const { limit, cursor } = page(url);
     const decoded = decodeCursor(cursor, 'timestamp');
@@ -917,6 +1187,7 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
           'UPDATE drives SET deleting_at = COALESCE(deleting_at, now()) WHERE id = $1',
           [driveId],
         );
+        await client.query('DELETE FROM account_key_slots WHERE drive_id = $1', [driveId]);
         await client.query(
           'UPDATE shares SET revoked_at = COALESCE(revoked_at, now()) WHERE drive_id = $1',
           [driveId],
@@ -938,6 +1209,7 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
     );
   }
   if (parts.length === 1 && parts[0] === 'account' && request.method === 'DELETE') {
+    if (!reverified) return reverificationErrorResponse('strict');
     const body = await jsonBody(request);
     const confirmation = stringField(body, 'confirmation', { required: true, max: 64 });
     if (confirmation !== 'DELETE MY ACCOUNT')
@@ -957,6 +1229,7 @@ async function consoleEndpoint(request: Request, auth: Auth, parts: string[], ur
           'UPDATE accounts SET deleting_at = COALESCE(deleting_at, now()) WHERE id = $1',
           [auth.accountId],
         );
+        await client.query('DELETE FROM account_keys WHERE account_id = $1', [auth.accountId]);
         await client.query(
           'UPDATE api_keys SET revoked_at = COALESCE(revoked_at, now()) WHERE account_id = $1',
           [auth.accountId],
@@ -2016,7 +2289,9 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   return response({ version: rowVersion(result) }, undeleted ? 200 : 201);
 }
 
-type RequestMode = { kind: 'bearer' } | { kind: 'console'; userId: string | null };
+type RequestMode =
+  | { kind: 'bearer' }
+  | { kind: 'console'; userId: string | null; reverified: boolean };
 
 export function consoleRouteAllowed(method: string, parts: string[]) {
   if (parts[0] === 'device') {
@@ -2027,6 +2302,10 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
   }
   if (method === 'GET' && parts.length === 1 && ['deletions', 'audit'].includes(parts[0]!))
     return true;
+  if (parts[0] === 'account-key') {
+    if (parts.length === 1) return ['GET', 'POST', 'PATCH', 'DELETE'].includes(method);
+    return parts.length === 2 && parts[1] === 'slots' && method === 'GET';
+  }
   if (method === 'DELETE' && parts.length === 1 && parts[0] === 'account') return true;
   if (method === 'DELETE' && parts.length === 2 && parts[0] === 'drives') return true;
   if (method === 'GET' && parts.length === 1 && parts[0] === 'billing') return true;
@@ -2056,6 +2335,7 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     return true;
   if (parts.length !== 3 || parts[0] !== 'drives') return false;
   if (method === 'POST' && parts[2] === 'key-backup') return true;
+  if ((method === 'POST' || method === 'DELETE') && parts[2] === 'account-key') return true;
   if ((method === 'GET' || method === 'POST') && parts[2] === 'shares') return true;
   if (
     method === 'GET' &&
@@ -2124,7 +2404,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
     const consoleOutput =
       mode.kind === 'console'
         ? ((await consoleDeviceEndpoint(request, auth.accountId, relative)) ??
-          (await consoleEndpoint(request, auth, relative, url)))
+          (await accountKeyEndpoint(request, auth, relative, url, mode.reverified)) ??
+          (await consoleEndpoint(request, auth, relative, url, mode.reverified)))
         : undefined;
     const control = consoleOutput ?? (await controlPlane(request, auth, relative));
     if (control) output = control;
@@ -2168,8 +2449,14 @@ export function handleApiRequest(request: Request) {
   return handleRequest(request, { kind: 'bearer' });
 }
 
-export function handleConsoleApiRequest(request: Request, userId: string | null) {
-  return handleRequest(request, { kind: 'console', userId });
+// `reverified` is true only when Clerk reports a recent strict reverification for this session
+// (see consoleReverified in src/console/auth.ts). Callers must pass it; it defaults to false.
+export function handleConsoleApiRequest(
+  request: Request,
+  userId: string | null,
+  reverified = false,
+) {
+  return handleRequest(request, { kind: 'console', userId, reverified });
 }
 
 const shareIdPattern = /^[A-Za-z0-9_-]{22}$/u;
