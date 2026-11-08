@@ -1966,25 +1966,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 Shared
                               </button>
                             </div>
-                            <button
-                              type="button"
-                              className="button secondary"
-                              data-testid="traces-link"
-                              onClick={() => {
-                                go({ path: '/traces', view: 'recent' });
-                                setFileRefresh((n) => n + 1);
-                              }}
-                            >
-                              Traces
-                            </button>
-                            <button
-                              type="button"
-                              className="button secondary"
-                              data-testid="capture-link"
-                              onClick={() => openTraces()}
-                            >
-                              Capture…
-                            </button>
                             {view === 'browse' && (
                               <select
                                 className="sort-select"
@@ -2033,42 +2014,63 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </div>
                       <div className="toolbar-key">
                         {tab === 'Files' && (
-                          <KeyChip
-                            hasKey={hasKey}
-                            backedUp={Boolean(drive?.key_backup_at)}
-                            backupText={backupText}
-                            confirming={keylineConfirm === selected}
-                            busy={busy}
-                            onLoad={() => openVaultDialog('recovery')}
-                            vault={vaultState}
-                            fingerprint={vault.fingerprint}
-                            vaultActions={{
-                              onSetup: () => openVaultDialog('setup'),
-                              onUnlock: () => openVaultDialog('passphrase'),
-                              onLock: () => vault.lock('manual'),
-                              onChange: () => openVaultDialog('change'),
-                              onReset: () => openVaultDialog('reset'),
-                            }}
-                            onDownload={() => {
-                              saveRecoveryFile(selected, driveKeys[selected]!);
-                              setKeylineConfirm(selected);
-                            }}
-                            onSaved={() =>
-                              void act(async () => {
+                          <>
+                            <button
+                              type="button"
+                              className="button secondary trace-btn"
+                              data-testid="traces-link"
+                              onClick={() => {
+                                go({ path: '/traces', view: 'recent' });
+                                setFileRefresh((n) => n + 1);
+                              }}
+                            >
+                              Traces
+                            </button>
+                            <button
+                              type="button"
+                              className="button secondary trace-btn"
+                              data-testid="capture-link"
+                              onClick={() => openTraces()}
+                            >
+                              Capture…
+                            </button>
+                            <KeyChip
+                              hasKey={hasKey}
+                              backedUp={Boolean(drive?.key_backup_at)}
+                              backupText={backupText}
+                              confirming={keylineConfirm === selected}
+                              busy={busy}
+                              onLoad={() => openVaultDialog('recovery')}
+                              vault={vaultState}
+                              fingerprint={vault.fingerprint}
+                              vaultActions={{
+                                onSetup: () => openVaultDialog('setup'),
+                                onUnlock: () => openVaultDialog('passphrase'),
+                                onLock: () => vault.lock('manual'),
+                                onChange: () => openVaultDialog('change'),
+                                onReset: () => openVaultDialog('reset'),
+                              }}
+                              onDownload={() => {
+                                saveRecoveryFile(selected, driveKeys[selected]!);
+                                setKeylineConfirm(selected);
+                              }}
+                              onSaved={() =>
+                                void act(async () => {
+                                  setKeylineConfirm('');
+                                  await recordBackup(selected);
+                                })
+                              }
+                              onForget={() => {
+                                setDriveKeys((current) => {
+                                  const next = { ...current };
+                                  delete next[selected];
+                                  return next;
+                                });
                                 setKeylineConfirm('');
-                                await recordBackup(selected);
-                              })
-                            }
-                            onForget={() => {
-                              setDriveKeys((current) => {
-                                const next = { ...current };
-                                delete next[selected];
-                                return next;
-                              });
-                              setKeylineConfirm('');
-                              setNotice('Drive key removed from this browser session.');
-                            }}
-                          />
+                                setNotice('Drive key removed from this browser session.');
+                              }}
+                            />
+                          </>
                         )}
                       </div>
                     </div>

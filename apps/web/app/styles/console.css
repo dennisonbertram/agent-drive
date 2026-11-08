@@ -1117,6 +1117,14 @@
   }
   .toolbar-key {
     order: 1;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: 100%;
+  }
+  /* Traces and Capture sit beside the key chip so the phone header does not grow */
+  .toolbar-key .trace-btn {
+    padding: 0 6px;
+    font-size: 12px;
   }
   .toolbar-key .drive-id,
   .toolbar-key .copy-button {
