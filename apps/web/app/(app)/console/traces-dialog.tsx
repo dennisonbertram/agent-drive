@@ -21,7 +21,6 @@ export type TracesKey = { key: string; source: Source };
  */
 export function TracesDialog({
   driveId,
-  origin,
   request,
   verify,
   getKey,
@@ -132,7 +131,7 @@ export function TracesDialog({
 
   const headers = created ? JSON.stringify({ Authorization: `Bearer ${created.token}` }) : '';
   const capture = `agent-drive capture --drive ${driveId} -- claude`;
-  const install = `npm install -g ${origin}/cli/agent-drive.tgz`;
+  const install = `npm install -g agent-drive`;
   return (
     <div className="traces-dialog">
       <h3 className="share-heading">Local agents</h3>

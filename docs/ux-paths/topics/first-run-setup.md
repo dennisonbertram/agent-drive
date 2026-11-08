@@ -10,13 +10,13 @@ Source: `apps/web/app/llms.txt/route.ts`, `apps/web/app/(app)/connect/connect.ts
 **Goal**: Give Claude Code a drive that survives the session.
 **Preconditions**: Signed in to Agent Drive in the browser; Node 20+ in the terminal; no previous login.
 **Ideal path**: 4 — paste the line, click the printed link, click Approve, tell the agent to finish (the agent does the rest: install, backup, skill, check).
-**Alternate paths**: copy the same line from the console Agents tab "Connect an agent" panel; copy `npm install -g <origin>/cli/agent-drive.tgz` from the landing page and run `agent-drive login` yourself; console-first route via "Create your first drive" and "Create API key" then `login --token-stdin`.
+**Alternate paths**: copy the same line from the console Agents tab "Connect an agent" panel; copy `npm install -g agent-drive` from the landing page and run `agent-drive login` yourself; console-first route via "Create your first drive" and "Create API key" then `login --token-stdin`.
 
 ### Steps
 
 1. On `/`, click Copy in the "Give this to your agent" panel → clipboard holds `Set up Agent Drive: https://agentdrive.xyz/llms.txt`.
 2. Paste it into Claude Code → agent fetches `/llms.txt`, reads the setup steps.
-3. Agent runs `npm install -g https://agentdrive.xyz/cli/agent-drive.tgz` → CLI installed (llms.txt offers `npx -y <tarball>` if global installs are blocked).
+3. Agent runs `npm install -g agent-drive` → CLI installed (llms.txt offers `npx -y agent-drive@latest` if global installs are blocked).
 4. Agent runs `agent-drive login --name "claude-code"` → prints `Open this link to approve: https://agentdrive.xyz/connect?code=BKQD-MWRT`, `Check that the code matches: BKQD-MWRT`, `Waiting for approval...`; if stdout is a terminal and CI is unset it also opens the browser.
 5. Agent tells Priya to open the link, check the code and click Approve (llms.txt wording: "There is nothing else for the human to choose") → she sees the page in the next step.
 6. `/connect` shows the Pairing code, "Connect claude-code?", Agent, Machine, Account (her email), Requested time, and the banner "This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it." plus the checkbox "Let this agent add other agents to its drives" left unticked.

@@ -77,7 +77,7 @@ ${HERO.title} ${HERO.lede}
 
 Give this to your agent: \`Set up Agent Drive: ${origin}/llms.txt\`
 
-Or in a terminal: \`npm install -g ${origin}/cli/agent-drive.tgz\`
+Or in a terminal: \`npm install -g agent-drive\`
 
 ${HERO.next}
 

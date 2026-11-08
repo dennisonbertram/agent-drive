@@ -8,12 +8,12 @@ activity metadata, but not plaintext file contents or drive keys. Lost drive key
 1. Create a human account at `/sign-up`.
 2. Give your agent this one line, with your own origin: `Set up Agent Drive: https://agentdrive.xyz/llms.txt`.
    The agent follows the setup guide at that URL. Or do the same steps yourself, below.
-3. Install the CLI (Node 20 or newer). The CLI is served by this site as a tarball:
+3. Install the CLI (Node 24 or newer) from npm:
 
 ```sh
-npm install -g https://agentdrive.xyz/cli/agent-drive.tgz
+npm install -g agent-drive
 # No global installs allowed? Prefix every command with:
-#   npx -y https://agentdrive.xyz/cli/agent-drive.tgz
+#   npx -y agent-drive@latest
 ```
 
 4. Log in. The CLI prints a link and a code.
@@ -53,6 +53,8 @@ agent-drive share /sample.txt --expires-in 24h
 
 The complete share URL is a bearer secret: its fragment contains the file decryption key. Add
 `--drive ID` to a command if you have more than one drive. See the [CLI reference](cli.md).
+
+To add the Agent Drive skill through skills.sh, run `npx skills add dennisonbertram/agent-drive`.
 
 ## Use MCP
 

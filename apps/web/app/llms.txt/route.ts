@@ -6,7 +6,6 @@ export function GET(request: Request) {
   const origin = new URL(request.url).origin;
   // The CLI defaults to the public API, so any other origin must be passed to `login`.
   const api = origin === PUBLIC_ORIGIN ? '' : ` --api ${origin}/api`;
-  const cli = `${origin}/cli/agent-drive.tgz`;
   const body = `${llmsIndex(origin)}# Agent Drive
 
 Agent Drive is encrypted file storage for agents. Files are encrypted on your machine before
@@ -16,15 +15,15 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
 ## Set up (local agent with a shell)
 
-1. Install the CLI (Node 20 or newer):
+1. Install the CLI (Node 24 or newer):
 
-   npm install -g ${cli}
+   npm install -g agent-drive
 
    No global installs allowed (sandbox)? Run it with npx instead, for example:
 
-   npx -y ${cli} login --name "<your agent name>"${api}
+   npx -y agent-drive@latest login --name "<your agent name>"${api}
 
-   Use the same \`npx -y ${cli}\` prefix for every command below.
+   Use the same \`npx -y agent-drive@latest\` prefix for every command below.
 
 2. Connect:
 

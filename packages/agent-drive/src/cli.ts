@@ -666,7 +666,7 @@ Commands:
   capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]   Run an agent with its LLM calls saved as encrypted traces under /traces
   mcp
 
-Without installing: npx -y https://agentdrive.xyz/cli/agent-drive.tgz <command>
+Without installing: npx -y agent-drive@latest <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
