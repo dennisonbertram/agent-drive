@@ -1,7 +1,7 @@
 import { decryptFile, envelopeVersion } from '../../../../packages/agent-drive/src/crypto.ts';
 import type { TraceInboxRecord } from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import { validateDownloadUrl } from '../share/url';
-import { MISSING_INBOX } from './share-link';
+import { MISSING_INBOX, inboxFor } from './share-link';
 
 type Api = <T>(path: string, method?: string, body?: unknown) => Promise<T>;
 
@@ -41,7 +41,7 @@ export async function openVersion(
   if (envelopeVersion(metadata.wrappedKey) === 2) {
     const record = await loadInbox(api, inboxCache, driveId);
     if (!record) throw new Error(MISSING_INBOX);
-    inbox = { driveId, ...record };
+    inbox = inboxFor(driveId, record);
   }
   return decryptFile(bytes, metadata.wrappedKey, key, inbox);
 }

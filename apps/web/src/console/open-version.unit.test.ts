@@ -74,4 +74,15 @@ describe('openVersion', () => {
       code: 'decryption_failed',
     });
   });
+
+  it('ignores a driveId inside the server record', async () => {
+    const sealedToOther = await sealFileKeyToInbox(await unwrapFileKey(v1, driveKey), {
+      driveId: OTHER,
+      ...otherRecord,
+    });
+    const { api } = setup({ ...otherRecord, driveId: OTHER } as TraceInboxRecord);
+    await expect(
+      openVersion(api, DRIVE, meta(sealedToOther), driveKey, new Map()),
+    ).rejects.toMatchObject({ code: 'decryption_failed' });
+  });
 });

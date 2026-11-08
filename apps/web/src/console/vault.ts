@@ -3,6 +3,7 @@
 // console.tsx. Nothing here touches browser storage, URLs or logs, and no error message ever
 // contains a passphrase, a drive key or a private key.
 import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
+import { inboxFor } from './share-link';
 import {
   unwrapInboxPrivateKey,
   type TraceInboxRecord,
@@ -248,11 +249,17 @@ export class Vault {
 
   /** True if `key` opens this wrapped file key (v2 through the drive's inbox record). */
   private async opens(driveId: string, wrapped: string, key: string) {
-    let inbox: ({ driveId: string } & TraceInboxRecord) | undefined;
-    if (envelopeVersion(wrapped) === 2) {
+    let version: 1 | 2;
+    try {
+      version = envelopeVersion(wrapped);
+    } catch {
+      return false;
+    }
+    let inbox: ReturnType<typeof inboxFor> | undefined;
+    if (version === 2) {
       const record = await this.deps.inbox(driveId);
       if (!record) return false;
-      inbox = { driveId, ...record };
+      inbox = inboxFor(driveId, record);
     }
     try {
       await unwrapFileKey(wrapped, key, inbox);
@@ -278,7 +285,7 @@ export class Vault {
     const record = await this.deps.inbox(driveId);
     if (!record) return 'unverifiable';
     try {
-      await unwrapInboxPrivateKey({ driveId, ...record }, key);
+      await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
       return 'inbox';
     } catch {
       return 'mismatch';

@@ -386,5 +386,34 @@ describe('vaultRequest', () => {
       await vault.unlock(PASSPHRASE);
       expect(await vault.addKey(DRIVE, driveKey)).toBe('skipped');
     });
+
+    it('a driveId inside the server record cannot override the requested drive', async () => {
+      const sealedToOther = await sealFileKeyToInbox(await unwrapFileKey(envelope, driveKey), {
+        driveId: OTHER_DRIVE,
+        ...otherDriveRecord,
+      });
+      const forged = { ...otherDriveRecord, driveId: OTHER_DRIVE } as TraceInboxRecord;
+      expect(
+        await makeVault({}, undefined, noFile, withInbox(forged)).vault.verifyKey(DRIVE, driveKey),
+      ).toBe('mismatch');
+      expect(
+        await makeVault(
+          {},
+          async () => sealedToOther,
+          undefined,
+          withInbox(forged),
+        ).vault.verifyKey(DRIVE, driveKey),
+      ).toBe('mismatch');
+    });
+
+    it('a truncated envelope is a mismatch, not a rejection', async () => {
+      const short = envelope.slice(0, 40);
+      const { vault } = makeVault({}, async () => short);
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('mismatch');
+      const keyed = makeVault(base(), async () => short);
+      await keyed.vault.load();
+      await keyed.vault.unlock(PASSPHRASE);
+      expect(await keyed.vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'mismatch' });
+    });
   });
 });

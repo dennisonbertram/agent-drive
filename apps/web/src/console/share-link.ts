@@ -3,6 +3,14 @@ import type { TraceInboxRecord } from '../../../../packages/agent-drive/src/trac
 
 export const MISSING_INBOX = 'This trace was sealed to a trace inbox this drive no longer has.';
 
+/** Builds the inbox from explicit fields so a driveId inside the server record cannot win. */
+export const inboxFor = (driveId: string, record: TraceInboxRecord) => ({
+  driveId,
+  keyId: record.keyId,
+  publicKey: record.publicKey,
+  wrappedPrivateKey: record.wrappedPrivateKey,
+});
+
 export type ShareExpiry = '1h' | '24h' | '7d' | '30d';
 export const DEFAULT_EXPIRY: ShareExpiry = '7d';
 
@@ -106,7 +114,7 @@ export async function createShareLink(
   if (envelopeVersion(meta.wrappedKey) === 2) {
     const record = await args.inbox?.(args.driveId);
     if (!record) throw new Error(MISSING_INBOX);
-    inbox = { driveId: args.driveId, ...record };
+    inbox = inboxFor(args.driveId, record);
   }
   const fileKey = await unwrapFileKey(meta.wrappedKey, args.driveKey, inbox);
   args.onPrepared?.({ fileKey, versionId: meta.id });

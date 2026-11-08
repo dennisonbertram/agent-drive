@@ -212,4 +212,25 @@ describe('createShareLink with a trace inbox', () => {
     await createShareLink(request, { ...base(driveKey), inbox });
     expect(inbox).not.toHaveBeenCalled();
   });
+
+  it('ignores a driveId inside the record and never POSTs', async () => {
+    const { driveKey, request } = await setup();
+    const OTHER = '44444444-4444-4444-8444-444444444444';
+    const v1 = (await request<{ wrappedKey: string }>('x')).wrappedKey;
+    const record = await createTraceInbox(OTHER, driveKey);
+    const v2 = await sealFileKeyToInbox(await unwrapFileKey(v1, driveKey), {
+      driveId: OTHER,
+      ...record,
+    });
+    const methods: string[] = [];
+    const v2Request: Request = async <T>(path: string, method = 'GET', body?: unknown) => {
+      methods.push(method);
+      return method === 'GET'
+        ? ({ id: 'ver-1', wrappedKey: v2 } as T)
+        : request<T>(path, method, body);
+    };
+    const inbox = async () => ({ ...record, driveId: OTHER }) as typeof record;
+    await expect(createShareLink(v2Request, { ...base(driveKey), inbox })).rejects.toBeTruthy();
+    expect(methods).not.toContain('POST');
+  });
 });
