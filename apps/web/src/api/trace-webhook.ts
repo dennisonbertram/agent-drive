@@ -1,9 +1,9 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import { encodeBase64Url } from '../../../../packages/agent-drive/src/crypto.js';
-import { encryptedSize, seal } from '../../../../packages/agent-drive/src/crypto-format.js';
-import { sealFileKeyToInbox } from '../../../../packages/agent-drive/src/trace-inbox.js';
-import { tracePath, traceTags } from '../../../../packages/agent-drive/src/trace-path.js';
+import { encodeBase64Url } from '../../../../packages/agent-drive/src/crypto.ts';
+import { encryptedSize, seal } from '../../../../packages/agent-drive/src/crypto-format.ts';
+import { sealFileKeyToInbox } from '../../../../packages/agent-drive/src/trace-inbox.ts';
+import { tracePath, traceTags } from '../../../../packages/agent-drive/src/trace-path.ts';
 import { enforceOperationBudget, enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
 import { getPool, withTransaction } from '../db/client';
 import { ApiError } from './errors';
