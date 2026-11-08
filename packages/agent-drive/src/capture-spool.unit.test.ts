@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,7 +35,8 @@ describe('spool', () => {
     const order: string[] = [];
     const d = drainer(spool, async (_d, path) => {
       order.push(path);
-      if (path === '/p2') throw apiError('exists', 409);
+      if (path === '/p2')
+        throw new AgentDriveApiError('conflict', 409, 'exists', { state: 'exists' });
     });
     await d.finish(Date.now() + 2000);
     expect(order).toEqual(['/p1', '/p2', '/p3']);
@@ -159,5 +160,46 @@ describe('spool', () => {
     await roomy.add('1', bytes, meta('/p'));
     await expect(roomy.add('2', bytes, meta('/q'))).rejects.toBeInstanceOf(SpoolFullError);
     expect((await names(dir)).filter((n) => n.endsWith('.json'))).toEqual(['1.json']);
+  });
+
+  it('does not delete a lock another drainer took over, and releases only its own', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/p'));
+    const lock = join(spool.dir, 'drain.lock');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const first = drainer(spool, async () => {
+      // While uploading, another process replaces our lock (as if ours had been judged stale).
+      await rm(lock, { recursive: true, force: true });
+      await mkdir(lock);
+      await writeFile(
+        join(lock, 'owner'),
+        JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: 'other' }),
+      );
+      release();
+    });
+    first.kick();
+    await gate;
+    await first.finish(Date.now() + 2000);
+    expect(JSON.parse(await readFile(join(lock, 'owner'), 'utf8')).token).toBe('other');
+  });
+
+  it('returns at the deadline even if the upload ignores the abort signal', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/p'));
+    const started = Date.now();
+    await drainer(spool, () => new Promise(() => {})).finish(Date.now() + 100);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(await names(spool.dir)).toContain('1.json');
+  });
+
+  it('passes the abort signal to the upload', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/p'));
+    let seen: AbortSignal | undefined;
+    await drainer(spool, async (_d, _p, _c, _w, options) => void (seen = options?.signal)).finish(
+      Date.now() + 1000,
+    );
+    expect(seen).toBeInstanceOf(AbortSignal);
   });
 });

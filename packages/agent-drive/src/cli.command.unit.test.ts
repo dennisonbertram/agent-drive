@@ -347,4 +347,35 @@ describe('capture command', () => {
     expect(bad.code).toBe(1);
     expect(bad.err).toContain('--agent');
   });
+
+  it('does not print a codex override value', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'agent-drive-bin-'));
+    dirs.push(bin);
+    await writeFile(join(bin, 'codex'), `#!${process.execPath}\n`, { mode: 0o755 });
+    const r = await capture([
+      '--drive',
+      A,
+      '--',
+      join(bin, 'codex'),
+      '-c',
+      'model_providers.foo.experimental_bearer_token="SECRET-VALUE"',
+    ]);
+    expect(disabled(r.err).length).toBe(1);
+    expect(r.err).not.toContain('SECRET-VALUE');
+    expect(disabled(r.err)[0]).toContain('model_providers.foo.experimental_bearer_token');
+  });
+
+  it('runs the child when --help comes after --', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-help-'));
+    dirs.push(dir);
+    const marker = join(dir, 'ran.json');
+    const script = join(dir, 'child.js');
+    await writeFile(
+      script,
+      `require('fs').writeFileSync(${JSON.stringify(marker)}, JSON.stringify(process.argv.slice(2))); process.exit(5);`,
+    );
+    const r = await capture(['--drive', A, '--', process.execPath, script, '--help']);
+    expect(r.code).toBe(5);
+    expect(JSON.parse(await readFile(marker, 'utf8'))).toEqual(['--help']);
+  });
 });

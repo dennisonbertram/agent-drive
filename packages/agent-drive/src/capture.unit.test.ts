@@ -112,6 +112,7 @@ function send(
       },
     );
     req.on('error', reject);
+    req.on('socket', (socket) => socket.on('error', () => {})); // early 502s can reset a large upload
     req.end(options.body);
   });
 }
@@ -154,9 +155,9 @@ describe('routing', () => {
     expect(miss.status).toBe(404);
     expect(up.seen.length).toBe(before);
     await s.proxy.close({ taskMs: 1000, totalMs: 2000 });
-    expect(
-      s.logs.some((l) => /capture: POST \/v1\/messages\?x=1 200 \d+ms captured/u.test(l)),
-    ).toBe(true);
+    expect(s.logs.some((l) => /capture: POST \/v1\/messages 200 \d+ms captured/u.test(l))).toBe(
+      true,
+    );
     expect((await spooled(s.dir)).length + s.uploads.length).toBe(2);
   });
 });
@@ -469,5 +470,62 @@ describe('shutdown ordering', () => {
     await s.proxy.close({ taskMs: 5000, totalMs: 10_000 });
     expect(s.uploads.length).toBe(1);
     expect(await s.proxy.summary()).toContain('capture: 1 uploaded, 0 queued');
+  });
+});
+
+describe('review fixes', () => {
+  it('drops captures after upstream failures so retained bytes stay within the budget', async () => {
+    const dead = { protocol: 'http' as const, hostname: '127.0.0.1', port: 1 };
+    const s = await setup({ anthropic: dead, openai: dead }, { proxy: { budgetBytes: 8 * MiB } });
+    const replies = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        send(s.proxy.port, '/anthropic/v1/messages', { body: Buffer.alloc(4 * MiB, 'q') }),
+      ),
+    );
+    expect(replies.map((r) => r.status)).toEqual([502, 502, 502, 502]);
+    await s.proxy.close({ taskMs: 2000, totalMs: 500 });
+    expect(s.proxy.reservedBytes).toBe(0);
+    expect(s.proxy.peakReservedBytes).toBeLessThanOrEqual(8 * MiB);
+    expect((await spooled(s.dir)).length + s.uploads.length).toBe(0);
+  }, 20_000);
+
+  it('keeps query strings out of the log and redacts credential-like values in the trace', async () => {
+    const up = await fakeUpstream((_q, res) => jsonReply(res, { ok: true }));
+    const s = await setup(up.upstreams, {
+      client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
+    });
+    await send(s.proxy.port, '/anthropic/v1/messages?api_key=SECRET-Q&beta=true&x-Token=SECRET-T', {
+      body: '{"model":"m"}',
+    });
+    await s.proxy.close({ taskMs: 1000, totalMs: 200 });
+    expect(up.seen[0]!.url).toContain('api_key=SECRET-Q');
+    expect(s.logs.join('\n')).not.toContain('SECRET');
+    expect(s.logs.join('\n')).not.toContain('beta=true');
+    const [t] = await spooled(s.dir);
+    expect(t!.text).not.toContain('SECRET');
+    expect(t!.trace.request.path).toBe(
+      '/v1/messages?api_key=[redacted]&beta=true&x-Token=[redacted]',
+    );
+  });
+
+  it('removes headers named in Connection in both directions', async () => {
+    const up = await fakeUpstream((_q, res) => {
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        connection: 'x-resp-hop',
+        'x-resp-hop': 'secret',
+        'x-keep': '1',
+      });
+      res.end('{}');
+    });
+    const s = await setup(up.upstreams);
+    const r = await send(s.proxy.port, '/anthropic/v1/messages', {
+      headers: { connection: 'x-hop, close', 'x-hop': 'a', 'x-other': 'b' },
+      body: '{}',
+    });
+    expect(up.seen[0]!.headers['x-hop']).toBeUndefined();
+    expect(up.seen[0]!.headers['x-other']).toBe('b');
+    expect(r.headers['x-resp-hop']).toBeUndefined();
+    expect(r.headers['x-keep']).toBe('1');
   });
 });

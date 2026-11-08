@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AgentDriveApiError, type PutOptions } from './client.js';
@@ -119,37 +120,57 @@ function pidAlive(pid: number) {
   }
 }
 
-async function lockIsStale(lock: string) {
+async function readOwner(lock: string) {
   try {
-    const owner = JSON.parse(await readFile(join(lock, 'owner'), 'utf8')) as {
+    return JSON.parse(await readFile(join(lock, 'owner'), 'utf8')) as {
       pid: number;
       startedAt: number;
+      token: string;
     };
-    return !pidAlive(owner.pid) || Date.now() - owner.startedAt > LOCK_MAX_AGE;
   } catch {
-    // The owner file may not be written yet; fall back to the directory's age.
-    const info = await stat(lock).catch(() => undefined);
-    return !info || Date.now() - info.mtimeMs > LOCK_MAX_AGE;
+    return undefined;
   }
+}
+
+async function lockIsStale(lock: string) {
+  const owner = await readOwner(lock);
+  if (owner) return !pidAlive(owner.pid) || Date.now() - owner.startedAt > LOCK_MAX_AGE;
+  // The owner file may not be written yet; fall back to the directory's age.
+  const info = await stat(lock).catch(() => undefined);
+  return !info || Date.now() - info.mtimeMs > LOCK_MAX_AGE;
 }
 
 async function takeLock(dir: string) {
   const lock = join(dir, 'drain.lock');
+  const token = randomUUID();
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await mkdir(lock, { mode: 0o700 });
       await writeFile(
         join(lock, 'owner'),
-        JSON.stringify({ pid: process.pid, startedAt: Date.now() }),
-        {
-          mode: 0o600,
-        },
+        JSON.stringify({ pid: process.pid, startedAt: Date.now(), token }),
+        { mode: 0o600 },
       );
-      return () => rm(lock, { recursive: true, force: true });
+      // Release only a lock that still carries our token.
+      return async () => {
+        if ((await readOwner(lock))?.token === token)
+          await rm(lock, { recursive: true, force: true });
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       if (!(await lockIsStale(lock))) return undefined;
-      await rm(lock, { recursive: true, force: true });
+      // Only one contender can rename the stale directory away; re-check what we moved.
+      const moved = `${lock}.stale.${randomUUID()}`;
+      try {
+        await rename(lock, moved);
+      } catch {
+        continue;
+      }
+      if (await lockIsStale(moved)) await rm(moved, { recursive: true, force: true });
+      else {
+        await rename(moved, lock).catch(() => {});
+        return undefined;
+      }
     }
   }
   return undefined;
@@ -157,7 +178,7 @@ async function takeLock(dir: string) {
 
 function classify(error: unknown): 'done' | 'invalid' | 'stop' | 'retry' {
   if (!(error instanceof AgentDriveApiError)) return 'retry';
-  if (error.status === 409 && error.code === 'exists') return 'done';
+  if (error.status === 409 && (error.state === 'exists' || error.code === 'exists')) return 'done';
   if (error.status === 400 && error.code === 'validation_error') return 'invalid';
   if (error.status === 429 || error.status >= 500) return 'retry';
   return 'stop'; // 401, 402, 403, 413 and any other client error: files stay for the next run
@@ -196,10 +217,17 @@ export class Drainer {
     this.kick();
     const running = this.running;
     if (!running) return;
-    const timer = setTimeout(() => this.abort.abort(), Math.max(0, deadline - Date.now()));
+    const wait = Math.max(0, deadline - Date.now());
+    const timer = setTimeout(() => this.abort.abort(), wait);
+    let stop: NodeJS.Timeout | undefined;
     try {
-      await running;
+      // The abort signal ends well-behaved uploads; the race covers a client that ignores it.
+      await Promise.race([
+        running,
+        new Promise((resolve) => (stop = setTimeout(resolve, wait + 200))),
+      ]);
     } finally {
+      clearTimeout(stop);
       clearTimeout(timer);
       this.abort.abort();
     }
@@ -272,6 +300,7 @@ export class Drainer {
           await this.client.putEncrypted(this.driveId, meta.path, ciphertext, meta.wrappedKey, {
             mode: 'create',
             tags: meta.tags,
+            signal: this.abort.signal,
           });
           this.uploaded++;
           await this.remove(id);

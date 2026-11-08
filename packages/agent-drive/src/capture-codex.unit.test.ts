@@ -30,4 +30,21 @@ describe('codex overrides', () => {
   it('ignores unrelated config', () => {
     expect(codexOverride(['-c', 'approval_policy=never', 'exec', 'hi'])).toBeUndefined();
   });
+
+  it.each([
+    [['-pwork']],
+    [['-cmodel_provider=x']],
+    [['-c=model_provider=x']],
+    [['-c=model_providers.foo.base_url=u']],
+    [['-p=work']],
+  ])('detects attached form %j', (args) => {
+    expect(codexOverride(args)).toBeTruthy();
+  });
+
+  it('never returns a configuration value', () => {
+    const found = codexOverride(['-c', 'model_providers.foo.experimental_bearer_token="SECRET"']);
+    expect(found).toBe('-c model_providers.foo.experimental_bearer_token');
+    expect(codexOverride(['--profile=SECRET-NAME'])).toBe('--profile');
+    expect(codexOverride(['-pSECRET-NAME'])).toBe('-p');
+  });
 });

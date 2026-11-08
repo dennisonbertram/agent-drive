@@ -22,6 +22,8 @@ export type PutOptions = {
   userId?: string;
   mode?: 'create' | 'overwrite';
   ifVersionId?: string;
+  /** Aborts an in-flight upload (used by capture shutdown). */
+  signal?: AbortSignal;
 };
 
 export type GetOptions = { versionId?: string };
@@ -651,15 +653,21 @@ export class AgentDriveClient {
       intentId: string;
       uploadUrl: string;
       ciphertextSize: number;
-    }>(`drives/${encode(driveId)}/put`, { method: 'POST', body: JSON.stringify(body) });
+    }>(`drives/${encode(driveId)}/put`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
     await this.storage(intent.uploadUrl, {
       method: 'PUT',
       body: ciphertext,
       headers: { 'content-type': 'application/octet-stream' },
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
       method: 'POST',
       body: JSON.stringify({ intentId: intent.intentId }),
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     return committed.version;
   }

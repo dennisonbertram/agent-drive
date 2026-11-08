@@ -18,22 +18,20 @@ function isProviderKey(setting: string) {
   return key === 'model_provider' || key.startsWith('model_providers.');
 }
 
-/** Returns the flag that already selects a Codex provider or profile, if any. */
+/** Returns the name of the flag (and config key) that already selects a provider or profile.
+ * Never returns a value: config values can hold credentials. */
 export function codexOverride(args: string[]): string | undefined {
+  const keyOf = (setting: string) => setting.split('=')[0]?.trim() ?? '';
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '-c' || arg === '--config') {
-      if (isProviderKey(args[i + 1] ?? '')) return `${arg} ${args[i + 1]}`;
-    } else if (arg.startsWith('--config=')) {
-      if (isProviderKey(arg.slice(9))) return arg;
-    } else if (
-      arg === '-p' ||
-      arg === '--profile' ||
-      arg.startsWith('--profile=') ||
-      arg.startsWith('-p=')
-    ) {
-      return arg;
-    }
+    let setting: string | undefined;
+    if (arg === '-c' || arg === '--config') setting = args[i + 1];
+    else if (arg.startsWith('--config=')) setting = arg.slice(9);
+    else if (arg.startsWith('-c=')) setting = arg.slice(3);
+    else if (arg.startsWith('-c') && !arg.startsWith('--')) setting = arg.slice(2);
+    else if (arg.startsWith('-p') || arg === '--profile' || arg.startsWith('--profile='))
+      return arg.startsWith('--') ? '--profile' : '-p';
+    if (setting !== undefined && isProviderKey(setting)) return `-c ${keyOf(setting)}`;
   }
   return undefined;
 }

@@ -149,7 +149,7 @@ at most 40 characters). The command's exit code is passed through.
 variables, such as `claude` and `codex` in API-key mode. Each file holds the method, path, an allowlisted set
 of headers (no `authorization`, `x-api-key`, cookies or any other header), and the request and response
 bodies. Streaming responses are stored as a list of SSE events. Each body is cut at 4 MiB and each file is kept
-under 9 MiB; cut parts are named in the `truncated` list.
+under 9 MiB; cut parts are named in the `truncated` list. Everything you send to the model, including any secrets you paste into a prompt, is saved in the trace, encrypted with your drive key. Values of query parameters whose names look like credentials (`key`, `token`, `secret`, `auth`, `signature`) are replaced with `[redacted]`, and request URLs are never printed with their query string.
 
 **What is not captured.** The Claude desktop app and editor extensions, other traffic from the agent (updates,
 telemetry), Codex websocket transport, Codex ChatGPT-login mode, and agents already pointed at another gateway.
@@ -171,7 +171,7 @@ arguments unchanged. Nothing in a shell profile, Claude settings or `~/.codex/co
 
 **Spool.** Encrypted traces are written to `<config-path>.state/capture/<driveId>/` (directory mode 0700, files
 0600; ciphertext plus a small JSON sidecar, never plaintext) and uploaded in the background with create-only
-writes. The spool holds at most 512 MiB; past that, new traces are not saved and are counted as
+writes. The spool holds at most about 512 MiB (the cap is approximate when several capture processes share a spool); past that, new traces are not saved and are counted as
 `spool full`. Traces that cannot be uploaded (offline, 5xx, 429) stay and are retried on a later run; a stop
 condition (invalid key, no permission, no quota) leaves them for the next run, and traces the server rejects
 as invalid are moved to `invalid/`. Each request is also logged to stderr as

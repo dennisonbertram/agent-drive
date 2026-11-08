@@ -672,7 +672,9 @@ Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
 memory, never written to disk; its drives count as backed up).
 `;
-if (!name || name === 'help' || name === '--help' || raw.includes('--help')) {
+// For `capture`, only flags before `--` are ours; the rest belongs to the wrapped command.
+const ownArgs = name === 'capture' && raw.includes('--') ? raw.slice(0, raw.indexOf('--')) : raw;
+if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);
 } else if (name === 'mcp') {
   runMcp().catch(() => {

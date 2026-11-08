@@ -65,6 +65,38 @@ const RESPONSE_HEADERS = new Set([
   'x-ratelimit-remaining-tokens',
 ]);
 
+/** Header names listed in `Connection` are hop-by-hop too (RFC 9110 section 7.6.1). */
+function hopHeaders(headers: IncomingHttpHeaders) {
+  const names = new Set(HOP_BY_HOP);
+  for (const token of String(headers.connection ?? '').split(','))
+    if (token.trim()) names.add(token.trim().toLowerCase());
+  return names;
+}
+
+/** Keeps query keys but hides values of keys that look like credentials. */
+export function redactQuery(path: string) {
+  const at = path.indexOf('?');
+  if (at < 0) return path;
+  const query = path
+    .slice(at + 1)
+    .split('&')
+    .map((pair) => {
+      const eq = pair.indexOf('=');
+      if (eq < 0) return pair;
+      let key = pair.slice(0, eq);
+      try {
+        key = decodeURIComponent(key);
+      } catch {
+        /* use the raw key */
+      }
+      return /key|token|secret|auth|signature/iu.test(key)
+        ? `${pair.slice(0, eq)}=[redacted]`
+        : pair;
+    })
+    .join('&');
+  return `${path.slice(0, at)}?${query}`;
+}
+
 type Upstream = { protocol: 'https' | 'http'; hostname: string; port: number };
 export type ProxyOptions = {
   agent: string;
@@ -220,7 +252,7 @@ export function buildTrace(agent: string, c: Captured) {
     truncated,
     request: {
       method: c.method,
-      path: c.path,
+      path: redactQuery(c.path),
       headers: pick(c.requestHeaders, REQUEST_HEADERS),
       body: requestBody,
     },
@@ -322,11 +354,14 @@ export async function startProxy(options: ProxyOptions) {
       released = true;
     };
     const line = (code: number, outcome: string) =>
-      log(`capture: ${method} ${path} ${code} ${Date.now() - startedAt}ms ${outcome}`);
+      log(
+        `capture: ${method} ${path.split('?')[0]} ${code} ${Date.now() - startedAt}ms ${outcome}`,
+      );
 
     const headers: IncomingHttpHeaders = {};
+    const requestHop = hopHeaders(req.headers);
     for (const [name, value] of Object.entries(req.headers))
-      if (!HOP_BY_HOP.has(name) && name !== 'host') headers[name] = value;
+      if (!requestHop.has(name) && name !== 'host') headers[name] = value;
     const defaultPort = upstream.protocol === 'https' ? 443 : 80;
     headers.host =
       upstream.port === defaultPort ? upstream.hostname : `${upstream.hostname}:${upstream.port}`;
@@ -338,9 +373,16 @@ export async function startProxy(options: ProxyOptions) {
       path,
       headers,
     });
-    if (capturing) req.on('data', (chunk: Buffer) => request.push(chunk));
+    let upstreamFailed = false;
+    if (capturing) req.on('data', (chunk: Buffer) => upstreamFailed || request.push(chunk));
     req.pipe(up);
     up.on('error', (error) => {
+      // Nothing worth saving: drop the buffered bytes and free the reservation.
+      upstreamFailed = true;
+      req.unpipe(up);
+      req.resume();
+      request.chunks = [];
+      response.chunks = [];
       release();
       if (res.headersSent) return void res.destroy();
       res.writeHead(502, { 'content-type': 'application/json' });
@@ -354,8 +396,9 @@ export async function startProxy(options: ProxyOptions) {
       status = ures.statusCode ?? 502;
       responseHeaders = ures.headers;
       const out: IncomingHttpHeaders = {};
+      const responseHop = hopHeaders(ures.headers);
       for (const [name, value] of Object.entries(ures.headers))
-        if (!HOP_BY_HOP.has(name)) out[name] = value;
+        if (!responseHop.has(name)) out[name] = value;
       res.writeHead(status, out);
       if (capturing) ures.on('data', (chunk: Buffer) => response.push(chunk));
       ures.pipe(res);
@@ -369,6 +412,7 @@ export async function startProxy(options: ProxyOptions) {
     });
     res.on('finish', () => {
       const code = status;
+      if (upstreamFailed) return drop('upstream error');
       if (!capturing) {
         drop('memory');
         return line(code, 'not captured: memory');
