@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { EMPTY_DRIVE, MISMATCH, setUpWebhook, type Source } from './webhook-setup';
+import { EMPTY_DRIVE, MISMATCH, keySourceFor, setUpWebhook, type Source } from './webhook-setup';
 
 const driveId = randomUUID();
 const key = randomBytes(32).toString('base64url');
@@ -53,7 +53,7 @@ describe('setUpWebhook', () => {
     await expect(run(f, 'pasted', async () => 'unverifiable')).rejects.toThrow(EMPTY_DRIVE);
     expect(f.calls).toEqual([]);
   });
-  it.each<Source>(['trusted', 'recovery-file', 'bundle', 'vault'])(
+  it.each<Source>(['trusted', 'recovery-file', 'bundle'])(
     'creates inbox and token for %s on an empty drive',
     async (source) => {
       const f = fake();
@@ -61,6 +61,18 @@ describe('setUpWebhook', () => {
       expect(f.calls).toEqual(['GET trace-inbox', 'POST trace-inbox', 'POST webhook-token']);
     },
   );
+  it('refuses an unchecked vault slot key on an empty drive', async () => {
+    const f = fake();
+    await expect(run(f, 'vault', async () => 'unverifiable')).rejects.toThrow(EMPTY_DRIVE);
+    expect(f.calls).toEqual([]);
+  });
+  it('verifies again when an inbox appeared after the key was checked', async () => {
+    const f = fake({ inbox: true });
+    const results: Verdict[] = ['unverifiable', 'mismatch'];
+    let n = 0;
+    await expect(run(f, 'bundle', async () => results[n++]!)).rejects.toThrow(MISMATCH);
+    expect(f.calls).not.toContain('POST webhook-token');
+  });
   it('accepts a pasted key that opens a file, and skips the inbox when it exists', async () => {
     const f = fake({ inbox: true });
     await run(f, 'pasted', async () => 'file');
@@ -90,5 +102,15 @@ describe('setUpWebhook', () => {
       'POST trace-inbox',
       'POST webhook-token',
     ]);
+  });
+});
+
+describe('keySourceFor', () => {
+  it('trusts only the key the tab generated, not a later replacement', () => {
+    expect(keySourceFor('k1', 'pasted', 'k1')).toBe('trusted');
+    // Forget key, then load an unrelated raw key: the drive's old trust does not carry over.
+    expect(keySourceFor('k1', 'pasted', 'k2')).toBe('pasted');
+    expect(keySourceFor(undefined, 'bundle', 'k2')).toBe('bundle');
+    expect(keySourceFor(undefined, undefined, 'k2')).toBe('pasted');
   });
 });

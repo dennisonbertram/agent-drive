@@ -13,6 +13,13 @@ export const MISMATCH = 'This key does not open this drive’s files.';
 export const EMPTY_DRIVE =
   'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.';
 
+/** The tab's own generated key is trusted only while it is still the key in use. */
+export const keySourceFor = (
+  generatedKey: string | undefined,
+  recorded: Source | undefined,
+  key: string,
+): Source => (generatedKey === key ? 'trusted' : (recorded ?? 'pasted'));
+
 const conflict = (reason: unknown) => (reason as { status?: number } | null)?.status === 409;
 
 /**
@@ -29,13 +36,23 @@ export async function setUpWebhook(args: {
   const { request, driveId, key, source, verify } = args;
   const verdict = await verify(driveId, key);
   if (verdict === 'mismatch') throw new Error(MISMATCH);
-  if (verdict === 'unverifiable' && source === 'pasted') throw new Error(EMPTY_DRIVE);
+  // Only a key bound to this drive may create the inbox when there is nothing to check it against.
+  // A vault slot is only unsealed, never matched to the drive.
+  if (verdict === 'unverifiable' && (source === 'pasted' || source === 'vault'))
+    throw new Error(EMPTY_DRIVE);
 
   async function ensureInbox() {
     const { inbox } = await request<{ inbox: TraceInboxRecord | null }>(
       `drives/${driveId}/trace-inbox`,
     );
-    if (inbox) return;
+    if (inbox) {
+      // An inbox that appeared after the first check (another tab) must open with this key.
+      if (verdict === 'unverifiable') {
+        const again = await verify(driveId, key);
+        if (again !== 'file' && again !== 'inbox') throw new Error(MISMATCH);
+      }
+      return;
+    }
     try {
       await request(`drives/${driveId}/trace-inbox`, 'POST', await createTraceInbox(driveId, key));
     } catch (reason) {

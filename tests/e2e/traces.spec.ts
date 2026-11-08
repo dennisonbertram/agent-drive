@@ -154,7 +154,7 @@ test('traces: Traces view, webhook setup with key checks, upload order, manageme
     await expect(rows.nth(1)).toContainText('model-a');
     await expect(rows.nth(0)).toContainText('/traces/openrouter/2026-11-08');
     // The agent list was loaded before the webhook created the openrouter agent.
-    await expect(rows.nth(0)).not.toContainText(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
+    await expect(rows.nth(0).locator('td').nth(2)).toHaveText('openrouter');
 
     // The preview needs the key: it was cached when the bundle loaded.
     await rows.nth(1).locator('[title^="Preview "]').click();
@@ -196,6 +196,53 @@ test('traces: Traces view, webhook setup with key checks, upload order, manageme
     expect(stored.session).toEqual([]);
     const text = JSON.stringify(stored);
     for (const secret of [driveKey, 'adk_', 'adw_', 'adcred1.']) expect(text).not.toContain(secret);
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('traces: the dialog cannot be closed while a token is being created, and revoke returns focus', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    const created = await context.request.post('/api/console/drives', {
+      data: { name: 'Trace drive' },
+      headers: { Origin: baseURL! },
+    });
+    const driveId = ((await created.json()) as { id: string }).id;
+    const driveKey = randomBytes(32).toString('base64url');
+    const bundle = `adcred1.${Buffer.from(JSON.stringify({ v: 1, driveKeys: { [driveId]: driveKey } })).toString('base64url')}`;
+    // Hold the token POST so the test can try to close the dialog while it is in flight.
+    let release = () => {};
+    const gate = new Promise<void>((done) => (release = done));
+    await page.route('**/webhook-token', async (route) => {
+      if (route.request().method() === 'POST') await gate;
+      await route.continue();
+    });
+    await page.goto(`/console?drive=${driveId}`);
+    await page.getByTestId('capture-link').click();
+    await addWebhook(page).click();
+    await page.getByText('Paste a key instead').click();
+    await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+    await expect(dialog(page).getByText('Setting up…')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page).getByRole('button', { name: 'Close dialog' })).toHaveCount(0);
+    release();
+    await expect(page.getByTestId('webhook-created')).toBeVisible();
+
+    await dialog(page).getByRole('button', { name: 'Revoke', exact: true }).click();
+    await dialog(page).getByRole('button', { name: 'Revoke webhook' }).click();
+    await expect(addWebhook(page)).toBeFocused();
   } finally {
     await cleanupUser(userId);
   }

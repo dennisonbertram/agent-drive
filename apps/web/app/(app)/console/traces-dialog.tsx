@@ -27,6 +27,7 @@ export function TracesDialog({
   getKey,
   resumeWith,
   onReady,
+  onBusy,
 }: {
   driveId: string;
   origin: string;
@@ -38,11 +39,28 @@ export function TracesDialog({
   resumeWith?: TracesKey | undefined;
   /** The inbox now exists and `key` is verified: seal it into the account. */
   onReady: (key: string, source: Source) => void;
+  /** True while a create, replace or revoke is in flight: the dialog must not close then. */
+  onBusy: (busy: boolean) => void;
 }) {
   const [active, setActive] = useState<Active | null | 'loading' | 'error'>('loading');
   const [created, setCreated] = useState<WebhookToken | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [revoking, setRevoking] = useState(false);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const focusAdd = useRef(false);
+  const working = busy || revoking;
+  useEffect(() => {
+    onBusy(working);
+  }, [working, onBusy]);
+  useEffect(() => () => onBusy(false), [onBusy]);
+  // After a revoke the confirm buttons are gone; keyboard focus goes to Add webhook.
+  useEffect(() => {
+    if (active === null && focusAdd.current) {
+      focusAdd.current = false;
+      addButton.current?.focus();
+    }
+  }, [active]);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -100,8 +118,14 @@ export function TracesDialog({
   }, []);
 
   async function revoke() {
-    await request(`drives/${driveId}/webhook-token`, 'DELETE');
+    setRevoking(true);
+    try {
+      await request(`drives/${driveId}/webhook-token`, 'DELETE');
+    } finally {
+      if (alive.current) setRevoking(false);
+    }
     if (!alive.current) return;
+    focusAdd.current = true;
     setCreated(null);
     setActive(null);
   }
@@ -160,6 +184,7 @@ export function TracesDialog({
           ) : (
             <div>
               <button
+                ref={addButton}
                 type="button"
                 className="button primary"
                 disabled={busy}

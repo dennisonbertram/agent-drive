@@ -28,7 +28,7 @@ import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
-import type { Source } from '@/src/console/webhook-setup';
+import { keySourceFor, type Source } from '@/src/console/webhook-setup';
 import { Vault, vaultRequest, type LockReason } from '@/src/console/vault';
 import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
@@ -461,7 +461,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // Increases when the drive changes, the unlock dialog closes, or a new action waits for a key.
   const actionEpoch = useRef(0);
   // Drives whose key this tab generated itself; those are sealed without a file check.
-  const trustedDrives = useRef(new Set<string>());
+  const trustedDrives = useRef(new Map<string, string>());
   // Where each cached drive key came from; a raw pasted key cannot be matched to an empty drive.
   const keySources = useRef(new Map<string, Source>());
   const [tab, setTab] = useState<Tab>('Files');
@@ -513,6 +513,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     | null
   >(null);
   // The key the unlock dialog just loaded for the webhook dialog, handed over once as it opens.
+  const [tracesBusy, setTracesBusy] = useState(false);
   const [tracesResume, setTracesResume] = useState<TracesKey | undefined>();
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
@@ -1091,7 +1092,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
     // Skipped by the vault itself if it is locked before the write.
-    trustedDrives.current.add(created.id);
+    trustedDrives.current.set(created.id, key);
     if (vault.status === 'unlocked') void vault.addKey(created.id, key, { trusted: true });
     setDriveReceipt({ id: created.id, key });
     setReceiptSaved(false);
@@ -1145,12 +1146,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // slot. With neither, asks for it (the dialog comes back through keyLoaded or the passphrase).
   async function webhookKey(): Promise<TracesKey | undefined> {
     const driveId = selected;
-    const sourceOf = (): Source =>
-      trustedDrives.current.has(driveId)
-        ? 'trusted'
-        : (keySources.current.get(driveId) ?? 'pasted');
     const cached = driveKeys[driveId];
-    if (cached) return { key: cached, source: sourceOf() };
+    if (cached)
+      return {
+        key: cached,
+        source: keySourceFor(
+          trustedDrives.current.get(driveId),
+          keySources.current.get(driveId),
+          cached,
+        ),
+      };
     if (vault.status === 'unlocked' && vault.hasSlot(driveId)) {
       const mark = actionEpoch.current;
       const epoch = vault.epochNow;
@@ -1183,7 +1188,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const result = await vault
       .addKey(driveId, key, {
         ...(path === undefined ? {} : { path }),
-        trusted: trustedDrives.current.has(driveId),
+        trusted: trustedDrives.current.get(driveId) === key,
       })
       .catch(() => 'skipped' as const);
     if (result === 'added') setNotice('Added to your account. Next time your passphrase opens it.');
@@ -1567,7 +1572,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         Object.fromEntries(
           Object.entries(driveKeys).map(([id, key]) => [
             id,
-            { key, trusted: trustedDrives.current.has(id) },
+            { key, trusted: trustedDrives.current.get(id) === key },
           ]),
         ),
       );
@@ -2828,7 +2833,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           }
           className={modal === 'preview' ? 'preview' : undefined}
           onClose={close}
-          closable={!busy && modal !== 'driveReceipt' && modal !== 'keyReceipt'}
+          closable={
+            !busy &&
+            !(modal === 'traces' && tracesBusy) &&
+            modal !== 'driveReceipt' &&
+            modal !== 'keyReceipt'
+          }
         >
           {modal !== 'unlock' && errorBanner}
           {modal === 'drive' && (
@@ -3014,6 +3024,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               request={api}
               verify={(id, key) => vault.verifyKey(id, key)}
               getKey={webhookKey}
+              onBusy={setTracesBusy}
               resumeWith={tracesResume}
               onReady={(key, source) => {
                 setDriveKeys((current) => ({ ...current, [selected]: key }));
