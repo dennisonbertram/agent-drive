@@ -67,3 +67,32 @@ All base64url is unpadded and canonical (re-encode and compare).
   20 characters with no separators.
 - **Display fingerprint.** First 8 bytes of SHA-256 of the raw public key, as four hex groups. It
   is for display only.
+
+## Trace inbox v1 and wrapped-key envelope v2
+
+A trace inbox lets the service encrypt a file for a drive without holding the drive key. Each
+drive has at most one inbox: a P-256 key pair whose private key is stored wrapped under the drive
+key. Anyone holding the drive key can unwrap it. Code: `packages/agent-drive/src/trace-inbox.ts`,
+frozen vectors in `trace-inbox.vectors.ts`.
+
+All base64url is unpadded and canonical.
+
+- **Stored record.** `{ keyId, publicKey, wrappedPrivateKey, createdAt }`. `keyId` is a UUID.
+  `publicKey` is the 65-byte raw uncompressed point, 87 characters. Readers add the `driveId`
+  they requested before calling crypto; a `driveId` from the server record is never trusted.
+- **Wrapped private key.** The PKCS#8 private key is wrapped with AES-GCM under the drive key.
+  AAD is UTF-8 `agent-drive:trace-inbox:v1:{driveId}:{keyId}:{publicKey}`. The value is
+  `base64url(0x01 || iv(12) || ciphertext||tag)`, decoded length `1 + 12 + 16 + n`, 32 <= n <= 256.
+  Because the AAD includes `driveId`, a record copied from another drive does not unwrap.
+- **Envelope v2.** `0x02 || epk(65) || iv(12) || ct(59)`, 137 bytes, 183 characters. `epk` is an
+  ephemeral raw P-256 point. `ct` is the 43-character base64url file key plus a 16-byte tag. The
+  key agreement is ECDH, then HKDF-SHA-256 with salt `agent-drive-trace-inbox-v1`. HKDF info and
+  AES-GCM AAD are both UTF-8 `{keyId}:{driveId}`. Envelope v1 (82 characters, drive-key wrapped)
+  and the ADRV v1 body format are unchanged.
+- **Reading.** `envelopeVersion(wrappedKey)` returns 1 or 2. `unwrapFileKey` and `decryptFile`
+  take an optional `inbox` record. A v2 envelope without one fails with `inbox_key_required`.
+  Every record field is validated before any key agreement.
+
+Webhook payloads are plaintext on the server while the request is in transit. The service
+encrypts the file to the inbox public key, but it never holds the drive key and cannot read
+the file afterwards.

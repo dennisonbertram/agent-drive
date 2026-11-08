@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   CHUNK_SIZE,
   decryptFile,
+  DriveCryptoError,
+  decodeDriveKey,
   encryptedSize,
   plaintextSize,
   decryptWithFileKey,
   encryptFile,
+  envelopeVersion,
   generateDriveKey,
   unwrapFileKey,
 } from './crypto.js';
 import { HEADER_SIZE, open, seal } from './crypto-format.js';
+import { createTraceInbox, sealFileKeyToInbox } from './trace-inbox.js';
+import { vector } from './trace-inbox.vectors.js';
 
 const sequence = (size: number) => Uint8Array.from({ length: size }, (_, index) => index % 251);
 const hex = (value: Uint8Array) => Buffer.from(value).toString('hex');
@@ -114,5 +119,61 @@ describe('plaintextSize', () => {
 
   it('rejects sizes smaller than an empty file', () => {
     expect(() => plaintextSize(40)).toThrow();
+  });
+});
+
+describe('wrapped-key envelope v2 through the public API', () => {
+  const driveA = '11111111-2222-4333-8444-555555555555';
+  const driveB = '22222222-2222-4333-8444-555555555555';
+  const plaintext = new TextEncoder().encode('{"otlp":{}}');
+
+  async function sealedFor(driveId: string, driveKey: string) {
+    const record = await createTraceInbox(driveId, driveKey);
+    const fileKey = generateDriveKey();
+    const ciphertext = await seal(plaintext, decodeDriveKey(fileKey), sequence(8));
+    const wrappedKey = await sealFileKeyToInbox(fileKey, { driveId, ...record });
+    return { ciphertext, wrappedKey, inbox: { driveId, ...record } };
+  }
+
+  it('reports the envelope version and rejects garbage', async () => {
+    const key = generateDriveKey();
+    expect(envelopeVersion((await encryptFile(plaintext, key)).wrappedKey)).toBe(1);
+    expect(envelopeVersion(vector.envelope)).toBe(2);
+    for (const bad of ['', 'abc', 'A'.repeat(82), 'A'.repeat(183), '!'.repeat(82)])
+      expect(() => envelopeVersion(bad)).toThrow(DriveCryptoError);
+  });
+
+  it('requires the inbox record for a v2 envelope', async () => {
+    await expect(unwrapFileKey(vector.envelope, vector.driveKey)).rejects.toMatchObject({
+      code: 'inbox_key_required',
+      message: "This file was sealed to the drive's trace inbox. Fetch the inbox record and retry.",
+    });
+  });
+
+  it('decrypts a v2 file with the inbox record', async () => {
+    const key = generateDriveKey();
+    const { ciphertext, wrappedKey, inbox } = await sealedFor(driveA, key);
+    expect(await decryptFile(ciphertext, wrappedKey, key, inbox)).toEqual(plaintext);
+  });
+
+  it('refuses a wrong drive key', async () => {
+    const { ciphertext, wrappedKey, inbox } = await sealedFor(driveA, generateDriveKey());
+    await expect(
+      decryptFile(ciphertext, wrappedKey, generateDriveKey(), inbox),
+    ).rejects.toMatchObject({ code: 'decryption_failed' });
+  });
+
+  it('refuses cross-drive substitution', async () => {
+    const key = generateDriveKey();
+    const a = await sealedFor(driveA, key);
+    const b = await sealedFor(driveB, key);
+    // A's envelope with B's record (and B's driveId).
+    await expect(decryptFile(a.ciphertext, a.wrappedKey, key, b.inbox)).rejects.toMatchObject({
+      code: 'decryption_failed',
+    });
+    // A's record presented while reading drive B.
+    await expect(
+      decryptFile(a.ciphertext, a.wrappedKey, key, { ...a.inbox, driveId: driveB }),
+    ).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 });
