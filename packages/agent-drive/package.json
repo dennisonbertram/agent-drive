@@ -1,7 +1,24 @@
 {
   "name": "agent-drive",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Command-line client and MCP server for Agent Drive, an encrypted file drive for AI agents.",
+  "homepage": "https://agentdrive.xyz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dennisonbertram/agent-drive.git",
+    "directory": "packages/agent-drive"
+  },
+  "bugs": {
+    "url": "https://github.com/dennisonbertram/agent-drive/issues"
+  },
+  "keywords": [
+    "agent",
+    "ai-agents",
+    "mcp",
+    "cli",
+    "storage",
+    "file-drive"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,8 +39,10 @@
     "build": "tsc --project tsconfig.build.json && node -e \"const f=require('fs');f.chmodSync('dist/cli.js',0o755);f.copyFileSync('../../skills/agent-drive/SKILL.md','dist/SKILL.md')\"",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.883.0",
     "@modelcontextprotocol/sdk": "1.32.2",
     "zod": "4.6.7"
   },
@@ -32,6 +51,11 @@
     "pg": "8.23.1"
   },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }
