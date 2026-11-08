@@ -40,6 +40,8 @@ const thirds = [
   'metadata',
   'head',
   'account-key',
+  'trace-inbox',
+  'webhook-token',
 ];
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
@@ -67,6 +69,20 @@ describe('console actions', () => {
       expect(action, `${m} ${p.join('/')}`).not.toBe('unknown');
       expect(auditLabel(action), action).not.toBe('Other request');
     }
+  });
+  it('allows exactly the trace inbox and webhook token routes', () => {
+    const inbox = ['drives', ID, 'trace-inbox'];
+    const token = ['drives', ID, 'webhook-token'];
+    for (const m of ['GET', 'POST']) expect(consoleRouteAllowed(m, inbox)).toBe(true);
+    for (const m of ['PUT', 'PATCH', 'DELETE']) expect(consoleRouteAllowed(m, inbox)).toBe(false);
+    for (const m of ['GET', 'POST', 'DELETE']) expect(consoleRouteAllowed(m, token)).toBe(true);
+    for (const m of ['PUT', 'PATCH']) expect(consoleRouteAllowed(m, token)).toBe(false);
+    expect(actionFor('GET', inbox, true)).toBe('drive.trace_inbox.read');
+    expect(actionFor('GET', inbox)).toBe('drive.trace_inbox.read');
+    expect(actionFor('POST', inbox)).toBe('console.drive.trace_inbox.create');
+    expect(actionFor('GET', token)).toBe('console.drive.webhook_token.read');
+    expect(actionFor('POST', token)).toBe('console.drive.webhook_token.create');
+    expect(actionFor('DELETE', token)).toBe('console.drive.webhook_token.revoke');
   });
   it('consoleReads=0 hides every console GET read and keeps writes', () => {
     // Mirrors the SQL filter in the audit endpoint: LIKE '%.list', LIKE '%.read', or consoleReadActions.

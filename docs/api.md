@@ -18,6 +18,7 @@ bearer API key; successful JSON responses and errors are `Cache-Control: no-stor
 | POST     | `/api/v1/drives/:id/put`                                             | `write`                             |
 | POST     | `/api/v1/drives/:id/commit`                                          | `write`                             |
 | GET      | `/api/v1/drives/:id/get`, `/list`, `/versions`, `/recent`, `/search` | `read`                              |
+| GET      | `/api/v1/drives/:id/trace-inbox`                                     | `read`                              |
 | POST     | `/api/v1/drives/:id/key-backup`                                      | `write`                             |
 | POST     | `/api/v1/drives/:id/move`                                            | `write`                             |
 | POST     | `/api/v1/drives/:id/delete`                                          | `delete`                            |
@@ -143,3 +144,22 @@ ciphertext+tag` of 1+12+16+32..256 bytes; `sealed.iv` is 12 bytes and `sealed.ct
 Writes lock the account row (shared, `deleting_at` must be null, else 409), then the account key
 row, then for slot routes the drive row (`deleting_at` must be null, else 404). Drive deletion
 removes the drive's slot; account deletion removes the account key (slots cascade).
+
+## Trace inbox and webhook token
+
+A drive can hold one trace inbox: an ECDH public key plus its private key wrapped by the client
+with the drive key, so the server can store it but not open it. A drive can also hold one active
+webhook token. Console routes need a Clerk session and the same-origin check; they are not
+reverification-gated because they reveal or change no key the server can use. A bearer key can
+only read the inbox. Every other route below returns 404 on `/api/v1`.
+
+| Route                              | Body, response                                                                                                                                                                                                                             | Audit action                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
+| `GET /drives/:id/trace-inbox`      | `{ inbox: { keyId, publicKey, wrappedPrivateKey, createdAt } \| null }`. On `/api/v1` the key needs `read` on the drive; counts as one operation like `get`.                                                                               | `drive.trace_inbox.read`             |
+| `POST /drives/:id/trace-inbox`     | Console only. `{ keyId, publicKey, wrappedPrivateKey }` returns 201 with the same shape. 409 if the drive already has an inbox. Unknown fields are 400.                                                                                    | `console.drive.trace_inbox.create`   |
+| `GET /drives/:id/webhook-token`    | Console only. `{ token: { id, createdAt } \| null }`. Never the secret or its hash.                                                                                                                                                        | `console.drive.webhook_token.read`   |
+| `POST /drives/:id/webhook-token`   | Console only. Returns 201 `{ id, token, url, createdAt }`; `token` is `adw_` plus 64 hex characters and is shown once (only its SHA-256 is stored). Revokes the active token in the same transaction. 409 if the drive has no trace inbox. | `console.drive.webhook_token.create` |
+| `DELETE /drives/:id/webhook-token` | Console only. Revokes the active token and returns `{ revokedAt }`; 404 if none is active.                                                                                                                                                 | `console.drive.webhook_token.revoke` |
+
+Tokens belong to the account's `openrouter` agent, which is created on first use. Deleting a drive
+removes its inbox and tokens.

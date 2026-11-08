@@ -93,6 +93,13 @@ export async function copyObject(source: string, target: string, etag?: string) 
   );
 }
 
+export async function putObject(key: string, body: Uint8Array) {
+  const settings = config();
+  await storageClient().send(
+    new PutObjectCommand({ Bucket: settings.bucket, Key: key, Body: body }),
+  );
+}
+
 export async function deleteObject(key: string) {
   const settings = config();
   await storageClient().send(new DeleteObjectCommand({ Bucket: settings.bucket, Key: key }));
