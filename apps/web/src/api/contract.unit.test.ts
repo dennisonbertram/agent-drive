@@ -26,12 +26,15 @@ describe('core API contract', () => {
         "POST /api/v1/drives/:id/shares",
         "GET /api/v1/drives/:id/shares",
         "DELETE /api/v1/drives/:id/shares/:shareId",
+        "GET /api/v1/drives/:id/trace-inbox",
         "GET /api/shares/:id",
         "GET /api/console/billing",
         "PATCH /api/console/billing/settings",
         "POST /api/console/billing/checkout",
         "POST /api/console/billing/portal",
         "GET /api/console/billing/statements",
+        "GET|POST /api/console/drives/:id/trace-inbox",
+        "GET|POST|DELETE /api/console/drives/:id/webhook-token",
         "POST /api/stripe/webhook",
       ]
     `);

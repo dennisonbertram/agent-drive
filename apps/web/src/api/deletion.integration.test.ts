@@ -842,4 +842,41 @@ describe('deletion lifecycle', () => {
       (await pool.query('SELECT 1 FROM accounts WHERE id=$1', [free.accountId])).rowCount,
     ).toBe(0);
   });
+
+  it('deletes an account whose drive has a trace inbox, an active webhook token and the openrouter agent', async () => {
+    const userId = `e2e_trace_${randomUUID()}`;
+    const f = await createConsoleFixture(userId);
+    const openrouter = await pool.query(
+      "INSERT INTO agents (account_id,name) VALUES ($1,'openrouter') RETURNING id",
+      [f.accountId],
+    );
+    await pool.query(
+      `INSERT INTO drive_trace_inboxes (drive_id,account_id,key_id,public_key,wrapped_private_key)
+       VALUES ($1,$2,$3,'pk','wpk')`,
+      [f.driveId, f.accountId, randomUUID()],
+    );
+    await pool.query(
+      `INSERT INTO drive_webhook_tokens (drive_id,account_id,agent_id,token_hash)
+       VALUES ($1,$2,$3,$4)`,
+      [f.driveId, f.accountId, openrouter.rows[0]!.id, tokenHash(token())],
+    );
+    const queued = await consoleRequest(userId, 'account', 'DELETE', {
+      confirmation: 'DELETE MY ACCOUNT',
+    });
+    const jobId = ((await json(queued)).deletion as { id: string }).id;
+    await pool.query('UPDATE deletion_jobs SET not_before=now() WHERE id=$1', [jobId]);
+    await runDeletionMaintenance({
+      objectStore: s3,
+      closeBilling: vi.fn(async () => true),
+      drainBilling: vi.fn(async () => undefined),
+      jobIds: [jobId],
+    });
+    expect((await pool.query('SELECT 1 FROM accounts WHERE id=$1', [f.accountId])).rowCount).toBe(
+      0,
+    );
+    expect(
+      (await pool.query('SELECT 1 FROM drive_webhook_tokens WHERE account_id=$1', [f.accountId]))
+        .rowCount,
+    ).toBe(0);
+  });
 });

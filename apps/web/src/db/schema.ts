@@ -162,6 +162,51 @@ export const accountKeySlots = pgTable(
   ],
 );
 
+export const driveTraceInboxes = pgTable(
+  'drive_trace_inboxes',
+  {
+    driveId: uuid('drive_id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    keyId: uuid('key_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    wrappedPrivateKey: text('wrapped_private_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'drive_trace_inboxes_drive_account_fk',
+      columns: [table.driveId, table.accountId],
+      foreignColumns: [drives.id, drives.accountId],
+    }).onDelete('cascade'),
+  ],
+);
+
+export const driveWebhookTokens = pgTable(
+  'drive_webhook_tokens',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    driveId: uuid('drive_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'restrict' }),
+    tokenHash: text('token_hash').notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'drive_webhook_tokens_drive_account_fk',
+      columns: [table.driveId, table.accountId],
+      foreignColumns: [drives.id, drives.accountId],
+    }).onDelete('cascade'),
+    uniqueIndex('drive_webhook_tokens_token_hash_unique').on(table.tokenHash),
+    uniqueIndex('drive_webhook_tokens_active_drive_unique')
+      .on(table.driveId)
+      .where(sql`${table.revokedAt} IS NULL`),
+  ],
+);
+
 export const apiKeys = pgTable(
   'api_keys',
   {
