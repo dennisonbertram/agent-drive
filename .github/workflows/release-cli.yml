@@ -29,9 +29,8 @@ jobs:
         run: |
           v=$(node -p "require('./packages/agent-drive/package.json').version")
           test "${GITHUB_REF_NAME}" = "cli-v${v}" || { echo "tag ${GITHUB_REF_NAME} != cli-v${v}"; exit 1; }
-      # ponytail: token auth for the first publish. After the package exists, configure a
-      # trusted publisher on npmjs.com (workflow release-cli.yml) and delete NODE_AUTH_TOKEN.
+      # Trusted publishing (OIDC): no stored token. Needs npm >= 11.5.1 and the trusted
+      # publisher configured on npmjs.com for this repo and workflow file.
+      - run: npm install -g npm@^11.5.1
       - run: npm publish --provenance --access public
         working-directory: packages/agent-drive
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
