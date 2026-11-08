@@ -1,0 +1,37 @@
+name: Release CLI
+
+on:
+  push:
+    tags: ['cli-v*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter agent-drive build
+      - run: pnpm exec vitest run --config vitest.unit.config.ts packages/agent-drive
+      - name: Tag matches package version
+        run: |
+          v=$(node -p "require('./packages/agent-drive/package.json').version")
+          test "${GITHUB_REF_NAME}" = "cli-v${v}" || { echo "tag ${GITHUB_REF_NAME} != cli-v${v}"; exit 1; }
+      # ponytail: token auth for the first publish. After the package exists, configure a
+      # trusted publisher on npmjs.com (workflow release-cli.yml) and delete NODE_AUTH_TOKEN.
+      - run: npm publish --provenance --access public
+        working-directory: packages/agent-drive
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
