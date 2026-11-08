@@ -1,4 +1,7 @@
-import { ingestOpenRouterTrace } from '../../../../../src/api/trace-webhook';
+import {
+  authorizeOpenRouterWebhook,
+  ingestOpenRouterTrace,
+} from '../../../../../src/api/trace-webhook';
 import { responseForError } from '../../../../../src/api/errors';
 
 export const runtime = 'nodejs';
@@ -13,6 +16,17 @@ function tooLarge() {
 }
 
 export async function POST(request: Request, context: { params: Promise<{ driveId: string }> }) {
+  // HTTPS and the token are checked before the body is read.
+  let driveId: string;
+  let auth: Awaited<ReturnType<typeof authorizeOpenRouterWebhook>>;
+  const url = new URL(request.url);
+  try {
+    driveId = (await context.params).driveId;
+    auth = await authorizeOpenRouterWebhook({ url, headers: request.headers, driveId });
+  } catch (error) {
+    await request.body?.cancel().catch(() => undefined);
+    return responseForError(error);
+  }
   if (Number(request.headers.get('content-length') ?? 0) > MAX_BYTES) {
     await request.body?.cancel().catch(() => undefined);
     return tooLarge();
@@ -37,13 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ driveI
     offset += chunk.byteLength;
   }
   try {
-    const { driveId } = await context.params;
-    return await ingestOpenRouterTrace({
-      url: new URL(request.url),
-      headers: request.headers,
-      bytes,
-      driveId,
-    });
+    return await ingestOpenRouterTrace({ url, headers: request.headers, bytes, driveId, auth });
   } catch (error) {
     return responseForError(error);
   }

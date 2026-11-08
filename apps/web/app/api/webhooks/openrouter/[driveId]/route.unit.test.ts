@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { ingestOpenRouterTrace } = vi.hoisted(() => ({ ingestOpenRouterTrace: vi.fn() }));
-vi.mock('../../../../../src/api/trace-webhook', () => ({ ingestOpenRouterTrace }));
+const { ingestOpenRouterTrace, authorizeOpenRouterWebhook } = vi.hoisted(() => ({
+  ingestOpenRouterTrace: vi.fn(),
+  authorizeOpenRouterWebhook: vi.fn(),
+}));
+vi.mock('../../../../../src/api/trace-webhook', () => ({
+  ingestOpenRouterTrace,
+  authorizeOpenRouterWebhook,
+}));
 
 import { ApiError } from '../../../../../src/api/errors';
 import { POST } from './route';
@@ -19,7 +25,10 @@ const call = (body: Uint8Array, headers: Record<string, string> = {}) =>
   );
 
 describe('openrouter webhook route', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authorizeOpenRouterWebhook.mockResolvedValue({ drive_id: driveId });
+  });
 
   it('returns 413 above 4 MiB without calling the module', async () => {
     const response = await call(new Uint8Array(4 * 1024 * 1024 + 1));
@@ -40,6 +49,23 @@ describe('openrouter webhook route', () => {
     expect(arg.headers.get('authorization')).toBe('Bearer x');
     expect(arg.headers.get('x-test-connection')).toBe('true');
     expect(arg.url.protocol).toBe('https:');
+  });
+
+  it('rejects before reading the body when authorization fails', async () => {
+    authorizeOpenRouterWebhook.mockRejectedValue(new ApiError('unauthorized', 'nope'));
+    const pull = vi.fn();
+    const body = new ReadableStream({ pull }, { highWaterMark: 0 });
+    const response = await POST(
+      new Request(`https://agent-drive.test/api/webhooks/openrouter/${driveId}`, {
+        method: 'POST',
+        body,
+        duplex: 'half',
+      } as RequestInit),
+      context,
+    );
+    expect(response.status).toBe(401);
+    expect(pull).not.toHaveBeenCalled();
+    expect(ingestOpenRouterTrace).not.toHaveBeenCalled();
   });
 
   it('maps a thrown ApiError to the standard error body', async () => {

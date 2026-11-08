@@ -65,7 +65,7 @@ async function authenticate(driveId: string, headers: Headers) {
     throw new ApiError('unauthorized', 'A bearer token is required.');
   const hash = createHash('sha256').update(header.slice(7)).digest('hex');
   const result = await getPool().query(
-    `SELECT t.token_hash, t.agent_id, t.account_id
+    `SELECT t.token_hash, t.agent_id, t.account_id, t.drive_id
        FROM drive_webhook_tokens t
        JOIN drives d ON d.id = t.drive_id
        JOIN accounts a ON a.id = d.account_id
@@ -74,7 +74,7 @@ async function authenticate(driveId: string, headers: Headers) {
     [driveId, hash],
   );
   const row = result.rows[0] as
-    | { token_hash: string; agent_id: string; account_id: string }
+    | { token_hash: string; agent_id: string; account_id: string; drive_id: string }
     | undefined;
   const stored = row ? Buffer.from(row.token_hash, 'hex') : null;
   const given = Buffer.from(hash, 'hex');
@@ -83,18 +83,32 @@ async function authenticate(driveId: string, headers: Headers) {
   return row;
 }
 
+export type WebhookAuth = Awaited<ReturnType<typeof authenticate>>;
+
+/** HTTPS, drive id and token checks. The route runs this before it reads the body. */
+export async function authorizeOpenRouterWebhook(input: {
+  url: URL;
+  headers: Headers;
+  driveId: string;
+}): Promise<WebhookAuth> {
+  if (!secureTransportAllowed(input.url.protocol, process.env.NODE_ENV))
+    throw new ApiError('permission_denied', 'HTTPS is required.');
+  if (!UUID.test(input.driveId))
+    throw new ApiError('validation_error', 'The drive id is not valid.');
+  return authenticate(input.driveId, input.headers);
+}
+
 /** Stores one OpenRouter OTLP trace, encrypted to the drive's trace-inbox key. */
 export async function ingestOpenRouterTrace(input: {
   url: URL;
   headers: Headers;
   bytes: Uint8Array;
   driveId: string;
+  auth?: WebhookAuth;
 }): Promise<Response> {
-  const { driveId, bytes } = input;
-  if (!secureTransportAllowed(input.url.protocol, process.env.NODE_ENV))
-    throw new ApiError('permission_denied', 'HTTPS is required.');
-  if (!UUID.test(driveId)) throw new ApiError('validation_error', 'The drive id is not valid.');
-  const token = await authenticate(driveId, input.headers);
+  const { bytes } = input;
+  const token = input.auth ?? (await authorizeOpenRouterWebhook(input));
+  const driveId = token.drive_id; // canonical lowercase id from the database
   if (input.headers.has('x-test-connection')) return json({ ok: true });
 
   let parsed: unknown;
@@ -130,7 +144,11 @@ export async function ingestOpenRouterTrace(input: {
   try {
     return await withTransaction(async (client) => {
       await lockBillingAccount(client, token.account_id);
-      await client.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [driveId]);
+      const drive = await client.query(
+        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, token.account_id],
+      );
+      if (!drive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       try {
         await putConflict(client, driveId, path, 'create');
       } catch (error) {
@@ -184,7 +202,7 @@ export async function ingestOpenRouterTrace(input: {
       return json({ ok: true, stored: 1, path }, 201);
     });
   } catch (error) {
-    if (objectKey) await deleteObject(objectKey).catch(() => undefined);
+    if (objectKey) await removeOrphan(objectKey);
     if (error instanceof ApiError && error.details.state === 'exists')
       return json({ ok: true, stored: 0, duplicate: true });
     console.error(
@@ -192,5 +210,18 @@ export async function ingestOpenRouterTrace(input: {
       error instanceof ApiError ? error.code : 'internal_error',
     );
     throw error;
+  }
+}
+
+/** Deletes an uploaded object unless a version row points at it (the commit may have succeeded). */
+async function removeOrphan(objectKey: string) {
+  try {
+    const committed = await getPool().query('SELECT 1 FROM versions WHERE object_key = $1', [
+      objectKey,
+    ]);
+    if (committed.rowCount) return;
+    await deleteObject(objectKey);
+  } catch {
+    console.error(JSON.stringify({ event: 'trace_webhook_orphan_cleanup_failed', objectKey }));
   }
 }

@@ -7,10 +7,15 @@ import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { POST } from '../../app/api/webhooks/openrouter/[driveId]/route';
 import * as versions from './versions';
+import * as db from '../db/client';
 
 vi.mock('./storage', async (original) => {
   const actual = await original<typeof import('./storage')>();
   return { ...actual, putObject: vi.fn(actual.putObject) };
+});
+vi.mock('../db/client', async (original) => {
+  const actual = await original<typeof import('../db/client')>();
+  return { ...actual, withTransaction: vi.fn(actual.withTransaction) };
 });
 vi.mock('./versions', async (original) => {
   const actual = await original<typeof import('./versions')>();
@@ -20,7 +25,7 @@ import { decryptFile, generateDriveKey } from '../../../../packages/agent-drive/
 import { encryptedSize } from '../../../../packages/agent-drive/src/crypto-format.js';
 import { createTraceInbox } from '../../../../packages/agent-drive/src/trace-inbox.js';
 import { responseForError } from './errors';
-import { ingestOpenRouterTrace } from './trace-webhook';
+import { authorizeOpenRouterWebhook, ingestOpenRouterTrace } from './trace-webhook';
 import { putObject, storageBucket, storageClient } from './storage';
 
 const pool = new Pool({
@@ -389,6 +394,76 @@ describe('openrouter webhook ingest', () => {
     const stored = await call(f.token);
     expect(stored.status).toBe(201);
     expect((await stored.json()).stored).toBe(1);
+  });
+
+  it('does not read the body for a bad token or a plain-http production request', async () => {
+    const f = await fixture();
+    const attempt = async (auth: string, url: string) => {
+      const pull = vi.fn();
+      const response = await POST(
+        new Request(url, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${auth}` },
+          body: new ReadableStream({ pull }, { highWaterMark: 0 }),
+          duplex: 'half',
+        } as RequestInit),
+        { params: Promise.resolve({ driveId: f.driveId }) },
+      );
+      expect(pull).not.toHaveBeenCalled();
+      return response.status;
+    };
+    const https = `https://agent-drive.test/api/webhooks/openrouter/${f.driveId}`;
+    expect(await attempt('adw_wrong', https)).toBe(401);
+    vi.stubEnv('NODE_ENV', 'production');
+    try {
+      expect(await attempt(f.token, https.replace('https', 'http'))).toBe(403);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('writes nothing when the drive is marked for deletion after authentication', async () => {
+    const f = await fixture();
+    const headers = new Headers({ authorization: `Bearer ${f.token}` });
+    const url = new URL(`https://agent-drive.test/api/webhooks/openrouter/${f.driveId}`);
+    const auth = await authorizeOpenRouterWebhook({ url, headers, driveId: f.driveId });
+    await pool.query('UPDATE drives SET deleting_at = now() WHERE id = $1', [f.driveId]);
+    const response = await ingestOpenRouterTrace({
+      url,
+      headers,
+      auth,
+      driveId: f.driveId,
+      bytes: new TextEncoder().encode(JSON.stringify(withTime())),
+    }).catch(responseForError);
+    expect(response.status).toBe(404);
+    expect(await counts(f)).toMatchObject({ objects: 0, versions: 0, audit: 0 });
+  });
+
+  it('keeps the object when the commit succeeded but its acknowledgement was lost', async () => {
+    const f = await fixture();
+    const body = withTime();
+    const actual = await vi.importActual<typeof import('../db/client')>('../db/client');
+    vi.mocked(db.withTransaction).mockImplementationOnce(async (callback) => {
+      await actual.withTransaction(callback);
+      throw new Error('connection lost after commit');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const lost = await post(f, body);
+    expect(lost.status).toBe(500);
+    expect(await counts(f)).toMatchObject({ objects: 1, versions: 1 });
+    const retry = await post(f, body);
+    expect((await retry.json()).duplicate).toBe(true);
+    expect(await counts(f)).toMatchObject({ objects: 1, versions: 1 });
+  });
+
+  it('accepts an uppercase drive id in the URL', async () => {
+    const f = await fixture();
+    const response = await post(f, withTime(), {}, { driveId: f.driveId.toUpperCase() });
+    expect(response.status).toBe(201);
+    const row = await pool.query('SELECT wrapped_key FROM versions WHERE drive_id = $1', [
+      f.driveId,
+    ]);
+    expect(row.rows[0].wrapped_key).toHaveLength(183);
   });
 
   it('rejects plain http in production', async () => {
