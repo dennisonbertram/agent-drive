@@ -80,3 +80,11 @@ export async function consoleUserId(): Promise<string | null> {
   const session = await clerkAuth();
   return session.userId ?? null;
 }
+
+/** True when this session recently passed Clerk strict reverification (always true in test auth). */
+export async function consoleReverified(): Promise<boolean> {
+  if (testModeRequested()) return testAuthEnabled();
+  if (!clerkConfigured()) return false;
+  const session = await clerkAuth();
+  return session.has({ reverification: 'strict' });
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useReverification } from '@clerk/nextjs';
 import { auditLabel, errorLabel } from '@/src/console/audit-labels';
 import { keyDetail } from '@/src/console/audit-who';
 import { AccountHeader } from '../account-header';
@@ -40,6 +41,23 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) throw new Error(body.error?.message ?? 'The request failed. Please retry.');
   return body as T;
 }
+
+// Account delete is a Clerk strict-reverification route. Return Clerk's reverification body
+// unchanged so useReverification can show its verify prompt and call this again.
+async function apiReverifiable<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/console/${path}`, {
+    ...init,
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const body = await response.json();
+  if (response.status === 403 && body?.clerk_error) return body as T;
+  if (!response.ok) throw new Error(body.error?.message ?? 'The request failed. Please retry.');
+  return body as T;
+}
+
+// Test auth runs without a Clerk provider, where useReverification cannot be used.
+const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
 
 async function all<T>(path: string): Promise<T[]> {
   const result: T[] = [];
@@ -82,6 +100,9 @@ function actor(event: Audit) {
 }
 
 export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean }) {
+  // clerkEnabled is constant for the life of the deployment, so the hook order never changes.
+  const useWrap = (clerkEnabled ? useReverification : passThrough) as typeof passThrough;
+  const reverifiable = useWrap(apiReverifiable);
   const [drives, setDrives] = useState<Drive[]>([]);
   const [jobs, setJobs] = useState<Deletion[]>([]);
   const [jobsCursor, setJobsCursor] = useState<string | null>(null);
@@ -185,15 +206,17 @@ export default function SettingsClient({ clerkEnabled }: { clerkEnabled: boolean
     setAccountError('');
     setNotice('');
     try {
-      const { deletion } = await api<{ deletion: Deletion }>(
-        kind === 'drive' ? `drives/${selected!.id}` : 'account',
-        {
-          method: 'DELETE',
-          body: JSON.stringify({
-            confirmation: kind === 'drive' ? driveConfirmation : accountConfirmation,
-          }),
-        },
-      );
+      const init = {
+        method: 'DELETE',
+        body: JSON.stringify({
+          confirmation: kind === 'drive' ? driveConfirmation : accountConfirmation,
+        }),
+      };
+      const { deletion } = (
+        kind === 'drive'
+          ? await api<{ deletion: Deletion }>(`drives/${selected!.id}`, init)
+          : await reverifiable<{ deletion: Deletion }>('account', init)
+      ) as { deletion: Deletion };
       setJobs((current) => [deletion, ...current.filter((job) => job.id !== deletion.id)]);
       setDriveConfirmation('');
       setAccountConfirmation('');

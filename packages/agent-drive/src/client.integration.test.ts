@@ -494,10 +494,10 @@ describe('Phase 2 client and CLI against the real API and services', () => {
       AGENT_DRIVE_API_KEY: managementToken,
       AGENT_DRIVE_MACHINE: 'phase2-cli-machine',
     };
-    const help = await runCli(['--help'], {});
+    const help = await runCli(['--help'], {} as NodeJS.ProcessEnv);
     expect(help.status).toBe(0);
     expect(help.stdout).toContain('sync LOCAL_DIRECTORY');
-    expect((await runCli([], {})).stdout).toContain('Commands:');
+    expect((await runCli([], {} as NodeJS.ProcessEnv)).stdout).toContain('Commands:');
     const loginEnvironment = { ...baseEnvironment };
     delete loginEnvironment.AGENT_DRIVE_API_KEY;
     const login = await runCli(

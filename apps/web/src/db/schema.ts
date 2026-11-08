@@ -4,13 +4,17 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
+  pgSequence,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
@@ -90,6 +94,71 @@ export const drives = pgTable(
     uniqueIndex('drives_account_name_unique').on(table.accountId, table.name),
     uniqueIndex('drives_id_account_id_unique').on(table.id, table.accountId),
     check('drives_quota_bytes_positive', sql`${table.quotaBytes} > 0`),
+  ],
+);
+
+export const accountKeys = pgTable(
+  'account_keys',
+  {
+    id: uuid('id').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .unique()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    format: smallint('format').notNull(),
+    publicKey: text('public_key').notNull(),
+    wrappedPrivateKey: text('wrapped_private_key').notNull(),
+    wrapGeneration: integer('wrap_generation').notNull().default(1),
+    kdfName: text('kdf_name').notNull(),
+    kdfIterations: integer('kdf_iterations').notNull(),
+    kdfSalt: text('kdf_salt').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('account_keys_id_account_id_unique').on(table.id, table.accountId),
+    check('account_keys_format_check', sql`${table.format} = 1`),
+    check('account_keys_wrap_generation_check', sql`${table.wrapGeneration} >= 1`),
+    check('account_keys_kdf_name_check', sql`${table.kdfName} = 'PBKDF2-SHA256'`),
+    check(
+      'account_keys_kdf_iterations_check',
+      sql`${table.kdfIterations} BETWEEN 600000 AND 2000000`,
+    ),
+  ],
+);
+
+// Slot revisions come from one sequence, so a deleted-then-recreated slot never repeats an old
+// revision and a stale expectedRevision from another tab cannot match the new slot.
+export const accountKeySlotRevisions = pgSequence('account_key_slot_revision_seq');
+
+export const accountKeySlots = pgTable(
+  'account_key_slots',
+  {
+    driveId: uuid('drive_id').primaryKey(),
+    accountId: uuid('account_id').notNull(),
+    accountKeyId: uuid('account_key_id').notNull(),
+    format: smallint('format').notNull(),
+    sealed: jsonb('sealed').$type<{ epk: string; iv: string; ct: string }>().notNull(),
+    revision: bigint('revision', { mode: 'number' })
+      .notNull()
+      .default(sql`nextval('account_key_slot_revision_seq')`),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'account_key_slots_drive_account_fk',
+      columns: [table.driveId, table.accountId],
+      foreignColumns: [drives.id, drives.accountId],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'account_key_slots_key_account_fk',
+      columns: [table.accountKeyId, table.accountId],
+      foreignColumns: [accountKeys.id, accountKeys.accountId],
+    }).onDelete('cascade'),
+    index('account_key_slots_account_key_idx').on(table.accountKeyId),
+    check('account_key_slots_format_check', sql`${table.format} = 1`),
+    check('account_key_slots_revision_check', sql`${table.revision} >= 1`),
   ],
 );
 

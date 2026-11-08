@@ -16,8 +16,9 @@ const firsts = [
   'drives',
   'agents',
   'keys',
+  'account-key',
 ];
-const seconds = [ID, 'statements', 'settings', 'checkout', 'portal'];
+const seconds = [ID, 'statements', 'settings', 'checkout', 'portal', 'slots'];
 const thirds = [
   'approve',
   'deny',
@@ -38,6 +39,7 @@ const thirds = [
   'commit',
   'metadata',
   'head',
+  'account-key',
 ];
 const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
