@@ -385,7 +385,9 @@ describe('normalizeGeneratedPassphrase', () => {
     expect(normalizeGeneratedPassphrase('abcd-efgh jkmn-pqrs-tvwx')).toBe('ABCDEFGHJKMNPQRSTVWX');
     expect(normalizeGeneratedPassphrase('ABCD EFGH JKMN PQRS TVWX')).toBe('ABCDEFGHJKMNPQRSTVWX');
     expect(normalizeGeneratedPassphrase('my own long passphrase')).toBe('my own long passphrase');
-    expect(normalizeGeneratedPassphrase('abcd-efgh-ilou-pqrs-tvwx')).toBe('abcd-efgh-ilou-pqrs-tvwx');
+    expect(normalizeGeneratedPassphrase('abcd-efgh-ilou-pqrs-tvwx')).toBe(
+      'abcd-efgh-ilou-pqrs-tvwx',
+    );
     expect(normalizeGeneratedPassphrase('ABCDEFGHJKMNPQRSTVW')).toBe('ABCDEFGHJKMNPQRSTVW');
   });
 });
