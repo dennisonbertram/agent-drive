@@ -6,7 +6,7 @@ import { prefersMarkdown } from './src/content/negotiate';
 import { shareTransportAllowed } from './src/share/transport';
 
 // Public pages with a Markdown twin. These never touch Clerk or auth().
-const TWIN = /^\/(?:pricing|docs(?:\/[^/]+)?|compare(?:\/[^/]+)?)?$/;
+const TWIN = /^\/(?:pricing|privacy|terms|docs(?:\/[^/]+)?|compare(?:\/[^/]+)?)?$/;
 
 const configured =
   process.env.AGENT_DRIVE_TEST_AUTH !== '1' &&
@@ -51,6 +51,8 @@ export const config = {
   matcher: [
     '/',
     '/pricing',
+    '/privacy',
+    '/terms',
     '/docs',
     '/docs/:slug',
     '/compare',

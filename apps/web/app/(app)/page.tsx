@@ -411,6 +411,8 @@ export default async function Home() {
             <Link href="/pricing">Pricing</Link>
             <Link href="/docs">Docs</Link>
             <Link href="/compare">Compare</Link>
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
             <Link href="/sign-in">Sign in</Link>
             <Link href="/console">Console</Link>
           </nav>
