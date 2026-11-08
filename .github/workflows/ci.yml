@@ -74,7 +74,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm services:up
-      - run: pnpm --filter agent-drive build
+      - run: pnpm --filter @dennisonbertram/agent-drive build
       - run: pnpm test:integration
       - if: always()
         run: docker compose down -v

@@ -11,9 +11,9 @@ activity metadata, but not plaintext file contents or drive keys. Lost drive key
 3. Install the CLI (Node 24 or newer) from npm:
 
 ```sh
-npm install -g agent-drive
+npm install -g @dennisonbertram/agent-drive
 # No global installs allowed? Prefix every command with:
-#   npx -y agent-drive@latest
+#   npx -y @dennisonbertram/agent-drive@latest
 ```
 
 4. Log in. The CLI prints a link and a code.
@@ -29,11 +29,18 @@ agent-drive login --name "my agent"
 6. Back up the credentials. The drive key exists only on this machine, so if the machine or sandbox
    is deleted the files can never be opened again.
 
+Offer these choices in this order and let the person pick:
+
 ```sh
-agent-drive credentials export --to /a/path/that/survives
-# or, into a secret store:
-agent-drive credentials export --stdout | gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm
+agent-drive credentials export --to 1password     # 1Password (needs the `op` CLI, signed in)
+agent-drive credentials export --to clipboard     # macOS and Windows: copy, paste into Apple Passwords or another manager, then:
+agent-drive credentials confirm                   # records the clipboard backup
+agent-drive credentials export --to /a/path/outside/the/sandbox/that/survives   # a file, mode 600
 ```
+
+`--to clipboard` clears the clipboard after 60 seconds if it still holds the credentials (add
+`--keep-clipboard` to skip that). 1Password and the file record the backup at once; the clipboard
+records it when you run `confirm`. Then `agent-drive check` passes.
 
 7. Check that it worked. Setup is complete only when this prints `check ok`.
 
@@ -71,7 +78,7 @@ changing saved credentials.
 ## Sandboxes and more agents
 
 - In a sandbox that is deleted or recreated, set `AGENT_DRIVE_CREDENTIALS` as a secret on the
-  platform, using the output of `agent-drive credentials export --stdout`. Every new sandbox is then
+  platform, holding the credentials bundle (`agent-drive credentials export --stdout`, then `agent-drive credentials confirm`). Every new sandbox is then
   already connected.
 - To add another agent, run `agent-drive login` on its machine and approve it in the browser. You can
   make it read-only or limit its writes to one folder.

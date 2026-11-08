@@ -8,6 +8,9 @@ export default defineConfig({
     ],
     exclude: ['packages/agent-drive/src/mcp.integration.test.ts'],
     environment: 'node',
+    // Files share one database and each migrates it in beforeAll; parallel files race on a fresh
+    // database and see each other's billing rows.
+    fileParallelism: false,
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

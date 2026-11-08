@@ -8,8 +8,8 @@ describe('GET /llms.txt', () => {
     expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8');
     const body = await res.text();
     expect(body).toContain('Set up Agent Drive: https://example.test/llms.txt');
-    expect(body).toContain('npm install -g agent-drive');
-    expect(body).toContain('npx -y agent-drive@latest');
+    expect(body).toContain('npm install -g @dennisonbertram/agent-drive');
+    expect(body).toContain('npx -y @dennisonbertram/agent-drive@latest');
     expect(body).toContain('agent-drive login --name');
     expect(body).toContain('agent-drive check');
     expect(body).toContain('check ok');
@@ -20,14 +20,18 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('[mcp_servers.agent-drive]');
     expect(body).toContain('[mcp_servers.agent-drive.tools.put]');
     expect(body).toContain('Back up your credentials');
-    expect(body).toContain('agent-drive credentials export --to');
-    expect(body).toContain('agent-drive credentials export --stdout |');
-    expect(body).toContain('<your secret store> && agent-drive credentials confirm');
-    expect(body).toContain(
-      'gh secret set AGENT_DRIVE_CREDENTIALS && agent-drive credentials confirm',
+    const one = body.indexOf('agent-drive credentials export --to 1password');
+    const clip = body.indexOf('agent-drive credentials export --to clipboard');
+    const file = body.indexOf(
+      'agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>',
     );
-    expect(body).toContain('gh secret set AGENT_DRIVE_CREDENTIALS');
-    expect(body).toContain('vercel env add AGENT_DRIVE_CREDENTIALS production');
+    expect(one).toBeGreaterThan(-1);
+    expect(clip).toBeGreaterThan(one);
+    expect(file).toBeGreaterThan(clip);
+    expect(body).toContain('Apple Passwords');
+    expect(body).toContain('agent-drive credentials confirm');
+    expect(body).not.toContain('gh secret set');
+    expect(body).not.toContain('vercel env add');
     expect(body).toContain('agent-drive skill install');
     expect(body).toContain('agent-drive skill install --target <dir>');
     expect(body).toContain('~/.claude/skills or ~/.codex/skills');
@@ -45,7 +49,7 @@ describe('GET /llms.txt', () => {
   it('adds --api to login commands for a non-default origin only', async () => {
     const other = await (await GET(new Request('http://localhost:3100/llms.txt'))).text();
     expect(other).toContain('login --name "<your agent name>" --api http://localhost:3100/api');
-    expect(other).toContain('npx -y agent-drive@latest login --name');
+    expect(other).toContain('npx -y @dennisonbertram/agent-drive@latest login --name');
     expect(other).toContain('agent-drive login --api http://localhost:3100/api` on the new');
     for (const line of other.split('\n').filter((l) => /agent-drive login|\blogin --name/u.test(l)))
       expect(line, line).toContain('--api http://localhost:3100/api');

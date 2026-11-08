@@ -23,8 +23,8 @@ hold drive keys, which breaks client-side encryption.
   `cli-vX.Y.Z`). The package's `files` lists only `dist` and the README; it has no workspace
   dependencies. The site still serves `/cli/agent-drive.tgz` for older instructions.
 - Install options shown to agents:
-  - `npm install -g agent-drive`
-  - Sandboxes without global installs: `npx -y agent-drive@latest <command>`
+  - `npm install -g @dennisonbertram/agent-drive`
+  - Sandboxes without global installs: `npx -y @dennisonbertram/agent-drive@latest <command>`
 - The CLI's default API URL is `https://agentdrive.xyz/api`, overridable by `--api` or
   `AGENT_DRIVE_API_URL`.
 
@@ -350,7 +350,21 @@ human never handles the key.
 
 ### Credentials bundle
 
-- `agent-drive credentials export (--to <path> | --stdout)` writes a bundle.
+- `agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to <path> | --stdout)` writes a bundle.
+  Offer the targets to the user in this order: 1Password, the clipboard (for Apple Passwords or
+  another password manager), then a file outside the sandbox, on a path that survives it.
+  - `--to 1password` (alias `--to op`) runs `op whoami`, then `op item create [--vault NAME] -` with
+    an item JSON template on stdin (title `Agent Drive – <drive ids>`, bundle in a concealed field).
+    The bundle is never in argv and never on disk. If `op` is missing or signed out, nothing is
+    exported or recorded, and the command prints what to run and exits non-zero.
+  - `--to clipboard` works on macOS (`pbcopy`) and Windows (`clip`, PowerShell `Get-Clipboard` and
+    `Set-Clipboard`) only; on Linux and WSL it exits non-zero and suggests `--to 1password` or a
+    file. It does not record a backup: after the user pastes the bundle into a password manager,
+    run `agent-drive credentials confirm`. The CLI waits 60 seconds, then clears the clipboard only
+    if it still holds the bundle, and prints "Could not clear the clipboard; clear it yourself" if
+    that fails; `--keep-clipboard` skips clearing.
+  - A file named `1password`, `op` or `clipboard` needs a path such as `./clipboard`.
+  - `--to 1password` records `keyBackup` like a file export (method `stdout`), so `check` passes.
   - Contents: base64url of JSON `{"v":1,"apiUrl","apiKey","driveKeys":{id:key},"driveKeyOrigins":{id:origin}}`, prefixed `adcred1.`.
   - `--to` writes the file with mode 600 and refuses an existing path unless `--force`.
   - `--to` writes through a temp file in the same directory (O_EXCL, O_NOFOLLOW, mode 600) and
@@ -380,7 +394,7 @@ human never handles the key.
 ### Enforcement
 
 - `login` and `drive create`, when they create a new drive key, end with:
-  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Until then `agent-drive check` will not pass.
+  > Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), or `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>`. Until then `agent-drive check` will not pass.
 - `check` prints `check ok` only when every usable drive key is backed up. Otherwise it exits 1
   with "drive key not backed up" plus the commands above.
 - `whoami` includes `keyBackup`.

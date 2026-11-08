@@ -4,6 +4,13 @@ import { validateUrl, type AgentDriveClient } from './client.js';
 import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
 import {
+  copyToClipboard,
+  exportTo1Password,
+  parseTarget,
+  realTargetDeps,
+  type TargetDeps,
+} from './backup-targets.js';
+import {
   readConfig,
   resolveDriveKey,
   resolveDriveId,
@@ -24,7 +31,7 @@ export type Bundle = {
 };
 
 export const BACKUP_HINT =
-  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to <a path that survives>` or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Until then `agent-drive check` will not pass.";
+  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), or `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>`. Until then `agent-drive check` will not pass.";
 
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
@@ -246,9 +253,17 @@ export async function issueCredentials(
  * is not recorded: pipe it to a secret store, then run `agent-drive credentials confirm`.
  */
 export async function exportCredentials(
-  options: { to?: string; force?: boolean; stdout?: boolean },
+  options: {
+    to?: string;
+    force?: boolean;
+    stdout?: boolean;
+    vault?: string;
+    keepClipboard?: boolean;
+  },
   io: Io,
+  deps: TargetDeps = realTargetDeps,
 ) {
+  const target = parseTarget(options.to);
   if (Boolean(options.to) === Boolean(options.stdout))
     throw new Error('Pass exactly one of --to <path> or --stdout.');
   if (options.stdout && io.isTTY)
@@ -268,17 +283,45 @@ export async function exportCredentials(
     driveKeys,
     driveKeyOrigins: config.driveKeyOrigins ?? {},
   });
+  const done = <M extends 'file' | 'stdout'>(method: M) => ({
+    method,
+    target: undefined,
+    clearing: undefined,
+    driveIds: ids,
+    apiUrl,
+    apiKey,
+  });
+  if (target === '1password') {
+    await exportTo1Password(bundle, `Agent Drive – ${ids.join(', ')}`, options.vault, deps);
+    const at = new Date().toISOString();
+    await writeConfig({
+      keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method: 'stdout' }])),
+    });
+    return { ...done('stdout'), target };
+  }
+  if (target === 'clipboard') {
+    // The clear timer starts at once and stays alive if the config write fails.
+    const clearing = await copyToClipboard(bundle, Boolean(options.keepClipboard), deps);
+    try {
+      // Not a backup yet: `credentials confirm` records it after the user saved it.
+      await writeConfig({ pendingExport: pendingFor(apiKey, ids) });
+    } catch (error) {
+      await clearing;
+      throw error;
+    }
+    return { ...done('stdout'), target, clearing };
+  }
   if (options.to) {
     await writeBundleFile(options.to, bundle, options.force);
     const at = new Date().toISOString();
     await writeConfig({
       keyBackup: Object.fromEntries(ids.map((id) => [id, { at, method: 'file' }])),
     });
-    return { method: 'file' as const, driveIds: ids, apiUrl, apiKey };
+    return done('file');
   }
   await io.write(`${bundle}\n`);
   await writeConfig({ pendingExport: pendingFor(apiKey, ids) });
-  return { method: 'stdout' as const, driveIds: ids, apiUrl, apiKey };
+  return done('stdout');
 }
 
 /**

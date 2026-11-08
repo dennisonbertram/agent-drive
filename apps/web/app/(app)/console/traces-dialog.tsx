@@ -131,7 +131,7 @@ export function TracesDialog({
 
   const headers = created ? JSON.stringify({ Authorization: `Bearer ${created.token}` }) : '';
   const capture = `agent-drive capture --drive ${driveId} -- claude`;
-  const install = `npm install -g agent-drive`;
+  const install = `npm install -g @dennisonbertram/agent-drive`;
   return (
     <div className="traces-dialog">
       <h3 className="share-heading">Local agents</h3>

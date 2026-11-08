@@ -16,7 +16,7 @@ After applying the database migration and provisioning a local management key as
 build the workspace CLI:
 
 ```sh
-pnpm --filter agent-drive build
+pnpm --filter @dennisonbertram/agent-drive build
 ```
 
 Set the local API endpoint and paste the one-time management credential at the hidden prompt:

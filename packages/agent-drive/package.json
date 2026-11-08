@@ -1,5 +1,5 @@
 {
-  "name": "agent-drive",
+  "name": "@dennisonbertram/agent-drive",
   "version": "0.1.0",
   "description": "Command-line client and MCP server for Agent Drive, an encrypted file drive for AI agents.",
   "homepage": "https://agentdrive.xyz",
@@ -33,7 +33,7 @@
     }
   },
   "bin": {
-    "agent-drive": "./dist/cli.js"
+    "agent-drive": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc --project tsconfig.build.json && node -e \"const f=require('fs');f.chmodSync('dist/cli.js',0o755);f.copyFileSync('../../skills/agent-drive/SKILL.md','dist/SKILL.md')\"",
@@ -52,10 +52,12 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public",
     "provenance": true
-  }
+  },
+  "license": "MIT"
 }

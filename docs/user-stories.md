@@ -72,7 +72,7 @@ These are deliberate and shape the stories below:
   *Accept:* GitHub or email sign-up, free tier, API key shown once.
 - **S1.2** As a developer, I want to add Agent Drive to Claude Code, Codex, or
   any MCP client with one command, so that my agent has storage immediately.
-  *Accept:* `npx agent-drive mcp` works as a stdio MCP server; a
+  *Accept:* `npx @dennisonbertram/agent-drive mcp` works as a stdio MCP server; a
   `claude mcp add` example is in the README.
 - **S1.3** As a developer, I want to create agents and drives through the CLI
   or API, so that I can provision storage for each agent I deploy.
