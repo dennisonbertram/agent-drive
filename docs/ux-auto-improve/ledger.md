@@ -5,13 +5,13 @@ Five rounds run with `/ux-auto-improve`, 6–7 Nov 2026. Goal: the console reads
 `docs/ux-paths`, `docs/ux-flow`, `docs/ux-walker` and `docs/ux-visual` (decisions C01–C15).
 Narrated before/after videos were kept outside this public repo.
 
-| Round | Section (decisions) | PRs |
-|-------|---------------------|-----|
-| 1 | Console list states and first-run key backup (C02, C06) | #74 |
-| 2 | Unlock on demand and the folder browser (C05, C04) | #75, #76, #78 |
-| 3 | Row actions, preview, Trash and sharing (C03, C08) | #79, #81, #82, #83, #86 |
-| 4 | /connect approval and the sign-up front door (C07, C01) | #72, #73, #94 |
-| 5 | Verification sweep: share page, plain billing units, audit log, large drives (C11, C12, C15) | #87, #88, #89, #90, #91 |
+| Round | Section (decisions)                                                                          | PRs                     |
+| ----- | -------------------------------------------------------------------------------------------- | ----------------------- |
+| 1     | Console list states and first-run key backup (C02, C06)                                      | #74                     |
+| 2     | Unlock on demand and the folder browser (C05, C04)                                           | #75, #76, #78           |
+| 3     | Row actions, preview, Trash and sharing (C03, C08)                                           | #79, #81, #82, #83, #86 |
+| 4     | /connect approval and the sign-up front door (C07, C01)                                      | #72, #73, #94           |
+| 5     | Verification sweep: share page, plain billing units, audit log, large drives (C11, C12, C15) | #87, #88, #89, #90, #91 |
 
 Related follow-ups in the same pass: homepage story (#84), agent-ready public site (#85),
 plan-limit messages (#93), activity names (#92), and the passphrase vault that lets the
