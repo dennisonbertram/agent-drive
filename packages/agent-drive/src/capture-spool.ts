@@ -273,6 +273,7 @@ export class Drainer {
       if (this.runPromise !== owner) return;
       this.runPromise = undefined;
       if (this.lifecycle === 'draining') this.lifecycle = 'idle';
+      if (this.pending && !this.blockedBy && this.canContinue()) this.startRun();
     });
     this.runPromise = owner;
   }
@@ -281,7 +282,7 @@ export class Drainer {
     while (this.runPromise) await this.runPromise;
   }
 
-  private async loop() {
+  protected async loop() {
     try {
       while (this.pending && this.canContinue()) {
         const release = await takeLock(this.spool.dir).catch(() => undefined);

@@ -199,6 +199,36 @@ describe('spool', () => {
     expect((await names(spool.dir)).filter((name) => name.endsWith('.json'))).toEqual([]);
   });
 
+  it('restarts when a kick arrives before the run finalizer', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/first'));
+    const uploaded: string[] = [];
+    class KickBeforeFinalizeDrainer extends Drainer {
+      private injected = false;
+
+      protected override loop() {
+        const run = super.loop();
+        if (this.injected) return run;
+        this.injected = true;
+        return run.then(async () => {
+          await spool.add('2', bytes, meta('/second'));
+          this.kick();
+        });
+      }
+    }
+    const d = new KickBeforeFinalizeDrainer(
+      spool,
+      { putEncrypted: async (_drive, path) => void uploaded.push(path) },
+      'd',
+      { log: () => undefined, minBackoffMs: 2, maxBackoffMs: 4 },
+    );
+
+    d.kick();
+    await d.finish(Date.now() + 1000);
+
+    expect(uploaded).toEqual(['/first', '/second']);
+  });
+
   it('counts invalid/ against the cap and never deletes queued entries', async () => {
     const dir = await tempDir();
     const spool = await Spool.open(dir, { capBytes: 5 });
