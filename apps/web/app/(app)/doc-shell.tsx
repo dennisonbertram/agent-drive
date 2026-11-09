@@ -41,6 +41,7 @@ export function DocShell({
             <Link href="/pricing">Pricing</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>
+            <a href="mailto:support@agentdrive.xyz">Contact</a>
           </nav>
         </footer>
       </div>

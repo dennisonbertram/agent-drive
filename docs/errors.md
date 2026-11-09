@@ -59,9 +59,9 @@ Billing and quota limits are enforced in the API. Each plan includes these month
 
 | Plan      | Drives | Stored ciphertext | Downloads | API operations |
 | --------- | ------ | ----------------- | --------- | -------------- |
-| Free      | 3      | 5 GiB             | 5 GiB     | 1,000,000      |
-| Developer | 25     | 100 GiB           | 100 GiB   | 10,000,000     |
-| Team      | 250    | 1,024 GiB         | 1,024 GiB | 100,000,000    |
+| Free      | 3      | 5 GB              | 5 GB      | 1,000,000      |
+| Developer | 25     | 100 GB            | 100 GB    | 10,000,000     |
+| Team      | 250    | 1 TB              | 1 TB      | 100,000,000    |
 
 On the Free plan, a request that would pass an allowance returns 402 `payment_required` with an `upgradeUrl`. A Developer or Team account with an active or trialing subscription can go past an allowance when overage rates are configured; otherwise it gets the same 402.
 
