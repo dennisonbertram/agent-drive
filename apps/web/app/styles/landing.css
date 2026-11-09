@@ -688,6 +688,10 @@
   }
 }
 @media (max-width: 760px) {
+  .l-copy {
+    min-width: 44px;
+    min-height: 44px;
+  }
   .l-wrap {
     padding: 0 20px;
   }

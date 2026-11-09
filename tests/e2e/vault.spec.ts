@@ -284,6 +284,71 @@ test('a wrong passphrase is refused and nothing opens', async ({ page, context, 
   });
 });
 
+test('ux round 07: failed status loading retries without losing the pending preview', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    let releaseInitial!: () => void;
+    const initialGate = new Promise<void>((resolve) => (releaseInitial = resolve));
+    let reachedInitial!: () => void;
+    const initialRequest = new Promise<void>((resolve) => (reachedInitial = resolve));
+    let firstLoad = true;
+    let setupPosts = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/api/console/account-key'))
+        setupPosts += 1;
+    });
+    await page.route('**/api/console/account-key', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      if (!firstLoad) return route.continue();
+      firstLoad = false;
+      reachedInitial();
+      await initialGate;
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'synthetic status failure' } }),
+      });
+    });
+    await page.reload();
+    await initialRequest;
+    const menu = await openMenu(page);
+    await expect(menu.getByRole('button', { name: 'Set up passphrase unlock' })).toHaveCount(0);
+    await expect(menu).toContainText(/Checking/i);
+    releaseInitial();
+    await expect(menu).toContainText(
+      'Couldn’t check passphrase status. Retry or use a recovery file.',
+    );
+    await expect(menu.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+
+    await nameButton(page, 'note.txt').click();
+    const recoveryDialog = page.getByRole('dialog');
+    await expect(recoveryDialog).toBeVisible();
+    await expect(recoveryDialog.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        response.url().endsWith('/api/console/account-key'),
+    );
+    await recoveryDialog.getByRole('button', { name: 'Retry', exact: true }).click();
+    expect((await retryResponse).ok()).toBe(true);
+    await expect(
+      recoveryDialog.getByRole('button', { name: 'Use my passphrase instead' }),
+    ).toBeVisible();
+    await recoveryDialog.getByRole('button', { name: 'Use my passphrase instead' }).click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    const preview = page.getByRole('dialog', { name: 'note.txt' });
+    await expect(preview).toContainText(`NOTE ${seeded.sentinel}`);
+    await expect(preview).toHaveCount(1);
+    expect(setupPosts).toBe(0);
+  });
+});
+
 test('a drive without a slot: load its recovery file once, then the passphrase opens it', async ({
   page,
   context,
@@ -298,8 +363,12 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     await expect(
-      page.getByText('This drive isn’t in your account yet. Load its recovery file once'),
+      page.getByText(
+        'Load this drive’s recovery file to open it. We’ll try to save its key for passphrase unlock.',
+        { exact: true },
+      ),
     ).toBeVisible();
     await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
     await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
@@ -316,6 +385,108 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
       `OTHER ${seeded.sentinel}`,
     );
+  });
+});
+
+test('ux round 08: failed slot save still opens preview and reports uncertainty after close', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    await page.reload();
+    await page.goto(`/console?drive=${seeded.b.id}`);
+    await page.route(`**/api/console/drives/${seeded.b.id}/account-key`, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { message: 'synthetic slot-save failure' } }),
+      });
+    });
+    await nameButton(page, 'other.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
+    const slotResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes(`/drives/${seeded.b.id}/account-key`),
+    );
+    await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
+    expect((await slotResponse).status()).toBe(503);
+    const preview = page.getByRole('dialog', { name: 'other.txt' });
+    await expect(preview).toContainText(`OTHER ${seeded.sentinel}`);
+    await expect(
+      page.getByText('Added to your account. Next time your passphrase opens it.', { exact: true }),
+    ).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    const notice = page.getByText(
+      'We couldn’t confirm this key was saved for passphrase unlock. Keep your recovery file.',
+      { exact: true },
+    );
+    await expect(notice).toBeVisible();
+
+    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await nameButton(page, 'other.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
+  });
+});
+
+test('ux round 08: late slot-save completion after a drive switch stays silent', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    await page.reload();
+    await page.goto(`/console?drive=${seeded.b.id}`);
+    await nameButton(page, 'other.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => (releaseSave = resolve));
+    let reachedSave!: () => void;
+    const saveReached = new Promise<void>((resolve) => (reachedSave = resolve));
+    await page.route(`**/api/console/drives/${seeded.b.id}/account-key`, async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      reachedSave();
+      await saveGate;
+      await route.continue();
+    });
+    const slotResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().includes(`/drives/${seeded.b.id}/account-key`),
+    );
+    await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
+    await saveReached;
+    await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
+      `OTHER ${seeded.sentinel}`,
+    );
+    await page.keyboard.press('Escape');
+    const trigger = page.getByTestId('drive-menu-button');
+    await trigger.click();
+    const menuId = await trigger.getAttribute('aria-controls');
+    await page.locator(`[id="${menuId}"]`).getByRole('button', { name: 'Vault drive A' }).click();
+    releaseSave();
+    expect((await slotResponse).ok()).toBe(true);
+    await expect(
+      page.getByText(
+        'We couldn’t confirm this key was saved for passphrase unlock. Keep your recovery file.',
+        { exact: true },
+      ),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('Added to your account. Next time your passphrase opens it.', { exact: true }),
+    ).toHaveCount(0);
   });
 });
 
@@ -609,7 +780,7 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
     await dialogPassphrase(page).fill(raw);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     const mismatch =
-      'The saved key for this drive doesn’t open this file. Load its recovery file to replace it.';
+      'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
     await expect(page.getByText(mismatch)).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();

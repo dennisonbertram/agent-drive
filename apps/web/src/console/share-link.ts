@@ -41,6 +41,8 @@ export type ShareRow = {
 
 export type ShareLink = { id: string; url: string; expiresAt: string; createdAt: string };
 
+type SharePage = { items: ShareRow[]; nextCursor?: string | null };
+
 export const shareUrl = (origin: string, id: string, fileKey: string) =>
   `${origin}/s/${id}#k=${fileKey}`;
 
@@ -51,8 +53,8 @@ export function addShareRow(items: ShareRow[], row: ShareRow): ShareRow[] {
 
 /**
  * After a failure that may have come after the server created the link (a lost response, a 5xx),
- * look for it in the drive's newest links: same path and version, not listed before the attempt,
- * created since it began. Returns its URL, rebuilt from the file key already held, or null.
+ * scan up to ten pages for one eligible link. Ambiguous or incomplete scans stay unresolved;
+ * a unique candidate is not proof that this attempt created it. The key stays local.
  */
 export async function recoverShareLink(
   request: Request,
@@ -66,27 +68,41 @@ export async function recoverShareLink(
     since: number;
   },
 ): Promise<ShareLink | null> {
-  const page = await request<{ items: ShareRow[] }>(
-    `drives/${encodeURIComponent(args.driveId)}/shares?limit=100`,
-  );
-  const found = page.items
-    .filter(
-      (row) =>
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  let found: ShareRow | undefined;
+  for (let index = 0; index < 10; index += 1) {
+    const page: SharePage = await request<SharePage>(
+      `drives/${encodeURIComponent(args.driveId)}/shares?limit=100${
+        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+      }`,
+    );
+    for (const row of page.items) {
+      if (
         row.path === args.path &&
         row.versionId === args.versionId &&
         row.status === 'active' &&
         !args.knownIds.has(row.id) &&
-        Date.parse(row.createdAt) >= args.since,
-    )
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  return found
-    ? {
-        id: found.id,
-        url: shareUrl(args.origin, found.id, args.fileKey),
-        expiresAt: found.expiresAt,
-        createdAt: found.createdAt,
+        Date.parse(row.createdAt) >= args.since
+      ) {
+        if (found && found.id !== row.id) return null;
+        found = row;
       }
-    : null;
+    }
+    if (!page.nextCursor)
+      return found
+        ? {
+            id: found.id,
+            url: shareUrl(args.origin, found.id, args.fileKey),
+            expiresAt: found.expiresAt,
+            createdAt: found.createdAt,
+          }
+        : null;
+    if (cursors.has(page.nextCursor)) return null;
+    cursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  return null;
 }
 
 export async function createShareLink(

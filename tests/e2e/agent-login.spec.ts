@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -217,7 +217,7 @@ test.describe('agent device login', () => {
       await expect(page.locator('.connect-summary')).toContainText('can add other agents');
     }
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
   }
 
   // Records every browser request (URL, headers, body) so tests can prove secrets never left it.
@@ -446,7 +446,7 @@ test.describe('agent device login', () => {
     await expect(page.getByText('It reconnects to the drive it used before')).toBeVisible();
     await expect(page.getByText('This agent gets its own encrypted drive')).toHaveCount(0);
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     const secondResult = await second.login.done;
     expect(secondResult.status, secondResult.stderr).toBe(0);
     expect(secondResult.stdout + secondResult.stderr).not.toMatch(/adk_/);
@@ -588,7 +588,7 @@ test.describe('agent device login', () => {
     );
     await page.getByRole('button', { name: 'Approve agent' }).click();
     const sent = (await approveRequest).postData() ?? '';
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     expect(sent).toContain('sealedDriveKeys');
     expect(sent).not.toContain(driveKey);
     expect(sent).not.toContain(configA.apiKey);
@@ -662,7 +662,7 @@ test.describe('agent device login', () => {
     );
     await page.getByRole('button', { name: 'Approve agent' }).click();
     const sent = (await approveRequest).postData() ?? '';
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     expect(sent).toContain('sealedDriveKeys');
     expect(sent).not.toContain(driveKey);
     expect(sent).not.toContain(configA.apiKey);
@@ -740,7 +740,7 @@ test.describe('agent device login', () => {
     expect(await fileCount()).toBe(1);
     await page.getByPlaceholder('/inbox/x').fill('/inbox/b');
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     expect((await third.login.done).status).toBe(0);
   });
 
@@ -833,7 +833,7 @@ test.describe('agent device login', () => {
       });
     }
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     const resultB = await b.login.done;
     expect(resultB.status, resultB.stderr).toBe(0);
 
@@ -899,8 +899,12 @@ test.describe('agent device login', () => {
     await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
     await expect(page.locator('.connect-facts')).toContainText('No writes');
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
-    await expect(page.getByText(/can now read the drive/)).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    const receipt = page.getByRole('status').locator('p');
+    await expect(receipt).toContainText('You approved grantee2-bot to read the drive');
+    await expect(receipt).toContainText(
+      'Return to your agent to finish setup and confirm it is ready.',
+    );
     const resultB = await b.login.done;
     expect(resultB.status, resultB.stderr).toBe(0);
     const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
@@ -1049,12 +1053,12 @@ test.describe('agent device login', () => {
     const env = cliEnv(baseURL!, root, 'done-state', 'm-done');
     const { login, path, code } = await startLogin(env, 'done-bot');
     await approve(page, path, 'done-bot', code);
-    await expect(page.getByRole('heading', { name: 'done-bot is connected' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Access approved for done-bot' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open console' })).toHaveAttribute(
       'href',
       '/console',
     );
-    await expect(page.getByText('Approved')).toHaveCount(0);
+    await expect(page.getByText('Approved', { exact: true })).toHaveCount(0);
     expect((await login.done).status).toBe(0);
   });
 
@@ -1083,7 +1087,7 @@ test.describe('agent device login', () => {
     await expect(page.locator('.connect-facts')).toContainText('Offered by');
     await expect(page.locator('.connect-facts')).toContainText('focus-a-bot');
     await page.getByRole('button', { name: 'Approve agent' }).click();
-    await expect(page.getByText('Return to your agent; it will finish setup')).toBeVisible();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
     expect((await b.login.done).status).toBe(0);
     const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
       scopes: string[];
@@ -1115,5 +1119,65 @@ test.describe('agent device login', () => {
   test('signed out visitors are sent to sign-in', async ({ page }) => {
     await page.goto('/connect?code=BCDF-GHJK');
     await expect(page).toHaveURL(/\/sign-in/);
+  });
+
+  test('ux round 02: approval receipt confirms approval without claiming setup is finished', async ({
+    page,
+    context,
+  }) => {
+    await newUser(context);
+    const ecdh = createECDH('prime256v1');
+    ecdh.generateKeys();
+    const clientName = 'receipt-check agent';
+    const started = await context.request.post('/api/oauth/device_authorization', {
+      data: {
+        client_name: clientName,
+        machine: 'receipt-check machine',
+        public_key: ecdh.getPublicKey('base64url'),
+      },
+    });
+    expect(started.status()).toBe(200);
+    const request = (await started.json()) as { user_code: string };
+    let tokenRequests = 0;
+    page.on('request', (browserRequest) => {
+      if (browserRequest.url().includes('/api/oauth/token')) tokenRequests += 1;
+    });
+    await page.goto(`/connect?code=${request.user_code}`);
+    await expect(page.getByRole('heading', { name: `Connect ${clientName}?` })).toBeVisible();
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+
+    const receipt = page.getByRole('status');
+    await expect(receipt.locator('.connect-tag')).toContainText('Approval saved');
+    await expect(
+      receipt.getByRole('heading', { name: `Access approved for ${clientName}` }),
+    ).toBeVisible();
+    await expect(receipt.locator('p').first()).toHaveText(
+      `You approved ${clientName} to read, write, delete and share its new drive. Return to your agent to finish setup and confirm it is ready.`,
+    );
+    await expect(receipt.getByRole('link', { name: 'Open console' })).toHaveAttribute(
+      'href',
+      '/console',
+    );
+    expect(tokenRequests).toBe(0);
+    const authorization = await database.query<{
+      status: string;
+      consumed_at: Date | null;
+      api_key_id: string | null;
+      account_id: string;
+    }>(
+      `SELECT status, consumed_at, api_key_id, account_id
+         FROM device_authorizations WHERE user_code=$1`,
+      [request.user_code],
+    );
+    expect(authorization.rows[0]).toMatchObject({
+      status: 'approved',
+      consumed_at: null,
+      api_key_id: null,
+    });
+    const keys = await database.query<{ count: string }>(
+      'SELECT count(*)::text AS count FROM api_keys WHERE account_id=$1',
+      [authorization.rows[0]!.account_id],
+    );
+    expect(keys.rows[0]!.count).toBe('0');
   });
 });
