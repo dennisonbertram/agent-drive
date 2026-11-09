@@ -37,7 +37,10 @@ export function docBody(slug: string, link: (slug: string) => string): string | 
   return raw
     .replace(/^# .*\n+/, '')
     .replace(/\[([^\]]+)\]\((?!https?:|#|\/)([^)\s]+)\)/g, (_m, text: string, href: string) => {
-      const target = docMeta((href.split('#')[0] ?? '').replace(/^.*\//, '').replace(/\.md$/, ''));
-      return target && href.endsWith('.md') ? `[${text}](${link(target.slug)})` : text;
+      const [file = '', anchor] = href.split('#');
+      const target = docMeta(file.replace(/^.*\//, '').replace(/\.md$/, ''));
+      return target && file.endsWith('.md')
+        ? `[${text}](${link(target.slug)}${anchor ? `#${anchor}` : ''})`
+        : text;
     });
 }

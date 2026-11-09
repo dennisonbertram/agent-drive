@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import allowlist from './docs.allowlist.json';
 import sources from './docs.generated.json';
-import { SECTIONS, docNeighbors, sectionedDocs } from './docs';
+import { SECTIONS, docBody, docNeighbors, sectionedDocs } from './docs';
 
 const docsDir = path.join(__dirname, '..', '..', '..', '..', 'docs');
 
@@ -31,6 +31,12 @@ describe('embedded public docs', () => {
       expect(existsSync(path.join(docsDir, d.file)), d.file).toBe(true);
       expect(['Get started', 'Guides', 'Reference', 'Security']).toContain(d.section);
     }
+  });
+
+  it('keeps links to another doc with an anchor', () => {
+    expect(docBody('sandboxes', (s) => `/docs/${s}`)).toContain(
+      '[Codex approval](/docs/mcp-tools#codex-approval)',
+    );
   });
 
   it('reads no files at request time', () => {

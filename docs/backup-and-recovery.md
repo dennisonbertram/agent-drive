@@ -94,33 +94,33 @@ The method is `file` for a file export or a `--from` import, `stdout` for 1Passw
 
 1. Install the CLI. It needs Node 24 or newer.
 
-   ```sh
-   npm install -g @dennisonbertram/agent-drive
-   ```
+```sh
+npm install -g @dennisonbertram/agent-drive
+```
 
-   To run without installing, prefix every command with `npx -y @dennisonbertram/agent-drive@latest`.
+To run without installing, prefix every command with `npx -y @dennisonbertram/agent-drive@latest`.
 
 2. Import the bundle. From a file:
 
-   ```sh
-   agent-drive credentials import --from /path/to/agent-drive-credentials.txt
-   ```
+```sh
+agent-drive credentials import --from /path/to/agent-drive-credentials.txt
+```
 
-   Or from standard input, for example after copying the bundle out of a password manager (macOS):
+Or from standard input, for example after copying the bundle out of a password manager (macOS):
 
-   ```sh
-   pbpaste | agent-drive credentials import
-   ```
+```sh
+pbpaste | agent-drive credentials import
+```
 
-   The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. A text that is not a valid bundle fails with `Not a valid Agent Drive credentials bundle.`
+The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. A text that is not a valid bundle fails with `Not a valid Agent Drive credentials bundle.`
 
 3. Check that the drive key opens the files.
 
-   ```sh
-   agent-drive check
-   ```
+```sh
+agent-drive check
+```
 
-   `check` must print `check ok`. If the key cannot decrypt existing files, it fails with `This drive key cannot decrypt existing files.`
+`check` must print `check ok`. If the key cannot decrypt existing files, it fails with `This drive key cannot decrypt existing files.`
 
 For a sandbox that is deleted and recreated, you can skip the import. Set `AGENT_DRIVE_CREDENTIALS` as a secret on the platform, holding the bundle. The CLI merges it in memory at startup, never writes it to disk, and counts its drives as backed up. The saved config and explicit `AGENT_DRIVE_API_URL`, `AGENT_DRIVE_API_KEY` and `AGENT_DRIVE_KEY_<DRIVE_ID>` variables win over the bundle. See [Using Agent Drive in sandboxes](sandboxes.md).
 

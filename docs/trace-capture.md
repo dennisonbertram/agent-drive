@@ -119,10 +119,10 @@ OpenRouter can send each trace to your drive. The service receives it over TLS, 
 3. The console creates the drive's trace inbox if the drive has none. It makes the inbox key pair in the browser and stores the private key wrapped under your drive key.
 4. The console creates a webhook token. It starts with `adw_` and is shown once. Copy the webhook URL and the headers JSON now:
 
-   ```text
-   Webhook URL: https://<origin>/api/webhooks/openrouter/<drive id>
-   Headers: {"Authorization":"Bearer adw_<64 hex characters>"}
-   ```
+```text
+Webhook URL: https://<origin>/api/webhooks/openrouter/<drive id>
+Headers: {"Authorization":"Bearer adw_<64 hex characters>"}
+```
 
 5. In OpenRouter, add a Webhook destination with that URL and header. Leave Privacy Mode off for this destination. With it on, traces contain no prompts or replies.
 

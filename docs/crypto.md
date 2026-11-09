@@ -10,7 +10,7 @@ There are three layers:
 
 1. **File body.** Each file version is encrypted with a fresh random 32-byte file key in the `ADRV v1` format.
 2. **Wrapped file key.** The file key is encrypted ("wrapped") with the 32-byte drive key. The service stores the wrapped key beside the version.
-3. **Sealed keys.** To hand a key to someone else, a client encrypts it to that party's public key. This is used for connecting an agent, for the console passphrase unlock, for share links and for the trace inbox.
+3. **Sealed keys.** To hand a key to someone else, a client encrypts it to that party's public key. This is used for connecting an agent, for the console passphrase unlock and for the trace inbox. A share link does not use a public key; it carries the file key in the URL fragment.
 
 Everything uses AES-256-GCM, ECDH on P-256, HKDF-SHA-256 and PBKDF2-SHA-256 through WebCrypto. All base64url values are unpadded and canonical: a decoder must re-encode the bytes and compare them to the input.
 
@@ -80,7 +80,7 @@ A share link carries one file key. It does not carry the drive key, so a link op
 
 - The CLI or console unwraps that version's wrapped file key with the drive key, then writes the 43-character file key into the URL fragment: `https://<origin>/s/<share id>#k=<file key>`.
 - Browsers do not send the fragment to servers. The share page downloads the ciphertext through a presigned URL and decrypts it in the browser.
-- A link's key cannot open a different file in the same drive, because each version has its own file key.
+- A link's key cannot open a different file in the same drive, because each version has its own file key. Copy and restore keep the same ciphertext and wrapped key, so the key also opens copies of that version.
 
 The whole URL is a bearer secret. Anyone who has it can read that version until the link expires or is revoked. See [Share links](sharing.md).
 

@@ -184,7 +184,8 @@
 }
 .doc-footer nav {
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 8px 20px;
 }
 .doc-footer a {
   color: var(--ink);
@@ -252,6 +253,9 @@
 }
 .doc-page-side > .doc-footer {
   grid-column: 1 / -1;
+}
+.doc-side {
+  align-self: stretch;
 }
 .doc-side-desktop {
   position: sticky;
