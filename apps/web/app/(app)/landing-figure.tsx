@@ -1,6 +1,4 @@
-import type { ReactNode } from 'react';
-
-// Static server-rendered SVG of the hub figure: one Agent Drive and four verified agent tools plus a generic tile.
+// Static server-rendered isometric SVG: one Agent Drive (a stack of folders) wired to four verified agent tools plus a generic tile.
 const FOLDERS = ['/memory', '/outputs', '/work', '/handoff'];
 
 // 24x24 icon paths (Simple Icons, CC0). Products without an icon show a lettered black square;
@@ -19,133 +17,133 @@ const TOOLS: Tool[] = [
   { name: 'Any agent with a shell or MCP', letter: '+' },
 ];
 
-const Tile = ({ t, x, y, w }: { t: Tool; x: number; y: number; w: number }) => (
+// Isometric projection: x runs right-down, y runs left-down, z runs up.
+const C = 0.866;
+const S = 0.5;
+const OX = 232;
+const OY = 150;
+const P = (x: number, y: number, z: number) => [OX + (x - y) * C, OY + (x + y) * S - z] as const;
+const pts = (a: (readonly [number, number])[]) => a.map((q) => q.join(',')).join(' ');
+// Maps flat drawing coordinates onto a horizontal face, or onto the face that spans x.
+const topM = (x: number, y: number, z: number) =>
+  `matrix(${C} ${S} ${-C} ${S} ${P(x, y, z).join(' ')})`;
+const frontM = (x: number, y: number, z: number) => `matrix(${C} ${S} 0 1 ${P(x, y, z).join(' ')})`;
+
+type BoxSpec = { x: number; y: number; z: number; w: number; d: number; h: number };
+const Box = ({ x, y, z, w, d, h }: BoxSpec) => (
   <>
-    <rect className="ka" x={x} y={y} width={w} height={34} rx={4} />
-    {t.icon ? (
-      <g transform={`translate(${x + 10},${y + 8}) scale(.75)`}>
-        <path className="ki" d={t.icon} />
-      </g>
-    ) : (
-      <>
-        <rect className="km" x={x + 9} y={y + 8} width={18} height={18} rx={4} />
-        <text className="kmt" x={x + 18} y={y + 20.5} textAnchor="middle">
-          {t.letter}
-        </text>
-      </>
-    )}
-    {t.name.length > 16 ? (
-      <text className="kn" x={x + 36} y={y + 14} style={{ fontSize: 11 }}>
-        <tspan x={x + 36}>Any agent with </tspan>
-        <tspan x={x + 36} dy={13}>
-          a shell or MCP
-        </tspan>
-      </text>
-    ) : (
-      <text className="kn" x={x + 36} y={y + 21.5}>
-        {t.name}
-      </text>
-    )}
-  </>
-);
-const Drive = ({ x, y, w }: { x: number; y: number; w: number }) => (
-  <>
-    <rect
-      className="ka"
-      x={x}
-      y={y}
-      width={w}
-      height={48 + FOLDERS.length * 32}
-      rx={5}
-      strokeWidth={1.5}
+    <polygon
+      className="ks2"
+      points={pts([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)])}
     />
-    <text className="kn" x={x + 14} y={y + 26} style={{ fontSize: 15 }}>
-      Agent Drive
-    </text>
-    <circle className="kled" cx={x + w - 18} cy={y + 21} r={5} />
-    {FOLDERS.map((f, i) => (
-      <g key={f}>
-        <rect className="ka" x={x + 14} y={y + 42 + i * 32} width={w - 28} height={26} rx={2} />
-        <text className="kf" x={x + 24} y={y + 60 + i * 32}>
-          {f}
-        </text>
-      </g>
-    ))}
+    <polygon
+      className="ks1"
+      points={pts([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)])}
+    />
+    <polygon
+      className="ka"
+      points={pts([P(x, y, z + h), P(x + w, y, z + h), P(x + w, y + d, z + h), P(x, y + d, z + h)])}
+    />
   </>
-);
-const Link = ({ p }: { p: number[][] }) => (
-  <polyline className="kl" points={p.map((q) => q.join(',')).join(' ')} />
-);
-const Svg = ({
-  cls,
-  box,
-  label,
-  children,
-}: {
-  cls: string;
-  box: string;
-  label: string;
-  children: ReactNode;
-}) => (
-  <svg className={cls} viewBox={box} role="img" aria-label={label}>
-    {children}
-  </svg>
 );
 
+const Tile = ({ t, x, y, w, d, h = 22 }: { t: Tool; h?: number } & Omit<BoxSpec, 'z' | 'h'>) => (
+  <>
+    <Box x={x} y={y} z={0} w={w} d={d} h={h} />
+    <g transform={topM(x, y, h)}>
+      {t.icon ? (
+        <g transform={`translate(${w / 2 - 10},${d / 2 - 10}) scale(.83)`}>
+          <path className="ki" d={t.icon} />
+        </g>
+      ) : (
+        <>
+          <rect className="km" x={w / 2 - 10} y={d / 2 - 10} width={20} height={20} rx={4} />
+          <text className="kmt" x={w / 2} y={d / 2 + 3} textAnchor="middle">
+            {t.letter}
+          </text>
+        </>
+      )}
+    </g>
+    <g transform={frontM(x, y + d, 0)}>
+      {t.name.length > 16 ? (
+        <text className="kn" x={10} y={13} style={{ fontSize: 11 }}>
+          <tspan x={10}>Any agent with </tspan>
+          <tspan x={10} dy={13}>
+            a shell or MCP
+          </tspan>
+        </text>
+      ) : (
+        <text className="kn" x={10} y={h - 6.5} style={{ fontSize: 12 }}>
+          {t.name}
+        </text>
+      )}
+    </g>
+  </>
+);
+
+// A connector on the ground plane, from a tile edge to the drive edge.
+const Wire = ({ a, b }: { a: [number, number]; b: [number, number] }) => {
+  const [ax, ay] = P(a[0], a[1], 0);
+  return (
+    <>
+      <polyline className="kl" points={pts([P(a[0], a[1], 0), P(b[0], b[1], 0)])} />
+      <circle className="kdot" cx={ax} cy={ay} r={2.5} />
+    </>
+  );
+};
+
+const SLAB = 24;
+const GAP = 6;
+const D = 120;
+const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
+
 export function LandingFigure() {
+  const [claude, codex, pi, opencode, any] = TOOLS as [Tool, Tool, Tool, Tool, Tool];
   return (
     <figure className="landing-fig">
-      <Svg
-        cls="dsk"
-        box="0 0 580 392"
-        label="One Agent Drive connected to Claude Code, Codex, pi, opencode and any agent with a shell or MCP."
+      <svg
+        className="dsk"
+        viewBox="-24 0 520 420"
+        role="img"
+        aria-label="One Agent Drive, shown as a stack of folders, connected to Claude Code, Codex, pi, opencode and any agent with a shell or MCP."
       >
-        <Drive x={220} y={104} w={140} />
-        {TOOLS.map((t, i) => {
-          const left = i < 3;
-          const k = left ? i : i - 3;
-          const y = left ? 40 + k * 100 : 90 + k * 100;
-          const x = left ? 0 : 420;
-          const ty = y + 17;
-          const dy = left ? 130 + k * 46 : 150 + k * 56;
+        {/* Back to front, so nearer shapes cover farther ones. */}
+        {FOLDERS.map((f, i) => {
+          const z = i * (SLAB + GAP);
           return (
-            <g key={t.name}>
-              <Link p={[left ? [160, ty] : [420, ty], left ? [220, dy] : [360, dy]]} />
-              <Tile t={t} x={x} y={y} w={160} />
+            <g key={f}>
+              <Box x={0} y={0} z={z} w={D} d={D} h={SLAB} />
+              <g transform={frontM(0, D, z)}>
+                <text className="kf" x={12} y={SLAB - 8} style={{ fontSize: 12 }}>
+                  {f}
+                </text>
+              </g>
             </g>
           );
         })}
-      </Svg>
-      <Svg
-        cls="mob"
-        box="0 0 340 340"
-        label="One Agent Drive connected to Claude Code, Codex, pi, opencode and any agent with a shell or MCP."
-      >
-        <Drive x={100} y={0} w={140} />
-        <Link
-          p={[
-            [170, 176],
-            [170, 206 + 2 * 44 + 17],
-          ]}
-        />
-        {TOOLS.map((t, i) => {
-          const right = i % 2 === 1;
-          const x = right ? 190 : 0;
-          const y = 206 + Math.floor(i / 2) * 44;
-          const ty = y + 17;
-          return (
-            <g key={t.name}>
-              <Link
-                p={[
-                  [right ? 190 : 150, ty],
-                  [170, ty],
-                ]}
-              />
-              <Tile t={t} x={x} y={y} w={150} />
-            </g>
-          );
-        })}
-      </Svg>
+        <g transform={topM(0, 0, STACK)}>
+          <circle className="kled" cx={D - 18} cy={18} r={6} />
+        </g>
+        <text
+          className="kn"
+          x={P(60, 60, STACK)[0]}
+          y={P(0, 0, STACK)[1] - 14}
+          textAnchor="middle"
+          style={{ fontSize: 15 }}
+        >
+          Agent Drive
+        </text>
+        <Wire a={[20, 160]} b={[20, D]} />
+        <Wire a={[133, 30]} b={[D, 30]} />
+        <Wire a={[72, 265]} b={[72, D]} />
+        <Wire a={[225, 100]} b={[D, 100]} />
+        <Wire a={[110, 190]} b={[110, D]} />
+        <Tile t={claude} x={-40} y={160} w={84} d={40} h={20} />
+        <Tile t={pi} x={133} y={0} w={84} d={40} h={20} />
+        <Tile t={any} x={100} y={190} w={120} d={50} h={32} />
+        <Tile t={codex} x={30} y={265} w={84} d={40} h={20} />
+        <Tile t={opencode} x={225} y={80} w={84} d={40} h={20} />
+      </svg>
     </figure>
   );
 }

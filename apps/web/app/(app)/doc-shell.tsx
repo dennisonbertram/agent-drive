@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { SiteHeader } from '../site-header';
+import { SiteFooter } from '../site-footer';
 import '../styles/docs.css';
 
 /** Frame shared by /docs and /compare pages. Public: it never reads the session. */
@@ -33,18 +33,8 @@ export function DocShell({
           </header>
           {children}
         </main>
-        <footer className="doc-footer">
-          <Link href="/">AGENT DRIVE</Link>
-          <nav aria-label="Footer">
-            <Link href="/docs">Docs</Link>
-            <Link href="/compare">Compare</Link>
-            <Link href="/pricing">Pricing</Link>
-            <Link href="/privacy">Privacy</Link>
-            <Link href="/terms">Terms</Link>
-            <a href="mailto:support@agentdrive.xyz">Contact</a>
-          </nav>
-        </footer>
       </div>
+      <SiteFooter />
     </>
   );
 }
