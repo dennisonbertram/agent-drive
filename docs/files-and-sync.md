@@ -83,13 +83,13 @@ agent-drive ls --sort modified --limit 20
 agent-drive ls --prefix /work --agent <agent id> --machine <machine name> --tag report
 ```
 
-| Flag                                                     | Effect                                                                                                                                                                               |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--prefix PATH`                                          | Lists every file whose path starts with `PATH`.                                                                                                                                      |
+| Flag                                                     | Effect                                                                                                                                                                             |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--prefix PATH`                                          | Lists every file whose path starts with `PATH`.                                                                                                                                    |
 | `--folder PATH`                                          | Lists the immediate children of `PATH`: file rows and folder rows. A folder row has `kind`, `path`, `items`, `ciphertextSize` and `createdAt`. Cannot be combined with `--prefix`. |
-| `--sort KEY`                                  | `KEY` is `path` (the default) or `modified`, which lists the newest first.                                                                                                                            |
-| `--agent ID`, `--machine NAME`, `--user ID`, `--tag TAG` | Filter by author agent, machine, user or tag. Only the first `--tag` is used.                                                                                                        |
-| `--limit N`, `--cursor C`                                | Page through results. Each page returns `nextCursor`; pass it back as `--cursor` for the next page.                                                                                  |
+| `--sort KEY`                                             | `KEY` is `path` (the default) or `modified`, which lists the newest first.                                                                                                         |
+| `--agent ID`, `--machine NAME`, `--user ID`, `--tag TAG` | Filter by author agent, machine, user or tag. Only the first `--tag` is used.                                                                                                      |
+| `--limit N`, `--cursor C`                                | Page through results. Each page returns `nextCursor`; pass it back as `--cursor` for the next page.                                                                                |
 
 `search` matches paths and attribution metadata, not file contents, because contents are encrypted.
 
