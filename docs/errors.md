@@ -55,7 +55,15 @@ The OAuth endpoints under `/api/oauth` use a different shape, `{ "error": "<code
 | `A key cannot grant more than it holds.`    | A delegated key or offer asked for a drive, scope or write path the caller lacks. Ask for less.                                    |
 | `HTTPS is required for API requests.`       | Production requires HTTPS. Use `https://agentdrive.xyz/api`.                                                                       |
 
-Billing and quota limits are enforced in the API. The size of each plan allowance is TBD on this page.
+Billing and quota limits are enforced in the API. Each plan includes these monthly allowances:
+
+| Plan      | Drives | Stored ciphertext | Downloads | API operations |
+| --------- | ------ | ----------------- | --------- | -------------- |
+| Free      | 3      | 5 GiB             | 5 GiB     | 1,000,000      |
+| Developer | 25     | 100 GiB           | 100 GiB   | 10,000,000     |
+| Team      | 250    | 1,024 GiB         | 1,024 GiB | 100,000,000    |
+
+On the Free plan, a request that would pass an allowance returns 402 `payment_required` with an `upgradeUrl`. A Developer or Team account with an active or trialing subscription can go past an allowance when overage rates are configured; otherwise it gets the same 402.
 
 ## Conflict recovery
 
@@ -85,33 +93,33 @@ See [Files, versions and sync](files-and-sync.md) for how versions work.
 
 ## Limits
 
-| Limit                        | Value                                                                      | Source                          |
-| ---------------------------- | -------------------------------------------------------------------------- | ------------------------------- |
-| List `limit`                 | 1 to 100, default 50                                                       | `validation.ts`                 |
-| JSON request body            | 256 KiB                                                                    | `validation.ts`                 |
-| Query string                 | 16 KiB                                                                     | `validation.ts`                 |
-| File path                    | 1,024 characters                                                           | `validation.ts`                 |
-| One upload (ciphertext)      | 5 GiB                                                                      | `validation.ts`                 |
-| Upload intent and upload URL | 10 minutes                                                                 | `handler.ts`                    |
-| Download URL                 | 10 minutes                                                                 | `storage.ts`                    |
-| Tags per version             | 32, each up to 64 characters                                               | `validation.ts`                 |
-| Description                  | 2,048 characters                                                           | `handler.ts`                    |
-| Write paths per key          | 16                                                                         | `validation.ts`                 |
-| Drives per key               | 100                                                                        | `handler.ts`                    |
-| Agent name                   | 128 characters (`POST /agents`), 64 (`agentName`, `client_name`)           | `handler.ts`, `device.ts`       |
-| Drive name                   | 128 characters                                                             | `handler.ts`                    |
-| `known_drive_ids` at login   | 20                                                                         | `device.ts`                     |
-| Share link lifetime          | 60 seconds to 30 days, default 7 days                                      | `handler.ts`                    |
-| Public share download URL    | up to 60 seconds                                                           | `handler.ts`                    |
-| Webhook body                 | 4 MiB                                                                      | `openrouter/[driveId]/route.ts` |
-| Requests per API key         | 600 per minute by default, set by the server. Value on agentdrive.xyz: TBD | `billing/ledger.ts`             |
-| Device authorization starts  | 20 per IP address per hour                                                 | `device.ts`                     |
-| Device calls per account     | 30 per 10 minutes, and 10 `not_found` results per 10 minutes               | `device.ts`                     |
-| Device request lifetime      | 600 seconds; poll every 5 seconds                                          | `device.ts`                     |
+| Limit                        | Value                                                            | Source                          |
+| ---------------------------- | ---------------------------------------------------------------- | ------------------------------- |
+| List `limit`                 | 1 to 100, default 50                                             | `validation.ts`                 |
+| JSON request body            | 256 KiB                                                          | `validation.ts`                 |
+| Query string                 | 16 KiB                                                           | `validation.ts`                 |
+| File path                    | 1,024 characters                                                 | `validation.ts`                 |
+| One upload (ciphertext)      | 5 GiB                                                            | `validation.ts`                 |
+| Upload intent and upload URL | 10 minutes                                                       | `handler.ts`                    |
+| Download URL                 | 10 minutes                                                       | `storage.ts`                    |
+| Tags per version             | 32, each up to 64 characters                                     | `validation.ts`                 |
+| Description                  | 2,048 characters                                                 | `handler.ts`                    |
+| Write paths per key          | 16                                                               | `validation.ts`                 |
+| Drives per key               | 100                                                              | `handler.ts`                    |
+| Agent name                   | 128 characters (`POST /agents`), 64 (`agentName`, `client_name`) | `handler.ts`, `device.ts`       |
+| Drive name                   | 128 characters                                                   | `handler.ts`                    |
+| `known_drive_ids` at login   | 20                                                               | `device.ts`                     |
+| Share link lifetime          | 60 seconds to 30 days, default 7 days                            | `handler.ts`                    |
+| Public share download URL    | up to 60 seconds                                                 | `handler.ts`                    |
+| Webhook body                 | 4 MiB                                                            | `openrouter/[driveId]/route.ts` |
+| Requests per API key         | 600 per minute by default                                        | `billing/ledger.ts`             |
+| Device authorization starts  | 20 per IP address per hour                                       | `device.ts`                     |
+| Device calls per account     | 30 per 10 minutes, and 10 `not_found` results per 10 minutes     | `device.ts`                     |
+| Device request lifetime      | 600 seconds; poll every 5 seconds                                | `device.ts`                     |
 
 ## CLI exit codes and common messages
 
-The CLI exits 0 on success and 1 on any failure. Messages go to stderr. `agent-drive backup` exits 1 if any file failed. `agent-drive capture -- COMMAND` passes through the exit code of COMMAND. Other exit codes are TBD.
+The CLI exits 0 on success and 1 on any failure. Messages go to stderr. `agent-drive backup` exits 1 if any file failed. `agent-drive capture -- COMMAND` passes through the exit code of COMMAND. The CLI sets no other exit codes.
 
 For an API error, the CLI prints the message, a hint for conflicts, a login hint for missing scopes, `Upgrade: <url>` for 402, and `Retry after: <n> seconds` for 429.
 

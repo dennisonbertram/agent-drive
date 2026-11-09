@@ -78,4 +78,4 @@ What revoking does not do:
 - It does not re-encrypt past data.
 - Revoking an API key does not remove a copy of the key from a backup bundle. The bundle's API key stops working, but the drive key in it stays valid.
 
-Agent Drive has no command or console action that rotates a drive key. [Encryption format](crypto.md) says a future rotation format has to be versioned. Whether rotation is planned: TBD. To move to a new drive key today, create a new drive, download each file from the old drive with `agent-drive get --output` and upload it to the new drive with `agent-drive put`, then delete the old drive. Deleting is queued, not immediate. See [Threat model](threat-model.md).
+Agent Drive has no command or console action that rotates a drive key. [Encryption format](crypto.md) says a future rotation format has to be versioned. To move to a new drive key today, create a new drive, download each file from the old drive with `agent-drive get --output` and upload it to the new drive with `agent-drive put`, then delete the old drive. Deleting is queued, not immediate. See [Threat model](threat-model.md).

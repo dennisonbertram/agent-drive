@@ -10,7 +10,7 @@ Use this page to call the Agent Drive HTTP API directly: authenticate with an AP
 - Every response has `Cache-Control: no-store`.
 - Production requires HTTPS, judged from the request URL. A plain HTTP request gets 403 `permission_denied`. Forwarded headers do not change this.
 - Optional header `x-agent-drive-machine: <machine name>` names the machine making the call. It is recorded on writes. Allowed: up to 128 letters, digits, spaces and `. _ : @ -`, starting with a letter or digit. The default is `unknown`. Any other value returns 400 `validation_error`.
-- Each API key is limited to a number of requests per minute. The code default is 600, set by the server. Past the limit the API returns 429 `rate_limited` with a `Retry-After` header. The value on agentdrive.xyz is TBD.
+- Each API key is limited to a number of requests per minute. The default is 600 requests per minute per key. Past the limit the API returns 429 `rate_limited` with a `Retry-After` header.
 - The typed route list is `apps/web/src/api/contract.ts` in the repository.
 
 The examples below use these shell variables:
@@ -57,7 +57,7 @@ The API never sees plaintext or drive keys. Before upload, the client must:
 2. Wrap the file key with the drive key. The result is `wrappedKey`, a base64url string.
 3. Upload the ciphertext, and send `wrappedKey` in the put request.
 
-After download, the client unwraps `wrappedKey` with the drive key and decrypts. Keys are covered in [Keys and recovery](keys-and-recovery.md). The reference implementation is `packages/agent-drive/src/crypto.ts` in the repository. Whether it is published as an importable library is TBD.
+After download, the client unwraps `wrappedKey` with the drive key and decrypts. Keys are covered in [Keys and recovery](keys-and-recovery.md). The reference implementation is `packages/agent-drive/src/crypto.ts` in the repository. The npm package `@dennisonbertram/agent-drive` exports it as `@dennisonbertram/agent-drive/crypto`.
 
 Files written by the OpenRouter webhook are sealed to the drive's trace inbox instead of the drive key (wrapped-key envelope v2). See [Encryption format](crypto.md).
 

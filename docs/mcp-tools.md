@@ -50,8 +50,6 @@ approval_mode = "approve"
 
 Setting `default_tools_approval_mode = "approve"` under the server approves every tool, including `delete`, `move`, `restore` and `share`. Use it only if you accept that.
 
-Verified with codex-cli 0.166.0 (`gpt-6-luna`, `--sandbox workspace-write`): `put` and `get` completed with `default_tools_approval_mode="approve"`, and `put` passed approval with `tools.put.approval_mode="approve"`. `download` was not run under Codex.
-
 ## CLI and MCP names
 
 Most MCP tools match a CLI command. Four have different names:

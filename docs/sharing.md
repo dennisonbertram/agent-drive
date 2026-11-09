@@ -68,6 +68,6 @@ If something is wrong, the page says so. The cases are: a missing key, a link th
 - The service enforces expiry. After it, the page shows "Share link expired".
 - Revoking a link stops new downloads. It cannot take back a copy someone already downloaded, or a key someone already saved.
 - Anyone with the complete URL can open the file. The service does not ask who they are.
-- Moving a file to the trash makes its links `unavailable`. Whether restoring the file makes the links work again is TBD.
-- Whether downloads through a share link count toward your plan's operation or egress limits is TBD; see [Errors and limits](errors.md).
+- Moving a file to the trash makes its links `unavailable`. Restoring the file makes them work again, because a link points to a fixed version of the file and the restore only clears the trash mark. A link that has expired or been revoked stays that way.
+- Each request to the public share endpoint (the metadata lookup and the download) counts as one API operation, and a download also counts toward the account owner's monthly download allowance. Past an allowance the link returns 402 `payment_required` on the Free plan; see [Errors and limits](errors.md).
 - The service sees the file name, the size and who created the link. It does not see the contents. See the [Threat model](threat-model.md) and [Encryption format](crypto.md).
