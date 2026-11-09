@@ -57,7 +57,7 @@ These service providers process data on our behalf, only to provide Agent Drive:
 
 - **Vercel:** hosts the website and the API.
 - **Neon:** hosts our Postgres database (through Vercel).
-- **Amazon Web Services (S3):** stores your encrypted files and storage access logs.
+- **Our object storage provider (an S3-compatible cloud storage service):** stores your encrypted files and storage access logs.
 - **Clerk:** sign-in, sessions, and sign-in and verification emails.
 - **Stripe:** payments and subscriptions.
 - **Resend:** sends billing alert emails, if you turn them on. We do not send marketing email.
