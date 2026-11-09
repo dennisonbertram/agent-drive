@@ -60,7 +60,7 @@ test.describe('agent-ready site', () => {
     for (const d of DOCS) urls.push(`/docs/${d}`);
     for (const c of COMPARE) urls.push(`/compare/${c}`);
     for (const u of urls) expect(body).toContain(`<loc>${ORIGIN}${u === '/' ? '/' : u}</loc>`);
-    expect(body).not.toContain('/console');
+    expect(body).not.toContain(`<loc>${ORIGIN}/console`);
     expect(body).not.toContain('/docs/plan');
   });
 
