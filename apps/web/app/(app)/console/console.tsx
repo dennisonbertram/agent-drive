@@ -2744,10 +2744,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <div className="split">
                           <strong>{item.name}</strong>
                           <span>
-                            {size(item.storageBytes)}
+                            {formatMetered(item.storageBytes)}
                             {item.quotaBytes === Number.MAX_SAFE_INTEGER
                               ? ' · account limits apply'
-                              : ` / ${size(item.quotaBytes)}`}
+                              : ` / ${formatMetered(item.quotaBytes)}`}
                           </span>
                         </div>
                         {item.quotaBytes !== Number.MAX_SAFE_INTEGER && (
@@ -2792,7 +2792,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 {authorLabel(item.name)}
                               </td>
                               <td role="cell" className="num" data-label="Storage">
-                                {size(item.storageBytes)}
+                                {formatMetered(item.storageBytes)}
                               </td>
                               <td role="cell" className="num" data-label="Versions">
                                 {item.versions}

@@ -28,11 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description:
       "Encrypted storage your agents keep across sandboxes. Files are encrypted on the agent's machine and survive sandboxes, machines and platform switches.",
     openGraph: { siteName: 'Agent Drive', type: 'website' },
-    twitter: {
-      card: 'summary_large_image',
-      title: 'Agent Drive',
-      description: 'Encrypted storage your agents keep across sandboxes.',
-    },
+    twitter: { card: 'summary_large_image' },
   };
 }
 
