@@ -1,0 +1,61 @@
+/* Protein figure: reuses the hero figure's .landing-fig classes (ka, ks1, ks2, kn, kt, kl, kp, kled). */
+.protein-fig {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: center;
+  margin: 56px 0 0;
+}
+@media (min-width: 900px) {
+  .protein-fig {
+    grid-template-columns: 1fr 1.05fr;
+    gap: 16px;
+  }
+}
+.protein-fig .pf-ring {
+  fill: none;
+  stroke: #111;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  opacity: 0.45;
+}
+.protein-fig .pf-flow {
+  animation: pf-flow 1.2s linear infinite;
+}
+.protein-fig .pf-file {
+  animation: pf-move 7.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation-delay: var(--delay, 0s);
+  opacity: 0;
+}
+@keyframes pf-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+@keyframes pf-move {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 1;
+  }
+  90%,
+  100% {
+    transform: translate(var(--ex), var(--ey));
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .protein-fig .pf-flow {
+    animation: none;
+  }
+  .protein-fig .pf-file {
+    animation: none;
+    opacity: 1;
+    transform: translate(var(--rx), var(--ry));
+  }
+}

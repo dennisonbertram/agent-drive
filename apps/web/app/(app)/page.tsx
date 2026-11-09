@@ -20,6 +20,7 @@ import { JsonLd } from '@/src/content/json-ld';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
 import { LandingFigure } from './landing-figure';
+import { ProteinFigure } from './protein-figure';
 import '../styles/landing.css';
 
 export const dynamic = 'force-dynamic';
@@ -293,6 +294,7 @@ export default function Home() {
           <div className="l-tag">{PROTEIN.tag}</div>
           <h2>{PROTEIN.title}</h2>
           <p className="l-lede">{PROTEIN.lede}</p>
+          <ProteinFigure />
           <Log
             heading="Drive contents: one project, shared by every agent"
             cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
