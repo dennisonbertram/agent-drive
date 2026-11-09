@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, perGbDollars } from './bytes';
+import { formatBytes, formatMetered, perGbDollars } from './bytes';
 
 describe('formatBytes', () => {
   it('uses decimal units (1 KB = 1000 B) with at most two decimals', () => {
@@ -12,10 +12,12 @@ describe('formatBytes', () => {
     expect(formatBytes(3 * 1024 * 1024)).toBe('3.15 MB');
     expect(formatBytes(1e12)).toBe('1 TB');
   });
-  it('keeps exact plan limits exact', () => {
-    expect(formatBytes(5n * 1024n ** 3n)).toBe('5.37 GB');
-    expect(formatBytes(String(5n * 1024n ** 3n))).toBe('5.37 GB');
-    expect(formatBytes(1024n * 1024n ** 3n)).toBe('1.1 TB');
+  it('shows plan limits as the round numbers the plans define', () => {
+    expect(formatMetered(5n * 1024n ** 3n)).toBe('5 GB');
+    expect(formatMetered(String(100n * 1024n ** 3n))).toBe('100 GB');
+    expect(formatMetered(1024n * 1024n ** 3n)).toBe('1 TB');
+    expect(formatMetered(1536n * 1024n ** 2n)).toBe('1.5 GB');
+    expect(formatMetered(1023)).toBe('1023 B');
   });
   it('promotes the unit when rounding reaches 1000', () => {
     expect(formatBytes(999_999)).toBe('1 MB');
@@ -32,10 +34,10 @@ describe('formatBytes', () => {
     expect(() => formatBytes('abc')).toThrow();
     expect(() => formatBytes('')).toThrow();
   });
-  it('shows the exact price per decimal GB for a per-GiB rate, rounded up', () => {
-    // 1 cent per GiB = $0.01 / 1.073741824 GB = $0.0093132...
-    expect(perGbDollars(1n)).toBe('$0.0094');
-    expect(perGbDollars(10n)).toBe('$0.0932');
-    expect(perGbDollars(0n)).toBe('$0.0000');
+  it('shows the per-GB price as the metered rate in dollars', () => {
+    expect(perGbDollars(1n)).toBe('$0.01');
+    expect(perGbDollars(10n)).toBe('$0.10');
+    expect(perGbDollars(250n)).toBe('$2.50');
+    expect(perGbDollars(0n)).toBe('$0.00');
   });
 });

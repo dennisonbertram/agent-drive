@@ -69,7 +69,7 @@ export function homeMarkdown(origin: string): string {
     .join('\n');
   return `# Agent Drive
 
-> Portable encrypted storage for agents. Files survive sandboxes, machines and platform switches.
+> Encrypted storage your agents keep across sandboxes. Files survive sandboxes, machines and platform switches.
 
 ${HERO.title} ${HERO.lede}
 

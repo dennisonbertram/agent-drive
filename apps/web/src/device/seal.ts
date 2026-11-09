@@ -73,7 +73,7 @@ export function parseRecoveryFile(text: string, driveId: string): string {
   try {
     candidate = JSON.parse(text);
   } catch {
-    throw new Error('Choose a JSON recovery key file downloaded from this console.');
+    throw new Error('Choose a JSON recovery file downloaded from this console.');
   }
   const c = candidate as { driveId?: unknown; key?: unknown } | null;
   if (!c || typeof c !== 'object' || c.driveId !== driveId || typeof c.key !== 'string')

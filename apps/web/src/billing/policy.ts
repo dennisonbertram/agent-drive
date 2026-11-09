@@ -1,5 +1,5 @@
 import { ApiError } from '../api/errors';
-import { formatBytes } from '../format/bytes';
+import { formatMetered } from '../format/bytes';
 
 export const GIB = 1024n ** 3n;
 export const PLANS = {
@@ -134,7 +134,7 @@ export function limitExceeded(
     message = `Your ${name} plan allows ${p.drives} drives and you have ${before.drives}. Delete a drive${upgrade} to add more.`;
   } else if (only ? only === 'storage' : usage.storageBytes > p.storageBytes) {
     limit = 'storage';
-    message = `This would exceed your ${name} plan's ${formatBytes(p.storageBytes)} storage (${formatBytes(before.storageBytes)} used). Trashed files and old versions still count. Deleting a drive frees its storage${upgrade ? ', or upgrade' : ''}.`;
+    message = `This would exceed your ${name} plan's ${formatMetered(p.storageBytes)} storage (${formatMetered(before.storageBytes)} used). Trashed files and old versions still count. Deleting a drive frees its storage${upgrade ? ', or upgrade' : ''}.`;
   } else if (only ? only === 'operations' : usage.operations > p.operations) {
     limit = 'operations';
     message = `Your ${name} plan's monthly API operation allowance has been reached. It resets ${resets}${upgrade ? '; you can also upgrade' : ''}.`;

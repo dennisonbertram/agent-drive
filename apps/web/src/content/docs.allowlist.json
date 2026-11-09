@@ -1,26 +1,128 @@
 [
   {
+    "slug": "overview",
+    "file": "overview.md",
+    "title": "What Agent Drive is",
+    "summary": "What Agent Drive stores, who can see what, and the terms used in these docs.",
+    "section": "Get started"
+  },
+  {
     "slug": "quickstart",
     "file": "quickstart.md",
     "title": "Quickstart",
-    "summary": "Connect an agent, store a first file and back up its key."
+    "summary": "Install the CLI, connect an agent, back up its key, store a file and share it.",
+    "section": "Get started"
+  },
+  {
+    "slug": "connect-an-agent",
+    "file": "connect-an-agent.md",
+    "title": "Connect an agent",
+    "summary": "Log in an agent, approve it in the browser, and add more agents with grant, issued credentials or the recovery file.",
+    "section": "Get started"
+  },
+  {
+    "slug": "console",
+    "file": "console.md",
+    "title": "The console",
+    "summary": "Browse, unlock, restore and share files in the browser, and manage agents, billing and account deletion.",
+    "section": "Get started"
+  },
+  {
+    "slug": "files-and-sync",
+    "file": "files-and-sync.md",
+    "title": "Files, versions and sync",
+    "summary": "Store, read, search, version and restore files, and upload whole folders with sync and backup.",
+    "section": "Guides"
+  },
+  {
+    "slug": "sharing",
+    "file": "sharing.md",
+    "title": "Share links",
+    "summary": "Share one file with a link that expires, and list or revoke links.",
+    "section": "Guides"
+  },
+  {
+    "slug": "sandboxes",
+    "file": "sandboxes.md",
+    "title": "Using Agent Drive in sandboxes",
+    "summary": "Keep an agent connected across disposable sandboxes and CI jobs with AGENT_DRIVE_CREDENTIALS.",
+    "section": "Guides"
+  },
+  {
+    "slug": "backup-and-recovery",
+    "file": "backup-and-recovery.md",
+    "title": "Back up and recover your drive key",
+    "summary": "Back up credentials, check the backup, and open your files again on a new machine.",
+    "section": "Guides"
+  },
+  {
+    "slug": "trace-capture",
+    "file": "trace-capture.md",
+    "title": "Capture traces",
+    "summary": "Save an agent's model traffic as encrypted traces with agent-drive capture or the OpenRouter webhook, and archive old trace files.",
+    "section": "Guides"
   },
   {
     "slug": "cli",
     "file": "cli.md",
-    "title": "CLI and MCP reference",
-    "summary": "Commands, credentials, sync, backup and the MCP server."
+    "title": "CLI reference",
+    "summary": "Every agent-drive command, flag, environment variable and exit behavior.",
+    "section": "Reference"
+  },
+  {
+    "slug": "mcp-tools",
+    "file": "mcp-tools.md",
+    "title": "MCP server and tools",
+    "summary": "Set up the agent-drive MCP server and look up every tool, argument and approval setting.",
+    "section": "Reference"
+  },
+  {
+    "slug": "skills",
+    "file": "skills.md",
+    "title": "Agent skills",
+    "summary": "The agent-drive and agent-drive-trace-archive skills: what they do, how to install them and when an agent uses them.",
+    "section": "Reference"
   },
   {
     "slug": "api",
     "file": "api.md",
     "title": "HTTP API",
-    "summary": "Routes, scopes, pagination, conflicts and device login endpoints."
+    "summary": "Authentication, scopes, pagination, and the routes for drives, files, versions and activity.",
+    "section": "Reference"
+  },
+  {
+    "slug": "api-device-login",
+    "file": "api-device-login.md",
+    "title": "HTTP API: device login and delegation",
+    "summary": "The OAuth device flow endpoints, delegated grants and issued keys that let agents get API keys.",
+    "section": "Reference"
+  },
+  {
+    "slug": "errors",
+    "file": "errors.md",
+    "title": "Errors and limits",
+    "summary": "Error format, error codes, HTTP statuses, rate limits and what to do about each.",
+    "section": "Reference"
   },
   {
     "slug": "crypto",
     "file": "crypto.md",
     "title": "Encryption format",
-    "summary": "The ADRV v1 ciphertext layout and key wrapping."
+    "summary": "The ADRV v1 ciphertext layout, key wrapping, account key and trace inbox formats.",
+    "section": "Security"
+  },
+  {
+    "slug": "keys-and-recovery",
+    "file": "keys-and-recovery.md",
+    "title": "Keys and recovery",
+    "summary": "Which keys exist, where each one lives, and what happens if one is lost.",
+    "section": "Security"
+  },
+  {
+    "slug": "threat-model",
+    "file": "threat-model.md",
+    "title": "Threat model",
+    "summary": "What Agent Drive protects, what the service can see, and what it does not protect against.",
+    "section": "Security"
   }
 ]

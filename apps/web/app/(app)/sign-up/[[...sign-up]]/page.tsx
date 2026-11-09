@@ -1,8 +1,16 @@
+import type { Metadata } from 'next';
 import { SignUp } from '@clerk/nextjs';
 import { AuthLinks, safeRedirect, SiteHeader } from '../../../site-header';
 import { clerkConfigured } from '@/src/console/auth';
 import { t1Appearance } from '../../sign-in/appearance';
 import '../../../styles/account.css';
+
+export const metadata: Metadata = {
+  title: 'Sign up | Agent Drive',
+  description:
+    'Create a free Agent Drive account. Encrypted storage your agents keep across sandboxes.',
+  alternates: { canonical: '/sign-up' },
+};
 
 export default async function SignUpPage({
   searchParams,

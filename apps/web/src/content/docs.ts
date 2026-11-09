@@ -6,8 +6,21 @@ import sources from './docs.generated.json';
  * nothing is globbed from docs/. Plans, runbooks, design contracts and UX notes stay private by
  * not being listed. The text is embedded at build time, so nothing reads docs/ at request time.
  */
-export const DOCS: readonly { slug: string; file: string; title: string; summary: string }[] =
-  allowlist;
+export type Doc = { slug: string; file: string; title: string; summary: string; section: string };
+export const DOCS: readonly Doc[] = allowlist;
+
+/** Section names in order of first appearance in the allowlist. */
+export const SECTIONS: readonly string[] = [...new Set(DOCS.map((d) => d.section))];
+
+export const sectionedDocs = (): { section: string; docs: Doc[] }[] =>
+  SECTIONS.map((section) => ({ section, docs: DOCS.filter((d) => d.section === section) }));
+
+/** Previous and next page across all sections; null at the ends or for an unknown slug. */
+export function docNeighbors(slug: string): { prev: Doc | null; next: Doc | null } {
+  const i = DOCS.findIndex((d) => d.slug === slug);
+  if (i < 0) return { prev: null, next: null };
+  return { prev: DOCS[i - 1] ?? null, next: DOCS[i + 1] ?? null };
+}
 
 export const docMeta = (slug: string) => DOCS.find((d) => d.slug === slug);
 
@@ -24,7 +37,10 @@ export function docBody(slug: string, link: (slug: string) => string): string | 
   return raw
     .replace(/^# .*\n+/, '')
     .replace(/\[([^\]]+)\]\((?!https?:|#|\/)([^)\s]+)\)/g, (_m, text: string, href: string) => {
-      const target = docMeta((href.split('#')[0] ?? '').replace(/^.*\//, '').replace(/\.md$/, ''));
-      return target && href.endsWith('.md') ? `[${text}](${link(target.slug)})` : text;
+      const [file = '', anchor] = href.split('#');
+      const target = docMeta(file.replace(/^.*\//, '').replace(/\.md$/, ''));
+      return target && file.endsWith('.md')
+        ? `[${text}](${link(target.slug)}${anchor ? `#${anchor}` : ''})`
+        : text;
     });
 }

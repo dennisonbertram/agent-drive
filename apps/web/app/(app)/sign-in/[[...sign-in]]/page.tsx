@@ -1,8 +1,15 @@
+import type { Metadata } from 'next';
 import { SignIn } from '@clerk/nextjs';
 import { AuthLinks, safeRedirect, SiteHeader } from '../../../site-header';
 import { clerkConfigured } from '@/src/console/auth';
 import { t1Appearance } from '../../sign-in/appearance';
 import '../../../styles/account.css';
+
+export const metadata: Metadata = {
+  title: 'Sign in | Agent Drive',
+  description: 'Sign in to Agent Drive to manage your drives, agents and billing.',
+  alternates: { canonical: '/sign-in' },
+};
 
 export default async function SignInPage({
   searchParams,

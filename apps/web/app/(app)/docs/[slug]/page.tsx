@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { DOCS, docBody, docMeta } from '@/src/content/docs';
 import { Markdown } from '@/src/content/markdown';
-import { DocShell } from '../../doc-shell';
+import { DocsLayout } from '../docs-layout';
 
 export const dynamicParams = false;
 export const generateStaticParams = () => DOCS.map((d) => ({ slug: d.slug }));
@@ -29,10 +29,10 @@ export default async function DocPage({ params }: { params: Promise<{ slug: stri
   const body = docBody(slug, (s) => `/docs/${s}`);
   if (!meta || body === null) notFound();
   return (
-    <DocShell eyebrow="DOCS" title={meta.title} mdHref={`/docs/${slug}.md`}>
+    <DocsLayout slug={slug}>
       <article className="doc-prose">
         <Markdown source={body} />
       </article>
-    </DocShell>
+    </DocsLayout>
   );
 }
