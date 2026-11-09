@@ -138,16 +138,65 @@ describe('spool', () => {
     await mkdir(lock);
     await writeFile(
       join(lock, 'owner'),
-      JSON.stringify({ pid: process.pid, startedAt: Date.now() }),
+      JSON.stringify({
+        pid: process.pid,
+        startedAt: Date.now() - 2 * 600_000,
+        token: 'live-owner',
+      }),
     );
     let calls = 0;
     const put = async () => void calls++;
     await drainer(spool, put).finish(Date.now() + 500);
     expect(calls).toBe(0);
     const dead = spawnSync(process.execPath, ['-e', '']).pid;
-    await writeFile(join(lock, 'owner'), JSON.stringify({ pid: dead, startedAt: Date.now() }));
+    await writeFile(
+      join(lock, 'owner'),
+      JSON.stringify({ pid: dead, startedAt: Date.now(), token: 'dead-owner' }),
+    );
     await drainer(spool, put).finish(Date.now() + 500);
     expect(calls).toBe(1);
+  });
+
+  it('consumes a kick received while releasing the drain lock', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/first'));
+    let enterRelease!: () => void;
+    const releaseEntered = new Promise<void>((resolve) => (enterRelease = resolve));
+    let allowRelease!: () => void;
+    const releaseGate = new Promise<void>((resolve) => (allowRelease = resolve));
+    let secondUpload!: () => void;
+    const secondUploaded = new Promise<void>((resolve) => (secondUpload = resolve));
+    class PausedReleaseDrainer extends Drainer {
+      private pause = true;
+
+      protected override async releaseLock(release: () => Promise<void>) {
+        if (this.pause) {
+          this.pause = false;
+          enterRelease();
+          await releaseGate;
+        }
+        await release();
+      }
+    }
+    const d = new PausedReleaseDrainer(
+      spool,
+      {
+        putEncrypted: async (_drive, path) => {
+          if (path === '/second') secondUpload();
+        },
+      },
+      'd',
+      { log: () => undefined, minBackoffMs: 2, maxBackoffMs: 4 },
+    );
+    d.kick();
+    await releaseEntered;
+    await spool.add('2', bytes, meta('/second'));
+    d.kick();
+    allowRelease();
+    await secondUploaded;
+    await d.finish(Date.now() + 1000);
+
+    expect((await names(spool.dir)).filter((name) => name.endsWith('.json'))).toEqual([]);
   });
 
   it('counts invalid/ against the cap and never deletes queued entries', async () => {
@@ -191,6 +240,53 @@ describe('spool', () => {
     await drainer(spool, () => new Promise(() => {})).finish(Date.now() + 100);
     expect(Date.now() - started).toBeLessThan(1500);
     expect(await names(spool.dir)).toContain('1.json');
+  });
+
+  it('does not mutate queued files or upload more work when an ignored upload resolves late', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/first'));
+    await spool.add('2', bytes, meta('/second'));
+    let uploadStarted!: () => void;
+    const started = new Promise<void>((resolve) => (uploadStarted = resolve));
+    let finishUpload!: () => void;
+    const upload = new Promise<void>((resolve) => (finishUpload = resolve));
+    let calls = 0;
+    const d = drainer(spool, async () => {
+      calls++;
+      uploadStarted();
+      await upload;
+    });
+
+    d.kick();
+    await started;
+    await d.finish(Date.now() + 30);
+    finishUpload();
+    await new Promise((resolve) => setImmediate(resolve));
+    d.kick();
+    await d.finish(Date.now() + 1000);
+
+    expect(calls).toBe(1);
+    expect(d.uploaded).toBe(0);
+    expect((await names(spool.dir)).filter((name) => /\.(json|adrv)$/u.test(name))).toEqual([
+      '1.adrv',
+      '1.json',
+      '2.adrv',
+      '2.json',
+    ]);
+  });
+
+  it('makes finish terminal even when no drain is running', async () => {
+    const spool = await Spool.open(await tempDir());
+    await spool.add('1', bytes, meta('/p'));
+    let calls = 0;
+    const d = drainer(spool, async () => void calls++);
+
+    await d.finish(Date.now() - 1);
+    d.kick();
+    await d.finish(Date.now() + 1000);
+
+    expect(calls).toBe(0);
+    expect((await names(spool.dir)).filter((name) => name.endsWith('.json'))).toEqual(['1.json']);
   });
 
   it('passes the abort signal to the upload', async () => {

@@ -17,18 +17,39 @@ export function getPool() {
   return pool;
 }
 
+export class TransactionCommitUnknownError extends Error {
+  constructor(cause: unknown) {
+    super('The transaction commit outcome is unknown.', { cause });
+    this.name = 'TransactionCommitUnknownError';
+  }
+}
+
 export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
+  let phase: 'starting' | 'active' | 'committing' | 'committed' = 'starting';
+  let discard = false;
   try {
     await client.query('BEGIN');
+    phase = 'active';
     const result = await callback(client);
+    phase = 'committing';
     await client.query('COMMIT');
+    phase = 'committed';
     return result;
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (phase === 'committing') {
+      discard = true;
+      // A lost COMMIT reply is not proof of rollback. External objects must be retained.
+      throw new TransactionCommitUnknownError(error);
+    }
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      discard = true;
+    }
     throw error;
   } finally {
-    client.release();
+    client.release(discard);
   }
 }
 

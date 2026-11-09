@@ -92,6 +92,100 @@ const base = (slot: unknown = goodSlot): Routes => ({
 });
 
 describe('Vault', () => {
+  it('discards old account reads after clear and discovers the new account', async () => {
+    const pendingRecord = deferred<unknown>();
+    let account = ACCOUNT;
+    let reads = 0;
+    const { vault, calls } = makeVault({
+      ...base(),
+      whoami: () => ({ accountId: account }),
+      'account-key': () => (++reads === 1 ? pendingRecord.promise : { accountKey: null }),
+    });
+    const oldLoad = vault.load();
+    vault.clear();
+    account = OTHER_DRIVE;
+    await vault.load();
+    pendingRecord.resolve({ accountKey: record });
+    await oldLoad;
+    expect(vault.status).toBe('none');
+    expect(vault.record).toBeNull();
+    expect(vault.fingerprint).toBe('');
+    expect(calls.filter(({ path }) => path === 'whoami')).toHaveLength(2);
+  });
+
+  it('only publishes the latest record read within a session', async () => {
+    const pendingRecord = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key': () => (++reads === 1 ? pendingRecord.promise : { accountKey: null }),
+    });
+    const oldLoad = vault.load();
+    await vault.load();
+    pendingRecord.resolve({ accountKey: record });
+    await oldLoad;
+    expect(vault.status).toBe('none');
+    expect(vault.record).toBeNull();
+  });
+
+  it('locks and discards slots when a refresh discovers a removed account key', async () => {
+    let removed = false;
+    const { vault, locked } = makeVault({
+      ...base(),
+      'account-key': () => ({ accountKey: removed ? null : record }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    removed = true;
+    await vault.load();
+    expect(vault.status).toBe('none');
+    expect(vault.slotCount).toBe(0);
+    expect(await vault.slotKey(DRIVE)).toBeNull();
+    expect(locked).toEqual(['stale']);
+  }, 30_000);
+
+  it('invalidates an unlock as soon as reset starts, not when deletion finishes', async () => {
+    const slots = deferred<unknown>();
+    const deletion = deferred<unknown>();
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => slots.promise,
+      'account-key': (method) => (method === 'DELETE' ? deletion.promise : { accountKey: record }),
+    });
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    const resetting = vault.reset();
+    slots.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await unlocking).toBe(false);
+    expect(vault.status).toBe('locked');
+    expect(vault.fetchingSlots).toBe(false);
+    deletion.resolve({});
+    await resetting;
+    expect(vault.status).toBe('none');
+    expect(await vault.slotKey(DRIVE)).toBeNull();
+  }, 30_000);
+
+  it('a new record load supersedes an in-flight unlock', async () => {
+    const slots = deferred<unknown>();
+    let removed = false;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => slots.promise,
+      'account-key': () => ({ accountKey: removed ? null : record }),
+    });
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    removed = true;
+    await vault.load();
+    slots.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await unlocking).toBe(false);
+    expect(vault.status).toBe('none');
+    expect(vault.slotCount).toBe(0);
+    expect(vault.fetchingSlots).toBe(false);
+  }, 30_000);
+
   it('unlocks with a typed generated passphrase and opens a verified drive key', async () => {
     const { vault } = makeVault(base());
     await vault.load();

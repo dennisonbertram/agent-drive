@@ -93,6 +93,7 @@ export class Vault {
   private slots = new Map<string, AccountSlot>();
   private epoch = 0;
   private unlockSeq = 0;
+  private recordSeq = 0;
   private seen = new Map<string, number>();
 
   constructor(private deps: VaultDeps) {}
@@ -115,12 +116,15 @@ export class Vault {
   /** Reads the session account and the stored record. Never needs the passphrase. */
   async load() {
     const epoch = this.epoch;
+    const seq = ++this.unlockSeq;
+    this.fetchingSlots = false;
+    const live = () => epoch === this.epoch && seq === this.unlockSeq;
     try {
-      await this.refreshRecord();
-      if (epoch !== this.epoch) return;
+      if (!(await this.refreshRecord(live))) return;
+      this.loadError = '';
       this.status = this.record ? (this.privateKey ? 'unlocked' : 'locked') : 'none';
     } catch (reason) {
-      if (epoch !== this.epoch) return;
+      if (!live()) return;
       this.loadError =
         reason instanceof Error ? reason.message : 'Passphrase unlock is unavailable.';
       this.status = 'error';
@@ -128,25 +132,39 @@ export class Vault {
     this.emit();
   }
 
-  private async refreshRecord() {
-    const [who, result] = await Promise.all([
-      this.accountId ? { accountId: this.accountId } : this.deps.request('whoami'),
-      this.deps.request('account-key'),
-    ]);
-    const accountId = (who as { accountId?: unknown }).accountId;
-    if (typeof accountId !== 'string') throw new Error('Passphrase unlock is unavailable.');
-    this.accountId = accountId;
-    const raw = (result as { accountKey: unknown }).accountKey;
-    if (raw === null || raw === undefined) {
-      this.record = null;
-      return;
+  private async refreshRecord(live: () => boolean) {
+    const seq = ++this.recordSeq;
+    const current = () => live() && seq === this.recordSeq;
+    try {
+      const [who, result] = await Promise.all([
+        this.accountId ? { accountId: this.accountId } : this.deps.request('whoami'),
+        this.deps.request('account-key'),
+      ]);
+      const accountId = (who as { accountId?: unknown }).accountId;
+      if (typeof accountId !== 'string') throw new Error('Passphrase unlock is unavailable.');
+      const raw = (result as { accountKey: unknown }).accountKey;
+      const record = raw == null ? null : await parseAccountKeyRecord(raw, accountId);
+      const print = record ? await fingerprint(record.publicKey) : '';
+      if (!current()) return false;
+      const seen = record ? this.seen.get(record.id) : undefined;
+      if (record && seen !== undefined && seen > record.wrapGeneration)
+        throw new Error(STALE_RECORD);
+      const changed =
+        this.record &&
+        (this.record.id !== record?.id || this.record.wrapGeneration !== record?.wrapGeneration);
+      this.accountId = accountId;
+      if (record) this.seen.set(record.id, Math.max(seen ?? 0, record.wrapGeneration));
+      this.record = record;
+      this.fingerprint = print;
+      if (changed && this.privateKey) {
+        this.lock('stale');
+        return false;
+      }
+      return true;
+    } catch (reason) {
+      if (!current()) return false;
+      throw reason;
     }
-    const record = await parseAccountKeyRecord(raw, accountId);
-    const seen = this.seen.get(record.id);
-    if (seen !== undefined && seen > record.wrapGeneration) throw new Error(STALE_RECORD);
-    this.seen.set(record.id, Math.max(seen ?? 0, record.wrapGeneration));
-    this.record = record;
-    this.fingerprint = await fingerprint(record.publicKey);
   }
 
   /** Tries a generated passphrase with spaces, dashes and case removed, then as typed. */
@@ -166,11 +184,11 @@ export class Vault {
    */
   async unlock(passphrase: string): Promise<boolean> {
     const epoch = this.epoch;
-    const seq = this.unlockSeq;
+    const seq = ++this.unlockSeq;
+    this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
     // A fresh read, so a passphrase changed on another device is noticed.
-    await this.refreshRecord();
-    if (!live()) return false;
+    if (!(await this.refreshRecord(live))) return false;
     const record = this.record;
     if (!record) {
       this.status = 'none';
@@ -186,7 +204,7 @@ export class Vault {
     try {
       slots = await this.fetchSlots(record.id);
     } finally {
-      this.fetchingSlots = false;
+      if (live()) this.fetchingSlots = false;
     }
     if (!live()) return false;
     this.privateKey = privateKey;
@@ -222,6 +240,7 @@ export class Vault {
   /** Stops an unlock attempt that is still running (its dialog was closed). */
   cancelUnlock() {
     this.unlockSeq += 1;
+    this.fetchingSlots = false;
   }
 
   /**
@@ -380,10 +399,10 @@ export class Vault {
     keys: Record<string, { key: string; trusted: boolean }>,
   ): Promise<{ added: number; total: number } | null> {
     const epoch = this.epoch;
-    const seq = this.unlockSeq;
+    const seq = ++this.unlockSeq;
     // Checked after every await: Lock, idle, reset or a closed dialog cancel the whole setup.
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
-    if (!this.accountId) await this.load();
+    if (!this.accountId && !(await this.refreshRecord(live))) return null;
     if (!live()) return null;
     const { record, privateKey } = await createAccountKey(this.accountId, passphrase);
     if (!live()) return null;
@@ -416,7 +435,7 @@ export class Vault {
   /** Re-wraps the same private key under a new passphrase. Returns false if locked meanwhile. */
   async change(oldPassphrase: string, newPassphrase: string): Promise<boolean> {
     const epoch = this.epoch;
-    const seq = this.unlockSeq;
+    const seq = ++this.unlockSeq;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
     const record = this.record;
     if (!record) throw new Error('No passphrase is set up.');
@@ -438,7 +457,7 @@ export class Vault {
       this.emit();
       return true;
     } catch (reason) {
-      if (statusOf(reason) === 409) {
+      if (live() && statusOf(reason) === 409) {
         this.lock('stale');
         throw new Error(CHANGED);
       }
@@ -450,18 +469,26 @@ export class Vault {
   async reset() {
     const record = this.record;
     if (!record) throw new Error('No passphrase is set up.');
+    this.epoch += 1;
+    const epoch = this.epoch;
+    this.privateKey = null;
+    this.slots = new Map();
+    this.fetchingSlots = false;
+    this.status = 'locked';
+    this.emit();
     try {
       await this.deps.strict('account-key', 'DELETE', {
         expectedKeyId: record.id,
         confirmation: 'RESET',
       });
     } catch (reason) {
-      if (statusOf(reason) === 409) {
+      if (epoch === this.epoch && statusOf(reason) === 409) {
         this.lock('stale');
         throw new Error(CHANGED);
       }
       throw reason;
     }
+    if (epoch !== this.epoch) return;
     this.epoch += 1;
     this.privateKey = null;
     this.slots = new Map();
@@ -477,7 +504,8 @@ export class Vault {
     this.epoch += 1;
     this.privateKey = null;
     this.slots = new Map();
-    if (this.record) this.status = 'locked';
+    this.fetchingSlots = false;
+    this.status = this.record ? 'locked' : 'none';
     this.emit();
     this.deps.onLocked?.(reason);
   }
@@ -487,6 +515,12 @@ export class Vault {
     this.epoch += 1;
     this.privateKey = null;
     this.slots = new Map();
-    if (this.status === 'unlocked') this.status = 'locked';
+    this.fetchingSlots = false;
+    this.accountId = '';
+    this.record = null;
+    this.fingerprint = '';
+    this.loadError = '';
+    this.seen = new Map();
+    this.status = 'loading';
   }
 }

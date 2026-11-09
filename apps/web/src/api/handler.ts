@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
-import { getPool, withTransaction } from '../db/client';
+import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { ApiError, errorFromDatabase, responseForError } from './errors';
 import {
@@ -1856,7 +1856,8 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     await deleteObject(source.staging_key).catch(() => undefined);
     return response({ version: rowVersion(result.version) }, 201);
   } catch (error) {
-    if (copied) await deleteObject(finalKey).catch(() => undefined);
+    if (copied && !(error instanceof TransactionCommitUnknownError))
+      await deleteObject(finalKey).catch(() => undefined);
     throw error;
   }
 }
@@ -2337,7 +2338,8 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       return output.rows[0] as Row;
     });
   } catch (error) {
-    if (copiedKey) await deleteObject(copiedKey).catch(() => undefined);
+    if (copiedKey && !(error instanceof TransactionCommitUnknownError))
+      await deleteObject(copiedKey).catch(() => undefined);
     throw error;
   }
   return response({ version: rowVersion(result) }, undeleted ? 200 : 201);

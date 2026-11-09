@@ -445,7 +445,7 @@ describe('openrouter webhook ingest', () => {
     const actual = await vi.importActual<typeof import('../db/client')>('../db/client');
     vi.mocked(db.withTransaction).mockImplementationOnce(async (callback) => {
       await actual.withTransaction(callback);
-      throw new Error('connection lost after commit');
+      throw new actual.TransactionCommitUnknownError(new Error('connection lost after commit'));
     });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const lost = await post(f, body);

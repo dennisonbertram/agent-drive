@@ -5,7 +5,7 @@ import { encryptedSize, seal } from '../../../../packages/agent-drive/src/crypto
 import { sealFileKeyToInbox } from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import { tracePath, traceTags } from '../../../../packages/agent-drive/src/trace-path.ts';
 import { enforceOperationBudget, enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
-import { getPool, withTransaction } from '../db/client';
+import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { ApiError } from './errors';
 import { deleteObject, putObject } from './storage';
 import { secureTransportAllowed } from './validation';
@@ -202,7 +202,8 @@ export async function ingestOpenRouterTrace(input: {
       return json({ ok: true, stored: 1, path }, 201);
     });
   } catch (error) {
-    if (objectKey) await removeOrphan(objectKey);
+    if (objectKey && !(error instanceof TransactionCommitUnknownError))
+      await removeOrphan(objectKey);
     if (error instanceof ApiError && error.details.state === 'exists')
       return json({ ok: true, stored: 0, duplicate: true });
     console.error(
