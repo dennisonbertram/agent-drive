@@ -2,15 +2,38 @@
 .protein-fig {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
-  align-items: center;
-  margin: 56px 0 0;
+  gap: 0;
+  align-items: end;
+  margin: 48px 0 0;
 }
 @media (min-width: 900px) {
   .protein-fig {
-    grid-template-columns: 1fr 1.05fr;
-    gap: 16px;
+    grid-template-columns: 310fr 410fr;
+    gap: 0;
   }
+}
+.protein-fig .pf-f1,
+.protein-fig .pf-f2,
+.protein-fig .pf-f3 {
+  stroke-width: 0.8;
+}
+.protein-fig .pf-f1 {
+  fill: #fff;
+  stroke: #fff;
+}
+.protein-fig .pf-f2 {
+  fill: #e6e4df;
+  stroke: #e6e4df;
+}
+.protein-fig .pf-f3 {
+  fill: #c9c6bf;
+  stroke: #c9c6bf;
+}
+.protein-fig .pf-e {
+  fill: none;
+  stroke: #111;
+  stroke-linejoin: round;
+  stroke-linecap: round;
 }
 .protein-fig .pf-ring {
   fill: none;
@@ -23,7 +46,7 @@
   animation: pf-flow 1.2s linear infinite;
 }
 .protein-fig .pf-file {
-  animation: pf-move 7.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: pf-move 9s linear infinite;
   animation-delay: var(--delay, 0s);
   opacity: 0;
 }
@@ -37,13 +60,13 @@
     transform: translate(0, 0);
     opacity: 0;
   }
-  10% {
+  4% {
     opacity: 1;
   }
-  72% {
+  30% {
     opacity: 1;
   }
-  90%,
+  36%,
   100% {
     transform: translate(var(--ex), var(--ey));
     opacity: 0;
@@ -57,5 +80,8 @@
     animation: none;
     opacity: 1;
     transform: translate(var(--rx), var(--ry));
+  }
+  .protein-fig .pf-extra {
+    display: none;
   }
 }

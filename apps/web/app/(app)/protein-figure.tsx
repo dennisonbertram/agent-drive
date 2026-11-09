@@ -15,16 +15,17 @@ const cross = (a: V, b: V): V => [
   a[0] * b[1] - a[1] * b[0],
 ];
 
-// A prim is one drawn shape: a ribbon quad / arrow piece ('poly'), a tube segment ('tube') or a dot.
-type Prim = { kind: 'poly' | 'tube' | 'dot'; p: V[] };
+// A prim is one drawn shape. ribbon: 4 points, only the two long edges are stroked.
+// tube: 2 points, drawn as a thin ribbon. solid: any polygon, fully outlined, shade top or side. dot: one point.
+type Prim = { kind: 'ribbon' | 'tube' | 'solid' | 'dot'; p: V[]; side?: boolean };
 
 function helix(A: V, B: V, r: number, turns: number, phase: number) {
   const axis = sub(B, A);
   const a = unit(axis);
   const u = unit(cross(a, Math.abs(a[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]));
   const w = cross(a, u);
-  const n = Math.round(turns * 14);
-  const half = mul(a, 7.5);
+  const n = Math.round(turns * 26);
+  const half = mul(a, 5.5);
   const c: V[] = [];
   for (let i = 0; i <= n; i++) {
     const s = i / n;
@@ -34,7 +35,7 @@ function helix(A: V, B: V, r: number, turns: number, phase: number) {
   const prims: Prim[] = [];
   for (let i = 0; i < n; i++) {
     prims.push({
-      kind: 'poly',
+      kind: 'ribbon',
       p: [sub(c[i]!, half), add(c[i]!, half), add(c[i + 1]!, half), sub(c[i + 1]!, half)],
     });
   }
@@ -48,20 +49,36 @@ function helix(A: V, B: V, r: number, turns: number, phase: number) {
   };
 }
 
+// A flat arrow with a little thickness: top face, bottom face and one side face per outline edge.
 function strand(A: V, B: V, across: V) {
   const d = sub(B, A);
   const a = unit(d);
-  const e = mul(unit(across), 9);
-  const bodyEnd = add(A, mul(d, 0.68));
-  const prims: Prim[] = [];
-  const n = 4;
-  for (let i = 0; i < n; i++) {
-    const p0 = add(A, mul(sub(bodyEnd, A), i / n));
-    const p1 = add(A, mul(sub(bodyEnd, A), (i + 1) / n));
-    prims.push({ kind: 'poly', p: [sub(p0, e), add(p0, e), add(p1, e), sub(p1, e)] });
-  }
+  const e = mul(unit(across), 8);
+  const th = mul(unit(cross(a, e)), 2.5);
+  const bodyEnd = add(A, mul(d, 0.66));
   const wide = mul(e, 1.9);
-  prims.push({ kind: 'poly', p: [sub(bodyEnd, wide), add(bodyEnd, wide), B, B] });
+  const ring: V[] = [
+    sub(A, e),
+    sub(bodyEnd, e),
+    sub(bodyEnd, wide),
+    B,
+    add(bodyEnd, wide),
+    add(bodyEnd, e),
+    add(A, e),
+  ];
+  const prims: Prim[] = [
+    { kind: 'solid', p: ring.map((q) => add(q, th)) },
+    { kind: 'solid', p: ring.map((q) => sub(q, th)) },
+  ];
+  for (let i = 0; i < ring.length; i++) {
+    const q0 = ring[i]!;
+    const q1 = ring[(i + 1) % ring.length]!;
+    prims.push({
+      kind: 'solid',
+      side: true,
+      p: [add(q0, th), add(q1, th), sub(q1, th), sub(q0, th)],
+    });
+  }
   return { prims, start: A, end: B, tan: a };
 }
 
@@ -70,7 +87,7 @@ function loop(p0: V, t0: V, p3: V, t3: V, k: number) {
   const p1 = add(p0, mul(t0, dist * k));
   const p2 = sub(p3, mul(t3, dist * k));
   const prims: Prim[] = [];
-  const n = 12;
+  const n = 20;
   let prev = p0;
   for (let i = 1; i <= n; i++) {
     const s = i / n;
@@ -86,11 +103,11 @@ function loop(p0: V, t0: V, p3: V, t3: V, k: number) {
 }
 
 function build(): Prim[] {
-  const h1 = helix([-90, -80, 22], [-80, 40, 18], 20, 3.5, 0);
+  const h1 = helix([-90, -80, 22], [-80, 40, 18], 20, 4.2, 0);
   const s1 = strand([-50, 72, -14], [52, 66, -14], [0, 0, 1]);
   const s2 = strand([52, 66, 14], [-50, 72, 14], [0, 0, 1]);
-  const h2 = helix([-6, 22, 12], [62, -62, 12], 20, 3, 1);
-  const h3 = helix([44, -74, -48], [-42, -36, -44], 18, 3, 2);
+  const h2 = helix([-6, 22, 12], [62, -62, 12], 20, 3.6, 1);
+  const h3 = helix([44, -74, -48], [-42, -36, -44], 18, 3.6, 2);
   const prims = [
     ...h1.prims,
     ...loop(h1.end, h1.tan1, s1.start, s1.tan, 0.5),
@@ -115,49 +132,59 @@ const PRIMS = build();
 
 // Orthographic projection after a turn about the vertical axis and a fixed downward tilt.
 const CX = 200;
-const CY = 150;
-const K = 1.32;
+const CY = 128;
+const K = 1.15;
 const TILT = (24 * Math.PI) / 180;
 const f1 = (n: number) => n.toFixed(1);
 
-type Frame = { pts: [number, number][]; depth: number; front: boolean; t: number; r: number };
+type Pt = [number, number];
+type Frame = { pts: Pt[]; depth: number; front: boolean; t: number; r: number };
 function frame(prim: Prim, theta: number): Frame {
   const ct = Math.cos(theta);
   const st = Math.sin(theta);
   const cp = Math.cos(TILT);
   const sp = Math.sin(TILT);
   let depth = 0;
-  const pts = prim.p.map(([x, y, z]) => {
+  let pts = prim.p.map(([x, y, z]) => {
     const xr = x * ct + z * st;
     const zr = -x * st + z * ct;
     depth += zr * cp + y * sp;
-    return [CX + xr * K, CY - (y * cp - zr * sp) * K] as [number, number];
+    return [CX + xr * K, CY - (y * cp - zr * sp) * K] as Pt;
   });
   depth /= prim.p.length;
   const t = Math.min(1, Math.max(0, (depth + 110) / 220)); // 0 far, 1 near
   let front = true;
-  let d = pts;
-  if (prim.kind === 'poly') {
-    const [a, b, c] = pts as [[number, number], [number, number], [number, number]];
-    front = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) < 0;
-  } else if (prim.kind === 'tube') {
-    const [a, b] = pts as [[number, number], [number, number]];
+  if (prim.kind === 'tube') {
+    const [a, b] = pts as [Pt, Pt];
     const dx = b[0] - a[0];
     const dy = b[1] - a[1];
     const l = Math.hypot(dx, dy) || 1;
-    const w = (1.4 + 1.6 * t) / l;
-    d = [
+    const w = (1.3 + 1.4 * t) / l;
+    pts = [
       [a[0] - dy * w, a[1] + dx * w],
       [a[0] + dy * w, a[1] - dx * w],
       [b[0] + dy * w, b[1] - dx * w],
       [b[0] - dy * w, b[1] + dx * w],
     ];
+  } else if (prim.kind !== 'dot') {
+    const [a, b, c] = pts as [Pt, Pt, Pt];
+    front = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]) < 0;
   }
-  return { pts: d, depth, front, t, r: 3.5 + 2.5 * t };
+  return { pts, depth, front, t, r: 3.5 + 2.5 * t };
 }
 
-const polyPoints = (f: Frame) => f.pts.map((q) => `${f1(q[0])},${f1(q[1])}`).join(' ');
-const faceClass = (prim: Prim, f: Frame) => (prim.kind === 'tube' ? 'ka' : f.front ? 'ka' : 'ks1');
+const pairs = (q: Pt[]) => q.map((v) => `${f1(v[0])},${f1(v[1])}`);
+const polyPoints = (f: Frame) => pairs(f.pts).join(' ');
+const faceClass = (prim: Prim, f: Frame) => (prim.side ? 'pf-f3' : f.front ? 'pf-f1' : 'pf-f2');
+// Ribbons and tubes stroke only their two long edges, so no cross lines show.
+const edgePath = (prim: Prim, f: Frame) => {
+  const s = pairs(f.pts);
+  return prim.kind === 'solid' ? `M${s.join('L')}Z` : `M${s[0]}L${s[3]}M${s[1]}L${s[2]}`;
+};
+const edgeStyle = (f: Frame) => ({
+  strokeWidth: f1(0.7 + 0.9 * f.t),
+  strokeOpacity: f1(0.3 + 0.7 * f.t),
+});
 
 function sorted(theta: number) {
   return PRIMS.map((prim, i) => ({ prim, i, f: frame(prim, theta) })).sort(
@@ -174,7 +201,7 @@ const SECONDS_PER_TURN = 26;
 const C = 0.866;
 const S = 0.5;
 const OX = 305;
-const OY = 140;
+const OY = 176;
 const P = (x: number, y: number, z: number) => [OX + (x - y) * C, OY + (x + y) * S - z] as const;
 const pts = (a: (readonly [number, number])[]) => a.map((q) => q.map(f1).join(',')).join(' ');
 const topM = (x: number, y: number, z: number) =>
@@ -206,16 +233,18 @@ const GAP = 5;
 const D = 100;
 const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
 const FILES = [
-  { name: '7XKA.pdb', size: '1.4 GB', y: 12 },
-  { name: 'embeddings.npy', size: '3.2 GB', y: 50 },
-  { name: 'trajectory.xtc', size: '1.8 GB', y: 88 },
+  { name: '7XKA.pdb', size: '1.4 GB', y: 10 },
+  { name: 'embeddings.npy', size: '3.2 GB', y: 48 },
+  { name: 'trajectory.xtc', size: '1.8 GB', y: 86 },
 ];
-const X0 = -215; // file start, in ground x
-const TRAVEL = 235; // distance a file moves before it has vanished into the drive
-const REST = [0.0, 0.22, 0.44]; // static resting progress per file (reduced motion)
+const X0 = -170; // file start, in ground x
+const TRAVEL = 190; // distance a file moves before it has vanished into the drive
+const REST = [0.12, 0.12, 0.12]; // static resting progress (reduced motion shows only the first file)
 const FW = 46;
 const FD = 18;
 const FH = 9;
+const TAG_W = 122;
+const TAG_H = 38;
 
 export function ProteinFigure() {
   const g = useRef<SVGGElement>(null);
@@ -244,10 +273,13 @@ export function ProteinFigure() {
           n.setAttribute('cy', f1(q[1]));
           n.setAttribute('r', f1(f.r));
         } else {
-          n.setAttribute('points', polyPoints(f));
-          n.setAttribute('class', faceClass(prim, f));
-          n.style.strokeWidth = f1(0.7 + 0.9 * f.t);
-          n.style.strokeOpacity = f1(0.3 + 0.7 * f.t);
+          const [poly, edge] = [n.firstElementChild!, n.lastElementChild as SVGElement];
+          poly.setAttribute('points', polyPoints(f));
+          poly.setAttribute('class', faceClass(prim, f));
+          edge.setAttribute('d', edgePath(prim, f));
+          const es = edgeStyle(f);
+          edge.style.strokeWidth = es.strokeWidth;
+          edge.style.strokeOpacity = es.strokeOpacity;
         }
         group.appendChild(n);
       }
@@ -287,7 +319,6 @@ export function ProteinFigure() {
   }, []);
 
   const first = sorted(REST_ANGLE);
-  const dx = (p: number) => TRAVEL * p;
   return (
     <figure
       ref={root}
@@ -295,7 +326,7 @@ export function ProteinFigure() {
       role="img"
       aria-label="A protein drawn as a slowly turning 3D line drawing of alpha helices and beta strands. Next to it, its data files (a structure file, embeddings and a simulation trajectory, gigabytes each) flow into an Agent Drive."
     >
-      <svg viewBox="0 0 400 350" aria-hidden="true" focusable="false">
+      <svg viewBox="45 0 310 310" aria-hidden="true" focusable="false">
         <ellipse
           ref={ring}
           className="pf-ring"
@@ -316,22 +347,20 @@ export function ProteinFigure() {
                 r={f1(f.r)}
               />
             ) : (
-              <polygon
-                key={i}
-                data-i={i}
-                className={faceClass(prim, f)}
-                points={polyPoints(f)}
-                style={{ strokeWidth: f1(0.7 + 0.9 * f.t), strokeOpacity: f1(0.3 + 0.7 * f.t) }}
-              />
+              <g key={i} data-i={i}>
+                <polygon className={faceClass(prim, f)} points={polyPoints(f)} />
+                <path className="pf-e" d={edgePath(prim, f)} style={edgeStyle(f)} />
+              </g>
             ),
           )}
         </g>
-        <text className="kt" x={CX} y={342} textAnchor="middle" style={{ fontSize: 12.5 }}>
+        <text className="kt" x={CX} y={302} textAnchor="middle" style={{ fontSize: 12.5 }}>
           PROTEIN 7XKA · HELICES + STRANDS
         </text>
       </svg>
 
-      <svg viewBox="0 0 430 262" aria-hidden="true" focusable="false">
+      <svg viewBox="20 30 410 280" aria-hidden="true" focusable="false">
+        {/* Connectors first, so no line is ever drawn over a label. */}
         {FILES.map((f) => (
           <polyline
             key={f.name}
@@ -344,47 +373,42 @@ export function ProteinFigure() {
           return (
             <g
               key={f.name}
-              className="pf-file"
+              className={k === 0 ? 'pf-file' : 'pf-file pf-extra'}
               style={
                 {
-                  '--delay': `${k * 2.5}s`,
+                  '--delay': `${k * 3}s`,
                   '--ex': `${f1(C * TRAVEL)}px`,
                   '--ey': `${f1(S * TRAVEL)}px`,
-                  '--rx': `${f1(C * dx(REST[k]!))}px`,
-                  '--ry': `${f1(S * dx(REST[k]!))}px`,
+                  '--rx': `${f1(C * TRAVEL * REST[k]!)}px`,
+                  '--ry': `${f1(S * TRAVEL * REST[k]!)}px`,
                 } as React.CSSProperties
               }
             >
               <g transform={`translate(${f1(C * X0)} ${f1(S * X0)})`}>
                 <Box x={0} y={f.y} z={0} w={FW} d={FD} h={FH} />
+                <line className="kl" x1={lx} y1={ly} x2={lx} y2={ly - 10} />
+                <rect
+                  className="ka"
+                  x={lx - TAG_W / 2}
+                  y={ly - 10 - TAG_H}
+                  width={TAG_W}
+                  height={TAG_H}
+                />
                 <text
                   className="kn"
                   x={lx}
-                  y={ly - 22}
+                  y={ly - 10 - TAG_H + 16}
                   textAnchor="middle"
-                  style={{
-                    fontSize: 14,
-                    paintOrder: 'stroke',
-                    stroke: '#fff',
-                    strokeWidth: 4,
-                    strokeLinejoin: 'round',
-                  }}
+                  style={{ fontSize: 14 }}
                 >
                   {f.name}
                 </text>
                 <text
                   className="kt"
                   x={lx}
-                  y={ly - 7}
+                  y={ly - 10 - TAG_H + 31}
                   textAnchor="middle"
-                  style={{
-                    fontSize: 13.5,
-                    letterSpacing: 0,
-                    paintOrder: 'stroke',
-                    stroke: '#fff',
-                    strokeWidth: 4,
-                    strokeLinejoin: 'round',
-                  }}
+                  style={{ fontSize: 13.5, letterSpacing: 0 }}
                 >
                   {f.size}
                 </text>
@@ -410,9 +434,9 @@ export function ProteinFigure() {
         </g>
         <text
           className="kn"
-          x={P(D / 2, D / 2, STACK)[0]}
-          y={P(0, 0, STACK)[1] - 14}
-          textAnchor="middle"
+          x={P(D, 0, STACK)[0]}
+          y={P(0, 0, STACK)[1] - 22}
+          textAnchor="end"
           style={{ fontSize: 15 }}
         >
           Agent Drive
