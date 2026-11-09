@@ -272,10 +272,12 @@ export default function Home() {
 
       <section id="games">
         <div className="l-wrap">
-          <div className="l-tag">{GAMES.tag}</div>
-          <h2>{GAMES.title}</h2>
-          <p className="l-lede">{GAMES.lede}</p>
           <div className="games-grid">
+            <div className="games-text">
+              <div className="l-tag">{GAMES.tag}</div>
+              <h2>{GAMES.title}</h2>
+              <p className="l-lede">{GAMES.lede}</p>
+            </div>
             <GamesFigure />
             <Log
               heading="Drive contents: the asset library a new session opens with"

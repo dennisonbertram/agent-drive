@@ -164,19 +164,20 @@ const Coin = () => {
   );
 };
 
-// ---- Agent Drive (smaller hero drive-stack) hovering above the island ----
-const D = 84;
-const SLAB = 17;
-const GAP = 5;
+// ---- Agent Drive (smaller hero drive-stack), up and to the right of the island ----
+const D = 76;
+const SLAB = 15;
+const GAP = 4;
 const FOLDERS = ['/sprites', '/levels', '/audio'];
 const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
-const START = PI(N * T, 2 * T, H); // right edge of the island
-const RISE = 150; // assets float straight up (the isometric z axis) into the drive
-const DX = 30; // the drive's bottom-front corner sits this far right of the connector
-const cx = START[0] + DX;
-const edge = (D / 2) * (1 - DX / (D * C)); // drive bottom edge height below its centre at the connector
-const cy = START[1] - RISE - edge;
-const PD = proj(cx, cy - D / 2);
+const START = PI(N * T + 14, 2 * T + 10, H); // just outside the island's right edge
+const DIR = [C, -S] as const; // along the iso -y axis, up and to the right
+const TRAVEL = 170;
+const END: Pt = [START[0] + DIR[0] * TRAVEL, START[1] + DIR[1] * TRAVEL];
+// The connector meets the front face of the bottom folder, to the right of its label.
+const PD0 = proj(0, 0);
+const face = PD0(D - 9, D, SLAB / 2);
+const PD = proj(END[0] - face[0], END[1] - face[1]);
 const topD = (z: number) => `matrix(${C} ${S} ${-C} ${S} ${PD(0, 0, z).map(r1).join(' ')})`;
 const frontD = (z: number) => `matrix(${C} ${S} 0 1 ${PD(0, D, z).map(r1).join(' ')})`;
 const PIXELS = ['010', '111', '101'];
@@ -189,13 +190,13 @@ export function GamesFigure() {
     <figure className="landing-fig games-fig">
       <style>{walkKeyframes()}</style>
       <svg
-        viewBox="15 -6 320 376"
+        viewBox="12 94 448 278"
         role="img"
         aria-label="An animated isometric video-game level: a small blocky character walks a loop across a tile island with a tree and a treasure chest while a coin spins. Generated game assets (hero-run.png, level-03.json, theme.ogg) rise along a dashed line into an Agent Drive, which keeps them for the next session."
       >
         <g aria-hidden="true">
           {/* Connector, then the drive over its upper end */}
-          <polyline className="gcon" points={pts([START, [START[0], START[1] - RISE + 14]])} />
+          <polyline className="gcon" points={pts([START, END])} />
           <circle className="kdot" cx={r1(START[0])} cy={r1(START[1])} r={2.5} />
           {/* Drive, back to front */}
           {FOLDERS.map((f, i) => {
@@ -274,7 +275,8 @@ export function GamesFigure() {
                 style={{
                   animationDelay: `${i * 3}s`,
                   ['--p' as string]: 0.5,
-                  ['--dy' as string]: `${-RISE}px`,
+                  ['--dx' as string]: `${r1(DIR[0] * TRAVEL)}px`,
+                  ['--dy' as string]: `${r1(DIR[1] * TRAVEL)}px`,
                 }}
               >
                 <g transform="translate(0 -4)">
