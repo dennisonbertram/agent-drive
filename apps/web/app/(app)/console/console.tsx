@@ -1200,7 +1200,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       .addKey(driveId, key, {
         ...(path === undefined ? {} : { path }),
         trusted: trustedDrives.current.get(driveId) === key,
-        live,
       })
       .catch(() => 'skipped' as const);
     if (!live()) return;

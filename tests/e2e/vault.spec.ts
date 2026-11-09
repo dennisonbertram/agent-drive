@@ -388,6 +388,86 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
   });
 });
 
+test('ux round 08: closing the preview does not cancel recovery-key persistence', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    await page.reload();
+    await page.goto(`/console?drive=${seeded.b.id}`);
+    await nameButton(page, 'other.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
+
+    let releaseVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => (releaseVerification = resolve));
+    let verificationSeen = false;
+    const verificationRoute = `**/api/console/drives/${seeded.b.id}/versions?*`;
+    await page.route(verificationRoute, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (
+        request.method() !== 'GET' ||
+        url.searchParams.get('path') !== '/other.txt' ||
+        url.searchParams.get('limit') !== '1'
+      ) {
+        await route.continue();
+        return;
+      }
+      verificationSeen = true;
+      await verificationGate;
+      await route.continue();
+    });
+
+    try {
+      const slotResponse = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          response.url().includes(`/drives/${seeded.b.id}/account-key`),
+        { timeout: 15_000 },
+      );
+      await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
+      await expect.poll(() => verificationSeen).toBe(true);
+      const preview = page.getByRole('dialog', { name: 'other.txt' });
+      await expect(preview).toContainText(`OTHER ${seeded.sentinel}`);
+      await page.keyboard.press('Escape');
+      await expect(preview).toHaveCount(0);
+
+      releaseVerification();
+      expect((await slotResponse).ok()).toBe(true);
+      await settle(page);
+      await expect(
+        page.getByText('Added to your account. Next time your passphrase opens it.', {
+          exact: true,
+        }),
+      ).toHaveCount(0);
+      await expect(
+        page.getByText(
+          'We couldn’t confirm this key was saved for passphrase unlock. Keep your recovery file.',
+          { exact: true },
+        ),
+      ).toHaveCount(0);
+    } finally {
+      releaseVerification();
+      await page.unroute(verificationRoute);
+    }
+
+    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await expect(chip(page)).toContainText('Locked');
+    await nameButton(page, 'other.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
+      `OTHER ${seeded.sentinel}`,
+    );
+  });
+});
+
 test('ux round 08: failed slot save still opens preview and reports uncertainty after close', async ({
   page,
   context,
