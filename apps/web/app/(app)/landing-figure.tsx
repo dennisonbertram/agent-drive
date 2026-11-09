@@ -1,4 +1,5 @@
-// Static server-rendered isometric SVG: one Agent Drive (a stack of folders) wired to four verified agent tools plus a generic tile.
+import type { CSSProperties, ReactNode } from 'react';
+// Server-rendered isometric SVG (animated with CSS only, see the hero-figure block in landing.css): one Agent Drive (a stack of folders) wired to four verified agent tools plus a generic tile.
 const FOLDERS = ['/memory', '/outputs', '/work', '/handoff'];
 
 // 24x24 icon paths (Simple Icons, CC0). Products without an icon show a lettered black square;
@@ -30,22 +31,40 @@ const topM = (x: number, y: number, z: number) =>
 const frontM = (x: number, y: number, z: number) => `matrix(${C} ${S} 0 1 ${P(x, y, z).join(' ')})`;
 
 type BoxSpec = { x: number; y: number; z: number; w: number; d: number; h: number };
-const Box = ({ x, y, z, w, d, h }: BoxSpec) => (
-  <>
-    <polygon
-      className="ks2"
-      points={pts([P(x + w, y, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x + w, y, z + h)])}
-    />
-    <polygon
-      className="ks1"
-      points={pts([P(x, y + d, z), P(x + w, y + d, z), P(x + w, y + d, z + h), P(x, y + d, z + h)])}
-    />
-    <polygon
-      className="ka"
-      points={pts([P(x, y, z + h), P(x + w, y, z + h), P(x + w, y + d, z + h), P(x, y + d, z + h)])}
-    />
-  </>
-);
+const Box = ({ x, y, z, w, d, h, P: Pr = P }: BoxSpec & { P?: typeof P }) => {
+  const P = Pr;
+  return (
+    <>
+      <polygon
+        className="ks2"
+        points={pts([
+          P(x + w, y, z),
+          P(x + w, y + d, z),
+          P(x + w, y + d, z + h),
+          P(x + w, y, z + h),
+        ])}
+      />
+      <polygon
+        className="ks1"
+        points={pts([
+          P(x, y + d, z),
+          P(x + w, y + d, z),
+          P(x + w, y + d, z + h),
+          P(x, y + d, z + h),
+        ])}
+      />
+      <polygon
+        className="ka"
+        points={pts([
+          P(x, y, z + h),
+          P(x + w, y, z + h),
+          P(x + w, y + d, z + h),
+          P(x, y + d, z + h),
+        ])}
+      />
+    </>
+  );
+};
 
 const Tile = ({ t, x, y, w, d, h = 22 }: { t: Tool; h?: number } & Omit<BoxSpec, 'z' | 'h'>) => (
   <>
@@ -81,8 +100,14 @@ const Tile = ({ t, x, y, w, d, h = 22 }: { t: Tool; h?: number } & Omit<BoxSpec,
   </>
 );
 
+const SLAB = 24;
+const GAP = 6;
+const D = 120;
+const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
+
 // A connector on the ground plane, from a tile edge to the drive edge.
-const Wire = ({ a, b }: { a: [number, number]; b: [number, number] }) => {
+type Pt = [number, number];
+const Wire = ({ a, b }: { a: Pt; b: Pt }) => {
   const [ax, ay] = P(a[0], a[1], 0);
   return (
     <>
@@ -92,10 +117,99 @@ const Wire = ({ a, b }: { a: [number, number]; b: [number, number] }) => {
   );
 };
 
-const SLAB = 24;
-const GAP = 6;
-const D = 120;
-const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
+// Wire ends on the ground plane: a at the tile, b at the drive.
+const WIRES = {
+  claude: { a: [20, 160], b: [20, 120] },
+  pi: { a: [133, 30], b: [120, 30] },
+  codex: { a: [72, 265], b: [72, 120] },
+  opencode: { a: [225, 100], b: [120, 100] },
+  any: { a: [110, 190], b: [110, 120] },
+} as const satisfies Record<string, { a: Pt; b: Pt }>;
+
+// One file slab per event. Loop length is LOOP seconds (keep in sync with landing.css).
+// At most two slabs are on screen at once, and never two on the same side, so tags never meet.
+const LOOP = 12;
+const ARRIVE = 0.22 * LOOP;
+type Ev = {
+  wire: keyof typeof WIRES;
+  tag: string;
+  folder: number; // index into FOLDERS
+  delay: number;
+  out?: boolean; // travels out of the drive
+  at: Pt; // tag centre, relative to the slab (screen units)
+};
+const EVENTS: Ev[] = [
+  { wire: 'claude', tag: '/handoff/next.md', folder: 3, delay: 0.3, at: [-60, -20] },
+  { wire: 'opencode', tag: '/work/plan.md', folder: 2, delay: 1.2, at: [-40, 16] },
+  { wire: 'codex', tag: '/handoff/next.md', folder: 3, delay: 3.5, out: true, at: [120, -30] },
+  { wire: 'pi', tag: '/outputs/report.pdf', folder: 1, delay: 5.2, at: [0, -20] },
+  { wire: 'any', tag: '/memory/notes.md', folder: 0, delay: 7.2, at: [40, -20] },
+  { wire: 'opencode', tag: '/memory/log.txt', folder: 0, delay: 9.4, at: [-40, 16] },
+];
+
+// Slab-local projection (same axes as P, origin at the slab centre).
+const Q = (x: number, y: number, z: number) => [(x - y) * C, (x + y) * S - z] as const;
+const px = (n: number) => `${n.toFixed(1)}px`;
+const TAG_H = 16;
+
+const Slab = ({ e }: { e: Ev }) => {
+  const w = WIRES[e.wire];
+  const [s, t] = e.out ? [w.b, w.a] : [w.a, w.b];
+  // Pi's wire is short, so its slab starts on the tile.
+  const from = e.wire === 'pi' && !e.out ? ([150, 30] as Pt) : s;
+  const [x0, y0] = P(from[0], from[1], 0);
+  const [x1, y1] = P(t[0], t[1], 0);
+  const tw = e.tag.length * 6.3 + 10;
+  const [cx, cy] = e.at; // tag centre relative to the slab
+  const tx = cx - tw / 2;
+  const ty = cy - TAG_H / 2;
+  const vars = {
+    '--x0': px(x0),
+    '--y0': px(y0),
+    '--x1': px(x1),
+    '--y1': px(y1),
+    '--d': `${e.delay}s`,
+  } as CSSProperties;
+  return (
+    <g className="hf-slab" style={vars}>
+      <g transform="translate(0,-9)">
+        <Box x={-10} y={-6} z={0} w={20} d={12} h={5} P={Q} />
+        <g className="hf-tagg">
+          <rect className="hf-tagbg" x={tx} y={ty} width={tw} height={TAG_H} rx={2} />
+          <text className="hf-tag" x={tx + tw / 2} y={ty + 11.5} textAnchor="middle">
+            {e.tag}
+          </text>
+        </g>
+      </g>
+    </g>
+  );
+};
+
+const Flow = ({ e }: { e: Ev }) => {
+  const w = WIRES[e.wire];
+  return (
+    <polyline
+      className={e.out ? 'hf-flow hf-out' : 'hf-flow'}
+      points={pts([P(w.a[0], w.a[1], 0), P(w.b[0], w.b[1], 0)])}
+      style={{ '--d': `${e.delay}s` } as CSSProperties}
+    />
+  );
+};
+
+// Wraps a folder layer in one group per slab event that touches it, so each can lift it once per loop.
+const Lift = ({ i, children }: { i: number; children: ReactNode }) =>
+  EVENTS.filter((e) => e.folder === i).reduceRight(
+    (acc, e, k) => (
+      <g
+        key={k}
+        className="hf-lift"
+        style={{ '--d': `${e.out ? e.delay : e.delay + ARRIVE}s` } as CSSProperties}
+      >
+        {acc}
+      </g>
+    ),
+    <>{children}</>,
+  );
 
 export function LandingFigure() {
   const [claude, codex, pi, opencode, any] = TOOLS as [Tool, Tool, Tool, Tool, Tool];
@@ -111,19 +225,31 @@ export function LandingFigure() {
         {FOLDERS.map((f, i) => {
           const z = i * (SLAB + GAP);
           return (
-            <g key={f}>
+            <Lift key={f} i={i}>
               <Box x={0} y={0} z={z} w={D} d={D} h={SLAB} />
-              <g transform={frontM(0, D, z)}>
+              <g transform={frontM(0, D, z + SLAB)}>
                 <text className="kf" x={12} y={SLAB - 8} style={{ fontSize: 12 }}>
                   {f}
                 </text>
               </g>
-            </g>
+            </Lift>
           );
         })}
-        <g transform={topM(0, 0, STACK)}>
-          <circle className="kled" cx={D - 18} cy={18} r={6} />
-        </g>
+        <Lift i={FOLDERS.length - 1}>
+          <g transform={topM(0, 0, STACK)}>
+            <circle className="kled" cx={D - 18} cy={18} r={6} />
+            {EVENTS.filter((e) => !e.out).map((e, k) => (
+              <circle
+                key={k}
+                className="hf-halo"
+                cx={D - 18}
+                cy={18}
+                r={6}
+                style={{ '--d': `${e.delay + ARRIVE}s` } as CSSProperties}
+              />
+            ))}
+          </g>
+        </Lift>
         <text
           className="kn"
           x={P(60, 60, STACK)[0]}
@@ -133,16 +259,24 @@ export function LandingFigure() {
         >
           Agent Drive
         </text>
-        <Wire a={[20, 160]} b={[20, D]} />
-        <Wire a={[133, 30]} b={[D, 30]} />
-        <Wire a={[72, 265]} b={[72, D]} />
-        <Wire a={[225, 100]} b={[D, 100]} />
-        <Wire a={[110, 190]} b={[110, D]} />
+        {(Object.values(WIRES) as { a: Pt; b: Pt }[]).map((w, i) => (
+          <Wire key={i} a={w.a} b={w.b} />
+        ))}
+        <g aria-hidden="true">
+          {EVENTS.map((e, i) => (
+            <Flow key={i} e={e} />
+          ))}
+        </g>
         <Tile t={claude} x={-40} y={160} w={84} d={40} h={20} />
         <Tile t={pi} x={133} y={0} w={84} d={40} h={20} />
         <Tile t={any} x={100} y={190} w={120} d={50} h={32} />
         <Tile t={codex} x={30} y={265} w={84} d={40} h={20} />
         <Tile t={opencode} x={225} y={80} w={84} d={40} h={20} />
+        <g aria-hidden="true">
+          {EVENTS.map((e, i) => (
+            <Slab key={i} e={e} />
+          ))}
+        </g>
       </svg>
     </figure>
   );
