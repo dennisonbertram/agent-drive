@@ -8,17 +8,21 @@ export function DocShell({
   eyebrow,
   title,
   mdHref,
+  sidebar,
   children,
 }: {
   eyebrow: string;
   title: string;
   mdHref: string;
+  /** Docs navigation. Absent on compare and legal pages. */
+  sidebar?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <>
       <SiteHeader />
-      <div className="doc-page">
+      <div className={sidebar ? 'doc-page doc-page-side' : 'doc-page'}>
+        {sidebar}
         <main>
           <header className="doc-heading">
             <p className="doc-eyebrow">{eyebrow}</p>

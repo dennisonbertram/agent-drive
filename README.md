@@ -4,9 +4,9 @@ Google Drive for agents: encrypted file storage on S3, used through an MCP serve
 
 - [User stories](docs/user-stories.md)
 - [Build plan](docs/plan.md)
-- [Phase 1 API contract](docs/api.md)
+- [HTTP API](docs/api.md)
 - [Client encryption format](docs/crypto.md)
-- [CLI and sync](docs/cli.md)
+- [CLI reference](docs/cli.md)
 - [Product quickstart](docs/quickstart.md)
 - [Deployment, deletion maintenance, and release gates](docs/deployment.md)
 

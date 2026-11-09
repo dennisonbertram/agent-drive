@@ -235,3 +235,121 @@
     margin-top: 6px;
   }
 }
+
+/* Docs layout: sidebar, mobile menu, pager. */
+.doc-section {
+  margin: 32px 0 12px;
+  font-size: 1.375rem;
+  letter-spacing: -0.02em;
+  font-weight: 500;
+}
+.doc-page-side {
+  max-width: calc(880px + 15rem + 48px);
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 880px);
+  column-gap: 48px;
+  align-items: start;
+}
+.doc-page-side > .doc-footer {
+  grid-column: 1 / -1;
+}
+.doc-side-desktop {
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
+  margin-top: 44px;
+}
+.doc-menu {
+  display: none;
+}
+.doc-nav h2 {
+  margin: 20px 0 8px;
+}
+.doc-nav div:first-child h2 {
+  margin-top: 0;
+}
+.doc-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.doc-nav a {
+  display: block;
+  padding: 6px 10px;
+  border-left: 2px solid var(--line);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.doc-nav a:hover {
+  color: var(--ink);
+}
+.doc-nav a[aria-current='page'] {
+  border-left-color: var(--sig);
+  background: var(--paper-2);
+  color: var(--ink);
+  font-weight: 500;
+}
+.doc-pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line-strong);
+}
+.doc-pager a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 44px;
+  max-width: 48%;
+  color: var(--link);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.doc-pager a span {
+  font: 400 11px/1.2 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.doc-pager-next {
+  margin-left: auto;
+  text-align: right;
+}
+.doc-menu summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+@media (max-width: 768px) {
+  .doc-page-side {
+    display: block;
+  }
+  .doc-side-desktop {
+    display: none;
+  }
+  .doc-menu {
+    display: block;
+    margin-top: 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+  }
+  .doc-menu summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 16px;
+    cursor: pointer;
+    font: 500 0.875rem var(--sans);
+  }
+  .doc-menu .doc-nav {
+    padding: 0 16px 16px;
+  }
+  .doc-page-side .doc-heading {
+    margin-top: 24px;
+  }
+}

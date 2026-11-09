@@ -1,5 +1,5 @@
 import { COMPARISONS, comparison, compareIndexMarkdown, comparisonMarkdown } from './compare';
-import { DOCS, docBody, docMeta } from './docs';
+import { DOCS, docBody, docMeta, sectionedDocs } from './docs';
 import { homeMarkdown } from './home';
 import { LEGAL, legalMarkdown } from './legal';
 import { pricingMarkdown } from './pricing';
@@ -7,10 +7,21 @@ import { pricingMarkdown } from './pricing';
 /** HTML path for a Markdown slug ("index" is the homepage). */
 export const htmlPath = (slug: string) => (slug === 'index' ? '/' : `/${slug}`);
 
+const docLines = (origin: string, level: string) =>
+  sectionedDocs()
+    .map(
+      ({ section, docs }) =>
+        `${level} ${section}\n\n${docs.map((d) => `- [${d.title}](${origin}/docs/${d.slug}.md): ${d.summary}`).join('\n')}`,
+    )
+    .join('\n\n');
+
 export function docsIndexMarkdown(origin: string): string {
   return `# Agent Drive docs
 
-${DOCS.map((d) => `- [${d.title}](${origin}/docs/${d.slug}.md): ${d.summary}`).join('\n')}
+${docLines(origin, '##')}
+
+## For agents
+
 - [Agent setup guide](${origin}/llms.txt): the instructions an agent follows to connect.
 `;
 }
@@ -60,7 +71,7 @@ Every page below is also available as Markdown at the URL shown. The setup guide
 
 ## Docs
 
-${DOCS.map((d) => `- [${d.title}](${origin}/docs/${d.slug}.md): ${d.summary}`).join('\n')}
+${docLines(origin, '###')}
 
 ## Pages
 
