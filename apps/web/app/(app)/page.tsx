@@ -21,7 +21,9 @@ import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
 import { LandingFigure } from './landing-figure';
 import { ProteinFigure } from './protein-figure';
+import { GamesFigure } from './games-figure';
 import '../styles/landing.css';
+import '../styles/games-figure.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -274,18 +276,21 @@ export default function Home() {
           <div className="l-tag">{GAMES.tag}</div>
           <h2>{GAMES.title}</h2>
           <p className="l-lede">{GAMES.lede}</p>
-          <Log
-            heading="Drive contents: the asset library a new session opens with"
-            cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
-            label="Example drive listing: a hero sprite, a stone texture, a music loop and a level file, each with its size and the agent that saved it."
-            caption="The next session reads these files instead of regenerating them."
-            rows={[
-              ['/assets/sprites/hero-run.png', '248 KB', 'sprite-agent', 'Tue'],
-              ['/assets/textures/stone-wall.png', '3.1 MB', 'texture-agent', 'Tue'],
-              ['/assets/audio/theme-loop.ogg', '5.6 MB', 'audio-agent', 'Wed'],
-              ['/levels/level-03.json', '84 KB', 'level-agent', 'Thu'],
-            ]}
-          />
+          <div className="games-grid">
+            <GamesFigure />
+            <Log
+              heading="Drive contents: the asset library a new session opens with"
+              cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
+              label="Example drive listing: a hero sprite, a stone texture, a music loop and a level file, each with its size and the agent that saved it."
+              caption="The next session reads these files instead of regenerating them."
+              rows={[
+                ['/assets/sprites/hero-run.png', '248 KB', 'sprite-agent', 'Tue'],
+                ['/assets/textures/stone-wall.png', '3.1 MB', 'texture-agent', 'Tue'],
+                ['/assets/audio/theme-loop.ogg', '5.6 MB', 'audio-agent', 'Wed'],
+                ['/levels/level-03.json', '84 KB', 'level-agent', 'Thu'],
+              ]}
+            />
+          </div>
         </div>
       </section>
 
