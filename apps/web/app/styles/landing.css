@@ -118,6 +118,9 @@
   gap: 40px;
   align-items: center;
 }
+.l-g.top {
+  align-items: start;
+}
 .l-hero h1 {
   margin-top: 20px;
 }
@@ -191,76 +194,6 @@
   flex: none;
   white-space: nowrap;
   cursor: pointer;
-}
-.landing-fig svg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-.landing-fig {
-  margin: 0;
-}
-.landing-fig .kp {
-  fill: none;
-  stroke: #111;
-  stroke-width: 1;
-  stroke-dasharray: 5 4;
-}
-.landing-fig .ka {
-  fill: #fff;
-  stroke: #111;
-  stroke-width: 1;
-}
-.landing-fig .kt {
-  font:
-    500 11px 'JetBrains Mono',
-    monospace;
-  letter-spacing: 0.1em;
-  fill: #6b6963;
-}
-.landing-fig .kn {
-  font:
-    500 13.5px 'JetBrains Mono',
-    monospace;
-  fill: #111;
-}
-.landing-fig .kf {
-  font:
-    400 13px 'JetBrains Mono',
-    monospace;
-  fill: #111;
-}
-.landing-fig .ks1 {
-  fill: #e6e4df;
-  stroke: #111;
-  stroke-width: 1;
-}
-.landing-fig .ks2 {
-  fill: #c9c6bf;
-  stroke: #111;
-  stroke-width: 1;
-}
-.landing-fig .kdot {
-  fill: #111;
-}
-.landing-fig .kl {
-  fill: none;
-  stroke: #111;
-  stroke-width: 1;
-}
-.landing-fig .ki,
-.landing-fig .km {
-  fill: #111;
-}
-.landing-fig .kmt {
-  font:
-    600 8.5px 'Inter Tight',
-    sans-serif;
-  fill: #fff;
-}
-.landing-fig .kled {
-  fill: #ff4a1c;
-  stroke: #111;
 }
 
 /* problem */
@@ -537,9 +470,6 @@
     grid-template-columns: 1fr;
     gap: 48px;
   }
-  .landing-fig {
-    max-width: 460px;
-  }
   .landing h1 {
     font-size: 64px;
   }
@@ -595,9 +525,6 @@
   }
   .l-panel code {
     flex-basis: 100%;
-  }
-  .landing-fig {
-    margin-top: 8px;
   }
   .l-three > div {
     grid-template-columns: 1fr;

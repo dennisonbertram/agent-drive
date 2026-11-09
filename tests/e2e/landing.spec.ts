@@ -35,16 +35,19 @@ test.describe('landing page', () => {
     ).toBeVisible();
   });
 
-  test('hero figure lists only verified tools plus a generic tile', async ({ page }) => {
+  test('hero figure names only verified tools, with no sections listing files twice', async ({
+    page,
+  }) => {
     await page.goto('/');
-    const fig = page.locator('.landing-fig svg.dsk');
-    const names = await fig.locator('text.kn').allTextContents();
-    expect(names.filter((n) => n !== 'Agent Drive').sort()).toEqual(
-      ['Claude Code', 'Codex', 'pi', 'opencode', 'Any agent with a shell or MCP'].sort(),
-    );
-    const label = (await fig.getAttribute('aria-label')) ?? '';
+    const label =
+      (await page.locator('.te-hero svg[role="img"]').first().getAttribute('aria-label')) ?? '';
+    for (const tool of ['Claude Code', 'Codex', 'pi', 'opencode', 'shell or MCP'])
+      expect(label).toContain(tool);
     for (const gone of ['Gemini', 'Cursor', 'Amp', 'Muse', 'Dots', 'trace-bot'])
       expect(label).not.toContain(gone);
+    // the games and protein sections show their files in the figure, not in a table
+    await expect(page.locator('#games .l-log, #protein .l-log')).toHaveCount(0);
+    await expect(page.locator('#games svg[role="img"], #protein svg[role="img"]')).toHaveCount(2);
   });
 
   test('shows no localhost and no paid-checkout notice', async ({ page }) => {

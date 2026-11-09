@@ -19,8 +19,11 @@ import {
 import { JsonLd } from '@/src/content/json-ld';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
-import { LandingFigure } from './landing-figure';
+import { HeroFigure } from './hero-figure';
+import { GamesFigure } from './games-figure';
+import { ProteinFigure } from './protein-figure';
 import '../styles/landing.css';
+import '../styles/te-figures.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -158,7 +161,7 @@ export default function Home() {
               </span>
             </p>
           </div>
-          <LandingFigure />
+          <HeroFigure />
         </div>
       </section>
 
@@ -269,41 +272,24 @@ export default function Home() {
       </section>
 
       <section id="games">
-        <div className="l-wrap">
-          <div className="l-tag">{GAMES.tag}</div>
-          <h2>{GAMES.title}</h2>
-          <p className="l-lede">{GAMES.lede}</p>
-          <Log
-            heading="Drive contents: the asset library a new session opens with"
-            cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
-            label="Example drive listing: a hero sprite, a stone texture, a music loop and a level file, each with its size and the agent that saved it."
-            caption="The next session reads these files instead of regenerating them."
-            rows={[
-              ['/assets/sprites/hero-run.png', '248 KB', 'sprite-agent', 'Tue'],
-              ['/assets/textures/stone-wall.png', '3.1 MB', 'texture-agent', 'Tue'],
-              ['/assets/audio/theme-loop.ogg', '5.6 MB', 'audio-agent', 'Wed'],
-              ['/levels/level-03.json', '84 KB', 'level-agent', 'Thu'],
-            ]}
-          />
+        <div className="l-wrap l-g top">
+          <div>
+            <div className="l-tag">{GAMES.tag}</div>
+            <h2>{GAMES.title}</h2>
+            <p className="l-lede">{GAMES.lede}</p>
+          </div>
+          <GamesFigure />
         </div>
       </section>
 
       <section id="protein">
-        <div className="l-wrap">
-          <div className="l-tag">{PROTEIN.tag}</div>
-          <h2>{PROTEIN.title}</h2>
-          <p className="l-lede">{PROTEIN.lede}</p>
-          <Log
-            heading="Drive contents: one project, shared by every agent"
-            cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
-            label="Example drive listing: a structure file, an embeddings file of 3.2 GB and a simulation run of 1.8 GB, each with the agent that saved it."
-            caption="Each file can be up to 5 GiB."
-            rows={[
-              ['/proteins/structures/1abc-fold.pdb', '412 MB', 'fold-agent', 'Mon'],
-              ['/proteins/embeddings/batch-07.npy', '3.2 GB', 'embed-agent', 'Tue'],
-              ['/proteins/runs/md-run-12/trajectory.xtc', '1.8 GB', 'sim-agent', 'Thu'],
-            ]}
-          />
+        <div className="l-wrap l-g top">
+          <div>
+            <div className="l-tag">{PROTEIN.tag}</div>
+            <h2>{PROTEIN.title}</h2>
+            <p className="l-lede">{PROTEIN.lede}</p>
+          </div>
+          <ProteinFigure />
         </div>
       </section>
 

@@ -1,0 +1,26 @@
+/* Landing illustrations (hero, games, protein): Swiss grid + dot-matrix. Drawn in an SVG
+   viewBox of 520 x 420; labels use --fs, which the component raises when the figure is narrow
+   so that text never renders below 11px. */
+.te-fig {
+  margin: 0;
+  width: 100%;
+  max-width: 560px;
+}
+.te-fig svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  --fs: 10px;
+}
+.te-fig .m {
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  font-size: var(--fs);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+/* The site loads JetBrains Mono at 400 and 500 only. */
+.te-fig .b,
+.te-fig .big {
+  font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  font-weight: 500;
+}
