@@ -215,3 +215,10 @@
     gap: 32px;
   }
 }
+
+/* Reduced motion shows one asset on its way into the drive. */
+@media (prefers-reduced-motion: reduce) {
+  .games-fig .g-extra {
+    display: none;
+  }
+}
