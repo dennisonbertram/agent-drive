@@ -1,10 +1,21 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
+import { SiteFooter } from '../site-footer';
 import { billingRates, PLANS } from '@/src/billing/policy';
 import { allowance } from '@/src/content/plans';
-import { FAQ, FEATURES, HERO, PROBLEM, faqJsonLd } from '@/src/content/home';
+import { COMPARISONS } from '@/src/content/compare';
+import {
+  CANONICAL_ORIGIN,
+  FAQ,
+  FEATURES,
+  GAMES,
+  HERO,
+  PROBLEM,
+  PROTEIN,
+  RELAY,
+  faqJsonLd,
+} from '@/src/content/home';
 import { JsonLd } from '@/src/content/json-ld';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
@@ -84,11 +95,42 @@ function SetupPanel({ instruction, label }: { instruction: string; label: string
   );
 }
 
-export default async function Home() {
-  const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
-  const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
+/** Activity-log style listing, reused by the relay, games and protein sections. */
+function Log({
+  heading,
+  cols,
+  label,
+  caption,
+  rows,
+}: {
+  heading: string;
+  cols: string[];
+  label: string;
+  caption: string;
+  rows: string[][];
+}) {
+  return (
+    <div className="l-log" role="img" aria-label={label}>
+      <div className="l-tag">{heading}</div>
+      <div className="lr h">
+        {cols.map((c) => (
+          <span key={c}>{c}</span>
+        ))}
+      </div>
+      {rows.map((r) => (
+        <div className="lr" key={r[0]}>
+          {r.map((cell, i) => (
+            <span key={i}>{cell}</span>
+          ))}
+        </div>
+      ))}
+      <p className="l-cap">{caption}</p>
+    </div>
+  );
+}
+
+export default function Home() {
+  const instruction = `Set up Agent Drive: ${CANONICAL_ORIGIN}/llms.txt`;
   const install = `npm install -g @dennisonbertram/agent-drive`;
   const paid = paidAvailable();
   const plans = [
@@ -153,79 +195,115 @@ export default async function Home() {
 
       <section id="relay">
         <div className="l-wrap">
-          <div className="l-tag">Example</div>
-          <h2>A bot, a coder and an assistant on the same data.</h2>
-          <p className="l-lede">
-            Three agents on three platforms. None of them shares a machine. They meet in the drive.
-          </p>
+          <div className="l-tag">Long-running work</div>
+          <h2>{RELAY.title}</h2>
+          <p className="l-lede">{RELAY.lede}</p>
           <ul className="l-also">
             <li>
-              <b>Research:</b> each run starts from what the last one found.
+              <b>Research:</b> build on the previous round&apos;s data sets each round.
             </li>
             <li>
-              <b>Long-running goals:</b> the plan and progress survive restarts and new models.
+              <b>Game development:</b> keep generated assets between sessions.{' '}
+              <a href="#games">See how</a>.
+            </li>
+            <li>
+              <b>Protein research:</b> gigabytes of structure data in one place.{' '}
+              <a href="#protein">See how</a>.
             </li>
           </ul>
           <div className="l-line3 relay">
             <div>
-              <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
-              <p>Pulls today&apos;s posts about your app from X.</p>
+              <div className="l-tag">1 / Sales agent &middot; cloud worker</div>
+              <p>Exports this week&apos;s customer list.</p>
               <code>
-                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; posts.jsonl
-                /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive put customers.csv /data/customers/2026-11-09.csv --drive
+                &quot;$DRIVE_ID&quot;
               </code>
             </div>
             <div>
-              <div className="l-tag">2 / Devin &middot; Devin sandbox</div>
-              <p>
-                Reads the posts, builds the feature people asked for most, and writes up what
-                changed.
-              </p>
+              <div className="l-tag">2 / Coding agent &middot; sandbox</div>
+              <p>Works through the list and saves its full trace.</p>
               <code>
-                <span>$</span> agent-drive get --drive &quot;$DRIVE_ID&quot;
-                /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive get /data/customers/2026-11-09.csv --output customers.csv
+                --drive &quot;$DRIVE_ID&quot;
                 <br />
-                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; notes.md
-                /outputs/csv-export.md
+                <span>$</span> agent-drive capture --drive &quot;$DRIVE_ID&quot; --agent
+                coding-agent -- claude
               </code>
+              <p className="l-small">
+                Traces land in <code className="l-inl">/traces/coding-agent/2026-11-09/…</code>
+              </p>
             </div>
             <div>
-              <div className="l-tag">3 / Claude &middot; Claude desktop</div>
-              <p>Checks what changed through the MCP server and tells you.</p>
+              <div className="l-tag">3 / Review agent &middot; GPU box</div>
+              <p>Reads the week&apos;s traces and improves the next run.</p>
               <div className="l-say">
-                Devin shipped CSV export today. It was the most requested feature in this
-                morning&apos;s posts from X. Notes are in /outputs/csv-export.md.
+                Read 42 traces from this week. Updated /prompts/outreach.md with the three changes
+                that worked.
               </div>
             </div>
           </div>
-          <div
-            className="l-log"
-            role="img"
-            aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox."
-          >
-            <div className="l-tag">Drive activity</div>
-            <div className="lr h">
-              <span>PATH</span>
-              <span>AGENT</span>
-              <span>MACHINE</span>
-            </div>
-            <div className="lr">
-              <span>/inbox/x/2026-11-05.jsonl</span>
-              <span>grok-bot</span>
-              <span>cloud-worker</span>
-            </div>
-            <div className="lr">
-              <span>/outputs/csv-export.md</span>
-              <span>devin</span>
-              <span>devin-sandbox</span>
-            </div>
-          </div>
-          <p className="l-lede l-many">
-            Agents in different sandboxes read and write the same files. Each has its own key and
-            can be limited to writing in certain folders. Every version records which agent wrote
-            it, and a write that checks the version fails with a conflict instead of overwriting
-            newer work.
-          </p>
+          <Log
+            heading="Drive activity: who saved what, from where"
+            cols={['FILE', 'SAVED BY', 'FROM', 'WHEN']}
+            label="Drive activity: the sales agent saved the customer list from a cloud worker, the coding agent saved a trace from its sandbox, and the review agent saved the prompts file from a GPU box."
+            caption="Every file records which agent saved it and from which machine."
+            rows={[
+              ['/data/customers/2026-11-09.csv', 'sales-agent', 'cloud-worker', 'Mon 09:12'],
+              [
+                '/traces/coding-agent/2026-11-09/101500.123Z_….json',
+                'coding-agent',
+                'sandbox-7',
+                'Mon 10:15',
+              ],
+              ['/prompts/outreach.md', 'review-agent', 'gpu-box', 'Fri 17:40'],
+            ]}
+          />
+          <ul className="l-solve">
+            <li>Many agents, one drive</li>
+            <li>Every version kept, with who wrote it</li>
+            <li>Per-agent keys and folder limits</li>
+            <li>No silent overwrites</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="games">
+        <div className="l-wrap">
+          <div className="l-tag">{GAMES.tag}</div>
+          <h2>{GAMES.title}</h2>
+          <p className="l-lede">{GAMES.lede}</p>
+          <Log
+            heading="Drive contents: the asset library a new session opens with"
+            cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
+            label="Example drive listing: a hero sprite, a stone texture, a music loop and a level file, each with its size and the agent that saved it."
+            caption="The next session reads these files instead of regenerating them."
+            rows={[
+              ['/assets/sprites/hero-run.png', '248 KB', 'sprite-agent', 'Tue'],
+              ['/assets/textures/stone-wall.png', '3.1 MB', 'texture-agent', 'Tue'],
+              ['/assets/audio/theme-loop.ogg', '5.6 MB', 'audio-agent', 'Wed'],
+              ['/levels/level-03.json', '84 KB', 'level-agent', 'Thu'],
+            ]}
+          />
+        </div>
+      </section>
+
+      <section id="protein">
+        <div className="l-wrap">
+          <div className="l-tag">{PROTEIN.tag}</div>
+          <h2>{PROTEIN.title}</h2>
+          <p className="l-lede">{PROTEIN.lede}</p>
+          <Log
+            heading="Drive contents: one project, shared by every agent"
+            cols={['FILE', 'SIZE', 'SAVED BY', 'WHEN']}
+            label="Example drive listing: a structure file, an embeddings file of 3.2 GB and a simulation run of 1.8 GB, each with the agent that saved it."
+            caption="Each file can be up to 5 GiB."
+            rows={[
+              ['/proteins/structures/1abc-fold.pdb', '412 MB', 'fold-agent', 'Mon'],
+              ['/proteins/embeddings/batch-07.npy', '3.2 GB', 'embed-agent', 'Tue'],
+              ['/proteins/runs/md-run-12/trajectory.xtc', '1.8 GB', 'sim-agent', 'Thu'],
+            ]}
+          />
         </div>
       </section>
 
@@ -279,57 +357,22 @@ export default async function Home() {
         </div>
       </section>
 
-      <section id="connect">
-        <div className="l-wrap l-two">
-          <div>
-            <div className="l-tag">Connecting</div>
-            <h2>One line to the agent. One click from you.</h2>
-            <ol className="l-steps">
-              <li>
-                <i>1</i>
-                <b>Paste one line into your agent.</b>
-                <div className="t">{instruction}</div>
-              </li>
-              <li>
-                <i>2</i>
-                <b>The agent shows a pairing code.</b>
-                <div className="t">CXRH-TZJT</div>
-              </li>
-              <li>
-                <i>3</i>
-                <b>You approve it once.</b>
-              </li>
-            </ol>
-            <p className="l-nokey">No API key to copy.</p>
-            <p className="l-more">
-              Adding a second agent? Approve it in the browser, hand it a .env line, or let a
-              trusted agent grant it. <Link href="/docs">Read the docs</Link>.
-            </p>
+      <section id="compare">
+        <div className="l-wrap">
+          <div className="l-tag">Compared to</div>
+          <h2>Why not S3, git or Dropbox?</h2>
+          <div className="l-line3 feat">
+            {COMPARISONS.map((c) => (
+              <div key={c.slug}>
+                <div className="l-tag">{c.other}</div>
+                <p>{c.summary}</p>
+                <Link href={`/compare/${c.slug}`}>{c.title}</Link>
+              </div>
+            ))}
           </div>
-          <div className="l-pair" role="img" aria-label="Example approval page">
-            <div className="top">
-              <span className="l-tag">Approve agent</span>
-              <span className="l-led" />
-            </div>
-            <div className="c">CXRH-TZJT</div>
-            <h3>Connect trace-bot?</h3>
-            <div className="rows">
-              <div>
-                <span>Agent</span>
-                <b>trace-bot</b>
-              </div>
-              <div>
-                <span>Machine</span>
-                <b>MacBook</b>
-              </div>
-              <div>
-                <span>Account</span>
-                <b>sam@northwind.dev</b>
-              </div>
-            </div>
-            <p className="can">Read, write, delete and share files in this drive</p>
-            <span className="l-btn signal">Approve</span>
-          </div>
+          <p className="l-pnote">
+            <Link href="/compare">All comparisons</Link>
+          </p>
         </div>
       </section>
 
@@ -387,7 +430,6 @@ export default async function Home() {
             What counts as an API operation? <a href="#faq">See the FAQ above.</a>
           </p>
           <p className="l-pnote">
-            {paid ? '' : 'Paid checkout is not enabled yet. '}
             <Link href="/pricing">See full pricing</Link>
           </p>
         </div>
@@ -405,21 +447,7 @@ export default async function Home() {
         </div>
       </section>
 
-      <footer className="l-footer">
-        <div className="l-wrap">
-          <nav aria-label="Footer">
-            <Link href="/pricing">Pricing</Link>
-            <Link href="/docs">Docs</Link>
-            <Link href="/compare">Compare</Link>
-            <Link href="/privacy">Privacy</Link>
-            <Link href="/terms">Terms</Link>
-            <a href="mailto:support@agentdrive.xyz">Contact</a>
-            <Link href="/sign-in">Sign in</Link>
-            <Link href="/console">Console</Link>
-          </nav>
-          <span>{host}</span>
-        </div>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

@@ -4,8 +4,28 @@ import { egressNotMetered } from './pricing';
 /** Homepage copy that the Markdown twin reuses. Backticks mark inline code. */
 export const HERO = {
   title: 'Agent files that outlive the sandbox.',
-  lede: 'Agents save to their drive as they work. When the sandbox ends, the machine changes, or the work moves from Claude Code to Codex, the files are still there.',
-  next: 'Free to start. Your agent shows a code; you approve it once. No API keys to copy.',
+  lede: 'Agents get a cloud drive to save work that outlives a session or sandbox.',
+  next: 'Free to start.',
+};
+
+/** The public origin shown in copyable setup instructions. Never a local host. */
+export const CANONICAL_ORIGIN = 'https://agentdrive.xyz';
+
+export const RELAY = {
+  title: 'Long-running sessions need persistent data.',
+  lede: 'Frontier research, traces kept for training, research output too big for GitHub. Work that runs for days needs a place to live between sessions.',
+};
+
+export const GAMES = {
+  tag: 'Game development',
+  title: 'Keep every generated asset between sessions.',
+  lede: 'Agents that build games generate sprites, textures, audio and levels. Save them to the drive and the next session opens with the whole asset library, not an empty folder.',
+};
+
+export const PROTEIN = {
+  tag: 'Research data',
+  title: "Gigabytes of protein data don't fit in GitHub.",
+  lede: "Anthropic's Fable 6.2 can now do protein work. That work produces structure files, embeddings and simulation runs measured in gigabytes. GitHub blocks files over 100 MB. Agent Drive keeps them encrypted, versioned and shared with every agent on the project.",
 };
 
 export const PROBLEM = {
@@ -84,6 +104,12 @@ ${HERO.next}
 ## ${PROBLEM.title}
 
 ${PROBLEM.lede}
+
+## Use cases
+
+- Long-running work: ${RELAY.title} ${RELAY.lede}
+- ${GAMES.tag}: ${GAMES.title} ${GAMES.lede}
+- ${PROTEIN.tag}: ${PROTEIN.title} ${PROTEIN.lede}
 
 ## Features
 

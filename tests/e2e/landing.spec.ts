@@ -2,10 +2,12 @@ import { expect, test } from '@playwright/test';
 
 const H2 = [
   /Sandboxes end/,
-  /A bot, a coder and an assistant/,
+  /Long-running sessions need persistent data/,
+  /Keep every generated asset/,
+  /Gigabytes of protein data/,
   /See every file your agents saved/,
   /Encrypted\. Sharable\. Works anywhere/,
-  /One line to the agent/,
+  /Why not S3, git or Dropbox/,
   /Questions/,
   /Start free/,
   /Give your agent a drive/,
@@ -29,10 +31,7 @@ test.describe('landing page', () => {
   test('says what happens next under the hero copy box', async ({ page }) => {
     await page.goto('/');
     await expect(
-      page.getByText(
-        'Free to start. Your agent shows a code; you approve it once. No API keys to copy.',
-        { exact: true },
-      ),
+      page.locator('.l-hero').getByText('Free to start.', { exact: true }),
     ).toBeVisible();
   });
 
@@ -46,6 +45,27 @@ test.describe('landing page', () => {
     const label = (await fig.getAttribute('aria-label')) ?? '';
     for (const gone of ['Gemini', 'Cursor', 'Amp', 'Muse', 'Dots', 'trace-bot'])
       expect(label).not.toContain(gone);
+  });
+
+  test('shows no localhost and no paid-checkout notice', async ({ page }) => {
+    await page.goto('/');
+    const text = await page.locator('main').innerText();
+    expect(text).not.toContain('localhost');
+    expect(text).not.toContain('Paid checkout');
+    await expect(page.locator('#connect')).toHaveCount(0);
+    await expect(page.locator('.l-hero code').first()).toContainText(
+      'Set up Agent Drive: https://agentdrive.xyz/llms.txt',
+    );
+  });
+
+  test('footer links to GitHub and every comparison', async ({ page }) => {
+    await page.goto('/');
+    const f = page.locator('footer.site-footer');
+    await expect(f.locator('a[href="https://github.com/dennisonbertram/agent-drive"]')).toHaveCount(
+      2,
+    );
+    await expect(f.locator('a[href^="/compare/"]')).toHaveCount(3);
+    await expect(f.getByText('© 2026 DappHero Corp.')).toBeVisible();
   });
 
   test('FAQ has five questions and each opens', async ({ page }) => {
