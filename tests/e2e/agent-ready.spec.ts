@@ -110,12 +110,13 @@ test.describe('agent-ready site', () => {
     expect(shown).toEqual(QUESTIONS);
   });
 
-  test('legal pages render with a draft notice and footer links', async ({ page }) => {
+  test('legal pages render final text and footer links', async ({ page }) => {
     for (const p of ['/privacy', '/terms']) {
       const res = await page.goto(p);
       expect(res?.status()).toBe(200);
-      await expect(page.getByTestId('draft-notice')).toContainText('Draft - under review');
-      await expect(page.locator('main')).toContainText('[TBD:');
+      await expect(page.locator('main')).toContainText('DappHero Corp.');
+      await expect(page.locator('main')).not.toContainText('[TBD');
+      await expect(page.locator('main')).not.toContainText('Draft - under review');
     }
     await page.goto('/');
     await expect(page.locator('footer a[href="/privacy"]')).toBeVisible();
@@ -135,9 +136,9 @@ test.describe('agent-ready site', () => {
     }
     for (const dd of await page.locator('.pricing-rate-list dd').allInnerTexts())
       expect(md).toContain(dd);
-    // One decimal byte unit everywhere: the Free plan's 5 GiB shows as 5.37 GB, never GiB.
-    expect(md).toContain('5.37 GB stored ciphertext');
-    expect(await page.locator('.billing-plan').first().innerText()).toContain('5.37 GB');
+    // Plan limits are metered in 2^30-byte GB: the Free plan shows 5 GB, never GiB.
+    expect(md).toContain('5 GB stored ciphertext');
+    expect(await page.locator('.billing-plan').first().innerText()).toContain('5 GB');
     expect(md).not.toMatch(/GiB|TiB/u);
     // Conditions: every paragraph of the fine print and any availability notice must match.
     const notes = [

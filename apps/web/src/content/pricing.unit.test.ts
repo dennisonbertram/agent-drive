@@ -14,11 +14,11 @@ describe('pricing rates', () => {
     process.env.BILLING_OPERATIONS_1000_CENTS = '5';
     delete process.env.S3_EGRESS_METERING;
     const md = pricingMarkdown('https://x.test');
-    expect(md).toContain('- Extra GB stored / month: $0.0932');
-    expect(md).toContain('- Extra GB downloaded: $0.1863');
-    expect(md).toContain(
-      'Overage is metered per 1,073,741,824 bytes (1.07 GB); prices above are shown per GB.',
-    );
+    expect(md).toContain('- Extra GB stored / month: $0.10');
+    expect(md).toContain('- Extra GB downloaded: $0.20');
+    expect(md).toContain('Usage is metered in GB of 1,073,741,824 bytes (2^30).');
+    expect(md).toContain('5 GB stored ciphertext');
+    expect(md).not.toMatch(/5\.37|107\.37|1\.1 TB/);
     expect(DISCLOSURE.usage.join(' ')).toContain('1,073,741,824 bytes');
   });
 });

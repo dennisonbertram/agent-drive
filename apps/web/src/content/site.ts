@@ -66,8 +66,8 @@ ${DOCS.map((d) => `- [${d.title}](${origin}/docs/${d.slug}.md): ${d.summary}`).j
 
 - [Home](${origin}/index.md): what Agent Drive is and how it works
 - [Pricing](${origin}/pricing.md): plans, limits and prices
-- [Privacy](${origin}/privacy.md): draft privacy policy
-- [Terms](${origin}/terms.md): draft terms of service
+- [Privacy](${origin}/privacy.md): what we collect, who handles it, and how long we keep it
+- [Terms](${origin}/terms.md): the rules for using Agent Drive
 - [Compare](${origin}/compare.md): when to use S3 or R2, git or GitHub, Dropbox or Google Drive instead
 ${COMPARISONS.map((c) => `- [${c.title}](${origin}/compare/${c.slug}.md): ${c.summary}`).join('\n')}
 

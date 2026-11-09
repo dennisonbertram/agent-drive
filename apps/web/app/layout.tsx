@@ -26,7 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(publicOrigin(h)),
     title: 'Agent Drive',
     description:
-      'Portable storage for agents. Files survive sandboxes, machines and platform switches.',
+      "Encrypted storage your agents keep across sandboxes. Files are encrypted on the agent's machine and survive sandboxes, machines and platform switches.",
     openGraph: { siteName: 'Agent Drive', type: 'website' },
     twitter: { card: 'summary_large_image' },
   };
