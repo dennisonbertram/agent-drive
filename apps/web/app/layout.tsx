@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { Inter_Tight, JetBrains_Mono } from 'next/font/google';
 import { publicOrigin } from '@/src/content/origin';
 import './globals.css';
+import { DevAgentation } from './dev-agentation';
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -39,7 +40,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${interTight.variable} ${jetbrainsMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <DevAgentation />
+      </body>
     </html>
   );
 }
