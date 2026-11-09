@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
@@ -89,5 +90,23 @@ describe('MCP driveId default', () => {
     expect(both.result.isError).toBe(true);
     const bad = await callList((id) => resolveDriveId(id, one, api), { sort: 'size' });
     expect(bad.result.isError).toBe(true);
+  });
+});
+
+describe('MCP server identity', () => {
+  it('reports the package version, not a placeholder', async () => {
+    const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+    const server = createMcpServer({} as AgentDriveClient);
+    const client = new Client({ name: 'version-test', version: '1.0.0' });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await server.connect(b);
+    await client.connect(a);
+    try {
+      expect(version).not.toBe('0.0.0');
+      expect(client.getServerVersion()?.version).toBe(version);
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 });

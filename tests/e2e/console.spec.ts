@@ -313,7 +313,7 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await expect(page.getByRole('heading', { name: 'Storage by drive' })).toBeVisible();
     await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
     const storageTile = page.locator('.stat', { hasText: 'ENCRYPTED STORAGE' });
-    await expect(storageTile).toContainText(' of 5.37 GB');
+    await expect(storageTile).toContainText(' of 5 GB');
     await expect(storageTile.locator('progress')).toHaveCount(1);
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke Browser regression key', exact: true }).click();

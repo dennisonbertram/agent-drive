@@ -6,7 +6,7 @@ import { DocShell } from '../doc-shell';
 export const metadata: Metadata = {
   title: 'Compare | Agent Drive',
   description: 'How Agent Drive differs from S3 and R2, git and GitHub, Dropbox and Google Drive.',
-  alternates: { types: { 'text/markdown': '/compare.md' } },
+  alternates: { canonical: '/compare', types: { 'text/markdown': '/compare.md' } },
   openGraph: { title: 'Compare | Agent Drive', url: '/compare', images: ['/opengraph-image'] },
 };
 

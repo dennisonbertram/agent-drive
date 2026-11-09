@@ -20,7 +20,9 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: 'Pricing | Agent Drive',
-  alternates: { types: { 'text/markdown': '/pricing.md' } },
+  description:
+    'Agent Drive plans and limits: a free plan to start, paid plans for more drives, storage and downloads. Client-side encryption on every plan.',
+  alternates: { canonical: '/pricing', types: { 'text/markdown': '/pricing.md' } },
   openGraph: {
     title: 'Pricing | Agent Drive',
     url: '/pricing',
@@ -129,7 +131,7 @@ export default async function PricingPage() {
               <h2>Private contents.</h2>
               <p>
                 File contents are encrypted on your device. File paths, sizes, tags, and activity
-                metadata remain visible to the service. Save your recovery keys: we cannot recover
+                metadata remain visible to the service. Save your recovery file: we cannot recover
                 lost keys.
               </p>
             </article>
@@ -154,7 +156,10 @@ export default async function PricingPage() {
         </main>
         <footer className="landing-footer">
           <Link href="/">AGENT DRIVE</Link>
-          <span>Persistent storage. Independent agents.</span>
+          <span>
+            Persistent storage. Independent agents.{' '}
+            <a href="mailto:support@agentdrive.xyz">Contact</a>
+          </span>
         </footer>
       </div>
     </>
