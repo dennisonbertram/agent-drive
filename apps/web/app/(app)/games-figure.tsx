@@ -30,11 +30,11 @@ const Box = ({ P, x, y, z, w, d, h, top = 'ka' }: BoxSpec & { P: Proj }) => (
 );
 
 // ---- Island: 4x4 tiles, a few raised blocks ----
-const T = 36;
+const T = 40;
 const N = 4;
 const H = 14;
 const LIFT = 12;
-const PI = proj(170, 170);
+const PI = proj(160, 200);
 const RAISED = new Set(['1,0', '2,2', '0,3']);
 const zOf = (i: number, j: number) => H + (RAISED.has(`${i},${j}`) ? LIFT : 0);
 const centre = (i: number, j: number) => PI((i + 0.5) * T, (j + 0.5) * T, zOf(i, j));
@@ -74,23 +74,32 @@ function walkKeyframes() {
   return `@keyframes g-walk{${css}100%{${tr(centre(LOOP[0]![0], LOOP[0]![1]))}}}`;
 }
 
+// Scales a prop about the ground point under its anchor so it stays on its tile.
+const Grow = ({ k, at, children }: { k: number; at: Pt; children: React.ReactNode }) => (
+  <g
+    transform={`translate(${r1(at[0])} ${r1(at[1])}) scale(${k}) translate(${-r1(at[0])} ${-r1(at[1])})`}
+  >
+    {children}
+  </g>
+);
+
 const Tree = () => {
   const [cx, cy] = [(0 + 0.5) * T, (0 + 0.5) * T];
   return (
-    <>
+    <Grow k={1.25} at={PI(cx, cy, H)}>
       <Box P={PI} x={cx - 3} y={cy - 3} z={H} w={6} d={6} h={16} />
       <g className="g-sway">
         <Box P={PI} x={cx - 12} y={cy - 12} z={H + 16} w={24} d={24} h={14} />
         <Box P={PI} x={cx - 8} y={cy - 8} z={H + 30} w={16} d={16} h={12} />
       </g>
-    </>
+    </Grow>
   );
 };
 
 const Chest = () => {
   const [cx, cy, z] = [(3 + 0.5) * T, (0 + 0.5) * T, H];
   return (
-    <>
+    <Grow k={1.3} at={PI(cx, cy, z)}>
       <Box P={PI} x={cx - 9} y={cy - 6} z={z} w={18} d={12} h={8} />
       <Box P={PI} x={cx - 9.5} y={cy - 6.5} z={z + 8} w={19} d={13} h={5} />
       <polygon
@@ -102,7 +111,7 @@ const Chest = () => {
           PI(cx - 2, cy + 6.5, z + 11),
         ])}
       />
-    </>
+    </Grow>
   );
 };
 
@@ -114,24 +123,26 @@ const Hero = () => (
       className="gshadow"
       points={pts([P0(-7, -7, 0), P0(7, -7, 0), P0(7, 7, 0), P0(-7, 7, 0)])}
     />
-    <g className="g-bob">
-      <Box P={P0} x={-4} y={-2} z={0} w={3} d={4} h={4} />
-      <Box P={P0} x={1} y={-2} z={0} w={3} d={4} h={4} />
-      <Box P={P0} x={-5} y={-3.5} z={4} w={10} d={7} h={10} />
-      <Box P={P0} x={-5.5} y={-4.5} z={14} w={11} d={9} h={9} />
-      <Box P={P0} x={-6} y={-5} z={23} w={12} d={10} h={3} top="gor" />
-      <circle
-        className="kdot"
-        cx={r1(P0(-2.5, 4.5, 18.5)[0])}
-        cy={r1(P0(-2.5, 4.5, 18.5)[1])}
-        r={1.2}
-      />
-      <circle
-        className="kdot"
-        cx={r1(P0(2.5, 4.5, 18.5)[0])}
-        cy={r1(P0(2.5, 4.5, 18.5)[1])}
-        r={1.2}
-      />
+    <g transform="scale(1.3)">
+      <g className="g-bob">
+        <Box P={P0} x={-4} y={-2} z={0} w={3} d={4} h={4} />
+        <Box P={P0} x={1} y={-2} z={0} w={3} d={4} h={4} />
+        <Box P={P0} x={-5} y={-3.5} z={4} w={10} d={7} h={10} />
+        <Box P={P0} x={-5.5} y={-4.5} z={14} w={11} d={9} h={9} />
+        <Box P={P0} x={-6} y={-5} z={23} w={12} d={10} h={3} top="gor" />
+        <circle
+          className="kdot"
+          cx={r1(P0(-2.5, 4.5, 18.5)[0])}
+          cy={r1(P0(-2.5, 4.5, 18.5)[1])}
+          r={1.2}
+        />
+        <circle
+          className="kdot"
+          cx={r1(P0(2.5, 4.5, 18.5)[0])}
+          cy={r1(P0(2.5, 4.5, 18.5)[1])}
+          r={1.2}
+        />
+      </g>
     </g>
   </g>
 );
@@ -140,32 +151,35 @@ const Coin = () => {
   const [x, y] = centre(1, 0);
   return (
     <g transform={`translate(${r1(x)} ${r1(y - 22)})`}>
+      <text className="kf gl g-plus" x={-8} y={-12}>
+        +1
+      </text>
       <g className="g-float">
         <g className="g-spin">
-          <circle className="gcoin" r={7} />
-          <line className="kl" x1={0} y1={-3.5} x2={0} y2={3.5} />
+          <circle className="gcoin" r={8} />
+          <line className="kl" x1={0} y1={-4} x2={0} y2={4} />
         </g>
       </g>
     </g>
   );
 };
 
-// ---- Agent Drive (smaller hero drive-stack) ----
-const D = 92;
+// ---- Agent Drive (smaller hero drive-stack) hovering above the island ----
+const D = 84;
 const SLAB = 17;
 const GAP = 5;
 const FOLDERS = ['/sprites', '/levels', '/audio'];
 const STACK = FOLDERS.length * SLAB + (FOLDERS.length - 1) * GAP;
 const START = PI(N * T, 2 * T, H); // right edge of the island
-const DIR = [C, -S] as const;
-const TRAVEL = 140;
-const END: Pt = [START[0] + DIR[0] * TRAVEL, START[1] + DIR[1] * TRAVEL];
-// Place the drive so the connector ends on the middle of its bottom folder's front face.
-const PD0 = proj(0, 0);
-const face = PD0(D - 9, D, SLAB / 2);
-const PD = proj(END[0] - face[0], END[1] - face[1]);
+const RISE = 150; // assets float straight up (the isometric z axis) into the drive
+const DX = 30; // the drive's bottom-front corner sits this far right of the connector
+const cx = START[0] + DX;
+const edge = (D / 2) * (1 - DX / (D * C)); // drive bottom edge height below its centre at the connector
+const cy = START[1] - RISE - edge;
+const PD = proj(cx, cy - D / 2);
 const topD = (z: number) => `matrix(${C} ${S} ${-C} ${S} ${PD(0, 0, z).map(r1).join(' ')})`;
 const frontD = (z: number) => `matrix(${C} ${S} 0 1 ${PD(0, D, z).map(r1).join(' ')})`;
+const PIXELS = ['010', '111', '101'];
 
 const ASSETS = ['hero-run.png', 'level-03.json', 'theme.ogg'];
 
@@ -175,11 +189,14 @@ export function GamesFigure() {
     <figure className="landing-fig games-fig">
       <style>{walkKeyframes()}</style>
       <svg
-        viewBox="34 22 430 322"
+        viewBox="15 10 320 360"
         role="img"
-        aria-label="An animated isometric video-game level: a small blocky character walks a loop across a tile island with a tree and a treasure chest while a coin spins. Generated game assets (hero-run.png, level-03.json, theme.ogg) travel along a dashed line into an Agent Drive, which keeps them for the next session."
+        aria-label="An animated isometric video-game level: a small blocky character walks a loop across a tile island with a tree and a treasure chest while a coin spins. Generated game assets (hero-run.png, level-03.json, theme.ogg) rise along a dashed line into an Agent Drive, which keeps them for the next session."
       >
         <g aria-hidden="true">
+          {/* Connector, then the drive over its upper end */}
+          <polyline className="gcon" points={pts([START, [START[0], START[1] - RISE + 14]])} />
+          <circle className="kdot" cx={r1(START[0])} cy={r1(START[1])} r={2.5} />
           {/* Drive, back to front */}
           {FOLDERS.map((f, i) => {
             const z = i * (SLAB + GAP);
@@ -187,7 +204,7 @@ export function GamesFigure() {
               <g key={f}>
                 <Box P={PD} x={0} y={0} z={z} w={D} d={D} h={SLAB} />
                 <g transform={frontD(z)}>
-                  <text className="kf gf" x={10} y={SLAB - 5}>
+                  <text className="kf gf" x={8} y={SLAB - 5}>
                     {f}
                   </text>
                 </g>
@@ -199,18 +216,13 @@ export function GamesFigure() {
             <circle className="gring" cx={D - 16} cy={16} r={5.5} />
           </g>
           <text
-            className="kn"
+            className="kn gt"
             x={r1(head[0])}
-            y={r1(PD(0, 0, STACK)[1] - 14)}
+            y={r1(PD(0, 0, STACK)[1] - 12)}
             textAnchor="middle"
-            style={{ fontSize: 15 }}
           >
             Agent Drive
           </text>
-
-          {/* Connector */}
-          <polyline className="gcon" points={pts([START, END])} />
-          <circle className="kdot" cx={r1(START[0])} cy={r1(START[1])} r={2.5} />
 
           {/* Island */}
           {CELLS.map(([i, j]) => (
@@ -257,14 +269,33 @@ export function GamesFigure() {
                 className="g-asset"
                 style={{
                   animationDelay: `${i * 3}s`,
-                  ['--p' as string]: 0.4 + i * 0.24,
-                  ['--dx' as string]: `${r1(DIR[0] * TRAVEL)}px`,
-                  ['--dy' as string]: `${r1(DIR[1] * TRAVEL)}px`,
+                  ['--p' as string]: 0.34 + i * 0.18,
+                  ['--dy' as string]: `${-RISE}px`,
                 }}
               >
                 <g transform="translate(0 -4)">
                   <Box P={P0} x={-11} y={-20} z={0} w={22} d={40} h={9} />
-                  <text className="kf gl" x={16} y={32}>
+                  {i === 0 && (
+                    <g
+                      transform={`matrix(${C} ${S} ${-C} ${S} ${P0(-11, -20, 9).map(r1).join(' ')})`}
+                    >
+                      {PIXELS.flatMap((row, v) =>
+                        [...row].map((c, u) =>
+                          c === '1' ? (
+                            <rect
+                              key={`${u}${v}`}
+                              className={u === 1 && v === 1 ? 'gor' : 'kdot'}
+                              x={3 + u * 5.2}
+                              y={12.5 + v * 5.2}
+                              width={5.2}
+                              height={5.2}
+                            />
+                          ) : null,
+                        ),
+                      )}
+                    </g>
+                  )}
+                  <text className="kf gl" x={14} y={8}>
                     {a}
                   </text>
                 </g>

@@ -1,6 +1,6 @@
 /* Animated isometric game scene. Reuses the hero figure's classes (.ka, .ks1, .ks2, .kl, .kdot, .kn, .kled). */
 .games-fig {
-  max-width: 620px;
+  max-width: 520px;
   width: 100%;
 }
 .games-fig .gtile {
@@ -34,18 +34,26 @@
 .games-fig .gl,
 .games-fig .gf {
   font:
-    500 12.5px 'JetBrains Mono',
+    500 9px 'JetBrains Mono',
     monospace;
   fill: #111;
+}
+.games-fig .gt {
+  font:
+    500 10.5px 'JetBrains Mono',
+    monospace;
+}
+.games-fig .g-plus {
+  opacity: 0;
 }
 .games-fig .gl {
   paint-order: stroke;
   stroke: #fff;
-  stroke-width: 4px;
+  stroke-width: 3px;
   stroke-linejoin: round;
 }
 .games-fig .g-asset {
-  transform: translate(calc(var(--p) * var(--dx)), calc(var(--p) * var(--dy)));
+  transform: translateY(calc(var(--p) * var(--dy)));
 }
 /* Static (reduced-motion) layout: three assets spread along the connector. */
 .games-fig .g-spin,
@@ -55,9 +63,12 @@
 }
 
 @media (max-width: 600px) {
-  .games-fig .gl,
-  .games-fig .gf {
-    font-size: 14.5px;
+  .games-fig .gl {
+    font-size: 11px;
+  }
+  .games-fig .gf,
+  .games-fig .gt {
+    font-size: 12px;
   }
 }
 
@@ -76,6 +87,9 @@
   }
   .games-fig .g-spin {
     animation: g-spin 1.6s infinite linear;
+  }
+  .games-fig .g-plus {
+    animation: g-plus 10s infinite ease-out;
   }
   .games-fig .gcon {
     animation: g-flow 1s infinite linear;
@@ -119,23 +133,38 @@
 }
 @keyframes g-asset {
   0% {
-    transform: translate(0, 0) scale(0.3);
+    transform: translateY(0) scale(0.3);
     opacity: 0;
   }
-  4% {
-    transform: translate(0, -6px) scale(1);
+  5% {
+    transform: translateY(-4px) scale(1);
     opacity: 1;
   }
   26% {
     opacity: 1;
   }
-  32% {
-    transform: translate(calc(var(--dx) * 0.76), calc(var(--dy) * 0.76)) scale(0.85);
+  30% {
+    transform: translateY(calc(var(--dy) * 0.82));
     opacity: 0;
   }
   100% {
-    transform: translate(calc(var(--dx) * 0.76), calc(var(--dy) * 0.76)) scale(0.85);
+    transform: translateY(calc(var(--dy) * 0.82));
     opacity: 0;
+  }
+}
+@keyframes g-plus {
+  0%,
+  76% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+  }
+  90%,
+  100% {
+    opacity: 0;
+    transform: translateY(-14px);
   }
 }
 @keyframes g-pulse {
@@ -164,12 +193,21 @@
 .games-grid {
   margin-top: 40px;
   display: grid;
-  grid-template-columns: minmax(0, 620px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 520px) minmax(0, 1fr);
   gap: 48px;
   align-items: center;
 }
 .games-grid .l-log {
   margin-top: 0;
+}
+@media (min-width: 1001px) {
+  .games-grid .lr {
+    grid-template-columns: 250px 72px 112px 1fr;
+    gap: 12px;
+  }
+  .games-grid .lr span {
+    white-space: nowrap;
+  }
 }
 @media (max-width: 1000px) {
   .games-grid {
