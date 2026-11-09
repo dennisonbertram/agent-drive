@@ -15,11 +15,11 @@ export const dynamic = 'force-dynamic';
 
 const title = 'Agent Drive: encrypted storage your agents keep across sandboxes';
 const description =
-  'Portable storage for agents. Files survive sandboxes, machines and platform switches.';
+  "Encrypted storage your agents keep across sandboxes. Files are encrypted on the agent's machine and survive sandboxes, machines and platform switches.";
 export const metadata: Metadata = {
   title,
   description,
-  alternates: { types: { 'text/markdown': '/index.md' } },
+  alternates: { canonical: '/', types: { 'text/markdown': '/index.md' } },
   openGraph: {
     title,
     description,
@@ -413,6 +413,7 @@ export default async function Home() {
             <Link href="/compare">Compare</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>
+            <a href="mailto:support@agentdrive.xyz">Contact</a>
             <Link href="/sign-in">Sign in</Link>
             <Link href="/console">Console</Link>
           </nav>

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { AccountHeader } from '../account-header';
-import { formatBytes, MAX_UPLOAD, perGbDollars, RATE_UNIT_NOTE } from '@/src/format/bytes';
+import { formatMetered, MAX_UPLOAD, perGbDollars, RATE_UNIT_NOTE } from '@/src/format/bytes';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
 type Plan = {
@@ -254,7 +254,7 @@ export default function BillingClient({
       <main>
         <div className="billing-heading">
           <div>
-            <p className="eyebrow">YOUR WORKSPACE</p>
+            <p className="eyebrow">YOUR ACCOUNT</p>
             <h1>Billing &amp; limits</h1>
             <p>Know your usage. Set your boundaries.</p>
           </div>
@@ -309,13 +309,13 @@ export default function BillingClient({
               </article>
               <article className="billing-card">
                 <p className="eyebrow">RETAINED STORAGE</p>
-                <strong className="billing-number">{formatBytes(billing.storageBytes)}</strong>
+                <strong className="billing-number">{formatMetered(billing.storageBytes)}</strong>
                 <p>
-                  {formatBytes(billing.limits.storageBytes!)} included · {billing.drives} drives
+                  {formatMetered(billing.limits.storageBytes!)} included · {billing.drives} drives
                 </p>
                 <small>
                   All versions count, including trash. Monthly peak:{' '}
-                  {formatBytes(billing.peakStorageBytes)}.
+                  {formatMetered(billing.peakStorageBytes)}.
                 </small>
               </article>
               <article className="billing-card">
@@ -328,13 +328,13 @@ export default function BillingClient({
                   {billing.egressNotMetered
                     ? 'Not charged'
                     : billing.egressMeteringConfigured
-                      ? formatBytes(billing.egressBytes)
-                      : formatBytes(billing.authorizedEgressBytes)}
+                      ? formatMetered(billing.egressBytes)
+                      : formatMetered(billing.authorizedEgressBytes)}
                 </strong>
                 {billing.egressNotMetered ? (
-                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
+                  <p>{formatMetered(billing.authorizedEgressBytes)} authorized this month</p>
                 ) : billing.egressMeteringConfigured ? (
-                  <p>{formatBytes(billing.authorizedEgressBytes)} authorized this month</p>
+                  <p>{formatMetered(billing.authorizedEgressBytes)} authorized this month</p>
                 ) : (
                   <p>Bytes approved for download; actual transfer isn’t metered.</p>
                 )}
@@ -359,7 +359,7 @@ export default function BillingClient({
                   configured first.{' '}
                   {billing.plan === 'free'
                     ? 'You can keep using the Free plan.'
-                    : 'Contact your workspace operator to restore payment setup.'}
+                    : 'Email support@agentdrive.xyz to restore payment setup.'}
                 </p>
               )}
               <div className="billing-plans">
@@ -374,8 +374,8 @@ export default function BillingClient({
                     </p>
                     <ul>
                       <li>{plan.drives} drives</li>
-                      <li>{formatBytes(plan.storageBytes)} encrypted storage</li>
-                      <li>{formatBytes(plan.egressBytes)} monthly download allowance</li>
+                      <li>{formatMetered(plan.storageBytes)} encrypted storage</li>
+                      <li>{formatMetered(plan.egressBytes)} monthly download allowance</li>
                       <li>{BigInt(plan.operations).toLocaleString()} monthly operations</li>
                     </ul>
                     <button
@@ -406,7 +406,7 @@ export default function BillingClient({
               )}
               <p className="billing-caption">
                 All plans include client-side encryption. {MAX_UPLOAD} maximum encrypted file size.
-                Need a custom enterprise plan? Contact your workspace operator.
+                Need a custom enterprise plan? Email support@agentdrive.xyz.
               </p>
               {rateCard && (
                 <div className="billing-card billing-rates">
@@ -549,11 +549,11 @@ export default function BillingClient({
                           {agent.name === '__console__' ? 'Console' : agent.name}
                         </td>
                         <td role="cell" className="num" data-label="Retained storage">
-                          {formatBytes(agent.storage_bytes)}
+                          {formatMetered(agent.storage_bytes)}
                         </td>
                         {meterOn && (
                           <td role="cell" className="num" data-label="Observed downloads">
-                            {formatBytes(agent.egress_bytes)}
+                            {formatMetered(agent.egress_bytes)}
                           </td>
                         )}
                         <td role="cell" className="num" data-label="Operations">
@@ -592,7 +592,10 @@ export default function BillingClient({
       </main>
       <footer className="landing-footer">
         <Link href="/">AGENT DRIVE</Link>
-        <span>Persistent storage. Independent agents.</span>
+        <span>
+          Persistent storage. Independent agents.{' '}
+          <a href="mailto:support@agentdrive.xyz">Contact</a>
+        </span>
       </footer>
     </div>
   );

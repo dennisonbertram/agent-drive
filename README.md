@@ -1,13 +1,13 @@
 # Agent Drive
 
-Google Drive for agents: encrypted file storage on S3, used through an MCP server, a CLI, and a skill.
+Encrypted storage your agents keep across sandboxes. Use it through an MCP server, a CLI, and a skill.
 
 - [User stories](docs/user-stories.md)
 - [Build plan](docs/plan.md)
 - [HTTP API](docs/api.md)
 - [Client encryption format](docs/crypto.md)
-- [CLI reference](docs/cli.md)
-- [Product quickstart](docs/quickstart.md)
+- [CLI and MCP reference](docs/cli.md)
+- [Quickstart](docs/quickstart.md)
 - [Deployment, deletion maintenance, and release gates](docs/deployment.md)
 
 ## Client quickstart
@@ -54,26 +54,25 @@ The CLI encrypts bytes before uploading. Drive keys never go to the API or objec
 
 ## MCP server
 
-Build the private workspace package from this checkout and configure your MCP host to run the
-compiled local CLI. Agent Drive reads API credentials and drive keys from its private config file
-or environment variables; it never accepts a drive key as a command-line argument. Changes to the
-saved configuration require restarting the MCP process.
-
-Claude Code (replace the checkout path and config path with local absolute paths):
+Install the CLI, then add it to your MCP host. Agent Drive reads API credentials and drive keys
+from its private config file or environment variables; it never accepts a drive key as a
+command-line argument. Changes to the saved configuration require restarting the MCP process.
 
 ```sh
-claude mcp add --transport stdio agent-drive \
-  --env AGENT_DRIVE_CONFIG=/ABSOLUTE/PATH/.config/agent-drive/config.json \
-  -- node /ABSOLUTE/PATH/agent-drive/packages/agent-drive/dist/cli.js mcp
+npm install -g @dennisonbertram/agent-drive
+claude mcp add agent-drive -- agent-drive mcp
 ```
+
+To run from source instead (for contributors), build the workspace package and point the host at
+the compiled CLI with `node /ABSOLUTE/PATH/agent-drive/packages/agent-drive/dist/cli.js mcp`.
 
 Codex (`~/.codex/config.toml`), forwarding credential variables from the local environment rather
 than placing their values in the TOML file:
 
 ```toml
 [mcp_servers.agent-drive]
-command = "node"
-args = ["/ABSOLUTE/PATH/agent-drive/packages/agent-drive/dist/cli.js", "mcp"]
+command = "agent-drive"
+args = ["mcp"]
 env_vars = ["AGENT_DRIVE_API_URL", "AGENT_DRIVE_API_KEY", "AGENT_DRIVE_CONFIG", "AGENT_DRIVE_KEY"]
 ```
 
@@ -179,7 +178,7 @@ pnpm --dir apps/web provision:local
 ```
 
 The command requires a loopback `DATABASE_URL` and interactive account and agent names. It prints
-the high-entropy API token once; only its SHA-256 hash is stored.
+the high-entropy API key once; only its SHA-256 hash is stored.
 
 Install the local Playwright browser once:
 
@@ -220,7 +219,7 @@ dashboard if GitHub sign-in is desired; Clerk handles the provider callback and 
 pnpm --filter @agent-drive/web dev
 ```
 
-Visit `/sign-up`, then `/console`. Create a drive, save its recovery key, create an agent,
+Visit `/sign-up`, then `/console`. Create a drive, save its recovery file, create an agent,
 and issue a scoped API key. The API key authorizes server operations; the separate drive key
 decrypts file contents. The browser generates the drive key using Web Crypto and keeps it in
 page memory only. Refreshing the page locks downloads until the key is loaded again. Recovery
