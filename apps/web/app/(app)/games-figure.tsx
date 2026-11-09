@@ -189,7 +189,7 @@ export function GamesFigure() {
     <figure className="landing-fig games-fig">
       <style>{walkKeyframes()}</style>
       <svg
-        viewBox="15 10 320 360"
+        viewBox="15 -6 320 376"
         role="img"
         aria-label="An animated isometric video-game level: a small blocky character walks a loop across a tile island with a tree and a treasure chest while a coin spins. Generated game assets (hero-run.png, level-03.json, theme.ogg) rise along a dashed line into an Agent Drive, which keeps them for the next session."
       >
@@ -258,7 +258,11 @@ export function GamesFigure() {
 
           {/* Assets leaving the scene, one after another */}
           {ASSETS.map((a, i) => (
-            <g key={a} transform={`translate(${r1(START[0])} ${r1(START[1])})`}>
+            <g
+              key={a}
+              className={i ? 'g-extra' : undefined}
+              transform={`translate(${r1(START[0])} ${r1(START[1])})`}
+            >
               <ellipse
                 className="gpulse"
                 style={{ animationDelay: `${i * 3}s` }}
@@ -269,7 +273,7 @@ export function GamesFigure() {
                 className="g-asset"
                 style={{
                   animationDelay: `${i * 3}s`,
-                  ['--p' as string]: 0.34 + i * 0.18,
+                  ['--p' as string]: 0.5,
                   ['--dy' as string]: `${-RISE}px`,
                 }}
               >
