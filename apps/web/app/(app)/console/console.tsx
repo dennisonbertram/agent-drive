@@ -39,7 +39,7 @@ import { ConfirmBody } from './confirm-dialog';
 import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
 import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
-import { formatBytes } from '@/src/format/bytes';
+import { formatBytes, formatMetered } from '@/src/format/bytes';
 import {
   ROOT,
   crumbs,
@@ -68,6 +68,7 @@ type ApiKey = {
   agent_id: string;
   drive_ids: string[];
   scopes: string[];
+  write_paths?: string[];
   issued_by_agent_id?: string | null;
   revoked_at: string | null;
 };
@@ -401,9 +402,9 @@ function SortHeader({
 
 const IDLE_MESSAGE = 'Locked after 30 minutes without use. Enter your passphrase to continue.';
 const NOT_IN_ACCOUNT =
-  'This drive isn’t in your account yet. Load its recovery file once and it will be added.';
+  'Load this drive’s recovery file to open it. We’ll try to save its key for passphrase unlock.';
 const MISMATCH =
-  'The saved key for this drive doesn’t open this file. Load its recovery file to replace it.';
+  'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
 const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
 function useClerkIdentity() {
   const { user } = useUser();
@@ -590,6 +591,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const issuedBy = (id?: string | null) =>
     id ? `issued by ${agents.find((agent) => agent.id === id)?.name ?? 'another agent'}` : '';
   const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
+  const hasRestrictedKeys = apiKeys.some((key) => key.write_paths?.length);
   const query = filter.toLowerCase();
   // Trash is a flat list of full paths. Files shows folder rows (Browse) or the newest files (Recent).
   const shownFiles = loadedFiles.filter((file) => file.path.toLowerCase().includes(query));
@@ -628,8 +630,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = loadedFiles.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
-  const vaultState =
-    vault.status === 'locked' || vault.status === 'unlocked' ? vault.status : 'none';
   const sharedNow = shares?.driveId === selected ? shares : null;
   const sharedShown = (sharedNow?.items ?? [])
     .filter((row) => row.path.toLowerCase().includes(query))
@@ -1212,14 +1212,26 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (found) openTraces(found);
   }
 
-  async function addToAccount(driveId: string, key: string, path?: string) {
+  function retryVault() {
+    if (vault.status === 'error') void vault.load();
+  }
+
+  async function addToAccount(driveId: string, key: string, path?: string, recovery = false) {
+    const mark = actionEpoch.current;
+    const epoch = vault.epochNow;
+    const live = () => mark === actionEpoch.current && epoch === vault.epochNow;
     const result = await vault
       .addKey(driveId, key, {
         ...(path === undefined ? {} : { path }),
         trusted: trustedDrives.current.get(driveId) === key,
       })
       .catch(() => 'skipped' as const);
+    if (!live()) return;
     if (result === 'added') setNotice('Added to your account. Next time your passphrase opens it.');
+    else if (recovery && result === 'skipped')
+      setNotice(
+        'We couldn’t confirm this key was saved for passphrase unlock. Keep your recovery file.',
+      );
   }
 
   async function download(file: FileEntry, key?: string) {
@@ -1564,7 +1576,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     keySources.current.set(selected, source);
     // A key the user supplied also goes into the account, once it opens a real file.
     if (vault.status === 'unlocked')
-      void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path);
+      void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path, true);
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
     else if (pending.kind === 'share') void openShare(pending.file, key);
@@ -2068,7 +2080,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               confirming={keylineConfirm === selected}
                               busy={busy}
                               onLoad={() => openVaultDialog('recovery')}
-                              vault={vaultState}
+                              vault={vault.status}
                               fingerprint={vault.fingerprint}
                               vaultActions={{
                                 onSetup: () => openVaultDialog('setup'),
@@ -2076,6 +2088,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 onLock: () => vault.lock('manual'),
                                 onChange: () => openVaultDialog('change'),
                                 onReset: () => openVaultDialog('reset'),
+                                onRetry: retryVault,
                               }}
                               onDownload={() => {
                                 saveRecoveryFile(selected, driveKeys[selected]!);
@@ -2204,6 +2217,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       <FileIcon kind={fileKind(name)} />
                                       <span className="file-text">
                                         <span className="file-label">{name}</span>
+                                        <span className="share-id">Link ID: {row.id}</span>
                                         <span className="file-meta">
                                           {STATUS_LABEL[row.status]} · expires{' '}
                                           {versionWhen(row.expiresAt)}
@@ -2232,7 +2246,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   <td className="row-actions-cell" role="cell">
                                     {(row.status === 'active' || row.status === 'unavailable') && (
                                       <RevokeControl
-                                        question={`Stop the link to ${name}?`}
+                                        question={`Stop link ${row.id} for ${name}?`}
                                         onRevoke={() => revokeShare(selected, row.id)}
                                       />
                                     )}
@@ -2664,6 +2678,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             {key.scopes.join(', ')}
                             {key.issued_by_agent_id && ` · ${issuedBy(key.issued_by_agent_id)}`}
                           </span>
+                          {Boolean(key.write_paths?.length) && (
+                            <>
+                              <span>Write paths:</span>
+                              {key.write_paths?.map((path) => (
+                                <code key={path}>{path}</code>
+                              ))}
+                              <small>
+                                Write paths do not restrict reads. Reading still requires read
+                                permission on an allowed drive.
+                              </small>
+                            </>
+                          )}
                           <small>
                             {key.drive_ids
                               .map((id) => drives.find((item) => item.id === id)?.name ?? id)
@@ -2696,6 +2722,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </div>
                     ))}
                   </section>
+                  {hasRestrictedKeys && (
+                    <p>
+                      Replacing a restricted key? Use the CLI or API with the same drives,
+                      permissions and write paths. Update and verify the agent before revoking the
+                      old key.
+                    </p>
+                  )}
                   <section className="panel connection-guide">
                     <p className="eyebrow">FROM YOUR TERMINAL</p>
                     <h2>Connect without sharing your identity.</h2>
@@ -2721,7 +2754,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <article className="panel stat">
                       <p>ENCRYPTED STORAGE</p>
                       <strong>
-                        {size(usage.storageBytes)} of {formatBytes(usage.limits.storageBytes)}
+                        {formatMetered(usage.storageBytes)} of{' '}
+                        {formatMetered(usage.limits.storageBytes)}
                       </strong>
                       <progress
                         className={
@@ -2767,10 +2801,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         <div className="split">
                           <strong>{item.name}</strong>
                           <span>
-                            {size(item.storageBytes)}
+                            {formatMetered(item.storageBytes)}
                             {item.quotaBytes === Number.MAX_SAFE_INTEGER
                               ? ' · account limits apply'
-                              : ` / ${size(item.quotaBytes)}`}
+                              : ` / ${formatMetered(item.quotaBytes)}`}
                           </span>
                         </div>
                         {item.quotaBytes !== Number.MAX_SAFE_INTEGER && (
@@ -2815,7 +2849,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 {authorLabel(item.name)}
                               </td>
                               <td role="cell" className="num" data-label="Storage">
-                                {size(item.storageBytes)}
+                                {formatMetered(item.storageBytes)}
                               </td>
                               <td role="cell" className="num" data-label="Versions">
                                 {item.versions}
@@ -2985,6 +3019,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               recoveryNote={recoveryNote}
               vault={{
                 email: identity.email,
+                status: vault.status,
+                onRetry: retryVault,
                 hasVault: vault.status === 'locked',
                 onUnlock: unlockWithPassphrase,
                 onSetup: setUpPassphrase,
@@ -3119,6 +3155,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 Use a different key for each agent or machine. New keys do not grant access to
                 future drives automatically.
               </p>
+              {hasRestrictedKeys && (
+                <p>
+                  This form cannot set write-path restrictions. To replace a restricted key, use the
+                  CLI or API with the same drives, permissions and write paths.
+                </p>
+              )}
               <label>
                 Key label
                 <input name="label" required maxLength={128} placeholder="Research laptop" />
@@ -3228,14 +3270,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 const current = version.id === (newestVersionId ?? versions[0]?.id);
                 return (
                   <div className="version-row" key={version.id} data-version-id={version.id}>
-                    <strong>
-                      {current ? 'Current version · ' : ''}
-                      {versionWhen(version.createdAt)} · {size(version.ciphertextSize)} ·{' '}
-                      {authorLabel(
-                        agents.find((agent) => agent.id === version.agentId)?.name ??
-                          version.agentId,
-                      )}
-                    </strong>
+                    <div className="version-meta">
+                      <strong>
+                        {current ? 'Current version · ' : ''}
+                        {versionWhen(version.createdAt)} · {size(version.ciphertextSize)} ·{' '}
+                        {authorLabel(
+                          agents.find((agent) => agent.id === version.agentId)?.name ??
+                            version.agentId,
+                        )}
+                      </strong>
+                      <details>
+                        <summary>Details</summary>
+                        <small>Created (UTC): {version.createdAt || '—'}</small>
+                        <code>Version ID: {version.id}</code>
+                      </details>
+                    </div>
                     {!current && (
                       <button
                         className="button secondary"

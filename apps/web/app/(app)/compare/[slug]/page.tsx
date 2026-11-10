@@ -21,7 +21,10 @@ export async function generateMetadata({
   return {
     title: `${c.title} | Agent Drive`,
     description: c.summary,
-    alternates: { types: { 'text/markdown': `/compare/${slug}.md` } },
+    alternates: {
+      canonical: `/compare/${slug}`,
+      types: { 'text/markdown': `/compare/${slug}.md` },
+    },
     openGraph: { title: c.title, url: `/compare/${slug}`, images: ['/opengraph-image'] },
   };
 }

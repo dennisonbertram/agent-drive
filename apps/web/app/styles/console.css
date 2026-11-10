@@ -1009,6 +1009,10 @@
     margin: 0;
     font-size: 0;
     gap: 0;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    justify-content: center;
   }
   .workspace-label,
   .nav-label,

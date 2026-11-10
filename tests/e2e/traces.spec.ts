@@ -76,7 +76,7 @@ const fixture = (model: string, start: string, prompt: string, reply: string) =>
 const addWebhook = (page: Page) => page.getByRole('button', { name: 'Add webhook' });
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Capture traces' });
 
-test('traces: Traces view, webhook setup with key checks, upload order, management', async ({
+test('ux round 05: traces capture guidance preserves its commands and webhook safeguards', async ({
   page,
   context,
   baseURL,
@@ -112,6 +112,9 @@ test('traces: Traces view, webhook setup with key checks, upload order, manageme
 
     // A raw key cannot be matched to an empty drive, and is not kept.
     await page.getByTestId('capture-link').click();
+    await expect(dialog(page)).toContainText(
+      'Connect to Agent Drive and load this drive’s key on your agent’s machine first. Run Claude Code or Codex through capture to save encrypted traces under /traces. Check terminal output: capture may be disabled, uploads may be queued, or calls may not be captured.',
+    );
     await addWebhook(page).click();
     await page.getByText('Paste a key instead').click();
     await page

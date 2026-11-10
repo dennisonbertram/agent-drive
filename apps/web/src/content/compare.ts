@@ -59,7 +59,7 @@ export const COMPARISONS: Comparison[] = [
       [
         'Scale and features',
         'Very large objects and workloads, lifecycle rules, public hosting and a wide ecosystem of tools.',
-        'Plan allowances and a 5.37 GB limit per encrypted upload. No public hosting; sharing uses expiring links.',
+        'Plan allowances and a 5 GB limit per encrypted upload. No public hosting; sharing uses expiring links.',
       ],
     ],
     chooseOther: [
@@ -103,7 +103,7 @@ export const COMPARISONS: Comparison[] = [
       [
         'Large and binary files',
         'Plain git is awkward for large binary files; extensions such as Git LFS exist.',
-        'Files of any type up to 5.37 GB per encrypted upload.',
+        'Files of any type up to 5 GB per encrypted upload.',
       ],
       [
         'Who can read the contents',

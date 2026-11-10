@@ -85,7 +85,7 @@ describe('limitExceeded', () => {
       { drives: 1n, storageBytes: 5n * GIB },
     );
     expect(r.limit).toBe('storage');
-    expect(r.message).toContain("Free plan's 5.37 GB storage (5.37 GB used)");
+    expect(r.message).toContain("Free plan's 5 GB storage (5 GB used)");
     expect(r.message).toContain(
       'Trashed files and old versions still count. Deleting a drive frees its storage, or upgrade.',
     );

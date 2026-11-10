@@ -158,6 +158,20 @@ describe('recoverShareLink', () => {
   };
   const listing = (items: ShareRow[]): Request =>
     (async () => ({ items, nextCursor: null })) as unknown as Request;
+  const paged = (
+    pages: Record<string, { items: ShareRow[]; nextCursor: string | null } | Error>,
+  ) => {
+    const calls: string[] = [];
+    const request = (async <T>(path: string) => {
+      calls.push(path);
+      const cursor = new URL(path, 'https://drive.test').searchParams.get('cursor') ?? '';
+      const page = pages[cursor];
+      if (!page) throw new Error(`unexpected cursor ${cursor}`);
+      if (page instanceof Error) throw page;
+      return page as T;
+    }) as Request;
+    return { request, calls };
+  };
 
   it('rebuilds the URL of a link created after the attempt began', async () => {
     const found = await recoverShareLink(listing([row('old'), row('Z'.repeat(22))]), args);
@@ -177,6 +191,75 @@ describe('recoverShareLink', () => {
       args,
     );
     expect(none).toBeNull();
+  });
+
+  it('finds the unique candidate after an empty first page and encodes the cursor', async () => {
+    const token = 'page +/opaque';
+    const { request, calls } = paged({
+      '': { items: [], nextCursor: token },
+      [token]: { items: [row('Z'.repeat(22))], nextCursor: null },
+    });
+    const found = await recoverShareLink(request, args);
+    expect(found?.id).toBe('Z'.repeat(22));
+    expect(calls).toHaveLength(2);
+    expect(new URL(calls[1]!, 'https://drive.test').searchParams.get('cursor')).toBe(token);
+    expect(
+      calls.every(
+        (path) => new URL(path, 'https://drive.test').searchParams.get('limit') === '100',
+      ),
+    ).toBe(true);
+    expect(calls.join('\n')).not.toContain(args.fileKey);
+  });
+
+  it('returns no candidate when distinct matches are split across pages', async () => {
+    const { request, calls } = paged({
+      '': { items: [row('A'.repeat(22))], nextCursor: 'next' },
+      next: { items: [row('B'.repeat(22))], nextCursor: null },
+    });
+    expect(await recoverShareLink(request, args)).toBeNull();
+    expect(calls).toHaveLength(2);
+  });
+
+  it('counts a repeated candidate ID once but waits for the terminal page', async () => {
+    const id = 'A'.repeat(22);
+    const { request, calls } = paged({
+      '': { items: [row(id)], nextCursor: 'next' },
+      next: { items: [row(id)], nextCursor: null },
+    });
+    expect((await recoverShareLink(request, args))?.id).toBe(id);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not return a partial candidate when a later page fails', async () => {
+    const { request } = paged({
+      '': { items: [row('A'.repeat(22))], nextCursor: 'later' },
+      later: new Error('later page unavailable'),
+    });
+    await expect(recoverShareLink(request, args)).rejects.toThrow('later page unavailable');
+  });
+
+  it('returns no candidate for a repeated cursor cycle', async () => {
+    const { request, calls } = paged({
+      '': { items: [row('A'.repeat(22))], nextCursor: 'cursor-A' },
+      'cursor-A': { items: [], nextCursor: 'cursor-B' },
+      'cursor-B': { items: [], nextCursor: 'cursor-A' },
+    });
+    expect(await recoverShareLink(request, args)).toBeNull();
+    expect(calls).toHaveLength(3);
+  });
+
+  it('returns no partial candidate when the ten-page budget ends before a terminal page', async () => {
+    const pages: Record<string, { items: ShareRow[]; nextCursor: string | null }> = {};
+    pages[''] = { items: [row('A'.repeat(22))], nextCursor: 'cursor-1' };
+    for (let page = 1; page < 10; page += 1) {
+      pages[`cursor-${page}`] = {
+        items: [],
+        nextCursor: `cursor-${page + 1}`,
+      };
+    }
+    const { request, calls } = paged(pages);
+    expect(await recoverShareLink(request, args)).toBeNull();
+    expect(calls).toHaveLength(10);
   });
 });
 

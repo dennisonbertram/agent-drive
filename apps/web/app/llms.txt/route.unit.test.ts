@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DOCS, SECTIONS } from '../../src/content/docs';
 import { GET } from './route';
 
 describe('GET /llms.txt', () => {
@@ -55,5 +56,18 @@ describe('GET /llms.txt', () => {
       expect(line, line).toContain('--api http://localhost:3100/api');
     const prod = await (await GET(new Request('https://agentdrive.xyz/llms.txt'))).text();
     expect(prod).not.toContain('--api');
+  });
+
+  it('lists every doc grouped under section headings in order', async () => {
+    const body = await (await GET(new Request('https://example.test/llms.txt'))).text();
+    let at = body.indexOf('## Docs');
+    expect(at).toBeGreaterThan(-1);
+    for (const s of SECTIONS) {
+      const i = body.indexOf(`### ${s}\n`, at);
+      expect(i, s).toBeGreaterThan(at);
+      at = i;
+    }
+    for (const d of DOCS)
+      expect(body).toContain(`- [${d.title}](https://example.test/docs/${d.slug}.md)`);
   });
 });

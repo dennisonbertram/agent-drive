@@ -1,7 +1,7 @@
 {
   "name": "@dennisonbertram/agent-drive",
-  "version": "0.1.0",
-  "description": "Command-line client and MCP server for Agent Drive, an encrypted file drive for AI agents.",
+  "version": "0.1.1",
+  "description": "Encrypted storage your agents keep across sandboxes. Command-line client and MCP server for Agent Drive.",
   "homepage": "https://agentdrive.xyz",
   "repository": {
     "type": "git",
