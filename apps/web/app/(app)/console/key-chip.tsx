@@ -1,6 +1,7 @@
 'use client';
 
 import { MenuButton } from './menu-button';
+import type { VaultStatus } from '@/src/console/vault';
 
 /** The one place that shows whether this tab has the drive key and whether the key is backed up. */
 export function KeyChip({
@@ -26,8 +27,7 @@ export function KeyChip({
   onSaved: () => void;
   onForget: () => void;
   busy: boolean;
-  /** 'none' also covers a failed load, so the chip behaves exactly as before. */
-  vault: 'none' | 'locked' | 'unlocked';
+  vault: VaultStatus;
   fingerprint: string;
   vaultActions: {
     onSetup: () => void;
@@ -35,9 +35,10 @@ export function KeyChip({
     onLock: () => void;
     onChange: () => void;
     onReset: () => void;
+    onRetry: () => void;
   };
 }) {
-  const hasVault = vault !== 'none';
+  const hasVault = vault === 'locked' || vault === 'unlocked';
   const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
@@ -60,6 +61,23 @@ export function KeyChip({
         </>
       }
     >
+      {(vault === 'loading' || vault === 'error') && (
+        <>
+          <p role="status">
+            {vault === 'loading'
+              ? 'Checking passphrase status…'
+              : 'Couldn’t check passphrase status. Retry or use a recovery file.'}
+          </p>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={vault === 'loading'}
+            onClick={vaultActions.onRetry}
+          >
+            {vault === 'loading' ? 'Checking…' : 'Retry'}
+          </button>
+        </>
+      )}
       {hasVault && (
         <p>
           {vault === 'locked'

@@ -402,6 +402,13 @@ dialog .banner.info {
   font: 500 13px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   overflow-wrap: anywhere;
 }
+.version-meta {
+  min-width: 0;
+}
+.version-meta details {
+  margin-top: 6px;
+  font-size: 13px;
+}
 .version-row small,
 .version-row code {
   font: 400 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
@@ -892,6 +899,15 @@ dialog.preview > .dialog-heading + * {
   flex: 1 1 100%;
   color: var(--ink-2, #3b3a37);
 }
+.share-id {
+  display: block;
+  flex: 1 1 100%;
+  min-width: 0;
+  font: 400 11.5px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  color: var(--muted, #6b6963);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .share-state {
   font: 500 12px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
 }
@@ -923,6 +939,12 @@ dialog.preview > .dialog-heading + * {
 .share-confirm .button {
   min-height: 32px;
   padding: 0 12px;
+}
+.share-links .share-confirm,
+.shared-list .share-confirm {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 760px) {
   .share-dialog {

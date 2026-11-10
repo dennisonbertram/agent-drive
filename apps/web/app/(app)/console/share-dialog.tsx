@@ -35,7 +35,7 @@ export const STATUS_LABEL: Record<ShareRow['status'], string> = {
   unavailable: 'Unavailable (file in Trash)',
 };
 
-/** `Revoke`, then `Stop this link? [Revoke link] [Cancel]`. The API call and the list update belong to the caller. */
+/** Two-step revocation. The API call and the list update belong to the caller. */
 export function RevokeControl({
   question,
   confirmLabel = 'Revoke link',
@@ -313,6 +313,7 @@ export function ShareDialog({
         <ul className="share-links">
           {mine.map((row) => (
             <li key={row.id} data-testid="share-link-row">
+              <span className="share-id">Link ID: {row.id}</span>
               <span className="share-when">
                 Created {versionWhen(row.createdAt)}
                 {' · '}
@@ -322,7 +323,10 @@ export function ShareDialog({
                 {STATUS_LABEL[row.status]}
               </span>
               {(row.status === 'active' || row.status === 'unavailable') && (
-                <RevokeControl question="Stop this link?" onRevoke={() => onRevoke(row.id)} />
+                <RevokeControl
+                  question={`Stop link ${row.id} for ${path.split('/').at(-1)}?`}
+                  onRevoke={() => onRevoke(row.id)}
+                />
               )}
             </li>
           ))}

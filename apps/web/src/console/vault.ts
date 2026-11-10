@@ -115,6 +115,9 @@ export class Vault {
   /** Reads the session account and the stored record. Never needs the passphrase. */
   async load() {
     const epoch = this.epoch;
+    this.status = 'loading';
+    this.loadError = '';
+    this.emit();
     try {
       await this.refreshRecord();
       if (epoch !== this.epoch) return;
@@ -129,24 +132,30 @@ export class Vault {
   }
 
   private async refreshRecord() {
+    const epoch = this.epoch;
     const [who, result] = await Promise.all([
       this.accountId ? { accountId: this.accountId } : this.deps.request('whoami'),
       this.deps.request('account-key'),
     ]);
+    if (epoch !== this.epoch) return;
     const accountId = (who as { accountId?: unknown }).accountId;
     if (typeof accountId !== 'string') throw new Error('Passphrase unlock is unavailable.');
-    this.accountId = accountId;
     const raw = (result as { accountKey: unknown }).accountKey;
     if (raw === null || raw === undefined) {
+      this.accountId = accountId;
       this.record = null;
+      this.fingerprint = '';
       return;
     }
     const record = await parseAccountKeyRecord(raw, accountId);
+    const nextFingerprint = await fingerprint(record.publicKey);
+    if (epoch !== this.epoch) return;
     const seen = this.seen.get(record.id);
     if (seen !== undefined && seen > record.wrapGeneration) throw new Error(STALE_RECORD);
     this.seen.set(record.id, Math.max(seen ?? 0, record.wrapGeneration));
+    this.accountId = accountId;
     this.record = record;
-    this.fingerprint = await fingerprint(record.publicKey);
+    this.fingerprint = nextFingerprint;
   }
 
   /** Tries a generated passphrase with spaces, dashes and case removed, then as typed. */
@@ -482,11 +491,16 @@ export class Vault {
     this.deps.onLocked?.(reason);
   }
 
-  /** Unmount, sign-out or user change: drop the private key and slots, keeping the callbacks. */
+  /** Unmount, sign-out or user change: drop account state, keeping the callbacks. */
   clear() {
     this.epoch += 1;
     this.privateKey = null;
     this.slots = new Map();
-    if (this.status === 'unlocked') this.status = 'locked';
+    this.accountId = '';
+    this.record = null;
+    this.fingerprint = '';
+    this.loadError = '';
+    this.seen.clear();
+    this.status = 'loading';
   }
 }

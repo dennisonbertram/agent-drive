@@ -35,11 +35,9 @@ export function MenuButton({
   useEffect(() => {
     const popover = menu.current;
     if (!popover) return;
-    const onToggle = (event: Event) => {
-      const isOpen = (event as ToggleEvent).newState === 'open';
-      setOpen(isOpen);
+    const position = () => {
       const anchor = button.current;
-      if (!isOpen || !anchor) return;
+      if (!popover.matches(':popover-open') || !anchor) return;
       // Right-aligned under the button; flipped above it when it would leave the viewport.
       const rect = anchor.getBoundingClientRect();
       const width = popover.offsetWidth;
@@ -53,12 +51,23 @@ export function MenuButton({
           : below;
       popover.style.left = `${left}px`;
       popover.style.top = `${top}px`;
+    };
+    const onToggle = (event: Event) => {
+      const isOpen = (event as ToggleEvent).newState === 'open';
+      setOpen(isOpen);
+      window.removeEventListener('resize', position);
+      if (!isOpen) return;
+      position();
+      window.addEventListener('resize', position);
       popover
         .querySelector<HTMLButtonElement>('button:not(:disabled)')
         ?.focus({ preventScroll: true });
     };
     popover.addEventListener('toggle', onToggle);
-    return () => popover.removeEventListener('toggle', onToggle);
+    return () => {
+      popover.removeEventListener('toggle', onToggle);
+      window.removeEventListener('resize', position);
+    };
   }, [align]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
