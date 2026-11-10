@@ -139,3 +139,153 @@ it('drains batches once, isolates failures, retries the same id, and pauses expi
     true,
   );
 });
+
+it('does not finalize replaced meter leases or send items stolen from its claimed batch', async () => {
+  const periodStart = new Date();
+  const insertMeters = async (customer: string, count: number) => {
+    await pool.query(
+      `INSERT INTO billing_meter_reports
+         (account_id,period_start,stripe_customer_id,cents,created_at,last_error)
+       SELECT $1,$2,$3,1,clock_timestamp() + (n * interval '1 millisecond'),'unchanged'
+         FROM generate_series(1,$4::integer) AS n`,
+      [accountId, periodStart, customer, count],
+    );
+    return (
+      await pool.query<{ id: string }>(
+        'SELECT id FROM billing_meter_reports WHERE account_id=$1 AND stripe_customer_id=$2 ORDER BY created_at',
+        [accountId, customer],
+      )
+    ).rows.map(({ id }) => id);
+  };
+  const drainWith = (sendMeterReport: ({ id }: { id: string }) => Promise<void>) =>
+    drainOutboxes({
+      meterDeliveryConfigured: () => true,
+      emailConfigured: () => true,
+      sendMeterReport,
+      sendBillingEmail: async () => undefined,
+    });
+  const successId = (await insertMeters('cus_stale_success_fixture', 1))[0]!;
+  await drainWith(async () => {
+    await pool.query(
+      `UPDATE billing_meter_reports SET lease_until=clock_timestamp()+interval '2 hours'
+        WHERE id=$1`,
+      [successId],
+    );
+  });
+  const successState = await pool.query<{
+    reported_at: Date | null;
+    lease_until: Date | null;
+    last_error: string | null;
+  }>('SELECT reported_at,lease_until,last_error FROM billing_meter_reports WHERE id=$1', [
+    successId,
+  ]);
+  expect(successState.rows[0]).toEqual({
+    reported_at: null,
+    lease_until: expect.any(Date),
+    last_error: 'unchanged',
+  });
+
+  const failureId = (await insertMeters('cus_stale_failure_fixture', 1))[0]!;
+  await drainWith(async () => {
+    await pool.query(
+      `UPDATE billing_meter_reports SET lease_until=clock_timestamp()+interval '2 hours'
+        WHERE id=$1`,
+      [failureId],
+    );
+    throw new Error('superseded provider failure');
+  });
+  const failureState = await pool.query<{
+    reported_at: Date | null;
+    lease_until: Date | null;
+    last_error: string | null;
+  }>('SELECT reported_at,lease_until,last_error FROM billing_meter_reports WHERE id=$1', [
+    failureId,
+  ]);
+  expect(failureState.rows[0]).toEqual({
+    reported_at: null,
+    lease_until: expect.any(Date),
+    last_error: 'unchanged',
+  });
+
+  const [firstId, otherId] = await insertMeters('cus_stolen_batch_fixture', 2);
+  const attempted: string[] = [];
+  await drainWith(async ({ id }) => {
+    attempted.push(id);
+    const stolenId = id === firstId ? otherId : firstId;
+    await pool.query(
+      `UPDATE billing_meter_reports SET lease_until=clock_timestamp()+interval '2 hours'
+        WHERE id=$1`,
+      [stolenId],
+    );
+  });
+  expect(attempted).toHaveLength(1);
+  expect([firstId, otherId]).toContain(attempted[0]);
+  const stolenId = attempted[0] === firstId ? otherId : firstId;
+  const stolenState = await pool.query<{ id: string; lease_until: Date | null }>(
+    'SELECT id,lease_until FROM billing_meter_reports WHERE id=ANY($1::uuid[])',
+    [[firstId, otherId]],
+  );
+  expect(stolenState.rows).toHaveLength(2);
+  expect(stolenState.rows.find((row) => row.id === stolenId)?.lease_until).toBeInstanceOf(Date);
+});
+
+it('does not finalize replaced notification leases after provider success or failure', async () => {
+  const periodStart = new Date();
+  let threshold = 100;
+  const insertNotification = async (suffix: string) =>
+    (
+      await pool.query<{ id: string }>(
+        `INSERT INTO billing_notifications
+           (account_id,period_start,threshold_cents,email,last_error)
+         VALUES ($1,$2,$3,$4,'unchanged') RETURNING id`,
+        [accountId, periodStart, threshold++, `claim-${suffix}@example.test`],
+      )
+    ).rows[0]!.id;
+  const drainWith = (
+    sendBillingEmail: ({ idempotencyKey }: { idempotencyKey: string }) => Promise<void>,
+  ) =>
+    drainOutboxes({
+      meterDeliveryConfigured: () => true,
+      emailConfigured: () => true,
+      sendMeterReport: async () => undefined,
+      sendBillingEmail,
+    });
+  const successId = await insertNotification('success');
+  await drainWith(async () => {
+    await pool.query(
+      `UPDATE billing_notifications SET lease_until=clock_timestamp()+interval '2 hours'
+        WHERE id=$1`,
+      [successId],
+    );
+  });
+  const successState = await pool.query<{
+    sent_at: Date | null;
+    lease_until: Date | null;
+    last_error: string | null;
+  }>('SELECT sent_at,lease_until,last_error FROM billing_notifications WHERE id=$1', [successId]);
+  expect(successState.rows[0]).toEqual({
+    sent_at: null,
+    lease_until: expect.any(Date),
+    last_error: 'unchanged',
+  });
+
+  const failureId = await insertNotification('failure');
+  await drainWith(async ({ idempotencyKey }) => {
+    await pool.query(
+      `UPDATE billing_notifications SET lease_until=clock_timestamp()+interval '2 hours'
+        WHERE id=$1`,
+      [idempotencyKey.replace('billing-notification/', '')],
+    );
+    throw new Error('superseded provider failure');
+  });
+  const failureState = await pool.query<{
+    sent_at: Date | null;
+    lease_until: Date | null;
+    last_error: string | null;
+  }>('SELECT sent_at,lease_until,last_error FROM billing_notifications WHERE id=$1', [failureId]);
+  expect(failureState.rows[0]).toEqual({
+    sent_at: null,
+    lease_until: expect.any(Date),
+    last_error: 'unchanged',
+  });
+});

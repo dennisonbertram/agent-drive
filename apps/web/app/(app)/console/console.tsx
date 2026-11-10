@@ -653,35 +653,51 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   } (${drive?.key_backup_method})`;
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
 
+  const refreshOwner = useRef(0);
   const refresh = useCallback(async () => {
-    const [nextDrives, nextAgents, nextKeys, nextUsage] = await Promise.all([
-      all<Drive>('drives'),
-      all<Agent>('agents'),
-      all<ApiKey>('keys'),
-      api<Usage>('usage'),
-    ]);
-    setDrives(
-      nextDrives.map((item) => {
-        const recorded = recordedBackups.current[item.id];
-        return recorded && !item.key_backup_at
-          ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
-          : item;
-      }),
-    );
-    setAgents(nextAgents);
-    setApiKeys(nextKeys);
-    setUsage(nextUsage);
-    setSelected((current) =>
-      nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives),
-    );
-    setReady(true);
-    setFileRefresh((value) => value + 1);
-  }, []);
+    const owner = ++refreshOwner.current;
+    try {
+      const [nextDrives, nextAgents, nextKeys, nextUsage] = await Promise.all([
+        all<Drive>('drives'),
+        all<Agent>('agents'),
+        all<ApiKey>('keys'),
+        api<Usage>('usage'),
+      ]);
+      if (owner !== refreshOwner.current) return;
+      setDrives(
+        nextDrives.map((item) => {
+          const recorded = recordedBackups.current[item.id];
+          return recorded && !item.key_backup_at
+            ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
+            : item;
+        }),
+      );
+      setAgents(nextAgents);
+      setApiKeys(nextKeys);
+      setUsage(nextUsage);
+      setSelected((current) =>
+        nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives),
+      );
+      setReady(true);
+      setFileRefresh((value) => value + 1);
+    } catch (reason) {
+      if (owner === refreshOwner.current) throw reason;
+    }
+  }, [identity.userId]);
 
   useEffect(() => {
+    let active = true;
     void Promise.resolve()
-      .then(refresh)
-      .catch((reason: Error) => setError(reason.message));
+      .then(() => {
+        if (active) return refresh();
+      })
+      .catch((reason: Error) => {
+        if (active) setError(reason.message);
+      });
+    return () => {
+      active = false;
+      refreshOwner.current += 1;
+    };
   }, [refresh]);
   useEffect(() => {
     if (!filter.trim()) return setTyped('');
@@ -982,6 +998,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     lastUser.current = identity.userId;
     if (!hadUser) return;
     vault.clear();
+    inboxCache.current.clear();
+    recordedBackups.current = {};
+    setDrives([]);
+    setAgents([]);
+    setApiKeys([]);
+    setUsage(null);
+    setSelected('');
+    setReady(false);
     lockAll('');
     void vault.load();
   }, [identity.userId, vault]);

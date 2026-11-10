@@ -1,4 +1,5 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import type { PoolClient } from 'pg';
 import { billingSummary, recordTransfer } from './ledger';
 import { parseS3Transfer } from './s3-log';
 import { getPool, withTransaction } from '../db/client';
@@ -12,6 +13,43 @@ import { billingOrigin } from './policy';
 
 const limit = 100;
 const maxLogLineBytes = 1024 * 1024;
+
+type MeterClaim = {
+  id: string;
+  lease_until: string;
+  stripe_customer_id: string;
+  cents: number;
+  created_at: Date;
+  period_start: Date;
+};
+
+type NotificationClaim = {
+  id: string;
+  lease_until: string;
+  account_id: string;
+  email: string;
+  threshold_cents: number;
+};
+
+async function ownsMeterClaim(claim: MeterClaim) {
+  const result = await getPool().query(
+    `SELECT 1 FROM billing_meter_reports
+      WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+        AND reported_at IS NULL AND first_attempt_at > clock_timestamp()-interval '23 hours'`,
+    [claim.id, claim.lease_until],
+  );
+  return !!result.rowCount;
+}
+
+async function ownsNotificationClaim(client: PoolClient, claim: NotificationClaim) {
+  const result = await client.query(
+    `SELECT 1 FROM billing_notifications
+      WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+        AND sent_at IS NULL AND first_attempt_at > clock_timestamp()-interval '24 hours'`,
+    [claim.id, claim.lease_until],
+  );
+  return !!result.rowCount;
+}
 
 function logsClient() {
   const config: ConstructorParameters<typeof S3Client>[0] = {
@@ -124,24 +162,28 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
   await getPool().query(
     `UPDATE billing_meter_reports
         SET last_error = 'Automatic retry paused after the 23-hour idempotency window; operator reconciliation required.'
-      WHERE reported_at IS NULL AND first_attempt_at <= now() - interval '23 hours'`,
+      WHERE reported_at IS NULL AND first_attempt_at <= clock_timestamp() - interval '23 hours'
+        AND (lease_until IS NULL OR lease_until < clock_timestamp())`,
   );
   if (!providers.meterDeliveryConfigured()) {
     await getPool().query(
       `UPDATE billing_meter_reports
           SET last_error = 'Stripe meter reporting is not configured; report remains pending.'
-        WHERE reported_at IS NULL AND first_attempt_at IS NULL`,
+        WHERE reported_at IS NULL AND first_attempt_at IS NULL
+          AND (lease_until IS NULL OR lease_until < clock_timestamp())`,
     );
   } else {
-    const meters = await getPool().query(
-      `UPDATE billing_meter_reports SET first_attempt_at=COALESCE(first_attempt_at,now()), lease_until=now()+interval '1 hour'
+    const meters = await getPool().query<MeterClaim>(
+      `UPDATE billing_meter_reports SET first_attempt_at=COALESCE(first_attempt_at,clock_timestamp()),
+           lease_until=clock_timestamp()+interval '1 hour'
        WHERE id IN (SELECT id FROM billing_meter_reports WHERE reported_at IS NULL
-         AND (first_attempt_at IS NULL OR first_attempt_at > now()-interval '23 hours')
-         AND (lease_until IS NULL OR lease_until < now())
+         AND (first_attempt_at IS NULL OR first_attempt_at > clock_timestamp()-interval '23 hours')
+         AND (lease_until IS NULL OR lease_until < clock_timestamp())
          ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 100)
-     RETURNING id, stripe_customer_id, cents, created_at, period_start, first_attempt_at`,
+     RETURNING id, lease_until::text AS lease_until, stripe_customer_id, cents, created_at, period_start`,
     );
     for (const row of meters.rows) {
+      if (!(await ownsMeterClaim(row))) continue;
       try {
         await providers.sendMeterReport({
           id: row.id,
@@ -161,14 +203,20 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
           ),
         });
         await getPool().query(
-          'UPDATE billing_meter_reports SET reported_at = now(), lease_until = NULL, last_error = NULL WHERE id = $1',
-          [row.id],
+          `UPDATE billing_meter_reports
+              SET reported_at = clock_timestamp(), lease_until = NULL, last_error = NULL
+            WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+              AND reported_at IS NULL AND first_attempt_at > clock_timestamp()-interval '23 hours'`,
+          [row.id, row.lease_until],
         );
       } catch (error) {
         await getPool().query(
-          'UPDATE billing_meter_reports SET lease_until = NULL, last_error = $2 WHERE id = $1',
+          `UPDATE billing_meter_reports SET lease_until = NULL, last_error = $3
+            WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+              AND reported_at IS NULL AND first_attempt_at > clock_timestamp()-interval '23 hours'`,
           [
             row.id,
+            row.lease_until,
             error instanceof Error
               ? `${error.name}: Stripe meter delivery failed.`
               : 'Stripe meter delivery failed.',
@@ -180,24 +228,27 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
   await getPool().query(
     `UPDATE billing_notifications
       SET last_error = 'Automatic retry paused after the 24-hour idempotency window; operator reconciliation required.'
-      WHERE sent_at IS NULL AND first_attempt_at <= now() - interval '24 hours'`,
+      WHERE sent_at IS NULL AND first_attempt_at <= clock_timestamp() - interval '24 hours'
+        AND (lease_until IS NULL OR lease_until < clock_timestamp())`,
   );
   if (!providers.emailConfigured()) {
     await getPool().query(
       `UPDATE billing_notifications
           SET last_error = 'Resend notifications are not configured; notification remains pending.'
-        WHERE sent_at IS NULL AND first_attempt_at IS NULL`,
+        WHERE sent_at IS NULL AND first_attempt_at IS NULL
+          AND (lease_until IS NULL OR lease_until < clock_timestamp())`,
     );
   } else {
-    const notifications = await getPool().query(
-      `UPDATE billing_notifications SET first_attempt_at=COALESCE(first_attempt_at,now()), lease_until=now()+interval '1 hour'
+    const notifications = await getPool().query<NotificationClaim>(
+      `UPDATE billing_notifications SET first_attempt_at=COALESCE(first_attempt_at,clock_timestamp()),
+           lease_until=clock_timestamp()+interval '1 hour'
        WHERE id IN (SELECT id FROM billing_notifications WHERE sent_at IS NULL
-         AND (first_attempt_at IS NULL OR first_attempt_at > now()-interval '24 hours')
+         AND (first_attempt_at IS NULL OR first_attempt_at > clock_timestamp()-interval '24 hours')
          AND EXISTS (SELECT 1 FROM accounts a
                       WHERE a.id=billing_notifications.account_id AND a.deleting_at IS NULL)
-         AND (lease_until IS NULL OR lease_until < now())
+         AND (lease_until IS NULL OR lease_until < clock_timestamp())
          ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 100)
-     RETURNING id, account_id, email, threshold_cents`,
+     RETURNING id, lease_until::text AS lease_until, account_id, email, threshold_cents`,
     );
     for (const row of notifications.rows) {
       await withTransaction(async (client) => {
@@ -206,9 +257,15 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
           [row.account_id],
         );
         if (!account.rowCount) {
-          await client.query('DELETE FROM billing_notifications WHERE id=$1', [row.id]);
+          await client.query(
+            `DELETE FROM billing_notifications
+              WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+                AND sent_at IS NULL AND first_attempt_at > clock_timestamp()-interval '24 hours'`,
+            [row.id, row.lease_until],
+          );
           return;
         }
+        if (!(await ownsNotificationClaim(client, row))) return;
         try {
           await providers.sendBillingEmail({
             idempotencyKey: `billing-notification/${row.id}`,
@@ -217,14 +274,20 @@ export async function drainOutboxes(providers: MaintenanceProviders = defaultPro
             text: `Your Agent Drive billing threshold of ${row.threshold_cents} cents was reached. Review billing at ${billingOrigin()}/console/billing.`,
           });
           await client.query(
-            'UPDATE billing_notifications SET sent_at = now(), lease_until = NULL, last_error = NULL WHERE id = $1',
-            [row.id],
+            `UPDATE billing_notifications
+                SET sent_at=clock_timestamp(), lease_until=NULL, last_error=NULL
+              WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+                AND sent_at IS NULL AND first_attempt_at > clock_timestamp()-interval '24 hours'`,
+            [row.id, row.lease_until],
           );
         } catch (error) {
           await client.query(
-            'UPDATE billing_notifications SET lease_until = NULL, last_error = $2 WHERE id = $1',
+            `UPDATE billing_notifications SET lease_until=NULL, last_error=$3
+              WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()
+                AND sent_at IS NULL AND first_attempt_at > clock_timestamp()-interval '24 hours'`,
             [
               row.id,
+              row.lease_until,
               error instanceof Error
                 ? `${error.name}: Resend delivery failed.`
                 : 'Resend delivery failed.',

@@ -1097,6 +1097,50 @@ test.describe('agent device login', () => {
     expect(who.driveIds).toEqual([driveId]);
   });
 
+  test('stale code lookups cannot replace a newer pairing request', async ({ page, context }) => {
+    await newUser(context);
+    let release!: () => void;
+    let started!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/api/console/device/BCDF-GHJK', async (route) => {
+      started();
+      await gate;
+      await route.fulfill({ status: 404, json: { error: { message: 'Old request expired' } } });
+    });
+    await page.route('**/api/console/device/LMNP-QRST', async (route) => {
+      await route.fulfill({
+        json: {
+          user_code: 'LMNP-QRST',
+          client_name: 'current-agent',
+          machine: null,
+          created_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 600_000).toISOString(),
+          drives: [{ id: randomUUID(), name: 'current-drive' }],
+          scopes: ['read'],
+        },
+      });
+    });
+    await page.goto('/connect');
+    await page.getByPlaceholder('XXXX-XXXX').fill('BCDF-GHJK');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await waiting;
+    await page.getByPlaceholder('XXXX-XXXX').fill('LMNP-QRST');
+    // Submit events can race even while the button is disabled (keyboard/programmatic submit).
+    await page.locator('form').dispatchEvent('submit');
+    await expect(page.getByRole('heading', { name: 'Connect current-agent?' })).toBeVisible();
+    const finished = page.waitForResponse('**/api/console/device/BCDF-GHJK');
+    release();
+    await finished;
+    await expect(page.getByRole('heading', { name: 'Connect current-agent?' })).toBeVisible();
+    await expect(page.locator('.connect-code')).toHaveText('LMNP-QRST');
+    await expect(page.locator('.banner.error')).toHaveCount(0);
+  });
+
   test('code entry formats and keeps the field still', async ({ page, context }) => {
     await newUser(context);
     await page.goto('/connect');
