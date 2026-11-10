@@ -179,7 +179,7 @@ const frame: Frame = (t, env) => {
     const kw = env.narrow ? 86 : 79; // phone keys are wider, so names fit at 12px
     const x = env.narrow ? kc(i) - kw / 2 : kx(i);
     k += `<rect x="${x + 0.5}" y="${y + 0.5}" width="${kw}" height="63" rx="10" fill="${fill}" stroke="${C.g2}" stroke-dasharray="3 3" stroke-opacity="${off.toFixed(3)}"/>`;
-    k += `<path d="${GL[i]!(x + kw - 13, y + 14.5)}" fill="${gl}" fill-rule="evenodd"/>`;
+    k += `<path d="${GL[i]!(x + kw - (env.narrow ? 14 : 13), y + (env.narrow ? 8.5 : 14.5))}" fill="${gl}" fill-rule="evenodd"/>`;
     lines.forEach((s, j) => (k += tx(x + 10, y + 54 - (lines.length - 1 - j) * ls, s, tc)));
   });
   // tiles, packets, counters
