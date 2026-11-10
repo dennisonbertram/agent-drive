@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, useId, type ReactNode } from 'react';
 import Link from 'next/link';
 import { SiteHeader } from '../site-header';
 import { SiteFooter } from '../site-footer';
@@ -99,28 +99,34 @@ function SetupPanel({ instruction, label }: { instruction: string; label: string
 
 /** Activity log as a real table: the path is a row header above who saved it, from where, and when. */
 function Log({ heading, caption, rows }: { heading: string; caption: string; rows: string[][] }) {
+  const id = useId();
+  const cols = ['Saved by', 'From', 'When'];
   return (
     <div className="l-log">
       <table className="lt">
         <caption className="l-tag">{heading}</caption>
         <thead>
           <tr>
-            <th scope="col">Saved by</th>
-            <th scope="col">From</th>
-            <th scope="col">When</th>
+            {cols.map((c, i) => (
+              <th scope="col" id={`${id}c${i}`} key={c}>
+                {c}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map(([path, ...cells]) => (
+          {rows.map(([path, ...cells], r) => (
             <Fragment key={path}>
               <tr className="lp">
-                <th scope="row" colSpan={3}>
+                <th scope="row" colSpan={3} id={`${id}r${r}`}>
                   {path}
                 </th>
               </tr>
               <tr>
                 {cells.map((cell, i) => (
-                  <td key={i}>{cell}</td>
+                  <td key={i} headers={`${id}r${r} ${id}c${i}`}>
+                    {cell}
+                  </td>
                 ))}
               </tr>
             </Fragment>

@@ -159,6 +159,25 @@ test.describe('phone page length and structure', () => {
     });
   }
 
+  test('each log value cell is tied to its path and its column header', async ({ page }) => {
+    await page.goto('/');
+    const out = await page.locator('table.lt').evaluate((t) => {
+      const text = (id: string) => t.querySelector(`#${CSS.escape(id)}`)?.textContent?.trim();
+      return [...t.querySelectorAll('tbody td')].map((td) => {
+        const ids = (td.getAttribute('headers') ?? '').split(/\s+/).filter(Boolean);
+        return ids.map(text);
+      });
+    });
+    const paths = [
+      '/data/customers/2026-11-09.csv',
+      '/traces/coding-agent/2026-11-09/101500.123Z_….json',
+      '/prompts/outreach.md',
+    ];
+    const cols = ['Saved by', 'From', 'When'];
+    expect(out).toHaveLength(9);
+    out.forEach((h, i) => expect(h).toEqual([paths[Math.floor(i / 3)], cols[i % 3]]));
+  });
+
   test('relay steps stack and the phone console image is used at 768px', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.goto('/');
