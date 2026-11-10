@@ -813,9 +813,16 @@
   color: var(--i);
 }
 .l-solve li {
-  border: 1px solid var(--hair);
-  border-radius: 999px;
-  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 400 var(--t-s) var(--mono2);
+}
+.l-solve li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: var(--sg);
 }
 .l-log + .l-log {
   margin-top: 24px;

@@ -105,13 +105,13 @@ for (const width of [1440, 390]) {
 
 // K2: a shorter, non-repeating phone page
 test.describe('phone page length and structure', () => {
-  test('the page is at most 10,000 px tall at 390px with nothing hidden behind a tap', async ({
+  test('the page is at most 9,400 px tall at 390px with nothing hidden behind a tap', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     const h = await page.evaluate(() => document.documentElement.scrollHeight);
-    expect(h).toBeLessThanOrEqual(10000);
+    expect(h).toBeLessThanOrEqual(9400);
     await expect(page.locator('main [hidden], main [role="tab"]')).toHaveCount(0);
   });
 
@@ -179,6 +179,11 @@ test.describe('phone page length and structure', () => {
       'Many agents, one drive',
       'No silent overwrites',
     ]);
+    const border = await page
+      .locator('ul.l-solve li')
+      .first()
+      .evaluate((e) => getComputedStyle(e).borderTopWidth);
+    expect(border).toBe('0px');
     const rows = page.locator('#compare a.cmp-row');
     await expect(rows).toHaveCount(4);
     await expect(rows.last()).toContainText('All comparisons');
