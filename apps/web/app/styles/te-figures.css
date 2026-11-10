@@ -10,7 +10,7 @@
   display: block;
   width: 100%;
   height: auto;
-  --fs: 19.5px; /* first paint on a phone: 12px at the 320px figure of a 360px screen */
+  --fs: 20.31px; /* first paint on a phone: 12.5px at the 320px figure of a 360px screen */
 }
 @media (min-width: 600px) {
   .te-fig svg {
