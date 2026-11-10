@@ -41,6 +41,9 @@ html:has(.site-header) {
   min-height: 44px;
 }
 .site-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--ink-2, #3b3a37);
   font-size: var(--t-b);
   text-decoration: none;

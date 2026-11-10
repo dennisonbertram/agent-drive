@@ -165,7 +165,8 @@ export default function Home() {
             <p className="l-cli">
               <span>or in a terminal:</span>{' '}
               <span className="l-cmd">
-                <b>{install}</b> <CopyButton text={install} className="l-copy" />
+                <b>{install}</b>{' '}
+                <CopyButton text={install} caption="Copy command" className="l-copy" />
               </span>
             </p>
           </div>
@@ -414,7 +415,7 @@ export default function Home() {
               ))}
             </tbody>
           </table>
-          <Link className="l-btn signal pt-cta" href="/sign-up">
+          <Link className="l-btn pt-cta" href="/sign-up">
             Sign up free
           </Link>
           <p className="l-pnote">
@@ -431,7 +432,7 @@ export default function Home() {
           <h2>Give your agent a drive.</h2>
           <div className="l-final-row">
             <SetupPanel instruction={instruction} label="Copy agent instruction again" />
-            <Link className="l-btn signal" href="/sign-up">
+            <Link className="l-btn" href="/sign-up">
               Sign up free
             </Link>
           </div>
