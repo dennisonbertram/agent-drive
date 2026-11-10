@@ -7,12 +7,15 @@ import {
   keySource,
 } from '@/src/console/recovery-file';
 import type { Source } from '@/src/console/webhook-setup';
+import type { VaultStatus } from '@/src/console/vault';
 import { CopyButton } from '../copy-button';
 import { NewPassphraseForm, PassphraseForm, ResetForm } from './vault-forms';
 
 export type UnlockMode = 'passphrase' | 'recovery' | 'setup' | 'change' | 'reset';
 export type VaultActions = {
   email: string;
+  status: VaultStatus;
+  onRetry: () => void;
   /** True when a passphrase exists for this account, so recovery mode can offer it. */
   hasVault: boolean;
   onUnlock: (passphrase: string) => Promise<string>;
@@ -122,6 +125,23 @@ export function UnlockDialog({
 
   return (
     <div className="unlock" ref={root}>
+      {(vault.status === 'loading' || vault.status === 'error') && (
+        <>
+          <p role="status">
+            {vault.status === 'loading'
+              ? 'Checking passphrase status…'
+              : 'Couldn’t check passphrase status. Retry or use a recovery file.'}
+          </p>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={vault.status === 'loading'}
+            onClick={vault.onRetry}
+          >
+            {vault.status === 'loading' ? 'Checking…' : 'Retry'}
+          </button>
+        </>
+      )}
       {recoveryNote && <p role="status">{recoveryNote}</p>}
       <p>
         Choose the recovery file for this drive. The key stays in this tab only. It is cleared when

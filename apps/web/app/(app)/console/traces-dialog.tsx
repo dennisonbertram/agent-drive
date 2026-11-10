@@ -136,8 +136,10 @@ export function TracesDialog({
     <div className="traces-dialog">
       <h3 className="share-heading">Local agents</h3>
       <p className="share-help">
-        Run Claude Code or Codex through <code>capture</code> and each call is saved here,
-        encrypted, under <code>/traces</code>.
+        Connect to Agent Drive and load this drive’s key on your agent’s machine first. Run Claude
+        Code or Codex through <code>capture</code> to save encrypted traces under{' '}
+        <code>/traces</code>. Check terminal output: capture may be disabled, uploads may be queued,
+        or calls may not be captured.
       </p>
       <div className="trace-command">
         <code>{install}</code>

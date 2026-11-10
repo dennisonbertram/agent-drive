@@ -405,14 +405,13 @@ export default function Connect({
       <section className="panel connect-card approved" role="status">
         <span className="connect-tag">
           <span className="connect-led on" aria-hidden="true" />
-          Paired
+          Approval saved
         </span>
-        <h1>{done.name} is connected</h1>
+        <h1>Access approved for {done.name}</h1>
         <p>
-          {done.name} can now {done.access} {done.drive}. Return to your agent; it will finish setup
-          on its own.
+          You approved {done.name} to {done.access} {done.drive}. Return to your agent to finish
+          setup and confirm it is ready.
         </p>
-        <p>It appears in the console under Agents once setup finishes.</p>
         <a className="button secondary" href="/console">
           Open console
         </a>

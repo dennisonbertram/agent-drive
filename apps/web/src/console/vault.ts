@@ -119,6 +119,9 @@ export class Vault {
     const seq = ++this.unlockSeq;
     this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    this.status = 'loading';
+    this.loadError = '';
+    this.emit();
     try {
       if (!(await this.refreshRecord(live))) return;
       this.loadError = '';
@@ -510,7 +513,7 @@ export class Vault {
     this.deps.onLocked?.(reason);
   }
 
-  /** Unmount, sign-out or user change: drop the private key and slots, keeping the callbacks. */
+  /** Unmount, sign-out or user change: drop account state, keeping the callbacks. */
   clear() {
     this.epoch += 1;
     this.privateKey = null;
