@@ -25,7 +25,7 @@ export const GAMES = {
 export const PROTEIN = {
   tag: 'Research data',
   title: "Gigabytes of protein data don't fit in GitHub.",
-  lede: "Anthropic's Fable 6.2 can now do protein work. That work produces structure files, embeddings and simulation runs measured in gigabytes. GitHub blocks files over 100 MB. Agent Drive keeps them encrypted, versioned and shared with every agent on the project.",
+  lede: "Anthropic's Claude Mythos 5.2 can now predict the structure of whole viral capsids. Protein work like this produces structure files, embeddings and simulation runs measured in gigabytes. GitHub blocks files over 100 MB. Agent Drive keeps them encrypted, versioned and shared with every agent on the project.",
 };
 
 export const PROBLEM = {
