@@ -95,6 +95,8 @@ export class Vault {
   private unlockSeq = 0;
   private recordSeq = 0;
   private seen = new Map<string, number>();
+  /** Status before the pending load began; cancelUnlock() puts it back. */
+  private beforeLoad: { status: VaultStatus; loadError: string } | null = null;
 
   constructor(private deps: VaultDeps) {}
 
@@ -119,15 +121,22 @@ export class Vault {
     const seq = ++this.unlockSeq;
     this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    // A first-ever load has nothing to go back to, so it falls back to a retryable error.
+    this.beforeLoad ??=
+      this.status === 'loading'
+        ? { status: 'error', loadError: 'Passphrase unlock could not be loaded. Try again.' }
+        : { status: this.status, loadError: this.loadError };
     this.status = 'loading';
     this.loadError = '';
     this.emit();
     try {
       if (!(await this.refreshRecord(live))) return;
+      this.beforeLoad = null;
       this.loadError = '';
       this.status = this.record ? (this.privateKey ? 'unlocked' : 'locked') : 'none';
     } catch (reason) {
       if (!live()) return;
+      this.beforeLoad = null;
       this.loadError =
         reason instanceof Error ? reason.message : 'Passphrase unlock is unavailable.';
       this.status = 'error';
@@ -244,6 +253,11 @@ export class Vault {
   cancelUnlock() {
     this.unlockSeq += 1;
     this.fetchingSlots = false;
+    if (this.beforeLoad && this.status === 'loading') {
+      ({ status: this.status, loadError: this.loadError } = this.beforeLoad);
+      this.emit();
+    }
+    this.beforeLoad = null;
   }
 
   /**
@@ -523,6 +537,7 @@ export class Vault {
     this.record = null;
     this.fingerprint = '';
     this.loadError = '';
+    this.beforeLoad = null;
     this.seen = new Map();
     this.status = 'loading';
   }

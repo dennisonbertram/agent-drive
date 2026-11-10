@@ -14,7 +14,7 @@ test.describe('shared site header', () => {
   test('Sign up free is in the phone viewport and tall enough to tap', async ({ page }) => {
     await page.setViewportSize(phone);
     await page.goto('/');
-    const link = page.getByRole('link', { name: 'Sign up free' });
+    const link = page.locator('header.site-header').getByRole('link', { name: 'Sign up free' });
     await expect(link).toBeInViewport();
     await expect(link).toHaveAttribute('href', '/sign-up');
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
@@ -26,7 +26,9 @@ test.describe('shared site header', () => {
       const boxes = [];
       for (const path of ['/', '/pricing']) {
         await page.goto(path);
-        await expect(page.getByRole('link', { name: 'Sign up free' })).toHaveCount(1);
+        await expect(
+          page.locator('header.site-header').getByRole('link', { name: 'Sign up free' }),
+        ).toHaveCount(1);
         const header = page.locator('header.site-header');
         await expect(header.getByRole('link', { name: 'Console' })).toHaveCount(0);
         await expect(header.locator('a[href="/docs"]')).toHaveCount(1);
@@ -84,7 +86,7 @@ test.describe('auth cross-links', () => {
   test('sign-in and sign-up link to each other and to Pricing and Docs', async ({ page }) => {
     await page.goto('/sign-in');
     const main = page.getByRole('main');
-    await expect(main.getByRole('link', { name: 'Create a free account' })).toHaveAttribute(
+    await expect(main.getByRole('link', { name: 'Sign up free' })).toHaveAttribute(
       'href',
       '/sign-up',
     );
@@ -111,7 +113,7 @@ test.describe('auth cross-links', () => {
       'javascript:alert(1)',
     ];
     const cases = [
-      ['/sign-in', 'Create a free account', '/sign-up'],
+      ['/sign-in', 'Sign up free', '/sign-up'],
       ['/sign-up', 'Sign in', '/sign-in'],
     ] as const;
     for (const [from, name, to] of cases) {
@@ -129,10 +131,132 @@ test.describe('auth cross-links', () => {
   });
 });
 
+for (const size of [phone, desktop]) {
+  test.describe(`primary action at ${size.width}px`, () => {
+    test.use({ viewport: size, permissions: ['clipboard-read', 'clipboard-write'] });
+
+    test('header stays at the top after scrolling to pricing, FAQ and the final call', async ({
+      page,
+    }) => {
+      await page.goto('/');
+      for (const sel of ['#pricing', '#faq', '.l-final']) {
+        await page.locator(sel).scrollIntoViewIfNeeded();
+        await page.locator(sel).evaluate((el) => el.scrollIntoView());
+        const top = await page
+          .locator('header.site-header')
+          .evaluate((el) => Math.round(el.getBoundingClientRect().top));
+        expect(top, sel).toBe(0);
+        await expect(
+          page.locator('header.site-header').getByRole('link', { name: 'Sign up free' }),
+        ).toBeInViewport();
+      }
+    });
+
+    test('every filled orange element is a Sign up free link, one per region', async ({ page }) => {
+      await page.goto('/');
+      const filled = await page.evaluate(() => {
+        const out: { name: string; tag: string; region: string }[] = [];
+        for (const el of document.querySelectorAll<HTMLElement>('a, button, span, div')) {
+          if (getComputedStyle(el).backgroundColor !== 'rgb(255, 74, 28)') continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < 20 || r.height < 20) continue; // decorative dots, not buttons
+          out.push({
+            name: (el.textContent ?? '').trim(),
+            tag: el.tagName,
+            region:
+              el.closest('header, section, footer')?.id ||
+              el.closest('header, section, footer')?.className ||
+              '',
+          });
+        }
+        return out;
+      });
+      expect(filled.length).toBeGreaterThan(0);
+      for (const f of filled) {
+        expect(f.tag).toBe('A');
+        expect(f.name).toBe('Sign up free');
+      }
+      const regions = filled.map((f) => f.region);
+      expect(new Set(regions).size).toBe(regions.length);
+    });
+
+    test('a filled Sign up free is visible on every screen', async ({ page }) => {
+      await page.goto('/');
+      const total = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (let y = 0; y < total; y += size.height) {
+        await page.evaluate((v) => window.scrollTo(0, v), y);
+        const seen = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('a')].some((a) => {
+            const r = a.getBoundingClientRect();
+            return (
+              a.textContent?.trim() === 'Sign up free' &&
+              getComputedStyle(a).backgroundColor === 'rgb(255, 74, 28)' &&
+              r.bottom > 0 &&
+              r.top < innerHeight
+            );
+          }),
+        );
+        expect(seen, `scrollY ${y}`).toBe(true);
+      }
+    });
+
+    test('at most one filled orange element is in view at any scroll position', async ({
+      page,
+    }) => {
+      await page.goto('/');
+      const total = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (let y = 0; y < total; y += 400) {
+        await page.evaluate((v) => window.scrollTo(0, v), y);
+        const n = await page.evaluate(
+          () =>
+            [...document.querySelectorAll<HTMLElement>('a, button')].filter((el) => {
+              const r = el.getBoundingClientRect();
+              return (
+                getComputedStyle(el).backgroundColor === 'rgb(255, 74, 28)' &&
+                r.width >= 20 &&
+                r.bottom > 0 &&
+                r.top < innerHeight
+              );
+            }).length,
+        );
+        expect(n, `scrollY ${y}`).toBeLessThanOrEqual(1);
+      }
+    });
+
+    test('sign-up has one name and the copy buttons keep theirs', async ({ page }) => {
+      await page.goto('/');
+      for (const bad of ['Create a free account', 'Start free'])
+        await expect(page.getByRole('link', { name: bad })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
+      const hero = page.locator('.l-hero').getByRole('button', { name: 'Copy agent instruction' });
+      await expect(hero).toHaveText('Copy prompt');
+      await hero.click();
+      await expect(hero).toHaveText('Copied');
+      await expect(
+        page.locator('.l-final').getByRole('button', { name: 'Copy agent instruction again' }),
+      ).toHaveText('Copy prompt');
+    });
+
+    test('See the FAQ above lands below the sticky header', async ({ page }) => {
+      await page.goto('/');
+      await page.getByRole('link', { name: 'See the FAQ above.' }).click();
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const h = document.querySelector('header.site-header')!.getBoundingClientRect().bottom;
+            const f = document.querySelector('#faq h2')!.getBoundingClientRect().top;
+            return f >= h;
+          }),
+        )
+        .toBe(true);
+    });
+  });
+}
+
 test('final call to action offers sign-up beside the copy button', async ({ page }) => {
   await page.goto('/');
   const final = page.locator('section.l-final');
-  await expect(final.getByRole('link', { name: 'Create a free account' })).toHaveAttribute(
+  await expect(final.getByRole('link', { name: 'Sign up free' })).toHaveAttribute(
     'href',
     '/sign-up',
   );

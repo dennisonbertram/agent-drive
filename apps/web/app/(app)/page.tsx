@@ -1,15 +1,30 @@
 import type { Metadata } from 'next';
+import { Fragment, useId, type ReactNode } from 'react';
 import Link from 'next/link';
-import { headers } from 'next/headers';
 import { SiteHeader } from '../site-header';
+import { SiteFooter } from '../site-footer';
 import { billingRates, PLANS } from '@/src/billing/policy';
 import { allowance } from '@/src/content/plans';
-import { FAQ, FEATURES, HERO, PROBLEM, faqJsonLd } from '@/src/content/home';
+import { COMPARISONS } from '@/src/content/compare';
+import {
+  CANONICAL_ORIGIN,
+  FAQ,
+  FEATURES,
+  GAMES,
+  HERO,
+  PROBLEM,
+  PROTEIN,
+  RELAY,
+  faqJsonLd,
+} from '@/src/content/home';
 import { JsonLd } from '@/src/content/json-ld';
 import { checkoutConfigured } from '@/src/billing/providers';
 import { CopyButton } from './copy-button';
-import { LandingFigure } from './landing-figure';
+import { HeroFigure } from './hero-figure';
+import { GamesFigure } from './games-figure';
+import { ProteinFigure } from './protein-figure';
 import '../styles/landing.css';
+import '../styles/te-figures.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,8 +44,6 @@ export const metadata: Metadata = {
   },
   twitter: { card: 'summary_large_image', title, description, images: ['/opengraph-image'] },
 };
-
-const count = (n: bigint) => new Intl.NumberFormat('en-US').format(n);
 
 function paidAvailable() {
   try {
@@ -78,17 +91,55 @@ function SetupPanel({ instruction, label }: { instruction: string; label: string
         <code>
           <span className="l-p">&gt;</span> {instruction}
         </code>
-        <CopyButton text={instruction} label={label} caption="Copy" className="l-btn signal" />
+        <CopyButton text={instruction} label={label} caption="Copy prompt" className="l-btn" />
       </div>
     </div>
   );
 }
 
-export default async function Home() {
-  const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'agentdrive.xyz';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
-  const instruction = `Set up Agent Drive: ${proto}://${host}/llms.txt`;
+/** Activity log as a real table: the path is a row header above who saved it, from where, and when. */
+function Log({ heading, caption, rows }: { heading: string; caption: string; rows: string[][] }) {
+  const id = useId();
+  const cols = ['Saved by', 'From', 'When'];
+  return (
+    <div className="l-log">
+      <table className="lt">
+        <caption className="l-tag">{heading}</caption>
+        <thead>
+          <tr>
+            {cols.map((c, i) => (
+              <th scope="col" id={`${id}c${i}`} key={c}>
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([path, ...cells], r) => (
+            <Fragment key={path}>
+              <tr className="lp">
+                <th scope="row" colSpan={3} id={`${id}r${r}`}>
+                  {path}
+                </th>
+              </tr>
+              <tr>
+                {cells.map((cell, i) => (
+                  <td key={i} headers={`${id}r${r} ${id}c${i}`}>
+                    {cell}
+                  </td>
+                ))}
+              </tr>
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+      <p className="l-cap">{caption}</p>
+    </div>
+  );
+}
+
+export default function Home() {
+  const instruction = `Set up Agent Drive: ${CANONICAL_ORIGIN}/llms.txt`;
   const install = `npm install -g @dennisonbertram/agent-drive`;
   const paid = paidAvailable();
   const plans = [
@@ -96,6 +147,14 @@ export default async function Home() {
     ['Developer', PLANS.developer],
     ['Team', PLANS.team],
   ] as const;
+  const ops = new Intl.NumberFormat('en-US', { notation: 'compact' });
+  const rows: [string, (p: (typeof plans)[number][1]) => ReactNode][] = [
+    ['Price / month', (p) => `$${p.baseCents / 100}`],
+    ['Drives', (p) => String(p.drives)],
+    ['Stored', (p) => allowance(p.storageBytes)],
+    ['Downloads / month', (p) => allowance(p.egressBytes)],
+    ['API operations / month', (p) => ops.format(Number(p.operations))],
+  ];
   return (
     <main className="landing" id="top">
       <JsonLd data={faqJsonLd()} />
@@ -112,11 +171,12 @@ export default async function Home() {
             <p className="l-cli">
               <span>or in a terminal:</span>{' '}
               <span className="l-cmd">
-                <b>{install}</b> <CopyButton text={install} className="l-copy" />
+                <b>{install}</b>{' '}
+                <CopyButton text={install} caption="Copy command" className="l-copy" />
               </span>
             </p>
           </div>
-          <LandingFigure />
+          <HeroFigure />
         </div>
       </section>
 
@@ -153,79 +213,94 @@ export default async function Home() {
 
       <section id="relay">
         <div className="l-wrap">
-          <div className="l-tag">Example</div>
-          <h2>A bot, a coder and an assistant on the same data.</h2>
-          <p className="l-lede">
-            Three agents on three platforms. None of them shares a machine. They meet in the drive.
-          </p>
+          <div className="l-tag">Long-running work</div>
+          <h2>{RELAY.title}</h2>
+          <p className="l-lede">{RELAY.lede}</p>
           <ul className="l-also">
             <li>
-              <b>Research:</b> each run starts from what the last one found.
+              <b>Research:</b> build on the previous round&apos;s data sets each round.
             </li>
             <li>
-              <b>Long-running goals:</b> the plan and progress survive restarts and new models.
+              <b>Game development:</b> keep generated assets between sessions.{' '}
+              <a href="#games">See how</a>.
+            </li>
+            <li>
+              <b>Protein research:</b> gigabytes of structure data in one place.{' '}
+              <a href="#protein">See how</a>.
             </li>
           </ul>
           <div className="l-line3 relay">
             <div>
-              <div className="l-tag">1 / Grok bot &middot; cloud worker</div>
-              <p>Pulls today&apos;s posts about your app from X.</p>
+              <div className="l-tag">1 / Sales agent &middot; cloud worker</div>
+              <p>Exports this week&apos;s customer list.</p>
               <code>
-                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; posts.jsonl
-                /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive put customers.csv /data/customers/2026-11-09.csv --drive
+                &quot;$DRIVE_ID&quot;
               </code>
             </div>
             <div>
-              <div className="l-tag">2 / Devin &middot; Devin sandbox</div>
-              <p>
-                Reads the posts, builds the feature people asked for most, and writes up what
-                changed.
-              </p>
+              <div className="l-tag">2 / Coding agent &middot; sandbox</div>
+              <p>Works through the list and saves its full trace.</p>
               <code>
-                <span>$</span> agent-drive get --drive &quot;$DRIVE_ID&quot;
-                /inbox/x/2026-11-05.jsonl
+                <span>$</span> agent-drive get /data/customers/2026-11-09.csv --output customers.csv
+                --drive &quot;$DRIVE_ID&quot;
                 <br />
-                <span>$</span> agent-drive put --drive &quot;$DRIVE_ID&quot; notes.md
-                /outputs/csv-export.md
+                <span>$</span> agent-drive capture --drive &quot;$DRIVE_ID&quot; --agent
+                coding-agent -- claude
               </code>
+              <p className="l-small">
+                Traces land in <code className="l-inl">/traces/coding-agent/2026-11-09/…</code>
+              </p>
             </div>
             <div>
-              <div className="l-tag">3 / Claude &middot; Claude desktop</div>
-              <p>Checks what changed through the MCP server and tells you.</p>
+              <div className="l-tag">3 / Review agent &middot; GPU box</div>
+              <p>Reads the week&apos;s traces and improves the next run.</p>
               <div className="l-say">
-                Devin shipped CSV export today. It was the most requested feature in this
-                morning&apos;s posts from X. Notes are in /outputs/csv-export.md.
+                Read 42 traces from this week. Updated /prompts/outreach.md with the three changes
+                that worked.
               </div>
             </div>
           </div>
-          <div
-            className="l-log"
-            role="img"
-            aria-label="Drive activity: the Grok bot wrote the posts file from a cloud worker, Devin wrote the notes file from its sandbox."
-          >
-            <div className="l-tag">Drive activity</div>
-            <div className="lr h">
-              <span>PATH</span>
-              <span>AGENT</span>
-              <span>MACHINE</span>
-            </div>
-            <div className="lr">
-              <span>/inbox/x/2026-11-05.jsonl</span>
-              <span>grok-bot</span>
-              <span>cloud-worker</span>
-            </div>
-            <div className="lr">
-              <span>/outputs/csv-export.md</span>
-              <span>devin</span>
-              <span>devin-sandbox</span>
-            </div>
+          <Log
+            heading="Drive activity: who saved what, from where"
+            caption="Every file records which agent saved it and from which machine."
+            rows={[
+              ['/data/customers/2026-11-09.csv', 'sales-agent', 'cloud-worker', 'Mon 09:12'],
+              [
+                '/traces/coding-agent/2026-11-09/101500.123Z_….json',
+                'coding-agent',
+                'sandbox-7',
+                'Mon 10:15',
+              ],
+              ['/prompts/outreach.md', 'review-agent', 'gpu-box', 'Fri 17:40'],
+            ]}
+          />
+          <ul className="l-solve">
+            <li>Many agents, one drive</li>
+            <li>No silent overwrites</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="games">
+        <div className="l-wrap l-g top">
+          <div>
+            <div className="l-tag">{GAMES.tag}</div>
+            <h2>{GAMES.title}</h2>
+            <p className="l-lede">{GAMES.lede}</p>
           </div>
-          <p className="l-lede l-many">
-            Agents in different sandboxes read and write the same files. Each has its own key and
-            can be limited to writing in certain folders. Every version records which agent wrote
-            it, and a write that checks the version fails with a conflict instead of overwriting
-            newer work.
-          </p>
+          <GamesFigure />
+        </div>
+      </section>
+
+      <section id="protein">
+        <div className="l-wrap l-g top">
+          <div>
+            <div className="l-tag">{PROTEIN.tag}</div>
+            <h2>{PROTEIN.title}</h2>
+            <p className="l-lede">{PROTEIN.lede}</p>
+          </div>
+          <ProteinFigure />
         </div>
       </section>
 
@@ -239,7 +314,7 @@ export default async function Home() {
           </p>
           <figure className="l-shot">
             <picture>
-              <source media="(max-width: 760px)" srcSet="/console-files-phone.png" />
+              <source media="(max-width: 1000px)" srcSet="/console-files-phone.png" />
               <img
                 src="/console-files.png"
                 width={2320}
@@ -279,56 +354,21 @@ export default async function Home() {
         </div>
       </section>
 
-      <section id="connect">
-        <div className="l-wrap l-two">
-          <div>
-            <div className="l-tag">Connecting</div>
-            <h2>One line to the agent. One click from you.</h2>
-            <ol className="l-steps">
-              <li>
-                <i>1</i>
-                <b>Paste one line into your agent.</b>
-                <div className="t">{instruction}</div>
-              </li>
-              <li>
-                <i>2</i>
-                <b>The agent shows a pairing code.</b>
-                <div className="t">CXRH-TZJT</div>
-              </li>
-              <li>
-                <i>3</i>
-                <b>You approve it once.</b>
-              </li>
-            </ol>
-            <p className="l-nokey">No API key to copy.</p>
-            <p className="l-more">
-              Adding a second agent? Approve it in the browser, hand it a .env line, or let a
-              trusted agent grant it. <Link href="/docs">Read the docs</Link>.
-            </p>
-          </div>
-          <div className="l-pair" role="img" aria-label="Example approval page">
-            <div className="top">
-              <span className="l-tag">Approve agent</span>
-              <span className="l-led" />
-            </div>
-            <div className="c">CXRH-TZJT</div>
-            <h3>Connect trace-bot?</h3>
-            <div className="rows">
-              <div>
-                <span>Agent</span>
-                <b>trace-bot</b>
-              </div>
-              <div>
-                <span>Machine</span>
-                <b>MacBook</b>
-              </div>
-              <div>
-                <span>Account</span>
-                <b>sam@northwind.dev</b>
-              </div>
-            </div>
-            <p className="can">Read, write, delete and share files in this drive</p>
-            <span className="l-btn signal">Approve</span>
+      <section id="compare">
+        <div className="l-wrap">
+          <div className="l-tag">Compared to</div>
+          <h2>Why not S3, git or Dropbox?</h2>
+          <div className="cmp">
+            {COMPARISONS.map((c) => (
+              <Link className="cmp-row" href={`/compare/${c.slug}`} key={c.slug}>
+                <span className="l-tag">{c.other}</span>
+                <span className="cmp-sum">{c.summary}</span>
+                <span className="cmp-go">{c.title} &rarr;</span>
+              </Link>
+            ))}
+            <Link className="cmp-row" href="/compare">
+              <span className="cmp-go">All comparisons &rarr;</span>
+            </Link>
           </div>
         </div>
       </section>
@@ -353,41 +393,41 @@ export default async function Home() {
           <div className="l-tag">Pricing</div>
           <h2>Start free.</h2>
           <p className="l-lede">Encryption on the agent&apos;s machine is on every plan.</p>
-          <div className="l-plans">
-            {plans.map(([name, p]) => (
-              <div className="l-plan" key={name}>
-                <h3>{name}</h3>
-                <div className="pr">
-                  ${p.baseCents / 100}
-                  <small> / month</small>
-                </div>
-                <ul>
-                  <li>{String(p.drives)} drives</li>
-                  <li>{allowance(p.storageBytes)} stored</li>
-                  <li>{allowance(p.egressBytes)} downloads a month</li>
-                  <li>{count(p.operations)} API operations a month</li>
-                </ul>
-                {p.baseCents === 0 && (
-                  <Link className="l-btn" href="/sign-up">
-                    Start free
-                  </Link>
-                )}
-                {p.baseCents > 0 &&
-                  (paid ? (
-                    <Link className="l-btn" href="/pricing">
-                      Choose plan
-                    </Link>
-                  ) : (
-                    <span className="soon">Coming soon</span>
+          <table className="pt">
+            <thead>
+              <tr>
+                <td />
+                {plans.map(([name, p]) => (
+                  <th scope="col" key={name}>
+                    {name}
+                    {p.baseCents > 0 &&
+                      (paid ? (
+                        <Link href="/pricing">Choose plan</Link>
+                      ) : (
+                        <span className="soon">Coming soon</span>
+                      ))}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, value]) => (
+                <tr key={label}>
+                  <th scope="row">{label}</th>
+                  {plans.map(([name, p]) => (
+                    <td key={name}>{value(p)}</td>
                   ))}
-              </div>
-            ))}
-          </div>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Link className="l-btn pt-cta" href="/sign-up">
+            Sign up free
+          </Link>
           <p className="l-pnote">
             What counts as an API operation? <a href="#faq">See the FAQ above.</a>
           </p>
           <p className="l-pnote">
-            {paid ? '' : 'Paid checkout is not enabled yet. '}
             <Link href="/pricing">See full pricing</Link>
           </p>
         </div>
@@ -399,27 +439,13 @@ export default async function Home() {
           <div className="l-final-row">
             <SetupPanel instruction={instruction} label="Copy agent instruction again" />
             <Link className="l-btn" href="/sign-up">
-              Create a free account
+              Sign up free
             </Link>
           </div>
         </div>
       </section>
 
-      <footer className="l-footer">
-        <div className="l-wrap">
-          <nav aria-label="Footer">
-            <Link href="/pricing">Pricing</Link>
-            <Link href="/docs">Docs</Link>
-            <Link href="/compare">Compare</Link>
-            <Link href="/privacy">Privacy</Link>
-            <Link href="/terms">Terms</Link>
-            <a href="mailto:support@agentdrive.xyz">Contact</a>
-            <Link href="/sign-in">Sign in</Link>
-            <Link href="/console">Console</Link>
-          </nav>
-          <span>{host}</span>
-        </div>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }
