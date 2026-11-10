@@ -141,6 +141,24 @@ test.describe('phone page length and structure', () => {
     });
   }
 
+  test('the terminal copy chip says Copy command and keeps its name', async ({ page }) => {
+    await page.goto('/');
+    const chip = page.locator('.l-cli').getByRole('button', { name: 'Copy command' });
+    await expect(chip).toHaveText('Copy command');
+  });
+
+  for (const width of [768, 1440]) {
+    test(`header links have 44 px hit areas at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/');
+      const hs = await page
+        .locator('header.site-header nav a')
+        .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+      expect(hs).toHaveLength(3);
+      for (const h of hs) expect(h).toBeGreaterThanOrEqual(44);
+    });
+  }
+
   test('relay steps stack and the phone console image is used at 768px', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await page.goto('/');

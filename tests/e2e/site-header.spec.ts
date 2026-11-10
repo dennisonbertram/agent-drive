@@ -200,6 +200,29 @@ for (const size of [phone, desktop]) {
       }
     });
 
+    test('at most one filled orange element is in view at any scroll position', async ({
+      page,
+    }) => {
+      await page.goto('/');
+      const total = await page.evaluate(() => document.documentElement.scrollHeight);
+      for (let y = 0; y < total; y += 400) {
+        await page.evaluate((v) => window.scrollTo(0, v), y);
+        const n = await page.evaluate(
+          () =>
+            [...document.querySelectorAll<HTMLElement>('a, button')].filter((el) => {
+              const r = el.getBoundingClientRect();
+              return (
+                getComputedStyle(el).backgroundColor === 'rgb(255, 74, 28)' &&
+                r.width >= 20 &&
+                r.bottom > 0 &&
+                r.top < innerHeight
+              );
+            }).length,
+        );
+        expect(n, `scrollY ${y}`).toBeLessThanOrEqual(1);
+      }
+    });
+
     test('sign-up has one name and the copy buttons keep theirs', async ({ page }) => {
       await page.goto('/');
       for (const bad of ['Create a free account', 'Start free'])
