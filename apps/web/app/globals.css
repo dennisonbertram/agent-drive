@@ -1,5 +1,12 @@
 :root {
   color-scheme: light;
+  /* Type scale for the public pages (landing, header, footer) */
+  --t-xs: 11px;
+  --t-s: 13px;
+  --t-b: 16px;
+  --t-l: 18px;
+  --t-h2: clamp(32px, 2.4vw + 14px, 48px);
+  --t-h1: clamp(44px, 4.5vw + 16px, 80px);
   --sans: var(--font-sans, 'Inter Tight'), system-ui, -apple-system, 'Helvetica Neue', sans-serif;
   --mono: var(--font-mono, 'JetBrains Mono'), ui-monospace, Menlo, monospace;
   font-family: var(--sans);
@@ -48,6 +55,11 @@
 }
 html {
   min-height: 100%;
+}
+@media (min-width: 761px) {
+  :root {
+    --t-b: 15px;
+  }
 }
 body {
   min-height: 100vh;

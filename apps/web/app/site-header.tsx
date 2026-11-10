@@ -63,7 +63,7 @@ export function AuthLinks({
   return (
     <p className="auth-links">
       {to === 'sign-up' ? 'New here? ' : 'Already have an account? '}
-      <Link href={href}>{to === 'sign-up' ? 'Create a free account' : 'Sign in'}</Link>
+      <Link href={href}>{to === 'sign-up' ? 'Sign up free' : 'Sign in'}</Link>
       {' · '}
       <Link href="/pricing">Pricing</Link>
       {' · '}
