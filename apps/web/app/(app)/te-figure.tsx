@@ -23,7 +23,7 @@ export type Env = { fs: number; cw: number; compact: boolean; narrow: boolean };
 const W = 520;
 export const envFor = (px: number): Env => {
   const f = px / W;
-  const fs = Math.max(10, 12 / f); // labels never render below 12px when the figure is below ~620px
+  const fs = Math.max(10, 12.5 / f); // labels never render below 12.5px when the figure is below ~620px
   return { fs, cw: fs * 0.6, compact: fs > 10, narrow: f < 1 }; // below 520px wide the 12px labels no longer fit the desktop key names
 };
 // First paint uses the phone size (the 320px figure of a 360px screen); the CSS --fs matches it.

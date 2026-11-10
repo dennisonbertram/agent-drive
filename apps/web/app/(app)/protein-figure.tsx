@@ -92,10 +92,10 @@ const FILE = (n: number) =>
       : { n: `sim/run_${pad(40 + n, 3)}.dcd`, gb: 2.6 };
 const START = [0.6, 2.2, 4.4]; // lap 0 upload starts; later laps upload one file from 1.0
 const LEN = [2.6, 3.8, 3.2];
-const RY = (i: number, pitch: number) => 120 + i * pitch;
+const RY = (i: number, narrow: boolean) => (narrow ? 114 + i * 64 : 120 + i * 56);
 
 const frame: Frame = (t, env) => {
-  const pitch = env.narrow ? 62 : 56; // phone rows put the size on its own line under the bar
+  const pitch = env.narrow ? 64 : 56; // phone rows put the size on its own line under the bar
   const lt = t % T;
   const lap = Math.floor(t / T);
   const slide = io(seg(lt, 11, 11.8));
@@ -139,7 +139,12 @@ const frame: Frame = (t, env) => {
   let tot = before;
   let done = first;
   let act: [string, number] | null = null;
-  let rowsSvg = `<defs><clipPath id="te-pc"><rect x="${RX - 6}" y="98" width="${RW + 12}" height="${env.narrow ? 190 : 156}"/></clipPath></defs><g clip-path="url(#te-pc)"><g transform="translate(0 ${(-pitch * slide).toFixed(2)})">`;
+  // The list scrolls inside its own band (below the axis, above the meta row); a row's text is
+  // drawn only while it lies wholly inside the band, so it never passes under other labels.
+  const top = env.narrow ? 92 : 98;
+  const bot = env.narrow ? 290 : 254;
+  const inBand = (ty: number) => ty - 1.02 * env.fs >= top && ty + 0.32 * env.fs <= bot;
+  let rowsSvg = `<defs><clipPath id="te-pc"><rect x="${RX - 6}" y="${top}" width="${RW + 12}" height="${bot - top}"/></clipPath></defs><g clip-path="url(#te-pc)"><g transform="translate(0 ${(-pitch * slide).toFixed(2)})">`;
   for (let i = 0; i < 4; i++) {
     const f = FILE(first + i);
     const p =
@@ -156,8 +161,10 @@ const frame: Frame = (t, env) => {
       if (p >= 1) done++;
       if (p > 0 && p < 1) act = [f.n, p];
     }
-    if (i === 3 && slide === 0) continue; // the next row exists only while the list scrolls
-    const y = RY(i, pitch);
+    const y = RY(i, env.narrow);
+    const sy = pitch * slide;
+    const nameOk = inBand(y - sy);
+    const sizeOk = inBand(y - sy + (env.narrow ? 36 : 0));
     const ok = p >= 1;
     const w = v > 0 ? Math.max(8, lg(v * 1000) - RX) : 0;
     const size = ok ? `${f.gb.toFixed(1)} GB` : `${v.toFixed(2)} / ${f.gb.toFixed(1)} GB`;
@@ -168,10 +175,8 @@ const frame: Frame = (t, env) => {
         : '') +
       `<path d="M${lg(100) + 0.5} ${y + 5}V${y + 19}" stroke="${C.ink}"/>` +
       `<rect x="${RX + 0.5}" y="${y - 7.5}" width="8" height="8" rx="1.5" fill="${ok ? C.or : 'none'}" stroke="${ok ? C.or : C.ink}"/>` +
-      tx(RX + 16, y, f.n, C.ink) +
-      (env.narrow
-        ? tx(RX + RW, y + 33, size, ok ? C.ink : C.g3, { a: 'end' })
-        : tx(RX + RW, y, size, ok ? C.ink : C.g3, { a: 'end' }));
+      (nameOk ? tx(RX + 16, y, f.n, C.ink) : '') +
+      (sizeOk ? tx(RX + RW, y + (env.narrow ? 36 : 0), size, ok ? C.ink : C.g3, { a: 'end' }) : '');
   }
   rowsSvg += '</g></g>';
   // ---- log axis
@@ -212,7 +217,7 @@ const frame: Frame = (t, env) => {
   });
   const meta =
     tx(24, 306, 'PROTEIN BACKBONE', C.g3) +
-    lgd +
+    (env.narrow ? '' : lgd) + // phones drop the dot legend (it collided with the GB readout)
     tx(RX, 306, env.compact ? 'IN DRIVE' : 'IN AGENT DRIVE', C.g3) +
     tx(
       RX + RW,

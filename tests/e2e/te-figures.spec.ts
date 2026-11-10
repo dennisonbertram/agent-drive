@@ -50,11 +50,11 @@ async function measure(page: Page, name: string) {
 const hit = (a: Box, b: Box, tol = 1) =>
   a.x + a.w - tol > b.x && b.x + b.w - tol > a.x && a.y + a.h - tol > b.y && b.y + b.h - tol > a.y;
 
-function check(name: string, m: Awaited<ReturnType<typeof measure>>) {
+function check(name: string, m: Awaited<ReturnType<typeof measure>>, fills = true) {
   const bad: string[] = [];
   m.texts.forEach((a, i) => {
-    if (a.size < 11.95) bad.push(`${name}: "${a.s}" renders at ${a.size.toFixed(1)}px`);
-    if (a.fill === '#a8a69f' || !OK_FILLS.has(a.fill))
+    if (a.size < 12.4) bad.push(`${name}: "${a.s}" renders at ${a.size.toFixed(1)}px`);
+    if (fills && (a.fill === '#a8a69f' || !OK_FILLS.has(a.fill)))
       bad.push(`${name}: "${a.s}" has fill ${a.fill}`);
     if (/AD-0\d|AD—0\d|S0\d|\d\d:\d\d\.\d|Cα|GEN \d/.test(a.s)) bad.push(`${name}: code "${a.s}"`);
     m.texts.slice(i + 1).forEach((b) => {
@@ -118,7 +118,23 @@ for (const [width, height] of [
   });
 }
 
-test('server HTML uses the phone variant and a 19.5px first-paint font size', async ({
+test.describe('file-list scroll', () => {
+  test.use({ viewport: { width: 360, height: 780 } });
+  // Samples every ~100 ms over a whole lap, which includes the 0.8 s scroll of the file list.
+  for (const name of FIGURES)
+    test(`${name}: no overlap at any moment of a lap`, async ({ page }) => {
+      await page.goto('/');
+      await page.locator(`.te-${name}`).scrollIntoViewIfNeeded();
+      const bad: string[] = [];
+      for (let i = 0; i < 125; i++) {
+        bad.push(...check(`${name}#${i}`, await measure(page, name), false));
+        await page.waitForTimeout(100);
+      }
+      expect(bad).toEqual([]);
+    });
+});
+
+test('server HTML uses the phone variant and a 20.31px first-paint font size', async ({
   request,
 }) => {
   const html = await (await request.get('/')).text();
@@ -128,7 +144,7 @@ test('server HTML uses the phone variant and a 19.5px first-paint font size', as
     (x) => x[1]!,
   );
   const css = (await Promise.all(hrefs.map(async (h) => (await request.get(h)).text()))).join('');
-  expect(css).toMatch(/--fs:\s*19\.5px/);
+  expect(css).toMatch(/--fs:\s*20\.31px/);
 });
 
 test.describe('figure centring', () => {
