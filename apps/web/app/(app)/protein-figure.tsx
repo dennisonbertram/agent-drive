@@ -142,7 +142,7 @@ const frame: Frame = (t, env) => {
   // The list scrolls inside its own band (below the axis, above the meta row); a row's text is
   // drawn only while it lies wholly inside the band, so it never passes under other labels.
   const top = env.narrow ? 92 : 98;
-  const bot = env.narrow ? 290 : 254;
+  const bot = env.narrow ? 285 : 254;
   const inBand = (ty: number) => ty - 1.02 * env.fs >= top && ty + 0.32 * env.fs <= bot;
   let rowsSvg = `<defs><clipPath id="te-pc"><rect x="${RX - 6}" y="${top}" width="${RW + 12}" height="${bot - top}"/></clipPath></defs><g clip-path="url(#te-pc)"><g transform="translate(0 ${(-pitch * slide).toFixed(2)})">`;
   for (let i = 0; i < 4; i++) {
