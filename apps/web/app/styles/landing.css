@@ -12,6 +12,7 @@
   background: var(--bg, #fff);
   color: var(--i);
   font-family: var(--sans2);
+  font-size: var(--t-b);
   line-height: 1.5;
   overflow-x: clip; /* not hidden: hidden would make .landing the sticky header's scroll container */
   min-height: 100vh;
@@ -40,7 +41,7 @@
   padding: 0 32px;
 }
 .l-tag {
-  font: 500 11px/1.2 var(--mono2);
+  font: 500 var(--t-xs) / 1.2 var(--mono2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--i2);
@@ -51,8 +52,10 @@
   gap: 8px;
   border: 1px solid var(--i);
   border-radius: 6px;
-  padding: 10px 18px;
-  font: 500 14px var(--sans2);
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  font: 500 var(--t-b) var(--sans2);
   background: var(--panel, #fff);
   color: var(--i);
   text-decoration: none;
@@ -85,20 +88,20 @@
 }
 .landing h1 {
   font-weight: 500;
-  font-size: 80px;
+  font-size: var(--t-h1);
   line-height: 0.98;
   letter-spacing: -0.035em;
 }
 .landing h2 {
   font-weight: 500;
-  font-size: 48px;
+  font-size: var(--t-h2);
   line-height: 1.03;
   letter-spacing: -0.03em;
   max-width: 15em;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 .l-lede {
-  font-size: 19px;
+  font-size: var(--t-l);
   line-height: 1.45;
   color: var(--i2);
   max-width: 27em;
@@ -129,7 +132,7 @@
   background: var(--code-bg, #111);
   color: var(--code-ink, #fff);
   border-radius: 10px;
-  padding: 18px 18px 18px 20px;
+  padding: 16px 16px 16px 20px;
   max-width: 560px;
 }
 .l-panel .l-tag {
@@ -139,12 +142,12 @@
 .l-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 .l-panel code {
   flex: 1;
   min-width: 0;
-  font-size: 13.5px;
+  font-size: var(--t-s);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -159,14 +162,14 @@
   color: #fff;
 }
 .l-cli {
-  margin-top: 18px;
-  font: 400 13px var(--mono2);
+  margin-top: 16px;
+  font: 400 var(--t-s) var(--mono2);
   color: var(--m);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   column-gap: 8px;
-  row-gap: 6px;
+  row-gap: 8px;
   max-width: 560px;
 }
 .l-cmd {
@@ -184,14 +187,15 @@
   overflow-wrap: anywhere;
 }
 .l-copy {
-  font: 500 11px var(--mono2);
+  font: 500 var(--t-xs) var(--mono2);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   border: 1px solid var(--hair);
   border-radius: 6px;
   background: transparent;
   color: var(--i2);
-  padding: 3px 8px;
+  min-height: 44px;
+  padding: 0 12px;
   flex: none;
   white-space: nowrap;
   cursor: pointer;
@@ -212,7 +216,7 @@
   gap: 24px;
 }
 .l-three h3 {
-  font: 500 11px var(--mono2);
+  font: 500 var(--t-xs) var(--mono2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--m);
@@ -226,15 +230,15 @@
   min-width: 0;
   border: 1px solid var(--i);
   border-radius: 6px;
-  padding: 14px;
-  font-size: 14px;
+  padding: 16px;
+  font-size: var(--t-s);
 }
 .l-cell b {
   font-weight: 500;
 }
 .l-cell small {
   display: block;
-  font: 400 12px var(--mono2);
+  font: 400 var(--t-s) var(--mono2);
   color: var(--m);
   margin-top: 4px;
   overflow-wrap: anywhere;
@@ -281,14 +285,14 @@
   border-left: 1px solid var(--hair);
 }
 .l-spec code {
-  font-size: 22px;
+  font-size: var(--t-l);
   font-weight: 500;
   letter-spacing: -0.01em;
 }
 .l-spec p {
   margin-top: 12px;
   color: var(--i2);
-  font-size: 16px;
+  font-size: var(--t-b);
 }
 
 /* connect */
@@ -309,19 +313,19 @@
   border-left: 1px solid var(--hair);
 }
 .l-line3 .l-tag {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .l-line3 p {
-  font-size: 16px;
+  font-size: var(--t-b);
   color: var(--i2);
-  margin-top: 14px;
+  margin-top: 16px;
 }
 .l-line3 code {
   display: block;
   background: var(--p2);
   border-radius: 6px;
-  padding: 12px 14px;
-  font-size: 13px;
+  padding: 12px 16px;
+  font-size: var(--t-s);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -341,26 +345,26 @@
   border-top: 1px solid var(--rule);
 }
 .l-plan {
-  padding: 26px 32px 0 0;
+  padding: 24px 32px 0 0;
 }
 .l-plan + .l-plan {
   padding-left: 32px;
   border-left: 1px solid var(--hair);
 }
 .l-plan h3 {
-  font: 500 12px var(--mono2);
+  font: 500 var(--t-s) var(--mono2);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--m);
 }
 .l-plan .pr {
-  font-size: 44px;
+  font-size: var(--t-h2);
   font-weight: 500;
   letter-spacing: -0.03em;
-  margin: 8px 0 14px;
+  margin: 8px 0 16px;
 }
 .l-plan .pr small {
-  font-size: 15px;
+  font-size: var(--t-b);
   color: var(--m);
   letter-spacing: 0;
   font-weight: 400;
@@ -369,31 +373,50 @@
   list-style: none;
   padding: 0;
   display: grid;
-  gap: 6px;
-  font-size: 15px;
+  gap: 8px;
+  font-size: var(--t-b);
   color: var(--i2);
 }
 .l-plan .soon {
   display: inline-block;
   margin-top: 20px;
-  font: 500 11px var(--mono2);
+  font: 500 var(--t-xs) var(--mono2);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   border: 1px solid var(--hair);
   color: var(--m);
   border-radius: 6px;
-  padding: 7px 12px;
+  padding: 8px 12px;
 }
 .l-plan .l-btn {
   margin-top: 20px;
 }
 .l-pnote {
   margin-top: 36px;
-  font-size: 15px;
+  font-size: var(--t-b);
   color: var(--i2);
 }
+/* One text-link style for links in landing content */
+.l-also a,
+.feat > div > a,
 .l-pnote a {
+  color: var(--i);
   font-weight: 500;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+/* Standalone links are full-height rows; links inside a sentence get vertical padding */
+.feat > div > a,
+.l-pnote > a:only-child {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  align-self: flex-start;
+}
+.l-also a,
+.l-pnote a {
+  padding-block: 12px;
 }
 
 /* final + footer */
@@ -401,7 +424,7 @@
   padding-bottom: 120px;
 }
 .landing .l-final h2 {
-  font-size: 64px;
+  font-size: var(--t-h2);
   max-width: none;
 }
 .l-final-row {
@@ -417,12 +440,12 @@
   grid-template-columns: repeat(3, 1fr);
 }
 .l-spec.s3 code {
-  font-size: 18px;
+  font-size: var(--t-l);
 }
 .relay > div {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .relay > div p {
   margin-top: 0;
@@ -430,30 +453,30 @@
 .l-say {
   border: 1px solid var(--i);
   border-radius: 10px 10px 10px 2px;
-  padding: 14px 16px;
-  font-size: 15px;
+  padding: 16px 16px;
+  font-size: var(--t-b);
   line-height: 1.45;
 }
 .l-log {
   margin-top: 40px;
   border-top: 1px solid var(--rule);
   padding-top: 16px;
-  font: 400 13px var(--mono2);
+  font: 400 var(--t-s) var(--mono2);
 }
 .l-log .l-tag {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .lr {
   display: grid;
   grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr);
   gap: 16px;
-  padding: 9px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--hair);
   overflow-wrap: anywhere;
 }
 .lr.h {
   color: var(--m);
-  font-size: 11px;
+  font-size: var(--t-xs);
   letter-spacing: 0.12em;
 }
 
@@ -471,12 +494,6 @@
     grid-template-columns: 1fr;
     gap: 48px;
   }
-  .landing h1 {
-    font-size: 64px;
-  }
-  .landing h2 {
-    font-size: 40px;
-  }
   .l-spec {
     grid-template-columns: 1fr 1fr;
   }
@@ -491,6 +508,9 @@
   }
 }
 @media (max-width: 760px) {
+  .l-cmd {
+    align-items: center;
+  }
   .l-wrap {
     padding: 0 20px;
   }
@@ -509,17 +529,8 @@
   .landing .l-hero {
     padding-top: 44px;
   }
-  .landing h1 {
-    font-size: 46px;
-  }
-  .landing h2 {
-    font-size: 34px;
-  }
-  .l-lede {
-    font-size: 17px;
-  }
   .l-panel {
-    margin-top: 26px;
+    margin-top: 24px;
   }
   .l-row {
     flex-wrap: wrap;
@@ -576,9 +587,6 @@
     left: -4px;
     transform: rotate(135deg);
   }
-  .landing .l-final h2 {
-    font-size: 42px;
-  }
 }
 @media (max-width: 760px) {
   .l-spec.s3 {
@@ -603,9 +611,9 @@
 
 /* hero next-step line */
 .l-next {
-  margin-top: 14px;
+  margin-top: 16px;
   max-width: 560px;
-  font-size: 15px;
+  font-size: var(--t-b);
   color: var(--i2);
 }
 
@@ -616,7 +624,7 @@
   margin: 16px 0 0;
   display: grid;
   gap: 4px;
-  font-size: 16px;
+  font-size: var(--t-b);
   color: var(--i2);
 }
 .l-also b {
@@ -652,7 +660,7 @@
   flex-direction: column;
 }
 .feat p {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
 }
 
 /* connect: one-line pointer to other ways in */
@@ -668,8 +676,8 @@
 }
 .l-faq summary {
   cursor: pointer;
-  padding: 18px 28px 18px 0;
-  font-size: 18px;
+  padding: 16px 28px 16px 0;
+  font-size: var(--t-l);
   font-weight: 500;
   list-style: none;
   position: relative;
@@ -682,7 +690,7 @@
   position: absolute;
   right: 4px;
   top: 16px;
-  font: 400 20px var(--mono2);
+  font: 400 var(--t-l) var(--mono2);
   color: var(--i2);
 }
 .l-faq details[open] summary::after {
@@ -690,34 +698,34 @@
 }
 .l-faq p {
   padding: 0 28px 20px 0;
-  font-size: 16px;
+  font-size: var(--t-b);
   color: var(--i2);
 }
 .l-faq code {
-  font-size: 14px;
+  font-size: var(--t-s);
   background: var(--p2);
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 1px 8px;
   overflow-wrap: anywhere;
 }
 
 .l-pnote + .l-pnote {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 /* activity listings: caption, inline code, solution list */
 .l-cap {
   margin: 12px 0 0;
-  font: 400 13px var(--sans2);
+  font: 400 var(--t-s) var(--sans2);
   color: var(--m);
 }
 .l-small {
-  font-size: 14px;
+  font-size: var(--t-s);
 }
 .l-line3 code.l-inl {
   display: inline;
-  padding: 1px 5px;
-  font-size: 12px;
+  padding: 1px 4px;
+  font-size: var(--t-s);
 }
 .l-solve {
   list-style: none;
@@ -726,13 +734,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
-  font-size: 15px;
+  font-size: var(--t-b);
   color: var(--i);
 }
 .l-solve li {
   border: 1px solid var(--hair);
   border-radius: 999px;
-  padding: 6px 14px;
+  padding: 8px 16px;
 }
 .l-log + .l-log {
   margin-top: 24px;
