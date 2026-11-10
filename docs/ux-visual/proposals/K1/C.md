@@ -8,7 +8,7 @@ I captured four product pages on 2026-11-09 with Playwright's iPhone 13 emulatio
 - **Teenage Engineering** (OP-1 field page): screen captures and product photos run the full width; what they show is explained in a small uppercase HTML caption directly under each image, not inside it. Evidence: `.../uxv-home/ref/teenage_engineering_products_op-1-p1.png`.
 - **Stripe and Vercel** were also captured, but their animated sections lazy-load and did not render in the full-page capture, so I make no claim about how they behave on phones.
 
-`...` is `/private/tmp/claude-501/-Users-dennison-develop-agent-drive/72e5153f-f1c9-4e4b-819b-255bec507e75/scratchpad`.
+`...` is `<scratchpad>`.
 
 The shared pattern: on a phone, the picture gets the full width and is cropped to the part that moves; the words that explain it are HTML, at body-text size, under the picture.
 

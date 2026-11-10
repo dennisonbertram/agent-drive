@@ -26,7 +26,7 @@ After (static mocks):
 | games   | `.../uxv-home/mocks/K1-A-games-390x844.png`   | `.../uxv-home/mocks/K1-A-games-360x780.png`   |
 | protein | `.../uxv-home/mocks/K1-A-protein-390x844.png` | `.../uxv-home/mocks/K1-A-protein-360x780.png` |
 
-`...` is `/private/tmp/claude-501/-Users-dennison-develop-agent-drive/72e5153f-f1c9-4e4b-819b-255bec507e75/scratchpad`. Mock source: `.../uxv-home/mocks/K1-A-figures.html?f=hero|games|protein&w=390`.
+`...` is `<scratchpad>`. Mock source: `.../uxv-home/mocks/K1-A-figures.html?f=hero|games|protein&w=390`.
 
 ```
 Before (360)                               After (360)
