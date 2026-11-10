@@ -50,8 +50,19 @@ async function measure(page: Page, name: string) {
 const hit = (a: Box, b: Box, tol = 1) =>
   a.x + a.w - tol > b.x && b.x + b.w - tol > a.x && a.y + a.h - tol > b.y && b.y + b.h - tol > a.y;
 
+const EXPECT: Record<string, string[]> = {
+  hero: ['CLAUDE', 'CODE', 'CODEX', 'PI', 'OPEN', 'ANY', 'AGENT'],
+  games: ['SPR', 'TEX', 'SFX', 'LVL'],
+  protein: ['7XKA_map.mrc', 'embeddings.npy', 'IN DRIVE'],
+};
+
 function check(name: string, m: Awaited<ReturnType<typeof measure>>, fills = true) {
   const bad: string[] = [];
+  // (the sweep skips the file names: they scroll out of the list after the first lap)
+  // a figure that renders no text would pass every check below, so require its labels first
+  const have = new Set(m.texts.map((t) => t.s));
+  for (const s of EXPECT[name.split(/[@#]/)[0]!]!.filter((x) => fills || !/\.(mrc|npy)$/.test(x)))
+    if (!have.has(s)) bad.push(`${name}: missing label "${s}"`);
   m.texts.forEach((a, i) => {
     if (a.size < 12.4) bad.push(`${name}: "${a.s}" renders at ${a.size.toFixed(1)}px`);
     if (fills && (a.fill === '#a8a69f' || !OK_FILLS.has(a.fill)))
@@ -131,6 +142,28 @@ test.describe('file-list scroll', () => {
         await page.waitForTimeout(100);
       }
       expect(bad).toEqual([]);
+    });
+});
+
+test.describe('reduced motion switched on mid-animation', () => {
+  test.use({ viewport: { width: 360, height: 780 } });
+  for (const name of FIGURES)
+    test(`${name} settles on its still frame`, async ({ page, context }) => {
+      const groups = (p: Page) =>
+        p.locator(`.te-${name} [data-g]`).evaluateAll((els) => els.map((e) => e.innerHTML));
+      const ref = await context.newPage();
+      await ref.emulateMedia({ reducedMotion: 'reduce' });
+      await ref.goto('/');
+      await ref.locator(`.te-${name}`).scrollIntoViewIfNeeded();
+      await ref.waitForTimeout(500);
+      const still = await groups(ref);
+      await page.goto('/');
+      await page.locator(`.te-${name}`).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(2200);
+      expect(await groups(page)).not.toEqual(still); // it really was animating
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.waitForTimeout(500);
+      expect(await groups(page)).toEqual(still);
     });
 });
 

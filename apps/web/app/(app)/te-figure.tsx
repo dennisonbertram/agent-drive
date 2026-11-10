@@ -235,7 +235,12 @@ export function TeFigure({
     const sync = () => {
       cancelAnimationFrame(raf);
       raf = 0;
-      if (reduce.matches || !onscreen || document.hidden) return;
+      if (reduce.matches) {
+        started = false; // reduced motion: show the representative frame, not a mid-transition one
+        paint();
+        return;
+      }
+      if (!onscreen || document.hidden) return;
       started = true;
       last = performance.now();
       raf = requestAnimationFrame(tick);
