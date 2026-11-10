@@ -15,7 +15,9 @@ export function loadInbox(api: Api, cache: InboxCache, driveId: string) {
       (result) => result.inbox,
     );
     // A failed request is not remembered.
-    pending.catch(() => cache.delete(driveId));
+    pending.catch(() => {
+      if (cache.get(driveId) === pending) cache.delete(driveId);
+    });
     cache.set(driveId, pending);
   }
   return pending;

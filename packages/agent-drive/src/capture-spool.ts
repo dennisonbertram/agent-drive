@@ -122,11 +122,11 @@ function pidAlive(pid: number) {
 
 async function readOwner(lock: string) {
   try {
-    return JSON.parse(await readFile(join(lock, 'owner'), 'utf8')) as {
+    return JSON.parse(await readFile(join(lock, 'owner'), 'utf8')) as Partial<{
       pid: number;
       startedAt: number;
       token: string;
-    };
+    }>;
   } catch {
     return undefined;
   }
@@ -134,8 +134,13 @@ async function readOwner(lock: string) {
 
 async function lockIsStale(lock: string) {
   const owner = await readOwner(lock);
-  if (owner) return !pidAlive(owner.pid) || Date.now() - owner.startedAt > LOCK_MAX_AGE;
-  // The owner file may not be written yet; fall back to the directory's age.
+  if (
+    owner &&
+    Number.isInteger(owner.pid) &&
+    typeof owner.startedAt === 'number' &&
+    typeof owner.token === 'string'
+  )
+    return !pidAlive(owner.pid!);
   const info = await stat(lock).catch(() => undefined);
   return !info || Date.now() - info.mtimeMs > LOCK_MAX_AGE;
 }
@@ -187,9 +192,11 @@ function classify(error: unknown): 'done' | 'invalid' | 'stop' | 'retry' {
 /** Uploads spooled traces in name order. Only one process drains a spool at a time. */
 export class Drainer {
   uploaded = 0;
-  private running: Promise<void> | undefined;
-  private again = false;
-  private stopped = false;
+  private lifecycle: 'idle' | 'draining' | 'finishing' | 'blocked' | 'finished' = 'idle';
+  private blockedBy: 'lock' | 'provider' | undefined;
+  private pending = false;
+  private runPromise: Promise<void> | undefined;
+  private finishPromise: Promise<void> | undefined;
   private warnedInvalid = false;
   private readonly abort = new AbortController();
 
@@ -205,47 +212,99 @@ export class Drainer {
   ) {}
 
   kick() {
-    this.again = true;
-    if (this.running || this.stopped || this.abort.signal.aborted) return;
-    this.running = this.loop().finally(() => {
-      this.running = undefined;
-    });
+    if (this.lifecycle === 'finished' || this.blockedBy === 'provider' || this.abort.signal.aborted)
+      return;
+    this.pending = true;
+    if (this.blockedBy === 'lock') {
+      this.blockedBy = undefined;
+      if (this.lifecycle === 'blocked') this.lifecycle = 'idle';
+    }
+    this.startRun();
   }
 
   /** Drains what is left, waiting at most until `deadline` (epoch ms), then stops retrying. */
   async finish(deadline: number) {
-    this.kick();
-    const running = this.running;
-    if (!running) return;
-    const wait = Math.max(0, deadline - Date.now());
-    const timer = setTimeout(() => this.abort.abort(), wait);
-    let stop: NodeJS.Timeout | undefined;
-    try {
-      // The abort signal ends well-behaved uploads; the race covers a client that ignores it.
-      await Promise.race([
-        running,
-        new Promise((resolve) => (stop = setTimeout(resolve, wait + 200))),
-      ]);
-    } finally {
-      clearTimeout(stop);
-      clearTimeout(timer);
+    if (this.finishPromise) return this.finishPromise;
+    if (this.lifecycle === 'finished') return;
+    this.lifecycle = 'finishing';
+    if (this.blockedBy !== 'provider') this.pending = true;
+    if (deadline <= Date.now()) {
       this.abort.abort();
+      this.pending = false;
+      this.lifecycle = 'finished';
+      return;
     }
+    this.startRun();
+    const wait = deadline - Date.now();
+    this.finishPromise = (async () => {
+      const timer = setTimeout(() => this.abort.abort(), wait);
+      let stop: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([
+          this.waitForRuns(),
+          new Promise<void>((resolve) => (stop = setTimeout(resolve, wait + 200))),
+        ]);
+      } finally {
+        clearTimeout(stop);
+        clearTimeout(timer);
+        this.abort.abort();
+        this.pending = false;
+        this.lifecycle = 'finished';
+      }
+    })();
+    return this.finishPromise;
   }
 
-  private async loop() {
+  protected async releaseLock(release: () => Promise<void>) {
+    await release();
+  }
+
+  private canContinue() {
+    return (
+      !this.abort.signal.aborted && this.lifecycle !== 'finished' && this.blockedBy !== 'provider'
+    );
+  }
+
+  private startRun() {
+    if (this.runPromise || !this.canContinue()) return;
+    if (this.lifecycle !== 'finishing') this.lifecycle = 'draining';
+    const run = this.loop();
+    const owner = run.finally(() => {
+      if (this.runPromise !== owner) return;
+      this.runPromise = undefined;
+      if (this.lifecycle === 'draining') this.lifecycle = 'idle';
+      if (this.pending && !this.blockedBy && this.canContinue()) this.startRun();
+    });
+    this.runPromise = owner;
+  }
+
+  private async waitForRuns() {
+    while (this.runPromise) await this.runPromise;
+  }
+
+  protected async loop() {
     try {
-      const release = await takeLock(this.spool.dir).catch(() => undefined);
-      if (!release) return;
-      try {
-        while (this.again && !this.stopped && !this.abort.signal.aborted) {
-          this.again = false;
-          await this.pass();
+      while (this.pending && this.canContinue()) {
+        const release = await takeLock(this.spool.dir).catch(() => undefined);
+        if (!release) {
+          this.blockedBy = 'lock';
+          if (this.lifecycle !== 'finishing') this.lifecycle = 'blocked';
+          return;
         }
-      } finally {
-        await release();
+        this.blockedBy = undefined;
+        try {
+          while (this.pending && this.canContinue()) {
+            this.pending = false;
+            if (this.lifecycle !== 'finishing') this.lifecycle = 'draining';
+            await this.pass();
+          }
+        } finally {
+          await this.releaseLock(release);
+        }
       }
     } catch (error) {
+      this.blockedBy = 'lock';
+      if (this.lifecycle !== 'finishing') this.lifecycle = 'blocked';
       this.options.log(`capture warning: upload failed: ${(error as Error).message}`);
     }
   }
@@ -253,7 +312,7 @@ export class Drainer {
   private sleep(ms: number) {
     return new Promise<boolean>((resolve) => {
       const { signal } = this.abort;
-      if (signal.aborted) return resolve(false);
+      if (!this.canContinue()) return resolve(false);
       const done = (value: boolean) => {
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
@@ -266,14 +325,19 @@ export class Drainer {
   }
 
   private async remove(id: string) {
+    if (!this.canContinue()) return;
     await rm(join(this.spool.dir, `${id}.json`), { force: true });
+    if (!this.canContinue()) return;
     await rm(join(this.spool.dir, `${id}.adrv`), { force: true });
   }
 
   private async moveToInvalid(id: string) {
     const invalid = join(this.spool.dir, 'invalid');
+    if (!this.canContinue()) return;
     await rename(join(this.spool.dir, `${id}.adrv`), join(invalid, `${id}.adrv`)).catch(() => {});
+    if (!this.canContinue()) return;
     await rename(join(this.spool.dir, `${id}.json`), join(invalid, `${id}.json`)).catch(() => {});
+    if (!this.canContinue()) return;
     if (!this.warnedInvalid) {
       this.warnedInvalid = true;
       this.options.log(`capture warning: the server rejected a trace; moved it to ${invalid}`);
@@ -283,17 +347,21 @@ export class Drainer {
   private async pass() {
     const names = (await readdir(this.spool.dir)).filter((n) => n.endsWith('.json')).sort();
     for (const name of names) {
-      if (this.stopped || this.abort.signal.aborted) return;
+      if (!this.canContinue()) return;
       const id = name.slice(0, -5);
       let meta: SidecarMeta;
       let ciphertext: Buffer<ArrayBuffer>;
       try {
-        meta = JSON.parse(await readFile(join(this.spool.dir, name), 'utf8')) as SidecarMeta;
+        const sidecar = await readFile(join(this.spool.dir, name), 'utf8');
+        if (!this.canContinue()) return;
+        meta = JSON.parse(sidecar) as SidecarMeta;
         ciphertext = await readFile(join(this.spool.dir, `${id}.adrv`));
       } catch {
+        if (!this.canContinue()) return;
         await this.moveToInvalid(id);
         continue;
       }
+      if (!this.canContinue()) return;
       let delay = this.options.minBackoffMs ?? 1000;
       for (;;) {
         try {
@@ -302,10 +370,12 @@ export class Drainer {
             tags: meta.tags,
             signal: this.abort.signal,
           });
+          if (!this.canContinue()) return;
           this.uploaded++;
           await this.remove(id);
           break;
         } catch (error) {
+          if (!this.canContinue()) return;
           const verdict = classify(error);
           if (verdict === 'done') {
             await this.remove(id);
@@ -316,7 +386,8 @@ export class Drainer {
             break;
           }
           if (verdict === 'stop') {
-            this.stopped = true;
+            this.blockedBy = 'provider';
+            if (this.lifecycle !== 'finishing') this.lifecycle = 'blocked';
             const cause = error instanceof AgentDriveApiError ? error.code : 'error';
             this.options.log(
               `capture: uploads stopped (${cause}); traces stay in ${this.spool.dir} for the next run`,

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -110,7 +110,7 @@ async function cleanupUser(userId: string) {
   }
 }
 
-test('new human workspace → encrypted CLI upload → browser download, restore, and revocation', async ({
+test('ux round 04: new human workspace → encrypted CLI upload → browser download, restore, and revocation', async ({
   page,
   context,
   baseURL,
@@ -277,10 +277,52 @@ test('new human workspace → encrypted CLI upload → browser download, restore
     await reloaded;
     await fileRow.getByRole('button', { name: /More actions/ }).click();
     await rowMenu(page).getByRole('button', { name: 'Versions' }).click();
-    await page
-      .locator(`.version-row[data-version-id="${initialVersion.id}"]`)
-      .getByRole('button', { name: 'Restore this version' })
-      .click();
+    const initialDetailsRow = page.locator('.version-row').nth(1);
+    const initialDetails = initialDetailsRow.locator('details');
+    const initialCreatedAtText = initialDetails.locator('small');
+    const initialVersionIdText = initialDetails.locator('code');
+    await expect(initialDetails.locator('summary')).toHaveText('Details');
+    await expect(initialDetails).not.toHaveAttribute('open', '');
+    await expect(initialCreatedAtText).toBeHidden();
+    await expect(initialVersionIdText).toBeHidden();
+    const detailsRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/console/')) detailsRequests.push(request.url());
+    });
+    await initialDetailsRow.locator('summary').focus();
+    await page.keyboard.press('Enter');
+    const versionDatabase = new Pool({ connectionString: process.env.DATABASE_URL });
+    let initialCreatedAt: string;
+    try {
+      const created = await versionDatabase.query<{ created_at: Date }>(
+        'SELECT created_at FROM versions WHERE id=$1',
+        [initialVersion.id],
+      );
+      initialCreatedAt = created.rows[0]!.created_at.toISOString();
+    } finally {
+      await versionDatabase.end();
+    }
+    await expect(initialCreatedAtText).toHaveText(`Created (UTC): ${initialCreatedAt}`);
+    await expect(initialVersionIdText).toHaveText(`Version ID: ${initialVersion.id}`);
+    await expect(initialVersionIdText).toBeVisible();
+    await expect(
+      initialDetailsRow.getByRole('button', { name: 'Restore this version' }),
+    ).toBeVisible();
+    await expect.poll(() => detailsRequests).toHaveLength(0);
+    const currentDetailsRow = page.locator('.version-row').filter({ hasText: 'Current version' });
+    const currentDetails = currentDetailsRow.locator('details');
+    const currentVersionIdText = currentDetails.locator('code');
+    await expect(currentDetails.locator('summary')).toHaveText('Details');
+    await expect(currentDetails).not.toHaveAttribute('open', '');
+    await expect(currentDetails.locator('small')).toBeHidden();
+    await expect(currentVersionIdText).toBeHidden();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await currentDetails.locator('summary').click();
+    await expect(currentVersionIdText).toBeVisible();
+    await expect(currentVersionIdText).toContainText('Version ID:');
+    expect(detailsRequests).toEqual([]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await initialDetailsRow.getByRole('button', { name: 'Restore this version' }).click();
     const restoredDownload = page.waitForEvent('download');
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     expect((await readFile((await (await restoredDownload).path())!)).equals(original)).toBe(true);
@@ -296,7 +338,9 @@ test('new human workspace → encrypted CLI upload → browser download, restore
       .click();
     const versionRows = page.locator('.version-row');
     await expect(versionRows.first()).toContainText('Current version');
-    await expect(versionRows.first().getByRole('button')).toHaveCount(0);
+    await expect(
+      versionRows.first().getByRole('button', { name: 'Restore this version' }),
+    ).toHaveCount(0);
     expect(await versionRows.count()).toBeGreaterThan(1);
     await expect(page.getByRole('button', { name: 'Restore this version' })).toHaveCount(
       (await versionRows.count()) - 1,
@@ -2054,7 +2098,7 @@ test('console preview: decrypts in the tab, never renders HTML or SVG, and revok
   }
 });
 
-test('console share: one link with the key only in the fragment, revoke in place, Shared view', async ({
+test('ux round 10: share IDs identify links through both revoke confirmations', async ({
   page,
   context,
   browser,
@@ -2105,6 +2149,7 @@ test('console share: one link with the key only in the fragment, revoke in place
     const requests: string[] = [];
     const consoleText: string[] = [];
     const sharePosts: { url: string; body: Record<string, unknown> }[] = [];
+    const shareDeletes: string[] = [];
     let shareListLoads = 0;
     page.on('request', (request) => {
       requests.push(
@@ -2112,6 +2157,8 @@ test('console share: one link with the key only in the fragment, revoke in place
       );
       if (request.method() === 'POST' && /\/drives\/[^/]+\/shares$/.test(request.url()))
         sharePosts.push({ url: request.url(), body: request.postDataJSON() });
+      if (request.method() === 'DELETE' && /\/drives\/[^/]+\/shares\/[^/]+$/.test(request.url()))
+        shareDeletes.push(request.url().split('/').at(-1)!);
       if (request.method() === 'GET' && /\/drives\/[^/]+\/shares\?/.test(request.url()))
         shareListLoads += 1;
     });
@@ -2179,28 +2226,41 @@ test('console share: one link with the key only in the fragment, revoke in place
     await expect(field).toHaveValue(/\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/);
     const url2 = await field.inputValue();
     expect(url2).not.toBe(url1);
+    const firstId = new URL(url1).pathname.split('/').at(-1)!;
+    const secondId = new URL(url2).pathname.split('/').at(-1)!;
 
-    // 5. Both links are listed (newest first); revoking the older one is a two-step change in place.
+    // 5. Full IDs identify links before the two-step revoke confirmation.
     const links = dialog.getByTestId('share-link-row');
     await expect(links).toHaveCount(2);
     const loadsBefore = shareListLoads;
-    await links.nth(1).getByRole('button', { name: 'Revoke' }).click();
-    await expect(links.nth(1)).toContainText('Stop this link?');
+    const firstLink = links.filter({ hasText: `Link ID: ${firstId}` });
+    const secondLink = links.filter({ hasText: `Link ID: ${secondId}` });
+    await expect(firstLink).toHaveCount(1);
+    await expect(secondLink).toHaveCount(1);
+    const secondIdText = secondLink.getByText(`Link ID: ${secondId}`, { exact: true });
+    await expect(secondIdText).toBeVisible();
+    expect(await secondIdText.evaluate((element) => element.closest('.file-meta'))).toBeNull();
+    await secondLink.getByRole('button', { name: 'Revoke' }).click();
+    const secondQuestion = `Stop link ${secondId} for report.md?`;
+    await expect(secondLink.getByRole('group', { name: secondQuestion })).toBeVisible();
+    await expect(secondLink).toContainText(secondQuestion);
     // Focus follows the control: Revoke -> Revoke link; Cancel -> back to Revoke.
-    await expect(links.nth(1).getByRole('button', { name: 'Revoke link' })).toBeFocused();
-    await links.nth(1).getByRole('button', { name: 'Cancel' }).click();
-    await expect(links.nth(1).getByRole('button', { name: 'Revoke', exact: true })).toBeFocused();
-    await links.nth(1).getByRole('button', { name: 'Revoke', exact: true }).click();
-    await links.nth(1).getByRole('button', { name: 'Revoke link' }).click();
-    await expect(links.nth(1)).toContainText('Revoked');
+    await expect(secondLink.getByRole('button', { name: 'Revoke link' })).toBeFocused();
+    await secondLink.getByRole('button', { name: 'Cancel' }).click();
+    expect(shareDeletes).toEqual([]);
+    await expect(secondLink.getByRole('button', { name: 'Revoke', exact: true })).toBeFocused();
+    await secondLink.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await secondLink.getByRole('button', { name: 'Revoke link' }).click();
+    await expect(secondLink).toContainText('Revoked');
+    expect(shareDeletes).toEqual([secondId]);
     // After success focus lands on the new status text, not on <body>.
-    await expect(links.nth(1).locator('.share-state')).toBeFocused();
+    await expect(secondLink.locator('.share-state')).toBeFocused();
     expect(shareListLoads).toBe(loadsBefore);
-    await expect(links.nth(0)).toContainText('Active');
+    await expect(firstLink).toContainText('Active');
     const revokedGuest = await browser.newContext();
     try {
       const guest = await revokedGuest.newPage();
-      await guest.goto(url1);
+      await guest.goto(url2);
       await expect(guest.getByTestId('share-error-share_revoked')).toBeVisible();
     } finally {
       await revokedGuest.close();
@@ -2220,10 +2280,31 @@ test('console share: one link with the key only in the fragment, revoke in place
     ).toBe(afterClose.writes);
 
     // 6. The Shared view lists both and survives a reload.
+    await page.reload();
     await page.getByRole('button', { name: 'Shared', exact: true }).click();
     await expect(page).toHaveURL(/view=shared/);
     const shared = page.locator('.file-panel tbody tr');
     await expect(shared).toHaveCount(2);
+    const sharedFirst = shared.filter({ hasText: `Link ID: ${firstId}` });
+    const sharedSecond = shared.filter({ hasText: `Link ID: ${secondId}` });
+    await expect(sharedFirst).toHaveCount(1);
+    await expect(sharedSecond).toHaveCount(1);
+    for (const [row, id] of [
+      [sharedFirst, firstId],
+      [sharedSecond, secondId],
+    ] as const) {
+      const idText = row.getByText(`Link ID: ${id}`, { exact: true });
+      await expect(idText).toBeVisible();
+      expect(await idText.evaluate((element) => element.closest('.file-meta'))).toBeNull();
+    }
+    await sharedFirst.getByRole('button', { name: 'Revoke', exact: true }).click();
+    const sharedQuestion = `Stop link ${firstId} for report.md?`;
+    await expect(sharedFirst.getByRole('group', { name: sharedQuestion })).toBeVisible();
+    await expect(sharedFirst).toContainText(sharedQuestion);
+    await expect(sharedFirst.getByRole('button', { name: 'Revoke link' })).toBeFocused();
+    await sharedFirst.getByRole('button', { name: 'Cancel' }).click();
+    expect(shareDeletes).toEqual([secondId]);
+    await expect(sharedFirst.getByRole('button', { name: 'Revoke', exact: true })).toBeFocused();
     await expect(shared.filter({ hasText: 'Active' })).toHaveCount(1);
     await expect(shared.filter({ hasText: 'Revoked' })).toHaveCount(1);
     await page.reload();
@@ -2385,7 +2466,7 @@ for (const how of ['closing the dialog', 'the idle lock'] as const) {
   });
 }
 
-test('console share: a lost response does not create a second link', async ({
+test('ux round 09: lost-response recovery finds the committed link beyond the first page', async ({
   page,
   context,
   baseURL,
@@ -2396,30 +2477,87 @@ test('console share: a lost response does not create a second link', async ({
   try {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const { driveId, recovery } = await seedShareDrive(context, baseURL!, root, userId);
+    const database = new Pool({ connectionString: process.env.DATABASE_URL });
+    try {
+      const source = await database.query<{
+        account_id: string;
+        file_id: string;
+        version_id: string;
+        agent_id: string;
+      }>(
+        `SELECT d.account_id, f.id AS file_id, f.current_version_id AS version_id, a.id AS agent_id
+           FROM drives d
+           JOIN files f ON f.drive_id = d.id
+           JOIN agents a ON a.account_id = d.account_id
+          WHERE d.id = $1 AND f.path = '/s/report.md'
+          LIMIT 1`,
+        [driveId],
+      );
+      const fixture = source.rows[0]!;
+      const olderIds = Array.from({ length: 101 }, () =>
+        randomUUID().replaceAll('-', '').slice(0, 22),
+      );
+      const olderCreatedAt = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+      await database.query(
+        `INSERT INTO shares
+           (id, account_id, drive_id, file_id, version_id, agent_id, user_id, expires_at, created_at)
+         SELECT seeded.id, $2, $3, $4, $5, $6, $7, $8::timestamptz + interval '1 day', $8::timestamptz
+           FROM unnest($1::text[]) AS seeded(id)`,
+        [
+          olderIds,
+          fixture.account_id,
+          driveId,
+          fixture.file_id,
+          fixture.version_id,
+          fixture.agent_id,
+          userId,
+          olderCreatedAt,
+        ],
+      );
+    } finally {
+      await database.end();
+    }
     let posts = 0;
+    let committedId = '';
     await page.route('**/drives/*/shares', async (route) => {
       if (route.request().method() !== 'POST') return route.continue();
       posts += 1;
       // The server commits the share, then the browser never sees the answer.
       if (posts === 1) {
-        await route.fetch();
+        const response = await route.fetch();
+        committedId = ((await response.json()) as { id: string }).id;
         return route.abort('failed');
       }
       return route.continue();
     });
     await page.goto(`/console?drive=${driveId}&path=%2Fs`);
     const row = page.locator('.file-panel tbody tr').filter({ hasText: 'report.md' });
+    await expect(row).toBeVisible();
     await row.getByRole('button', { name: /More actions/ }).click();
+    const firstList = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' && /\/drives\/[^/]+\/shares\?/.test(response.url()),
+    );
     await rowMenu(page).getByRole('button', { name: 'Share', exact: true }).click();
+    await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+    await firstList;
     const dialog = page.getByRole('dialog', { name: 'Share report.md' });
     await dialog.getByRole('button', { name: 'Copy link' }).click();
     // The dialog finds the link that was committed and copies it; it does not ask for a retry.
     await expect(dialog.getByRole('status')).toContainText('Link copied.');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(
-      /\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/,
-    );
-    await expect(dialog.getByTestId('share-link-row')).toHaveCount(1);
+    expect(committedId).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toMatch(/\/s\/[A-Za-z0-9_-]{22}#k=[A-Za-z0-9_-]{43}$/);
+    expect(new URL(copied).pathname.split('/').at(-1)).toBe(committedId);
+    await expect(
+      dialog.getByTestId('share-link-row').filter({ hasText: `Link ID: ${committedId}` }),
+    ).toHaveCount(1);
+    await dialog.getByRole('button', { name: 'Copy link' }).click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(copied);
+    await expect(
+      dialog.getByTestId('share-link-row').filter({ hasText: `Link ID: ${committedId}` }),
+    ).toHaveCount(1);
     expect(posts).toBe(1);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -2476,6 +2614,245 @@ test('console polish: phone search row, account header, Drive ID, Restored toast
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       390,
     );
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('ux round 01: console menu keeps an open drive popover in bounds after resize', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(90_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const driveA = await seededDrive(context, baseURL!, userId, 'Resize drive A', [
+      { path: '/resize.txt', at: minutesAgo(1) },
+    ]);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`/console?drive=${driveA}&path=%2F`);
+    const search = page.getByLabel('Search this folder');
+    await search.fill('resize');
+    const trigger = page.getByTestId('drive-menu-button');
+    const panelId = await trigger.getAttribute('aria-controls');
+    expect(panelId).toBeTruthy();
+    const panel = page.locator(`[id="${panelId}"]`);
+    await trigger.click();
+    await expect(panel).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    const selectedDrive = panel.getByRole('button', { name: /Resize drive A/ });
+    await expect(selectedDrive).toHaveAttribute('aria-current', 'true');
+    await selectedDrive.focus();
+    const desktopBox = await panel.boundingBox();
+    expect(desktopBox).not.toBeNull();
+    expect(desktopBox!.x + desktopBox!.width).toBeGreaterThan(367);
+    const originalUrl = page.url();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await expect.poll(async () => panel.boundingBox()).not.toBeNull();
+    const phoneBox = await panel.boundingBox();
+    expect(phoneBox).not.toBeNull();
+    expect(phoneBox!.x).toBeGreaterThanOrEqual(8);
+    expect(phoneBox!.x + phoneBox!.width).toBeLessThanOrEqual(368);
+    await expect
+      .poll(() => panel.evaluate((element) => element.matches(':popover-open')))
+      .toBe(true);
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await expect(selectedDrive).toBeFocused();
+    await expect(trigger).toHaveAttribute('aria-label', 'Drive: Resize drive A');
+    await expect(search).toHaveValue('resize');
+    expect(page.url()).toBe(originalUrl);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => panel.boundingBox()).not.toBeNull();
+    const desktopAgain = await panel.boundingBox();
+    const triggerBox = await trigger.boundingBox();
+    expect(desktopAgain).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(desktopAgain!.x).toBeGreaterThanOrEqual(8);
+    expect(desktopAgain!.x).toBe(
+      Math.max(8, Math.min(triggerBox!.x, 1440 - desktopAgain!.width - 8)),
+    );
+    await expect
+      .poll(() => panel.evaluate((element) => element.matches(':popover-open')))
+      .toBe(true);
+    await expect(selectedDrive).toBeFocused();
+    await expect(search).toHaveValue('resize');
+    expect(page.url()).toBe(originalUrl);
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(() => panel.evaluate((element) => element.matches(':popover-open')))
+      .toBe(false);
+    await expect(trigger).toBeFocused();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('ux round 03: phone console brand and landing Copy command have usable hitboxes', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const assertTarget = async (target: Locator, width: number) => {
+      const box = await target.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(812);
+      expect(
+        await target.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(bounds.left + 2, bounds.top + 2);
+          return hit === element || element.contains(hit);
+        }),
+      ).toBe(true);
+      expect(
+        await target.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return [...document.querySelectorAll<HTMLElement>('a, button')]
+            .filter(
+              (other) => other !== element && !element.contains(other) && !other.contains(element),
+            )
+            .some((other) => {
+              const adjacent = other.getBoundingClientRect();
+              return (
+                bounds.left < adjacent.right &&
+                bounds.right > adjacent.left &&
+                bounds.top < adjacent.bottom &&
+                bounds.bottom > adjacent.top
+              );
+            });
+        }),
+      ).toBe(false);
+    };
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto('/');
+      const command = page.locator('.l-copy');
+      await expect(command).toHaveAccessibleName('Copy command');
+      await expect(command).toBeVisible();
+      await assertTarget(command, width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      );
+      await command.click();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+        'npm install -g @dennisonbertram/agent-drive',
+      );
+    }
+    const driveId = await seededDrive(context, baseURL!, userId, 'Phone brand drive', [
+      { path: '/phone.txt', at: minutesAgo(1) },
+    ]);
+    for (const width of [320, 375]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto(`/console?drive=${driveId}`);
+      const brand = page.getByRole('link', { name: 'Agent Drive', exact: true });
+      await expect(brand).toBeVisible();
+      await expect(brand).toHaveAttribute('href', '/');
+      await assertTarget(brand, width);
+      const artworkBox = await brand.locator('svg').boundingBox();
+      expect(artworkBox).not.toBeNull();
+      expect(artworkBox!.width).toBe(16);
+      expect(artworkBox!.height).toBe(16);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        width,
+      );
+    }
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('ux round 06: restricted API-key policy is visible before manual replacement', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(90_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const driveId = await seededDrive(context, baseURL!, userId, 'Policy drive', [
+      { path: '/ci/artifacts/result.txt', at: minutesAgo(1) },
+    ]);
+    const agentResponse = await context.request.post('/api/console/agents', {
+      data: { name: 'Policy agent' },
+      headers: { Origin: baseURL! },
+    });
+    expect(agentResponse.status()).toBe(200);
+    const agentId = ((await agentResponse.json()) as { id: string }).id;
+    const createKey = async (label: string, writePaths?: string[]) => {
+      const response = await context.request.post('/api/console/keys', {
+        data: {
+          label,
+          agentId,
+          driveIds: [driveId],
+          scopes: ['read', 'write'],
+          ...(writePaths === undefined ? {} : { writePaths }),
+        },
+        headers: { Origin: baseURL! },
+      });
+      expect(response.status()).toBe(201);
+    };
+    await createKey('Restricted policy key', ['/ci/artifacts']);
+    await createKey('Unrestricted policy key', []);
+    await createKey('Missing policy key');
+    const metadata = (await (await context.request.get('/api/console/keys')).json()) as {
+      items: { label: string; write_paths: string[] }[];
+    };
+    expect(
+      metadata.items.find((key) => key.label === 'Restricted policy key')?.write_paths,
+    ).toEqual(['/ci/artifacts']);
+    expect(
+      metadata.items.find((key) => key.label === 'Unrestricted policy key')?.write_paths,
+    ).toEqual([]);
+    expect(metadata.items.find((key) => key.label === 'Missing policy key')?.write_paths).toEqual(
+      [],
+    );
+
+    await page.route('**/api/console/keys', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      const body = (await response.json()) as {
+        items: { label: string; write_paths?: string[] }[];
+      };
+      const missing = body.items.find((key) => key.label === 'Missing policy key');
+      if (missing) delete missing.write_paths;
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/console');
+    await page.getByRole('button', { name: 'API keys', exact: true }).click();
+    const rows = page.locator('.entity-row');
+    const keyRow = (label: string) => rows.filter({ has: page.getByText(label, { exact: true }) });
+    const restricted = keyRow('Restricted policy key');
+    const unrestricted = keyRow('Unrestricted policy key');
+    const missing = keyRow('Missing policy key');
+    await expect(restricted.getByText('Write paths:', { exact: false })).toBeVisible();
+    await expect(restricted.getByText('/ci/artifacts', { exact: true })).toBeVisible();
+    await expect(restricted).toContainText(
+      'Write paths do not restrict reads. Reading still requires read permission on an allowed drive.',
+    );
+    await expect(unrestricted).not.toContainText('Write paths:');
+    await expect(missing).not.toContainText('Write paths:');
+    await expect(
+      page.getByText(
+        'Replacing a restricted key? Use the CLI or API with the same drives, permissions and write paths. Update and verify the agent before revoking the old key.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: '+ New API key', exact: true }).click();
+    const createDialog = page.getByRole('dialog', { name: 'Create API key' });
+    await expect(createDialog).toContainText(
+      'This form cannot set write-path restrictions. To replace a restricted key, use the CLI or API with the same drives, permissions and write paths.',
+    );
+    await page.keyboard.press('Escape');
   } finally {
     await cleanupUser(userId);
   }

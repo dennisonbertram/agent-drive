@@ -205,6 +205,83 @@ afterAll(async () => {
 });
 
 describe('deletion lifecycle', () => {
+  it('stops after a takeover during billing closure without deleting identity or storage', async () => {
+    const userId = `clerk_claim_${randomUUID()}`;
+    const fixture = await createConsoleFixture(userId);
+    const stripeCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
+    await pool.query(
+      `INSERT INTO billing_accounts (account_id,plan,stripe_customer_id,checkout_session_id)
+       VALUES ($1,'developer',$2,'cs_known')`,
+      [fixture.accountId, stripeCustomerId],
+    );
+    const queued = await consoleRequest(userId, 'account', 'DELETE', {
+      confirmation: 'DELETE MY ACCOUNT',
+    });
+    const jobId = ((await json(queued)).deletion as { id: string }).id;
+    await pool.query('UPDATE deletion_jobs SET not_before=now() WHERE id=$1', [jobId]);
+    const closeBilling = vi.fn(async () => {
+      await pool.query(
+        `UPDATE deletion_jobs SET lease_until=clock_timestamp()+interval '2 hours' WHERE id=$1`,
+        [jobId],
+      );
+      return true;
+    });
+    const deleteIdentity = vi.fn(async () => undefined);
+    const objectStore = { send: vi.fn() } as unknown as S3Client;
+
+    await runDeletionMaintenance({
+      objectStore,
+      closeBilling,
+      deleteIdentity,
+      drainBilling: vi.fn(async () => undefined),
+      jobIds: [jobId],
+    });
+
+    expect(closeBilling).toHaveBeenCalledOnce();
+    expect(deleteIdentity).not.toHaveBeenCalled();
+    expect(objectStore.send).not.toHaveBeenCalled();
+    const state = await pool.query<{ completed_at: Date | null; lease_until: Date }>(
+      'SELECT completed_at,lease_until FROM deletion_jobs WHERE id=$1',
+      [jobId],
+    );
+    expect(state.rows[0]?.completed_at).toBeNull();
+    expect(state.rows[0]?.lease_until.getTime()).toBeGreaterThan(Date.now() + 60 * 60 * 1000);
+  });
+
+  it('does not read or delete identity after losing the claim before that phase', async () => {
+    const userId = `clerk_identity_claim_${randomUUID()}`;
+    await createConsoleFixture(userId);
+    const queued = await consoleRequest(userId, 'account', 'DELETE', {
+      confirmation: 'DELETE MY ACCOUNT',
+    });
+    const jobId = ((await json(queued)).deletion as { id: string }).id;
+    await pool.query('UPDATE deletion_jobs SET not_before=now() WHERE id=$1', [jobId]);
+    const drainBilling = vi.fn(async () => {
+      await pool.query(
+        `UPDATE deletion_jobs SET lease_until=clock_timestamp()+interval '2 hours' WHERE id=$1`,
+        [jobId],
+      );
+    });
+    const deleteIdentity = vi.fn(async () => undefined);
+    const objectStore = { send: vi.fn() } as unknown as S3Client;
+
+    await runDeletionMaintenance({
+      objectStore,
+      closeBilling: vi.fn(async () => true),
+      deleteIdentity,
+      drainBilling,
+      jobIds: [jobId],
+    });
+
+    expect(drainBilling).toHaveBeenCalledOnce();
+    expect(deleteIdentity).not.toHaveBeenCalled();
+    expect(objectStore.send).not.toHaveBeenCalled();
+    expect(
+      (await pool.query('SELECT completed_at FROM deletion_jobs WHERE id=$1', [jobId])).rows[0]
+        ?.completed_at,
+    ).toBeNull();
+  });
+
   it('queues through the owner route and purges versioned drive data without touching neighbors', async () => {
     const userId = `e2e_${randomUUID()}`;
     const foreignUserId = `e2e_foreign_${randomUUID()}`;

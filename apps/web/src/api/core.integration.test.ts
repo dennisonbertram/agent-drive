@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PLANS } from '../billing/policy';
-import { getPool } from '../db/client';
+import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
 import { encodeCursor, MAX_QUERY_LENGTH } from './validation';
@@ -18,6 +18,11 @@ import {
   generateDriveKey,
   unwrapFileKey,
 } from '../../../../packages/agent-drive/src/crypto.js';
+
+vi.mock('../db/client', async (original) => {
+  const actual = await original<typeof import('../db/client')>();
+  return { ...actual, withTransaction: vi.fn(actual.withTransaction) };
+});
 
 const pool = new Pool({
   connectionString:
@@ -268,6 +273,51 @@ afterAll(async () => {
 });
 
 describe('Phase 1 core API', () => {
+  it('retains committed upload and copy bytes when the commit acknowledgement is lost', async () => {
+    const actual = await vi.importActual<typeof import('../db/client')>('../db/client');
+    const path = `/unknown-commit-${randomUUID()}.bin`;
+    const destination = `/unknown-copy-${randomUUID()}.bin`;
+    const bytes = Buffer.from('retained ciphertext');
+    vi.mocked(withTransaction).mockImplementation(async (callback) => {
+      const result = await actual.withTransaction(callback);
+      const value = result as { version?: { object_key?: unknown }; object_key?: unknown } | null;
+      if (value?.version?.object_key || value?.object_key)
+        throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
+      return result;
+    });
+    try {
+      const uploaded = await uploadCommit(writeToken, driveId, path, bytes);
+      expect(uploaded.response.status).toBe(500);
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+      const retried = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+        intentId: uploaded.intentId,
+      });
+      expect(retried.status).toBe(200);
+      const versionId = (await json(retried)).version.id;
+      vi.mocked(withTransaction).mockImplementation(async (callback) => {
+        const result = await actual.withTransaction(callback);
+        if ((result as { object_key?: unknown } | null)?.object_key)
+          throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
+        return result;
+      });
+      const copied = await request(`/drives/${driveId}/copy`, writeToken, 'POST', {
+        path,
+        destinationPath: destination,
+        versionId,
+      });
+      expect(copied.status).toBe(500);
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+      for (const savedPath of [path, destination]) {
+        const download = await json(
+          await request(`/drives/${driveId}/get?path=${encodeURIComponent(savedPath)}`, writeToken),
+        );
+        expect(await (await fetch(download.downloadUrl)).text()).toBe(bytes.toString());
+      }
+    } finally {
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+    }
+  });
+
   it('supports encrypted-object upload, versions, immutable bytes, restore, copy, move, search and recent', async () => {
     const firstBytes = Buffer.from('ciphertext-one');
     const first = await uploadCommit(writeToken, driveId, '/folder/file.bin', firstBytes, {

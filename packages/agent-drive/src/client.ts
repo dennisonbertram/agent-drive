@@ -581,6 +581,7 @@ export class AgentDriveClient {
             ? AbortSignal.any([AbortSignal.timeout(remaining), caller])
             : AbortSignal.timeout(remaining),
         );
+        if (caller?.aborted || Date.now() >= deadline) break;
         if (page.items.length > 0) return page;
       } catch (error) {
         if (!isAbort(error)) throw error;
@@ -591,12 +592,18 @@ export class AgentDriveClient {
       const napping = sleep(Math.min(RECENT_POLL_MS, left));
       if (!caller) await napping;
       else
-        await Promise.race([
-          napping,
-          new Promise<void>((resolve) =>
-            caller.addEventListener('abort', () => resolve(), { once: true }),
-          ),
-        ]);
+        await new Promise<void>((resolve, reject) => {
+          const onAbort = () => {
+            caller.removeEventListener('abort', onAbort);
+            resolve();
+          };
+          caller.addEventListener('abort', onAbort, { once: true });
+          napping.then(onAbort, (error: unknown) => {
+            caller.removeEventListener('abort', onAbort);
+            reject(error);
+          });
+          if (caller.aborted) onAbort();
+        });
     }
     return { items: [], nextCursor: null, latestCursor: options.cursor ?? null };
   }

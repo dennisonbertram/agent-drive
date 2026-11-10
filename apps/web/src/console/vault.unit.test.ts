@@ -14,6 +14,7 @@ import { createAccountKey, sealToAccount, type AccountKeyRecord } from './accoun
 import { Vault, vaultRequest, type LockReason } from './vault';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
+const OTHER_ACCOUNT = '22222222-2222-4222-8222-222222222222';
 const DRIVE = '33333333-3333-4333-8333-333333333333';
 const PASSPHRASE = 'K7M2Q9X4B8T3V6N5R1D0';
 
@@ -92,6 +93,153 @@ const base = (slot: unknown = goodSlot): Routes => ({
 });
 
 describe('Vault', () => {
+  it('restores the previous status when a pending load is cancelled', async () => {
+    const pending = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      whoami: () => {
+        if (++reads === 1) throw new Error('offline');
+        return reads === 2 ? pending.promise : { accountId: ACCOUNT };
+      },
+    });
+    await vault.load();
+    expect(vault.status).toBe('error');
+    const retry = vault.load();
+    expect(vault.status).toBe('loading');
+    vault.cancelUnlock();
+    expect(vault.status).toBe('error');
+    expect(vault.loadError).toBe('offline');
+    pending.resolve({ accountId: ACCOUNT });
+    await retry;
+    expect(vault.status).toBe('error');
+    await vault.load();
+    expect(vault.status).toBe('locked');
+  });
+
+  it('leaves a recoverable status when the first load is cancelled', async () => {
+    const pending = deferred<unknown>();
+    const { vault } = makeVault({ ...base(), whoami: () => pending.promise });
+    const first = vault.load();
+    vault.cancelUnlock();
+    expect(vault.status).toBe('error');
+    expect(vault.loadError).not.toBe('');
+    pending.resolve({ accountId: ACCOUNT });
+    await first;
+    await vault.load();
+    expect(vault.status).not.toBe('error');
+  });
+
+  it('does not clobber a load started after the cancel', async () => {
+    const pending = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      whoami: () => (++reads === 1 ? pending.promise : { accountId: ACCOUNT }),
+    });
+    const first = vault.load();
+    vault.cancelUnlock();
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    pending.resolve({ accountId: ACCOUNT });
+    await first;
+    expect(vault.status).toBe('locked');
+  });
+
+  it('discards old account reads after clear and discovers the new account', async () => {
+    const pendingRecord = deferred<unknown>();
+    let account = ACCOUNT;
+    let reads = 0;
+    const { vault, calls } = makeVault({
+      ...base(),
+      whoami: () => ({ accountId: account }),
+      'account-key': () => (++reads === 1 ? pendingRecord.promise : { accountKey: null }),
+    });
+    const oldLoad = vault.load();
+    vault.clear();
+    account = OTHER_DRIVE;
+    await vault.load();
+    pendingRecord.resolve({ accountKey: record });
+    await oldLoad;
+    expect(vault.status).toBe('none');
+    expect(vault.record).toBeNull();
+    expect(vault.fingerprint).toBe('');
+    expect(calls.filter(({ path }) => path === 'whoami')).toHaveLength(2);
+  });
+
+  it('only publishes the latest record read within a session', async () => {
+    const pendingRecord = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key': () => (++reads === 1 ? pendingRecord.promise : { accountKey: null }),
+    });
+    const oldLoad = vault.load();
+    await vault.load();
+    pendingRecord.resolve({ accountKey: record });
+    await oldLoad;
+    expect(vault.status).toBe('none');
+    expect(vault.record).toBeNull();
+  });
+
+  it('locks and discards slots when a refresh discovers a removed account key', async () => {
+    let removed = false;
+    const { vault, locked } = makeVault({
+      ...base(),
+      'account-key': () => ({ accountKey: removed ? null : record }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    removed = true;
+    await vault.load();
+    expect(vault.status).toBe('none');
+    expect(vault.slotCount).toBe(0);
+    expect(await vault.slotKey(DRIVE)).toBeNull();
+    expect(locked).toEqual(['stale']);
+  }, 30_000);
+
+  it('invalidates an unlock as soon as reset starts, not when deletion finishes', async () => {
+    const slots = deferred<unknown>();
+    const deletion = deferred<unknown>();
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => slots.promise,
+      'account-key': (method) => (method === 'DELETE' ? deletion.promise : { accountKey: record }),
+    });
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    const resetting = vault.reset();
+    slots.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await unlocking).toBe(false);
+    expect(vault.status).toBe('locked');
+    expect(vault.fetchingSlots).toBe(false);
+    deletion.resolve({});
+    await resetting;
+    expect(vault.status).toBe('none');
+    expect(await vault.slotKey(DRIVE)).toBeNull();
+  }, 30_000);
+
+  it('a new record load supersedes an in-flight unlock', async () => {
+    const slots = deferred<unknown>();
+    let removed = false;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => slots.promise,
+      'account-key': () => ({ accountKey: removed ? null : record }),
+    });
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    removed = true;
+    await vault.load();
+    slots.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await unlocking).toBe(false);
+    expect(vault.status).toBe('none');
+    expect(vault.slotCount).toBe(0);
+    expect(vault.fetchingSlots).toBe(false);
+  }, 30_000);
+
   it('unlocks with a typed generated passphrase and opens a verified drive key', async () => {
     const { vault } = makeVault(base());
     await vault.load();
@@ -109,6 +257,80 @@ describe('Vault', () => {
     await expect(vault.unlock('not the passphrase')).rejects.toThrow(
       'That passphrase is not correct.',
     );
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('retries a failed status load and clears the stale error when locked', async () => {
+    let fail = true;
+    const routes = {
+      ...base(),
+      'account-key': () => {
+        if (fail) throw new Error('temporary status failure');
+        return { accountKey: { ...record, createdAt: 'x', updatedAt: 'x' } };
+      },
+    };
+    const { vault } = makeVault(routes);
+    await vault.load();
+    expect(vault.status).toBe('error');
+    expect(vault.loadError).toBe('temporary status failure');
+    fail = false;
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    expect(vault.loadError).toBe('');
+  }, 30_000);
+
+  it('retries a failed status load and clears the stale error when no vault exists', async () => {
+    let fail = true;
+    const routes = {
+      ...base(),
+      'account-key': () => {
+        if (fail) throw new Error('temporary status failure');
+        return { accountKey: null };
+      },
+    };
+    const { vault } = makeVault(routes);
+    await vault.load();
+    expect(vault.status).toBe('error');
+    fail = false;
+    await vault.load();
+    expect(vault.status).toBe('none');
+    expect(vault.loadError).toBe('');
+  }, 30_000);
+
+  it('does not commit a delayed status record after Lock invalidates its epoch', async () => {
+    const gate = deferred<unknown>();
+    const { vault, calls } = makeVault({ ...base(), 'account-key': () => gate.promise });
+    const pending = vault.load();
+    await vi.waitFor(() => expect(calls.some((call) => call.path === 'account-key')).toBe(true), {
+      timeout: 10_000,
+    });
+    vault.lock('manual');
+    gate.resolve({ accountKey: { ...record, createdAt: 'x', updatedAt: 'x' } });
+    await pending;
+    expect(vault.record).toBeNull();
+    expect(vault.fingerprint).toBe('');
+  }, 30_000);
+
+  it('refreshes the account identity after clear instead of reusing the previous account', async () => {
+    const otherRecord = (await createAccountKey(OTHER_ACCOUNT, PASSPHRASE)).record;
+    let accountId = ACCOUNT;
+    let currentRecord = record;
+    const whoami = vi.fn(() => ({ accountId }));
+    const { vault } = makeVault({
+      ...base(),
+      whoami,
+      'account-key': () => ({
+        accountKey: { ...currentRecord, createdAt: 'x', updatedAt: 'x' },
+      }),
+    });
+    await vault.load();
+    expect(vault.record?.accountId).toBe(ACCOUNT);
+    accountId = OTHER_ACCOUNT;
+    currentRecord = otherRecord;
+    vault.clear();
+    await vault.load();
+    expect(whoami).toHaveBeenCalledTimes(2);
+    expect(vault.record?.accountId).toBe(OTHER_ACCOUNT);
     expect(vault.status).toBe('locked');
   }, 30_000);
 

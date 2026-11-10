@@ -128,8 +128,11 @@ export default function Connect({
     null,
   );
   const loginCommand = <code className="connect-cmd">agent-drive login</code>;
-  const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<'entry' | 'loading' | 'review' | 'approving' | 'done'>(
+    'entry',
+  );
+  const loading = phase === 'loading';
+  const busy = phase === 'approving';
   const [done, setDone] = useState<{ name: string; access: string; drive: string } | null>(null);
   const [formError, setFormError] = useState('');
   const [fieldError, setFieldError] = useState<{ field: 'key' | 'folder'; message: string } | null>(
@@ -153,8 +156,14 @@ export default function Connect({
   const generation = useRef(0);
 
   async function load(raw: string) {
+    if (busyRef.current) return;
     const code = normalizeCode(raw);
-    generation.current += 1;
+    const startedAt = ++generation.current;
+    const live = () => startedAt === generation.current;
+    refetches.current = 0;
+    refetchStopped.current = false;
+    clearKey();
+    setPhase('entry');
     setProblem(null);
     setNotice('');
     setRequest(null);
@@ -166,14 +175,18 @@ export default function Connect({
       setProblem({ kind: 'error', message: 'Enter the code in the form XXXX-XXXX.' });
       return;
     }
-    setLoading(true);
+    setPhase('loading');
     try {
       const found = await api<DeviceRequest>(`device/${encodeURIComponent(code)}`);
+      if (!live()) return;
       setRequest(found);
+      setPhase('review');
       setExisting(false);
       setAccountDrives([]);
-      if (found.creates_drive) void loadDrives();
+      if (found.creates_drive) void loadDrives(startedAt);
     } catch (error) {
+      if (!live()) return;
+      setPhase('entry');
       if (error instanceof HttpError && error.status === 404)
         setProblem({
           kind: 'missing',
@@ -184,8 +197,6 @@ export default function Connect({
           kind: 'error',
           message: error instanceof Error ? error.message : 'The request could not be loaded.',
         });
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -197,7 +208,7 @@ export default function Connect({
     setFieldError(null);
   }
 
-  async function loadDrives() {
+  async function loadDrives(startedAt: number) {
     try {
       const items: Drive[] = [];
       let cursor: string | null = null;
@@ -205,6 +216,7 @@ export default function Connect({
         const page: { items: Drive[]; nextCursor: string | null } = await api(
           `drives?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
         );
+        if (startedAt !== generation.current) return;
         items.push(...page.items);
         cursor = page.nextCursor;
       } while (cursor);
@@ -219,6 +231,9 @@ export default function Connect({
     // Load the prefilled code once on mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (initialCode) void load(initialCode);
+    return () => {
+      generation.current += 1;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -232,6 +247,7 @@ export default function Connect({
   const shownExpiry = request?.expires_at;
   useEffect(() => {
     if (!shownCode || !shownExpiry || done) return;
+    let active = true;
     let inFlight = false;
     async function onFocus() {
       if (
@@ -248,13 +264,16 @@ export default function Connect({
       try {
         const found = await api<DeviceRequest>(`device/${encodeURIComponent(shownCode!)}`);
         if (
+          active &&
           startedAt === generation.current &&
           (found.offerRevision ?? 0) !== shownRevision &&
           !busyRef.current
         ) {
-          generation.current += 1;
+          const updatedAt = ++generation.current;
           setRequest(found);
           setExisting(false);
+          setAccountDrives([]);
+          if (found.creates_drive) void loadDrives(updatedAt);
           clearKey();
           setNotice(
             found.offer
@@ -263,13 +282,16 @@ export default function Connect({
           );
         }
       } catch {
-        refetchStopped.current = true;
+        if (active && startedAt === generation.current) refetchStopped.current = true;
       } finally {
         inFlight = false;
       }
     }
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', onFocus);
+    };
   }, [shownCode, shownRevision, shownExpiry, done]);
 
   // Bring a field error into view and put the cursor where the fix goes.
@@ -281,11 +303,12 @@ export default function Connect({
   }, [fieldError]);
 
   async function approve() {
-    if (!request) return;
+    if (!request || busyRef.current) return;
     setFormError('');
     setFieldError(null);
-    generation.current += 1;
-    setBusy(true);
+    const startedAt = ++generation.current;
+    const live = () => startedAt === generation.current;
+    setPhase('approving');
     busyRef.current = true;
     try {
       // The revision binds this approval to the offer (or lack of one) the page showed.
@@ -332,14 +355,19 @@ export default function Connect({
           offerRevision,
         };
       }
+      if (!live()) return;
       await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
+      if (!live()) return;
       clearKey();
+      setPhase('done');
       setDone({
         name: request.client_name,
         access: describeScopes(scopes),
         drive: driveLabel,
       });
     } catch (error) {
+      if (!live()) return;
+      setPhase('review');
       if (error instanceof KeyError) setFieldError({ field: 'key', message: error.message });
       else if (
         error instanceof HttpError &&
@@ -348,8 +376,10 @@ export default function Connect({
       ) {
         // The request changed since this page loaded (for example an offer arrived): show it again.
         clearKey();
+        busyRef.current = false;
         await load(request.user_code);
-        setNotice('The request changed; review it again.');
+        if (generation.current === startedAt + 1)
+          setNotice('The request changed; review it again.');
       } else if (
         error instanceof HttpError &&
         error.status === 400 &&
@@ -366,8 +396,7 @@ export default function Connect({
         );
       else setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      if (live()) busyRef.current = false;
     }
   }
 
@@ -376,14 +405,13 @@ export default function Connect({
       <section className="panel connect-card approved" role="status">
         <span className="connect-tag">
           <span className="connect-led on" aria-hidden="true" />
-          Paired
+          Approval saved
         </span>
-        <h1>{done.name} is connected</h1>
+        <h1>Access approved for {done.name}</h1>
         <p>
-          {done.name} can now {done.access} {done.drive}. Return to your agent; it will finish setup
-          on its own.
+          You approved {done.name} to {done.access} {done.drive}. Return to your agent to finish
+          setup and confirm it is ready.
         </p>
-        <p>It appears in the console under Agents once setup finishes.</p>
         <a className="button secondary" href="/console">
           Open console
         </a>
