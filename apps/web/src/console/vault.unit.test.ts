@@ -93,6 +93,59 @@ const base = (slot: unknown = goodSlot): Routes => ({
 });
 
 describe('Vault', () => {
+  it('restores the previous status when a pending load is cancelled', async () => {
+    const pending = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      whoami: () => {
+        if (++reads === 1) throw new Error('offline');
+        return reads === 2 ? pending.promise : { accountId: ACCOUNT };
+      },
+    });
+    await vault.load();
+    expect(vault.status).toBe('error');
+    const retry = vault.load();
+    expect(vault.status).toBe('loading');
+    vault.cancelUnlock();
+    expect(vault.status).toBe('error');
+    expect(vault.loadError).toBe('offline');
+    pending.resolve({ accountId: ACCOUNT });
+    await retry;
+    expect(vault.status).toBe('error');
+    await vault.load();
+    expect(vault.status).toBe('locked');
+  });
+
+  it('leaves a recoverable status when the first load is cancelled', async () => {
+    const pending = deferred<unknown>();
+    const { vault } = makeVault({ ...base(), whoami: () => pending.promise });
+    const first = vault.load();
+    vault.cancelUnlock();
+    expect(vault.status).toBe('error');
+    expect(vault.loadError).not.toBe('');
+    pending.resolve({ accountId: ACCOUNT });
+    await first;
+    await vault.load();
+    expect(vault.status).not.toBe('error');
+  });
+
+  it('does not clobber a load started after the cancel', async () => {
+    const pending = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      whoami: () => (++reads === 1 ? pending.promise : { accountId: ACCOUNT }),
+    });
+    const first = vault.load();
+    vault.cancelUnlock();
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    pending.resolve({ accountId: ACCOUNT });
+    await first;
+    expect(vault.status).toBe('locked');
+  });
+
   it('discards old account reads after clear and discovers the new account', async () => {
     const pendingRecord = deferred<unknown>();
     let account = ACCOUNT;
