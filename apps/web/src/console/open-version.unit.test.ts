@@ -9,7 +9,7 @@ import {
   sealFileKeyToInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
-import { openVersion, type InboxCache } from './open-version';
+import { loadInbox, openVersion, type InboxCache } from './open-version';
 
 const DRIVE = '33333333-3333-4333-8333-333333333333';
 const OTHER = '44444444-4444-4444-8444-444444444444';
@@ -43,6 +43,24 @@ const meta = (wrappedKey: string) => ({
 });
 
 describe('openVersion', () => {
+  it('does not evict a replacement request when an invalidated request fails', async () => {
+    const cache: InboxCache = new Map();
+    let reject!: (error: Error) => void;
+    const old = loadInbox(
+      (() =>
+        new Promise((_, fail) => {
+          reject = fail;
+        })) as never,
+      cache,
+      DRIVE,
+    );
+    cache.clear();
+    const current = loadInbox((async () => ({ inbox: record })) as never, cache, DRIVE);
+    reject(new Error('old request failed'));
+    await expect(old).rejects.toThrow('old request failed');
+    expect(cache.get(DRIVE)).toBe(current);
+    expect(await current).toBe(record);
+  });
   it('decrypts a v1 version without asking for the inbox', async () => {
     const { api, calls } = setup(null);
     const out = await openVersion(api, DRIVE, meta(v1), driveKey, new Map() as InboxCache);

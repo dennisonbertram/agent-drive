@@ -29,6 +29,37 @@ type Adapters = {
   jobIds?: string[];
 };
 
+type DeletionJob = {
+  id: string;
+  kind: string;
+  target_id: string;
+  account_id: string;
+  lease_until: string;
+  completed_at: Date | null;
+};
+
+async function renewClaim(job: Pick<DeletionJob, 'id' | 'lease_until'>) {
+  const claim = await getPool().query<{ lease_until: string }>(
+    `UPDATE deletion_jobs SET lease_until=clock_timestamp()+interval '10 minutes'
+      WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+        AND lease_until > clock_timestamp()
+      RETURNING lease_until::text AS lease_until`,
+    [job.id, job.lease_until],
+  );
+  if (!claim.rows[0]) throw new Error('Deletion claim expired.');
+  job.lease_until = claim.rows[0].lease_until;
+}
+
+async function assertSweepClaim(job: Pick<DeletionJob, 'id' | 'lease_until'>) {
+  const claim = await getPool().query(
+    `SELECT 1 FROM deletion_jobs
+      WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NOT NULL
+        AND lease_until > clock_timestamp()`,
+    [job.id, job.lease_until],
+  );
+  if (!claim.rowCount) throw new Error('Deletion claim expired.');
+}
+
 export async function purgePrefix(store: S3Client, prefix: string) {
   let removed = 0;
   while (removed < batchSize) {
@@ -115,10 +146,7 @@ function safeError(error: unknown) {
   return 'Deletion cleanup is retryable.';
 }
 
-async function purgeDrive(
-  store: S3Client,
-  job: { id: string; target_id: string; account_id: string; lease_until: string },
-) {
+async function purgeDrive(store: S3Client, job: DeletionJob) {
   const active = await getPool().query(
     `SELECT 1 FROM drives d JOIN accounts a ON a.id=d.account_id
       WHERE d.id=$1 AND d.account_id=$2 AND d.deleting_at IS NOT NULL
@@ -133,7 +161,9 @@ async function purgeDrive(
     throw new Error('Deletion target ownership does not match.');
   if (target.rowCount && !active.rowCount)
     throw new Error('Deletion target is not marked for deletion.');
+  await renewClaim(job);
   const objectEmpty = await purgePrefix(store, `objects/${job.account_id}/${job.target_id}/`);
+  await renewClaim(job);
   const stagingEmpty = await purgePrefix(store, `staging/${job.account_id}/${job.target_id}/`);
   if (!objectEmpty || !stagingEmpty) return false;
   if (!target.rowCount) return true;
@@ -146,7 +176,9 @@ async function purgeDrive(
     );
     if (!locked.rowCount) throw new Error('Deletion target is not marked for deletion.');
     const claim = await client.query(
-      'SELECT 1 FROM deletion_jobs WHERE id=$1 AND lease_until=$2 AND completed_at IS NULL FOR UPDATE',
+      `SELECT 1 FROM deletion_jobs
+        WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+          AND lease_until > clock_timestamp() FOR UPDATE`,
       [job.id, job.lease_until],
     );
     if (!claim.rowCount) throw new Error('Deletion claim expired.');
@@ -170,11 +202,7 @@ async function purgeDrive(
   return true;
 }
 
-async function purgeAccount(
-  store: S3Client,
-  job: { id: string; target_id: string; account_id: string; lease_until: string },
-  adapters: Adapters,
-) {
+async function purgeAccount(store: S3Client, job: DeletionJob, adapters: Adapters) {
   const targetId = job.target_id;
   if (job.account_id !== targetId) throw new Error('Deletion target ownership does not match.');
   const account = await getPool().query<{
@@ -182,7 +210,9 @@ async function purgeAccount(
     deleting_at: Date | null;
   }>('SELECT external_clerk_user_id, deleting_at FROM accounts WHERE id = $1', [targetId]);
   if (!account.rows[0]) {
+    await renewClaim(job);
     const objectsEmpty = await purgePrefix(store, `objects/${targetId}/`);
+    await renewClaim(job);
     const stagingEmpty = await purgePrefix(store, `staging/${targetId}/`);
     return objectsEmpty && stagingEmpty;
   }
@@ -205,16 +235,19 @@ async function purgeAccount(
       await queueBillingDeliveries(client, state, { notify: false });
     }
   });
+  await renewClaim(job);
   await (adapters.drainBilling ?? drainOutboxes)();
   const pending = await getPool().query(
     'SELECT 1 FROM billing_meter_reports WHERE account_id = $1 AND reported_at IS NULL LIMIT 1',
     [targetId],
   );
   if (pending.rowCount) throw new Error('Billing deliveries remain pending.');
+  await renewClaim(job);
   const billingJob = await getPool().query<{ billing_closed_at: Date | null }>(
     `SELECT billing_closed_at FROM deletion_jobs
-      WHERE kind=$1 AND target_id=$2 AND lease_until=$3`,
-    ['account', targetId, job.lease_until],
+      WHERE id=$1 AND kind=$2 AND target_id=$3 AND lease_until=$4::timestamptz
+        AND completed_at IS NULL AND lease_until > clock_timestamp()`,
+    [job.id, 'account', targetId, job.lease_until],
   );
   const billing = await getPool().query<{ stripe_customer_id: string | null }>(
     'SELECT stripe_customer_id FROM billing_accounts WHERE account_id = $1',
@@ -222,16 +255,20 @@ async function purgeAccount(
   );
   if (!billingJob.rows[0]) throw new Error('Deletion claim expired.');
   if (!billingJob.rows[0].billing_closed_at && billing.rows[0]?.stripe_customer_id) {
+    await renewClaim(job);
     const closed = await (adapters.closeBilling ?? closeStripeBillingForDeletion)(
       targetId,
       billing.rows[0].stripe_customer_id,
     );
     if (!closed) throw new Error('Stripe billing remains open.');
-    await getPool().query(
+    const checkpoint = await getPool().query(
       `UPDATE deletion_jobs SET billing_closed_at=now()
-        WHERE kind=$1 AND target_id=$2 AND lease_until=$3`,
-      ['account', targetId, job.lease_until],
+        WHERE id=$1 AND kind=$2 AND target_id=$3 AND lease_until=$4::timestamptz
+          AND completed_at IS NULL AND lease_until > clock_timestamp()
+        RETURNING id`,
+      [job.id, 'account', targetId, job.lease_until],
     );
+    if (!checkpoint.rowCount) throw new Error('Deletion claim expired.');
   }
   const identity = account.rows[0].external_clerk_user_id;
   const synthetic =
@@ -241,20 +278,30 @@ async function purgeAccount(
   if (identity && !synthetic) {
     if (!consoleIdentityDeletionConfigured() && !adapters.deleteIdentity)
       throw new Error('Console identity deletion is not configured.');
+    await renewClaim(job);
     const recorded = await getPool().query(
-      'SELECT identity_deleted_at FROM deletion_jobs WHERE id=$1 AND lease_until=$2',
+      `SELECT identity_deleted_at FROM deletion_jobs
+        WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+          AND lease_until > clock_timestamp()`,
       [job.id, job.lease_until],
     );
-    if (!recorded.rows[0]?.identity_deleted_at) {
+    if (!recorded.rows[0]) throw new Error('Deletion claim expired.');
+    if (!recorded.rows[0].identity_deleted_at) {
+      await renewClaim(job);
       await (adapters.deleteIdentity ?? deleteConsoleIdentity)(identity);
-      await getPool().query(
+      const checkpoint = await getPool().query(
         `UPDATE deletion_jobs SET identity_deleted_at=now()
-          WHERE id=$1 AND lease_until=$2`,
+          WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+            AND lease_until > clock_timestamp()
+          RETURNING id`,
         [job.id, job.lease_until],
       );
+      if (!checkpoint.rowCount) throw new Error('Deletion claim expired.');
     }
   }
+  await renewClaim(job);
   const objectsEmpty = await purgePrefix(store, `objects/${targetId}/`);
+  await renewClaim(job);
   const stagingEmpty = await purgePrefix(store, `staging/${targetId}/`);
   if (!objectsEmpty || !stagingEmpty) return false;
   const accountRemoved = await withTransaction(async (client) => {
@@ -267,7 +314,9 @@ async function purgeAccount(
     );
     if (!locked.rowCount) return;
     const claim = await client.query(
-      'SELECT 1 FROM deletion_jobs WHERE id=$1 AND lease_until=$2 AND completed_at IS NULL FOR UPDATE',
+      `SELECT 1 FROM deletion_jobs
+        WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+          AND lease_until > clock_timestamp() FOR UPDATE`,
       [job.id, job.lease_until],
     );
     if (!claim.rowCount) throw new Error('Deletion claim expired.');
@@ -332,48 +381,39 @@ async function purgeAccount(
   return accountRemoved;
 }
 
-async function processJob(
-  job: {
-    id: string;
-    kind: string;
-    target_id: string;
-    account_id: string;
-    lease_until: string;
-  },
-  adapters: Adapters,
-) {
+async function processJob(job: DeletionJob, adapters: Adapters) {
   const store = adapters.objectStore ?? storageClient();
   const done =
     job.kind === 'drive' ? await purgeDrive(store, job) : await purgeAccount(store, job, adapters);
-  if (done)
-    await getPool().query(
+  if (done) {
+    const completed = await getPool().query(
       `UPDATE deletion_jobs SET completed_at=now(),lease_until=NULL,last_error=NULL
-        WHERE id=$1 AND lease_until=$2 AND completed_at IS NULL`,
+        WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+          AND lease_until > clock_timestamp()
+        RETURNING id`,
       [job.id, job.lease_until],
     );
-  else
-    await getPool().query(
+    if (!completed.rowCount) throw new Error('Deletion claim expired.');
+  } else {
+    const released = await getPool().query(
       `UPDATE deletion_jobs SET lease_until=NULL,last_attempt_at=now(),
           not_before=GREATEST(not_before,now()+interval '30 seconds')
-        WHERE id=$1 AND lease_until=$2 AND completed_at IS NULL`,
+        WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NULL
+          AND lease_until > clock_timestamp()
+        RETURNING id`,
       [job.id, job.lease_until],
     );
+    if (!released.rowCount) throw new Error('Deletion claim expired.');
+  }
 }
 
 export async function runDeletionMaintenance(adapters: Adapters = {}) {
-  const jobs = await getPool().query<{
-    id: string;
-    kind: string;
-    target_id: string;
-    account_id: string;
-    lease_until: string;
-    completed_at: Date | null;
-  }>(
+  const jobs = await getPool().query<DeletionJob>(
     `WITH active_jobs AS (
        SELECT id FROM deletion_jobs
         WHERE completed_at IS NULL AND not_before <= now()
           AND ($1::uuid[] IS NULL OR id=ANY($1::uuid[]))
-          AND (lease_until IS NULL OR lease_until < now())
+          AND (lease_until IS NULL OR lease_until < clock_timestamp())
         ORDER BY last_attempt_at NULLS FIRST, requested_at, id
         FOR UPDATE SKIP LOCKED LIMIT 8
      ), sweep_jobs AS (
@@ -381,7 +421,7 @@ export async function runDeletionMaintenance(adapters: Adapters = {}) {
         WHERE completed_at IS NOT NULL
           AND ($1::uuid[] IS NULL OR id=ANY($1::uuid[]))
           AND (last_swept_at IS NULL OR last_swept_at < now()-interval '1 minute')
-          AND (lease_until IS NULL OR lease_until < now())
+          AND (lease_until IS NULL OR lease_until < clock_timestamp())
         ORDER BY last_attempt_at NULLS FIRST, requested_at, id
         FOR UPDATE SKIP LOCKED LIMIT 2
      )
@@ -415,21 +455,30 @@ export async function runDeletionMaintenance(adapters: Adapters = {}) {
               ]
             : [`objects/${job.target_id}/`, `staging/${job.target_id}/`];
         let empty = true;
-        for (const prefix of prefixes) empty = (await purgePrefix(store, prefix)) && empty;
+        for (const prefix of prefixes) {
+          await assertSweepClaim(job);
+          empty = (await purgePrefix(store, prefix)) && empty;
+        }
         if (empty) {
-          await getPool().query(
+          const swept = await getPool().query(
             `UPDATE deletion_jobs SET last_swept_at=now(),lease_until=NULL,last_error=NULL
-              WHERE id=$1 AND lease_until=$2 AND completed_at IS NOT NULL`,
+              WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NOT NULL
+                AND lease_until > clock_timestamp()
+              RETURNING id`,
             [job.id, job.lease_until],
           );
+          if (!swept.rowCount) throw new Error('Deletion claim expired.');
         } else {
-          await getPool().query(
+          const rescheduled = await getPool().query(
             `UPDATE deletion_jobs SET completed_at=NULL,lease_until=NULL,
                 last_attempt_at=now(),not_before=GREATEST(not_before,now()+interval '30 seconds'),
                 last_error='Deletion cleanup is retryable.'
-              WHERE id=$1 AND lease_until=$2 AND completed_at IS NOT NULL`,
+              WHERE id=$1 AND lease_until=$2::timestamptz AND completed_at IS NOT NULL
+                AND lease_until > clock_timestamp()
+              RETURNING id`,
             [job.id, job.lease_until],
           );
+          if (!rescheduled.rowCount) throw new Error('Deletion claim expired.');
         }
       } else {
         await processJob(job, adapters);
@@ -439,7 +488,7 @@ export async function runDeletionMaintenance(adapters: Adapters = {}) {
         `UPDATE deletion_jobs SET completed_at=CASE WHEN completed_at IS NOT NULL THEN NULL ELSE completed_at END,
             lease_until=NULL,last_attempt_at=now(),
             not_before=GREATEST(not_before,now()+interval '30 seconds'),last_error=$3
-          WHERE id=$1 AND lease_until=$2`,
+          WHERE id=$1 AND lease_until=$2::timestamptz AND lease_until > clock_timestamp()`,
         [job.id, job.lease_until, safeError(error)],
       );
     }

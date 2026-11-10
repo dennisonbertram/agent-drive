@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { AgentDriveClient, AgentDriveApiError } from './client.js';
 import { decodeDriveKey, encryptFile, generateDriveKey } from './crypto.js';
@@ -183,6 +184,36 @@ describe('AgentDriveClient transport guards', () => {
       new Response(JSON.stringify({ items, nextCursor: null, latestCursor }), { status: 200 });
     const make = (fetcher: typeof fetch) =>
       new AgentDriveClient({ apiUrl: 'http://127.0.0.1:3000', apiKey: 't', fetch: fetcher });
+
+    it('releases each sleep listener instead of accumulating cancellation handlers', async () => {
+      const controller = new AbortController();
+      let polls = 0;
+      const fetcher = vi.fn(async () => {
+        expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+        return page(++polls < 20 ? [] : [{ id: 'e' }]);
+      });
+      const result = await make(fetcher).waitForRecent(
+        'd',
+        { waitMs: 10_000, signal: controller.signal },
+        async () => {},
+      );
+      expect(result.items).toHaveLength(1);
+      expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+    });
+
+    it('does not publish late events after cancellation', async () => {
+      const controller = new AbortController();
+      const fetcher = vi.fn(async () => {
+        controller.abort();
+        return page([{ id: 'late' }], 'new-cursor');
+      });
+      const result = await make(fetcher).waitForRecent('d', {
+        cursor: 'old-cursor',
+        waitMs: 10_000,
+        signal: controller.signal,
+      });
+      expect(result).toEqual({ items: [], nextCursor: null, latestCursor: 'old-cursor' });
+    });
 
     it('polls until an item appears and never sleeps past the deadline', async () => {
       const fetcher = vi
