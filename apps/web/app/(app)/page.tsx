@@ -92,7 +92,7 @@ function SetupPanel({ instruction, label }: { instruction: string; label: string
         <code>
           <span className="l-p">&gt;</span> {instruction}
         </code>
-        <CopyButton text={instruction} label={label} caption="Copy" className="l-btn signal" />
+        <CopyButton text={instruction} label={label} caption="Copy prompt" className="l-btn" />
       </div>
     </div>
   );
@@ -397,8 +397,8 @@ export default function Home() {
                   <li>{count(p.operations)} API operations a month</li>
                 </ul>
                 {p.baseCents === 0 && (
-                  <Link className="l-btn" href="/sign-up">
-                    Start free
+                  <Link className="l-btn signal" href="/sign-up">
+                    Sign up free
                   </Link>
                 )}
                 {p.baseCents > 0 &&
@@ -426,8 +426,8 @@ export default function Home() {
           <h2>Give your agent a drive.</h2>
           <div className="l-final-row">
             <SetupPanel instruction={instruction} label="Copy agent instruction again" />
-            <Link className="l-btn" href="/sign-up">
-              Create a free account
+            <Link className="l-btn signal" href="/sign-up">
+              Sign up free
             </Link>
           </div>
         </div>

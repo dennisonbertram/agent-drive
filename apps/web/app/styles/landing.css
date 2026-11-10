@@ -13,7 +13,7 @@
   color: var(--i);
   font-family: var(--sans2);
   line-height: 1.5;
-  overflow-x: hidden;
+  overflow-x: clip; /* not hidden: hidden would make .landing the sticky header's scroll container */
   min-height: 100vh;
 }
 .landing *,
@@ -152,10 +152,11 @@
   color: var(--code-muted, #a8a69f);
 }
 .l-panel .l-btn {
+  background: transparent;
   border-color: #fff;
   box-shadow: none;
   flex: none;
-  color: var(--i);
+  color: #fff;
 }
 .l-cli {
   margin-top: 18px;

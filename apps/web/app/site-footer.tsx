@@ -51,7 +51,7 @@ export function SiteFooter() {
             <BrandMark />
             <p className="sf-tagline">Encrypted storage your agents keep across sandboxes.</p>
             <Link className="sf-cta" href="/sign-up">
-              Create a free account &rarr;
+              Sign up free &rarr;
             </Link>
             <a className="sf-icon" href={REPO} aria-label="Agent Drive on GitHub">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden focusable="false">

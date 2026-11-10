@@ -1,5 +1,12 @@
+/* Anchors (See how, See the FAQ above) must not land under the sticky header. */
+html:has(.site-header) {
+  scroll-padding-top: 72px;
+}
 /* Shared public header: /, /pricing, /sign-in, /sign-up. Uses global tokens from globals.css. */
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   border-bottom: 1px solid var(--line-strong, #111);
   background: var(--bg, #fff);
   color: var(--ink, #111);
@@ -60,13 +67,9 @@
   box-shadow: none;
 }
 .site-signup {
+  background: var(--sig, #ff4a1c);
   min-height: 36px;
   padding: 0 14px;
-}
-/* The hero Copy button is the page's one orange primary. To make this the primary
-   instead, add the class "signal" to the link in site-header.tsx. */
-.site-signup.signal {
-  background: var(--sig, #ff4a1c);
 }
 .site-header :focus-visible {
   outline: 2px solid var(--focus, #111);
