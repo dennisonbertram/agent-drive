@@ -337,59 +337,55 @@
 
 /* works with */
 
-/* pricing */
-.l-plans {
-  margin-top: 56px;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
+/* pricing: one comparison table */
+.pt {
+  margin-top: 40px;
+  width: 100%;
+  border-collapse: collapse;
   border-top: 1px solid var(--rule);
 }
-.l-plan {
-  padding: 24px 32px 0 0;
+.landing .pt {
+  min-width: 0;
 }
-.l-plan + .l-plan {
-  padding-left: 32px;
-  border-left: 1px solid var(--hair);
+.pt th,
+.pt td {
+  padding: 12px 8px 12px 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--hair);
+  white-space: normal;
 }
-.l-plan h3 {
-  font: 500 var(--t-s) var(--mono2);
-  letter-spacing: 0.12em;
+.pt thead th {
+  font: 500 var(--t-xs) var(--mono2);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--m);
+  color: var(--i);
 }
-.l-plan .pr {
-  font-size: var(--t-h2);
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  margin: 8px 0 16px;
-}
-.l-plan .pr small {
-  font-size: var(--t-b);
+.pt tbody th {
+  width: 30%;
+  font: 400 var(--t-xs) var(--mono2);
   color: var(--m);
-  letter-spacing: 0;
   font-weight: 400;
 }
-.l-plan ul {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: 8px;
+.pt tbody tr:last-child td {
+  border-bottom: 1px solid var(--hair);
+}
+.pt tbody td {
+  white-space: nowrap;
   font-size: var(--t-b);
   color: var(--i2);
 }
-.l-plan .soon {
-  display: inline-block;
-  margin-top: 20px;
+.pt .soon,
+.pt thead a {
+  display: block;
+  margin-top: 4px;
   font: 500 var(--t-xs) var(--mono2);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  border: 1px solid var(--hair);
   color: var(--m);
-  border-radius: 6px;
-  padding: 8px 12px;
 }
-.l-plan .l-btn {
-  margin-top: 20px;
+.pt-cta {
+  margin-top: 24px;
 }
 .l-pnote {
   margin-top: 36px;
@@ -421,7 +417,10 @@
 
 /* final + footer */
 .landing .l-final {
-  padding-bottom: 120px;
+  padding-bottom: 64px;
+}
+.landing .site-footer {
+  margin-top: 0;
 }
 .landing .l-final h2 {
   font-size: var(--t-h2);
@@ -459,28 +458,102 @@
 }
 .l-log {
   margin-top: 40px;
-  border-top: 1px solid var(--rule);
-  padding-top: 16px;
   font: 400 var(--t-s) var(--mono2);
 }
-.l-log .l-tag {
-  margin-bottom: 8px;
+.landing .lt {
+  width: 100%;
+  min-width: 0;
+  border-collapse: collapse;
+  border-top: 1px solid var(--rule);
 }
-.lr {
-  display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr);
-  gap: 16px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--hair);
-  overflow-wrap: anywhere;
+.lt caption {
+  padding: 16px 0 8px;
+  text-align: left;
 }
-.lr.h {
+.landing .lt th {
+  border-bottom: 0;
+  white-space: normal;
+  text-align: left;
+  font-weight: 400;
+}
+.lt thead th {
+  padding: 4px 16px 8px 0;
   color: var(--m);
   font-size: var(--t-xs);
   letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.lt tr.lp th {
+  font-size: var(--t-s);
+  padding: 8px 0 0;
+  color: var(--i);
+  overflow-wrap: anywhere;
+}
+.lt td {
+  font-size: var(--t-s);
+  padding: 0 16px 8px 0;
+  border-bottom: 1px solid var(--hair);
+  color: var(--i2);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+/* compare: one block link per comparison */
+.cmp {
+  margin-top: 32px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--rule);
+}
+.cmp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px 24px 24px 0;
+  min-height: 44px;
+  color: var(--i);
+  font-weight: 500;
+  text-decoration: none;
+}
+.cmp-row + .cmp-row {
+  padding-left: 24px;
+  border-left: 1px solid var(--hair);
+}
+.cmp-sum {
+  flex: 1;
+  font-weight: 400;
+  color: var(--i2);
+}
+.cmp-go {
+  margin-top: auto;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.cmp-row:last-child {
+  grid-column: 1 / -1;
+  padding-left: 0;
+  border-left: 0;
+  border-top: 1px solid var(--hair);
 }
 
 @media (max-width: 1000px) {
+  .l-line3.relay {
+    grid-template-columns: 1fr;
+  }
+  .l-line3.relay > div,
+  .l-line3.relay > div + div {
+    padding: 24px 0;
+    border-left: 0;
+  }
+  .l-line3.relay > div + div {
+    border-top: 1px solid var(--hair);
+  }
+  .l-line3.relay code {
+    white-space: pre-wrap;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
   .l-spec.s3 > div:nth-child(3) {
     padding-left: 28px;
     border-left: 1px solid var(--hair);
@@ -524,7 +597,7 @@
     min-height: 44px;
   }
   .landing section {
-    padding-top: 84px;
+    padding-top: 48px;
   }
   .landing .l-hero {
     padding-top: 44px;
@@ -555,37 +628,46 @@
   .l-spec > div + div {
     border-top: 1px solid var(--hair);
   }
-  .l-line3,
-  .l-plans {
+  .l-line3 {
     grid-template-columns: 1fr;
   }
   .l-line3 > div,
-  .l-line3 > div + div,
-  .l-plan,
-  .l-plan + .l-plan {
+  .l-line3 > div + div {
     padding: 24px 0;
     border-left: 0;
   }
-  .l-line3 > div + div,
-  .l-plan + .l-plan {
+  .l-line3 > div + div {
     border-top: 1px solid var(--hair);
   }
-  .l-strip {
-    flex-direction: column;
+  .l-line3 code,
+  .l-line3.relay code {
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+  .l-line3 {
+    margin-top: 32px;
+  }
+  .l-three {
+    margin-top: 32px;
+    gap: 24px;
+  }
+  .l-cell {
+    padding: 8px;
   }
   .l-arr {
-    width: 0;
-    height: 22px;
-    border-top: 0;
-    border-left: 1px solid var(--i);
-    align-self: center;
+    width: 16px;
   }
-  .l-arr::after {
-    right: auto;
-    top: auto;
-    bottom: 0;
-    left: -4px;
-    transform: rotate(135deg);
+  .cmp {
+    grid-template-columns: 1fr;
+  }
+  .cmp-row,
+  .cmp-row + .cmp-row {
+    padding: 16px 0;
+    border-left: 0;
+  }
+  .cmp-row + .cmp-row {
+    border-top: 1px solid var(--hair);
   }
 }
 @media (max-width: 760px) {
@@ -599,13 +681,6 @@
   }
   .l-spec.s3 > div:nth-child(n + 2) {
     border-top: 1px solid var(--hair);
-  }
-  .lr {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-  .lr.h {
-    display: none;
   }
 }
 
@@ -744,4 +819,11 @@
 }
 .l-log + .l-log {
   margin-top: 24px;
+}
+
+/* The cap must follow the base .l-shot rule to win at 761 to 1000 px */
+@media (min-width: 761px) and (max-width: 1000px) {
+  .l-shot {
+    max-width: 520px;
+  }
 }

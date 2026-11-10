@@ -88,13 +88,12 @@ test.describe('landing page', () => {
     }
   });
 
-  test('Free tier has a Sign up free link to sign-up', async ({ page }) => {
+  test('pricing table has a Sign up free link to sign-up', async ({ page }) => {
     await page.goto('/');
-    const free = page.locator('.l-plan', { hasText: 'Free' }).first();
-    await expect(free.getByRole('link', { name: 'Sign up free' })).toHaveAttribute(
-      'href',
-      '/sign-up',
-    );
+    await expect(
+      page.locator('#pricing').getByRole('link', { name: 'Sign up free' }),
+    ).toHaveAttribute('href', '/sign-up');
+    await expect(page.locator('#pricing table.pt tbody tr')).toHaveCount(5);
   });
 
   test('console section shows a described screenshot', async ({ page }) => {
