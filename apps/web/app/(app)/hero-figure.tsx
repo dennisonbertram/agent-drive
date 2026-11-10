@@ -8,7 +8,7 @@ import type { Env, Frame } from './te-figure';
 const T = 12;
 const FD = ['memory', 'outputs', 'work', 'handoff'];
 const AGENT = [
-  { l: ['CLAUDE', 'CODE'], n: ['CLAUDE'], s: 'CLAUDE' },
+  { l: ['CLAUDE', 'CODE'], n: ['CLAUDE', 'CODE'], s: 'CLAUDE' },
   { l: ['CODEX'], n: ['CODEX'], s: 'CODEX' },
   { l: ['PI'], n: ['PI'], s: 'PI' },
   { l: ['OPENCODE'], n: ['OPEN', 'CODE'], s: 'OPENCODE' },

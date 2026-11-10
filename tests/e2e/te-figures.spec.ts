@@ -84,6 +84,10 @@ for (const [width, height] of [
         await page.goto('/');
         const fig = page.locator(`.te-${name}`);
         await fig.scrollIntoViewIfNeeded();
+        if (name === 'hero') {
+          const labels = await page.locator('.te-hero [data-g="keys"] text').allTextContents();
+          expect(labels.join(' ')).toBe('CLAUDE CODE CODEX PI OPEN CODE ANY AGENT');
+        }
         const bad: string[] = [];
         let waited = 0;
         for (const at of [1000, 5000, 8000]) {
