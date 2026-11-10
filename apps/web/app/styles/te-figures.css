@@ -1,8 +1,8 @@
 /* Landing illustrations (hero, games, protein): Swiss grid + dot-matrix. Drawn in an SVG
    viewBox of 520 x 420; labels use --fs, which the component raises when the figure is narrow
-   so that text never renders below 11px. */
+   so that text never renders below 12px. */
 .te-fig {
-  margin: 0;
+  margin: 0 auto;
   width: 100%;
   max-width: 560px;
 }
@@ -10,7 +10,12 @@
   display: block;
   width: 100%;
   height: auto;
-  --fs: 10px;
+  --fs: 19.5px; /* first paint on a phone: 12px at the 320px figure of a 360px screen */
+}
+@media (min-width: 600px) {
+  .te-fig svg {
+    --fs: 10px;
+  }
 }
 .te-fig .m {
   font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);

@@ -12,6 +12,7 @@ export const C = {
   g1: '#e6e4df',
   g2: '#a8a69f',
   g3: '#6f6d68',
+  ot: '#c2370f', // orange for text on cream (5.0:1); C.or is for marks and the dark strip
   or: '#ff4a1c',
   w: '#ffffff',
   off: '#2a2a28',
@@ -19,13 +20,14 @@ export const C = {
 
 /** Layout facts that depend on the rendered width: font size in viewBox units, and variants. */
 export type Env = { fs: number; cw: number; compact: boolean; narrow: boolean };
-export const ENV0: Env = { fs: 10, cw: 6, compact: false, narrow: false };
 const W = 520;
 export const envFor = (px: number): Env => {
   const f = px / W;
-  const fs = Math.max(10, 11 / f); // labels never render below 11px when the figure is below ~570px
-  return { fs, cw: fs * 0.6, compact: fs > 10, narrow: f < 0.88 };
+  const fs = Math.max(10, 12 / f); // labels never render below 12px when the figure is below ~620px
+  return { fs, cw: fs * 0.6, compact: fs > 10, narrow: f < 1 }; // below 520px wide the 12px labels no longer fit the desktop key names
 };
+// First paint uses the phone size (the 320px figure of a 360px screen); the CSS --fs matches it.
+export const ENV0: Env = envFor(320);
 
 export const cl = (v: number, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 export const seg = (t: number, a: number, b: number) => cl((t - a) / (b - a));
@@ -169,18 +171,15 @@ export function typed(sched: [number, string][], t: number, dur = 0.3) {
   return m[1].slice(0, Math.ceil(k * m[1].length));
 }
 
-/** Panel chrome: background, corner marks, header, rule, blinking dot and running timecode. */
-export function chrome(code: string, title: string, t: number, T: number, env: Env) {
+/** Panel chrome: background, corner marks, title, rule and a blinking dot. */
+export function chrome(title: string, t: number, T: number) {
   const lt = t % T;
   const mk = (x: number, y: number) =>
     `<path d="M${x - 4} ${y}h8M${x} ${y - 4}v8" stroke="${C.g2}"/>`;
-  const rx = 496 - 7 * env.cw - 8;
   return (
     `<rect width="520" height="420" rx="16" fill="${C.g0}"/>${mk(12, 12)}${mk(508, 12)}${mk(12, 408)}${mk(508, 408)}` +
-    tx(24, 30, code, C.ink, { b: true }) +
-    tx(24 + (code.length + 1) * env.cw + 6, 30, title, C.g2) +
-    `<circle cx="${r1(rx)}" cy="26.5" r="3" fill="${C.or}" opacity="${lt % 1 < 0.5 ? 1 : 0.25}"/>` +
-    tx(496, 30, `00:${pad(Math.floor(lt), 2)}.${Math.floor((lt % 1) * 10)}`, C.ink, { a: 'end' }) +
+    tx(24, 30, title, C.g3) +
+    `<circle cx="493" cy="26.5" r="3" fill="${C.or}" opacity="${lt % 1 < 0.5 ? 1 : 0.25}"/>` +
     `<path d="M24 42.5H496" stroke="${C.ink}"/>`
   );
 }

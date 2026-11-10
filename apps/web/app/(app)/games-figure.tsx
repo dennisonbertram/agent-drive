@@ -204,9 +204,9 @@ const frame: Frame = (t, env) => {
     const on = c === ac;
     const x = 24 + c * 56;
     pl +=
-      `<rect x="${x}" y="296" width="48" height="24" rx="12" fill="${on ? C.ink : C.g1}"/>` +
-      tx(x + 24, vc(308, env), n, on ? C.g0 : C.ink, { a: 'middle' });
-    pl += tx(tcx(c) + TS / 2, vc(308, env), n, C.ink, { a: 'middle' });
+      `<rect x="${x}" y="292" width="48" height="30" rx="15" fill="${on ? C.ink : C.g1}"/>` +
+      tx(x + 24, vc(307, env), n, on ? C.g0 : C.ink, { a: 'middle' });
+    pl += tx(tcx(c) + TS / 2, vc(307, env), n, C.ink, { a: 'middle' });
   });
   // library: rows lap..lap+4 (the last one scrolls in), shifted up by `sl` rows
   let lb = `<defs><clipPath id="te-gc"><rect x="${LX - 4}" y="${LY - 2}" width="${4 * (TS + TG) + 4}" height="${4 * (TS + TG) - TG + 4}"/></clipPath></defs><g clip-path="url(#te-gc)"><g transform="translate(0 ${(-(TS + TG) * sl).toFixed(2)})">`;
@@ -235,15 +235,16 @@ const frame: Frame = (t, env) => {
     lb += `<rect x="${tcx(i % 4) + 0.5}" y="${tcy(Math.floor(i / 4)) + 0.5}" width="${TS - 1}" height="${TS - 1}" rx="5.5" fill="none" stroke="${cur ? C.or : C.ink}" stroke-width="${cur ? 2 : 1}" opacity="${h.toFixed(3)}"/>`;
   }
   lb += '</g></g>';
+  const drawing = G.filter((g) => lt >= g).length;
   const meta =
-    tx(24, 344, `16×16 PX · GEN ${pad(saved, 2)}/04`, C.g2) +
-    tx(280, 344, 'LIBRARY', C.g2) +
-    tx(496, 344, `${pad(total, 2)} ASSETS`, C.ink, { a: 'end' });
+    tx(24, 347, lt >= 7.7 ? 'ALL 4 SAVED' : drawing ? `DRAWING ${drawing} OF 4` : '', C.g3) +
+    tx(280, 347, 'LIBRARY', C.g3) +
+    tx(496, 347, `${pad(total, 2)} ASSETS`, C.ink, { a: 'end' });
   // strip message
   const MSG: [number, string][] = [
     [0, 'NEW SESSION'],
     ...G.flatMap((g, c): [number, string][] => [
-      [g, 'GEN ' + names(c)],
+      [g, 'DRAW ' + names(c)],
       [g + SAVE, 'SAVED ' + names(c)],
     ]),
     [7.7, 'SESSION ENDED'],
@@ -261,27 +262,12 @@ const frame: Frame = (t, env) => {
     );
   else if (lt >= 11.3) msg = typed([[11.3, 'NEW SESSION']], lt);
   return {
-    bg: chrome(
-      'AD—02',
-      env.narrow ? 'GAME ASSETS' : 'GAME ASSETS · KEPT BETWEEN SESSIONS',
-      t,
-      T,
-      env,
-    ),
+    bg: chrome(env.narrow ? 'GAME ASSETS' : 'GAME ASSETS · KEPT BETWEEN SESSIONS', t, T),
     scr,
     pills: pl,
     lib: lb,
     meta,
-    strip: strip(
-      'te-gs',
-      24,
-      366,
-      472,
-      32,
-      3,
-      msg,
-      'S' + pad(1 + 2 * lap + (lt >= 8.4 ? 1 : 0), 2),
-    ),
+    strip: strip('te-gs', 24, 366, 472, 32, 3, msg),
   };
 };
 

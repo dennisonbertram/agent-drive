@@ -83,18 +83,19 @@ const RAD = [1.2, 1.9, 2.6];
 const RX = 264;
 const RW = 232;
 const lg = (mb: number) => RX + RW * cl((Math.log10(Math.max(mb, 10)) - 1) / 3);
-// Sizes of 7XKA.pdb and embeddings.npy come from the brief; the later runs are illustrative.
+// Sizes of the density map and embeddings.npy come from the brief; the later runs are illustrative.
 const FILE = (n: number) =>
   n === 0
-    ? { n: '7XKA.pdb', gb: 1.4 }
+    ? { n: '7XKA_map.mrc', gb: 1.4 }
     : n === 1
       ? { n: 'embeddings.npy', gb: 3.2 }
       : { n: `sim/run_${pad(40 + n, 3)}.dcd`, gb: 2.6 };
 const START = [0.6, 2.2, 4.4]; // lap 0 upload starts; later laps upload one file from 1.0
 const LEN = [2.6, 3.8, 3.2];
-const RY = (i: number) => 120 + i * 56;
+const RY = (i: number, pitch: number) => 120 + i * pitch;
 
 const frame: Frame = (t, env) => {
+  const pitch = env.narrow ? 62 : 56; // phone rows put the size on its own line under the bar
   const lt = t % T;
   const lap = Math.floor(t / T);
   const slide = io(seg(lt, 11, 11.8));
@@ -138,7 +139,7 @@ const frame: Frame = (t, env) => {
   let tot = before;
   let done = first;
   let act: [string, number] | null = null;
-  let rowsSvg = `<defs><clipPath id="te-pc"><rect x="${RX - 6}" y="98" width="${RW + 12}" height="${env.narrow ? 170 : 156}"/></clipPath></defs><g clip-path="url(#te-pc)"><g transform="translate(0 ${(-56 * slide).toFixed(2)})">`;
+  let rowsSvg = `<defs><clipPath id="te-pc"><rect x="${RX - 6}" y="98" width="${RW + 12}" height="${env.narrow ? 190 : 156}"/></clipPath></defs><g clip-path="url(#te-pc)"><g transform="translate(0 ${(-pitch * slide).toFixed(2)})">`;
   for (let i = 0; i < 4; i++) {
     const f = FILE(first + i);
     const p =
@@ -155,7 +156,8 @@ const frame: Frame = (t, env) => {
       if (p >= 1) done++;
       if (p > 0 && p < 1) act = [f.n, p];
     }
-    const y = RY(i);
+    if (i === 3 && slide === 0) continue; // the next row exists only while the list scrolls
+    const y = RY(i, pitch);
     const ok = p >= 1;
     const w = v > 0 ? Math.max(8, lg(v * 1000) - RX) : 0;
     const size = ok ? `${f.gb.toFixed(1)} GB` : `${v.toFixed(2)} / ${f.gb.toFixed(1)} GB`;
@@ -168,7 +170,7 @@ const frame: Frame = (t, env) => {
       `<rect x="${RX + 0.5}" y="${y - 7.5}" width="8" height="8" rx="1.5" fill="${ok ? C.or : 'none'}" stroke="${ok ? C.or : C.ink}"/>` +
       tx(RX + 16, y, f.n, C.ink) +
       (env.narrow
-        ? tx(RX + RW, y + 31, size, ok ? C.ink : C.g3, { a: 'end' })
+        ? tx(RX + RW, y + 33, size, ok ? C.ink : C.g3, { a: 'end' })
         : tx(RX + RW, y, size, ok ? C.ink : C.g3, { a: 'end' }));
   }
   rowsSvg += '</g></g>';
@@ -176,21 +178,20 @@ const frame: Frame = (t, env) => {
   let ax = `<path d="M${RX} 86.5H${RX + RW}" stroke="${C.ink}"/>`;
   const labels: [number, string, string][] = [
     [10, '10 MB', 'start'],
-    [100, env.compact ? 'GIT 100 MB' : 'GITHUB 100 MB', 'middle'],
+    [100, env.narrow ? 'GIT LIMIT' : env.compact ? 'GIT 100 MB' : 'GITHUB 100 MB', 'middle'],
     [1000, '1 GB', 'middle'],
     [10000, '10 GB', 'end'],
   ];
   labels.forEach(([mb, l, a]) => {
     const x = lg(mb) + (mb === 10000 ? -0.5 : 0.5);
     ax += `<path d="M${x} 80V86" stroke="${mb === 100 ? C.or : C.ink}"/>`;
-    if (!(env.compact && mb === 10))
-      ax += tx(mb === 10 ? RX : mb === 10000 ? RX + RW : x, 74, l, mb === 100 ? C.or : C.g3, { a });
+    if (env.narrow ? mb === 100 : !(env.compact && mb === 10))
+      ax += tx(mb === 10 ? RX : mb === 10000 ? RX + RW : x, 74, l, mb === 100 ? C.ot : C.g3, { a });
   });
   for (let m = 20; m < 10000; m *= 10)
     for (let k = 2; k < 10; k++)
       ax += `<path d="M${lg((m / 2) * k).toFixed(1)} 83V86" stroke="${C.g2}"/>`;
   // ---- readouts
-  const deg = Math.round((th * 180) / Math.PI) % 360;
   const gbText = tot.toFixed(2);
   const sw = env.narrow ? 14 : 18;
   let lgd = '';
@@ -210,25 +211,18 @@ const frame: Frame = (t, env) => {
     lx += sw + l.length * env.cw + (env.narrow ? 6 : 12);
   });
   const meta =
-    tx(24, 312, '7XKA', C.ink, { b: true }) +
-    tx(
-      24 + 5 * env.cw + (env.narrow ? 0 : 6),
-      312,
-      env.narrow ? 'BACKBONE' : 'BACKBONE · Cα',
-      C.g2,
-    ) +
-    tx(240, 312, `${pad(deg, 3)}°`, C.ink, { a: 'end' }) +
+    tx(24, 306, 'PROTEIN BACKBONE', C.g3) +
     lgd +
-    tx(RX, 312, env.compact ? 'IN DRIVE' : 'IN AGENT DRIVE', C.g2) +
+    tx(RX, 306, env.compact ? 'IN DRIVE' : 'IN AGENT DRIVE', C.g3) +
     tx(
       RX + RW,
-      312,
+      306,
       env.narrow ? '0 IN GIT' : `${lap === 0 ? done + '/3' : done} FILES · 0 IN GIT`,
-      C.g2,
+      C.g3,
       { a: 'end' },
     ) +
-    `<text class="big" x="${RX - 2}" y="346" font-size="34" fill="${C.ink}">${gbText}</text>` +
-    tx(RX - 2 + gbText.length * 20.4 + 6, 346, 'GB', C.ink);
+    `<text class="big" x="${RX - 2}" y="352" font-size="34" fill="${C.ink}">${gbText}</text>` +
+    tx(RX - 2 + gbText.length * 20.4 + 6, 352, 'GB', C.ink);
   const a = act as [string, number] | null;
   const m = a
     ? ['> ' + a[0], pad(Math.floor(a[1] * 100), 3) + '%']
@@ -238,7 +232,7 @@ const frame: Frame = (t, env) => {
         ? ['NEXT RUN', '']
         : ['DRIVE READY', ''];
   return {
-    bg: chrome('AD—03', 'PROTEIN DATA · TOO BIG FOR GIT', t, T, env),
+    bg: chrome('PROTEIN DATA · TOO BIG FOR GIT', t, T),
     scr,
     ax,
     rows: rowsSvg,

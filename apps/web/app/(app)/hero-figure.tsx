@@ -2,31 +2,17 @@
 // Hero illustration: five agents press keys, packets run down a bus into one drive, tiles
 // snap into its folders. The loop never deletes a saved file: the next lap starts with
 // everything grey ("earlier sessions") and the agents save fresh versions on top.
-import {
-  C,
-  TeFigure,
-  byEnv,
-  chrome,
-  cl,
-  io,
-  mix,
-  ob,
-  pad,
-  seg,
-  strip,
-  tx,
-  typed,
-} from './te-figure';
+import { C, TeFigure, byEnv, chrome, cl, io, mix, ob, seg, strip, tx, typed } from './te-figure';
 import type { Env, Frame } from './te-figure';
 
 const T = 12;
 const FD = ['memory', 'outputs', 'work', 'handoff'];
 const AGENT = [
-  { n: '01', l: ['CLAUDE', 'CODE'], s: 'CLAUDE' },
-  { n: '02', l: ['CODEX'], s: 'CODEX' },
-  { n: '03', l: ['PI'], s: 'PI' },
-  { n: '04', l: ['OPENCODE'], s: 'OPENCODE' },
-  { n: '05', l: ['ANY', 'SHELL+MCP'], s: 'AGENT' },
+  { l: ['CLAUDE', 'CODE'], n: ['CLAUDE'], s: 'CLAUDE' },
+  { l: ['CODEX'], n: ['CODEX'], s: 'CODEX' },
+  { l: ['PI'], n: ['PI'], s: 'PI' },
+  { l: ['OPENCODE'], n: ['OPEN', 'CODE'], s: 'OPENCODE' },
+  { l: ['ANY', 'SHELL+MCP'], n: ['ANY', 'AGENT'], s: 'AGENT' },
 ];
 const kx = (i: number) => 24 + i * 98;
 const kc = (i: number) => 64 + i * 98;
@@ -114,7 +100,7 @@ const MSG: [number, string][] = [
   [0, 'SANDBOX ONLINE'],
   ...DROPS.map((D): [number, string] => [
     D.t,
-    D.h ? 'SAVE HANDOFF/NEXT.MD' : `${AGENT[D.a]!.s} > /${FD[D.f]!.toUpperCase()}`,
+    D.h ? 'SAVE NEXT.MD' : `${AGENT[D.a]!.s} > /${FD[D.f]!.toUpperCase()}`,
   ]),
   [8.1, 'CODEX OPENS NEXT.MD'],
   [9.5, 'SANDBOX ENDED'],
@@ -124,7 +110,6 @@ const MSG: [number, string][] = [
 
 // Wires, drive body, folder headers and legend: depend only on the layout.
 const body = byEnv((env: Env) => {
-  const ext = env.narrow ? 18 : 0; // narrow: counters sit under the tiles, so the drive is taller
   let w = `<path d="${AGENT.map((_, i) => `M${kc(i) + 0.5} ${KB}V${RAIL}`).join('')}M${kc(0)} ${RAIL}H${kc(4) + 1}${FD.map((_, f) => `M${cc(f) + 0.5} ${RAIL}V${DT}`).join('')}" stroke="${C.ink}" fill="none"/>`;
   AGENT.forEach(
     (_, i) => (w += `<circle cx="${kc(i) + 0.5}" cy="${RAIL}" r="2" fill="${C.ink}"/>`),
@@ -133,10 +118,10 @@ const body = byEnv((env: Env) => {
     (_, f) =>
       (w += `<circle cx="${cc(f) + 0.5}" cy="${RAIL}" r="2" fill="${C.g0}" stroke="${C.ink}"/>`),
   );
-  let d = `<rect x="24.5" y="${DT + 0.5}" width="471" height="${159 + ext}" rx="12" fill="${C.w}" stroke="${C.ink}"/>`;
+  let d = `<rect x="24.5" y="${DT + 0.5}" width="471" height="159" rx="12" fill="${C.w}" stroke="${C.ink}"/>`;
   FD.forEach((n, f) => {
     const x = col(f);
-    if (f) d += `<path d="M${x + 0.5} 164V${300 + ext}" stroke="${C.g1}"/>`;
+    if (f) d += `<path d="M${x + 0.5} 164V300" stroke="${C.g1}"/>`;
     d +=
       tx(x + 12, 178, `/${n}`, C.ink) + `<path d="M${x + 12} 188.5H${x + 106}" stroke="${C.ink}"/>`;
     for (let s = 0; s < (f === 3 ? 3 : 9); s++) {
@@ -158,11 +143,11 @@ const body = byEnv((env: Env) => {
   let lx = 24;
   lg.forEach(([c, l]) => {
     d +=
-      `<rect x="${lx}" y="${334 + ext}" width="8" height="8" rx="2" fill="${c}"/>` +
-      tx(lx + 14, 342 + ext, l, C.ink);
+      `<rect x="${lx}" y="334" width="8" height="8" rx="2" fill="${c}"/>` +
+      tx(lx + 14, 342, l, C.ink);
     lx += 14 + l.length * env.cw + 20;
   });
-  if (!env.narrow) d += tx(496, 342, 'ENCRYPTED AT REST', C.g2, { a: 'end' });
+  if (!env.narrow) d += tx(496, 342, 'ENCRYPTED AT REST', C.g3, { a: 'end' });
   return w + d;
 });
 
@@ -171,7 +156,7 @@ const frame: Frame = (t, env) => {
   const lap = Math.floor(t / T);
   const sealed = seg(lt, 11.3, 11.9); // end of the loop: this session's tiles become "earlier sessions"
   // keys
-  const ls = Math.max(12, env.fs * 1.1);
+  const ls = Math.max(12, env.fs * 1.35); // line pitch: text boxes of stacked lines never touch
   let k = '';
   AGENT.forEach((A, i) => {
     let press = 0;
@@ -184,23 +169,17 @@ const frame: Frame = (t, env) => {
     let fill = mix(C.g1, C.ink, press);
     fill = mix(fill, C.or, recv);
     fill = mix(fill, C.g0, off);
-    let tc = mix(mix(C.ink, C.g0, press), C.ink, recv);
-    tc = mix(tc, C.g2, off);
+    // the label flips at the midpoint: blending ink to cream passes through the key's own grey
+    let tc = mix(press > 0.5 ? C.g0 : C.ink, C.ink, recv);
+    tc = mix(tc, C.g3, off);
     let gl = mix(mix(C.ink, C.or, press), C.ink, recv);
     gl = mix(gl, C.g2, off);
-    const x = kx(i);
     const y = 58 + press * 1.5;
-    const lines = env.narrow
-      ? i === 3
-        ? ['OPEN', 'CODE']
-        : i === 4
-          ? ['ANY', 'SHELL']
-          : A.l
-      : A.l;
-    k += `<rect x="${x + 0.5}" y="${y + 0.5}" width="79" height="63" rx="10" fill="${fill}" stroke="${C.g2}" stroke-dasharray="3 3" stroke-opacity="${off.toFixed(3)}"/>`;
-    k +=
-      tx(x + 10, y + 18, A.n, tc) +
-      `<path d="${GL[i]!(x + 66, y + 14.5)}" fill="${gl}" fill-rule="evenodd"/>`;
+    const lines = env.narrow ? A.n : A.l;
+    const kw = env.narrow ? 86 : 79; // phone keys are wider, so names fit at 12px
+    const x = env.narrow ? kc(i) - kw / 2 : kx(i);
+    k += `<rect x="${x + 0.5}" y="${y + 0.5}" width="${kw}" height="63" rx="10" fill="${fill}" stroke="${C.g2}" stroke-dasharray="3 3" stroke-opacity="${off.toFixed(3)}"/>`;
+    k += `<path d="${GL[i]!(x + kw - 13, y + 14.5)}" fill="${gl}" fill-rule="evenodd"/>`;
     lines.forEach((s, j) => (k += tx(x + 10, y + 54 - (lines.length - 1 - j) * ls, s, tc)));
   });
   // tiles, packets, counters
@@ -241,7 +220,7 @@ const frame: Frame = (t, env) => {
   const na = lap > 0 ? 1 : seg(lt, H.land + 0.2, H.land + 0.5);
   const nb = lap > 0 ? 1 : seg(lt, PK1, PK1 + 0.3);
   const x3 = col(3) + 12;
-  const lh = Math.max(16, env.fs * 1.15);
+  const lh = Math.max(16, env.fs * 1.35);
   const y1 = 254;
   const y2 = y1 + lh;
   const y3 = y2 + lh;
@@ -250,24 +229,19 @@ const frame: Frame = (t, env) => {
     tl +=
       tx(x3, y1, 'next.md', C.ink, { op: na }) +
       (env.narrow
-        ? tx(x3, y2, '01 CLAUDE', C.g2, { op: na })
-        : tx(x3, y2, 'FROM', C.g2, { op: na }) + tx(x4, y2, '01 CLAUDE', C.g2, { op: na }));
+        ? ''
+        : tx(x3, y2, 'FROM', C.g3, { op: na }) + tx(x4, y2, 'CLAUDE', C.g3, { op: na }));
   if (nb > 0)
     tl += env.narrow
-      ? tx(x3, y3, '02 CODEX', C.or, { op: nb })
-      : tx(x3, y3, 'TO', C.or, { op: nb }) + tx(x4, y3, '02 CODEX', C.or, { op: nb });
-  const cn = cnt
-    .map((n, f) =>
-      env.narrow
-        ? tx(col(f) + 12, 322, pad(n, 2), C.g2)
-        : tx(col(f) + 106, 178, pad(n, 2), C.g2, { a: 'end' }),
-    )
-    .join('');
+      ? tx(x3, y2, 'TO CODEX', C.ot, { op: nb })
+      : tx(x3, y3, 'TO', C.ot, { op: nb }) + tx(x4, y3, 'CODEX', C.ot, { op: nb });
+  // the strip's right side counts the saved files while the left message is short enough to leave room
+  const msg = MSG.filter((m) => lt >= m[0]).pop()![1];
+  const files = cnt.reduce((a, b) => a + b, 0);
   return {
-    bg: chrome('AD—01', 'MANY AGENTS · ONE DRIVE', t, T, env),
+    bg: chrome('MANY AGENTS · ONE DRIVE', t, T),
     body: body(env),
     keys: k,
-    cnt: cn,
     tiles: tl,
     fx,
     strip: strip(
@@ -278,7 +252,7 @@ const frame: Frame = (t, env) => {
       32,
       3,
       typed(MSG, lt),
-      'S' + pad(3 + (Math.floor((t + 0.8) / T) % 97), 2),
+      msg.length <= 16 ? `${files} FILES` : '',
     ),
   };
 };
@@ -288,7 +262,7 @@ export function HeroFigure() {
     <TeFigure
       name="hero"
       frame={frame}
-      still={10.5}
+      still={6.6}
       label="Five agents (Claude Code, Codex, pi, opencode and any agent with a shell or MCP) save files into the four folders of one Agent Drive. Claude Code leaves a handoff note that Codex picks up. When the sandbox ends, the files stay."
     />
   );
