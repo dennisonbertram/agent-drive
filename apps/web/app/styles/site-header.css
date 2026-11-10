@@ -1,10 +1,18 @@
+/* Anchors (See how, See the FAQ above) must not land under the sticky header. */
+html:has(.site-header) {
+  scroll-padding-top: 72px;
+}
 /* Shared public header: /, /pricing, /sign-in, /sign-up. Uses global tokens from globals.css. */
 .site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
   border-bottom: 1px solid var(--line-strong, #111);
   background: var(--bg, #fff);
   color: var(--ink, #111);
   font-family: var(--sans, system-ui, sans-serif);
   line-height: 1.5;
+  font-size: var(--t-b);
 }
 .site-header *,
 .site-header *::before,
@@ -21,6 +29,7 @@
   padding: 0 32px;
 }
 .site-header .brand {
+  font-size: var(--t-b);
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -29,10 +38,11 @@
   font-weight: 600;
   letter-spacing: -0.01em;
   text-decoration: none;
+  min-height: 44px;
 }
 .site-nav a {
   color: var(--ink-2, #3b3a37);
-  font-size: 14px;
+  font-size: var(--t-b);
   text-decoration: none;
 }
 .site-nav a:hover,
@@ -49,7 +59,7 @@
   background: var(--panel, #fff);
   box-shadow: 0 2px 0 var(--ink, #111);
   color: var(--ink, #111);
-  font: 500 14px var(--sans, system-ui, sans-serif);
+  font: 500 var(--t-b) var(--sans, system-ui, sans-serif);
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
@@ -60,13 +70,9 @@
   box-shadow: none;
 }
 .site-signup {
+  background: var(--sig, #ff4a1c);
   min-height: 36px;
   padding: 0 14px;
-}
-/* The hero Copy button is the page's one orange primary. To make this the primary
-   instead, add the class "signal" to the link in site-header.tsx. */
-.site-signup.signal {
-  background: var(--sig, #ff4a1c);
 }
 .site-header :focus-visible {
   outline: 2px solid var(--focus, #111);
@@ -107,7 +113,7 @@
   }
   .site-nav:popover-open {
     position: fixed;
-    inset: 64px 16px auto auto;
+    inset: 64px 20px auto auto;
     display: grid;
     min-width: 200px;
     height: auto;
@@ -130,7 +136,6 @@
 @media (max-width: 360px) {
   .site-header-inner {
     gap: 8px;
-    padding: 0 12px;
   }
   .site-header .brand {
     font-size: 0;

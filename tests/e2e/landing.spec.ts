@@ -23,7 +23,7 @@ const QUESTIONS = [
 test.describe('landing page', () => {
   test('sections appear in the story order', async ({ page }) => {
     await page.goto('/');
-    const heads = await page.locator('main h2').allTextContents();
+    const heads = await page.locator('main > section h2').allTextContents();
     expect(heads).toHaveLength(H2.length);
     H2.forEach((re, i) => expect(heads[i]).toMatch(re));
   });
@@ -31,7 +31,12 @@ test.describe('landing page', () => {
   test('says what happens next under the hero copy box', async ({ page }) => {
     await page.goto('/');
     await expect(
-      page.locator('.l-hero').getByText('Free to start.', { exact: true }),
+      page
+        .locator('.l-hero')
+        .getByText(
+          'Free to start. Your agent shows a pairing code, and you approve it in your account.',
+          { exact: true },
+        ),
     ).toBeVisible();
   });
 
@@ -83,13 +88,12 @@ test.describe('landing page', () => {
     }
   });
 
-  test('Free tier has a Start free link to sign-up', async ({ page }) => {
+  test('pricing table has a Sign up free link to sign-up', async ({ page }) => {
     await page.goto('/');
-    const free = page.locator('.l-plan', { hasText: 'Free' }).first();
-    await expect(free.getByRole('link', { name: 'Start free' })).toHaveAttribute(
-      'href',
-      '/sign-up',
-    );
+    await expect(
+      page.locator('#pricing').getByRole('link', { name: 'Sign up free' }),
+    ).toHaveAttribute('href', '/sign-up');
+    await expect(page.locator('#pricing table.pt tbody tr')).toHaveCount(5);
   });
 
   test('console section shows a described screenshot', async ({ page }) => {

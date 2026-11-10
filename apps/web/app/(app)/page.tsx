@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Fragment, type ReactNode } from 'react';
 import Link from 'next/link';
 import { SiteHeader } from '../site-header';
 import { SiteFooter } from '../site-footer';
@@ -43,8 +44,6 @@ export const metadata: Metadata = {
   },
   twitter: { card: 'summary_large_image', title, description, images: ['/opengraph-image'] },
 };
-
-const count = (n: bigint) => new Intl.NumberFormat('en-US').format(n);
 
 function paidAvailable() {
   try {
@@ -92,41 +91,42 @@ function SetupPanel({ instruction, label }: { instruction: string; label: string
         <code>
           <span className="l-p">&gt;</span> {instruction}
         </code>
-        <CopyButton text={instruction} label={label} caption="Copy" className="l-btn signal" />
+        <CopyButton text={instruction} label={label} caption="Copy prompt" className="l-btn" />
       </div>
     </div>
   );
 }
 
-/** Activity-log style listing, reused by the relay, games and protein sections. */
-function Log({
-  heading,
-  cols,
-  label,
-  caption,
-  rows,
-}: {
-  heading: string;
-  cols: string[];
-  label: string;
-  caption: string;
-  rows: string[][];
-}) {
+/** Activity log as a real table: the path is a row header above who saved it, from where, and when. */
+function Log({ heading, caption, rows }: { heading: string; caption: string; rows: string[][] }) {
   return (
-    <div className="l-log" role="img" aria-label={label}>
-      <div className="l-tag">{heading}</div>
-      <div className="lr h">
-        {cols.map((c) => (
-          <span key={c}>{c}</span>
-        ))}
-      </div>
-      {rows.map((r) => (
-        <div className="lr" key={r[0]}>
-          {r.map((cell, i) => (
-            <span key={i}>{cell}</span>
+    <div className="l-log">
+      <table className="lt">
+        <caption className="l-tag">{heading}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Saved by</th>
+            <th scope="col">From</th>
+            <th scope="col">When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([path, ...cells]) => (
+            <Fragment key={path}>
+              <tr className="lp">
+                <th scope="row" colSpan={3}>
+                  {path}
+                </th>
+              </tr>
+              <tr>
+                {cells.map((cell, i) => (
+                  <td key={i}>{cell}</td>
+                ))}
+              </tr>
+            </Fragment>
           ))}
-        </div>
-      ))}
+        </tbody>
+      </table>
       <p className="l-cap">{caption}</p>
     </div>
   );
@@ -141,6 +141,14 @@ export default function Home() {
     ['Developer', PLANS.developer],
     ['Team', PLANS.team],
   ] as const;
+  const ops = new Intl.NumberFormat('en-US', { notation: 'compact' });
+  const rows: [string, (p: (typeof plans)[number][1]) => ReactNode][] = [
+    ['Price / month', (p) => `$${p.baseCents / 100}`],
+    ['Drives', (p) => String(p.drives)],
+    ['Stored', (p) => allowance(p.storageBytes)],
+    ['Downloads / month', (p) => allowance(p.egressBytes)],
+    ['API operations / month', (p) => ops.format(Number(p.operations))],
+  ];
   return (
     <main className="landing" id="top">
       <JsonLd data={faqJsonLd()} />
@@ -248,8 +256,6 @@ export default function Home() {
           </div>
           <Log
             heading="Drive activity: who saved what, from where"
-            cols={['FILE', 'SAVED BY', 'FROM', 'WHEN']}
-            label="Drive activity: the sales agent saved the customer list from a cloud worker, the coding agent saved a trace from its sandbox, and the review agent saved the prompts file from a GPU box."
             caption="Every file records which agent saved it and from which machine."
             rows={[
               ['/data/customers/2026-11-09.csv', 'sales-agent', 'cloud-worker', 'Mon 09:12'],
@@ -264,8 +270,6 @@ export default function Home() {
           />
           <ul className="l-solve">
             <li>Many agents, one drive</li>
-            <li>Every version kept, with who wrote it</li>
-            <li>Per-agent keys and folder limits</li>
             <li>No silent overwrites</li>
           </ul>
         </div>
@@ -303,7 +307,7 @@ export default function Home() {
           </p>
           <figure className="l-shot">
             <picture>
-              <source media="(max-width: 760px)" srcSet="/console-files-phone.png" />
+              <source media="(max-width: 1000px)" srcSet="/console-files-phone.png" />
               <img
                 src="/console-files.png"
                 width={2320}
@@ -347,18 +351,18 @@ export default function Home() {
         <div className="l-wrap">
           <div className="l-tag">Compared to</div>
           <h2>Why not S3, git or Dropbox?</h2>
-          <div className="l-line3 feat">
+          <div className="cmp">
             {COMPARISONS.map((c) => (
-              <div key={c.slug}>
-                <div className="l-tag">{c.other}</div>
-                <p>{c.summary}</p>
-                <Link href={`/compare/${c.slug}`}>{c.title}</Link>
-              </div>
+              <Link className="cmp-row" href={`/compare/${c.slug}`} key={c.slug}>
+                <span className="l-tag">{c.other}</span>
+                <span className="cmp-sum">{c.summary}</span>
+                <span className="cmp-go">{c.title} &rarr;</span>
+              </Link>
             ))}
+            <Link className="cmp-row" href="/compare">
+              <span className="cmp-go">All comparisons &rarr;</span>
+            </Link>
           </div>
-          <p className="l-pnote">
-            <Link href="/compare">All comparisons</Link>
-          </p>
         </div>
       </section>
 
@@ -382,36 +386,37 @@ export default function Home() {
           <div className="l-tag">Pricing</div>
           <h2>Start free.</h2>
           <p className="l-lede">Encryption on the agent&apos;s machine is on every plan.</p>
-          <div className="l-plans">
-            {plans.map(([name, p]) => (
-              <div className="l-plan" key={name}>
-                <h3>{name}</h3>
-                <div className="pr">
-                  ${p.baseCents / 100}
-                  <small> / month</small>
-                </div>
-                <ul>
-                  <li>{String(p.drives)} drives</li>
-                  <li>{allowance(p.storageBytes)} stored</li>
-                  <li>{allowance(p.egressBytes)} downloads a month</li>
-                  <li>{count(p.operations)} API operations a month</li>
-                </ul>
-                {p.baseCents === 0 && (
-                  <Link className="l-btn" href="/sign-up">
-                    Start free
-                  </Link>
-                )}
-                {p.baseCents > 0 &&
-                  (paid ? (
-                    <Link className="l-btn" href="/pricing">
-                      Choose plan
-                    </Link>
-                  ) : (
-                    <span className="soon">Coming soon</span>
+          <table className="pt">
+            <thead>
+              <tr>
+                <td />
+                {plans.map(([name, p]) => (
+                  <th scope="col" key={name}>
+                    {name}
+                    {p.baseCents > 0 &&
+                      (paid ? (
+                        <Link href="/pricing">Choose plan</Link>
+                      ) : (
+                        <span className="soon">Coming soon</span>
+                      ))}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([label, value]) => (
+                <tr key={label}>
+                  <th scope="row">{label}</th>
+                  {plans.map(([name, p]) => (
+                    <td key={name}>{value(p)}</td>
                   ))}
-              </div>
-            ))}
-          </div>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Link className="l-btn signal pt-cta" href="/sign-up">
+            Sign up free
+          </Link>
           <p className="l-pnote">
             What counts as an API operation? <a href="#faq">See the FAQ above.</a>
           </p>
@@ -426,8 +431,8 @@ export default function Home() {
           <h2>Give your agent a drive.</h2>
           <div className="l-final-row">
             <SetupPanel instruction={instruction} label="Copy agent instruction again" />
-            <Link className="l-btn" href="/sign-up">
-              Create a free account
+            <Link className="l-btn signal" href="/sign-up">
+              Sign up free
             </Link>
           </div>
         </div>
