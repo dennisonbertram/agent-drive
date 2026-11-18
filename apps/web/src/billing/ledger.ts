@@ -325,12 +325,20 @@ export async function enforceOperationBudget(client: PoolClient, accountId: stri
   }
 }
 
+function requestLimitPerMinute(raw: string | undefined, message: string) {
+  const value = raw ?? '600';
+  if (!/^\d{1,5}$/u.test(value) || Number(value) < 1 || Number(value) > 10000) {
+    throw new ApiError('internal_error', message);
+  }
+  return Number(value);
+}
+
 export async function enforceKeyRateLimit(keyId: string | null) {
   if (!keyId) return;
-  const raw = process.env.API_KEY_REQUESTS_PER_MINUTE ?? '600';
-  if (!/^\d{1,5}$/u.test(raw) || Number(raw) < 1 || Number(raw) > 10000) {
-    throw new ApiError('internal_error', 'The API rate limit is not configured correctly.');
-  }
+  const limit = requestLimitPerMinute(
+    process.env.API_KEY_REQUESTS_PER_MINUTE,
+    'The API rate limit is not configured correctly.',
+  );
   const result = await getPool().query<{ requests: number; retry_after: number }>(
     `INSERT INTO api_key_rate_limits (api_key_id, window_start, requests)
        VALUES ($1, date_trunc('minute',now()), 1)
@@ -341,10 +349,35 @@ export async function enforceKeyRateLimit(keyId: string | null) {
      RETURNING requests, GREATEST(1,CEIL(EXTRACT(EPOCH FROM (window_start + interval '1 minute' - now()))))::int AS retry_after`,
     [keyId],
   );
-  if (result.rows[0]!.requests > Number(raw)) {
+  if (result.rows[0]!.requests > limit) {
     throw new ApiError(
       'rate_limited',
       'This API key has reached its request limit. Retry shortly.',
+      429,
+      { retryAfter: result.rows[0]!.retry_after },
+    );
+  }
+}
+
+export async function enforceConsoleRateLimit(accountId: string) {
+  const limit = requestLimitPerMinute(
+    process.env.CONSOLE_REQUESTS_PER_MINUTE,
+    'The console rate limit is not configured correctly.',
+  );
+  const result = await getPool().query<{ requests: number; retry_after: number }>(
+    `INSERT INTO console_rate_limits (account_id, window_start, requests)
+       VALUES ($1, date_trunc('minute',now()), 1)
+     ON CONFLICT (account_id) DO UPDATE SET
+       window_start = date_trunc('minute',now()),
+       requests = CASE WHEN console_rate_limits.window_start = date_trunc('minute',now())
+         THEN LEAST(console_rate_limits.requests + 1,10001) ELSE 1 END
+     RETURNING requests, GREATEST(1,CEIL(EXTRACT(EPOCH FROM (window_start + interval '1 minute' - now()))))::int AS retry_after`,
+    [accountId],
+  );
+  if (result.rows[0]!.requests > limit) {
+    throw new ApiError(
+      'rate_limited',
+      'This console session has reached its request limit. Retry shortly.',
       429,
       { retryAfter: result.rows[0]!.retry_after },
     );

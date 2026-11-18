@@ -49,6 +49,7 @@ import {
   authorizeDownload,
   billingState,
   billingSummary,
+  enforceConsoleRateLimit,
   enforceKeyRateLimit,
   enforceOperationBudget,
   enforceWriteBudget,
@@ -570,11 +571,11 @@ async function listChildren(
   };
 }
 
-function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
+export function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
   const clauses: string[] = [];
-  if (includeQuery) {
-    const q = queryValue(url, 'q', 128);
-    params.push(escapedLike(q ?? ''));
+  const q = includeQuery ? queryValue(url, 'q', 128) : null;
+  if (q) {
+    params.push(escapedLike(q));
     clauses.push(`f.path ILIKE $${params.length} ESCAPE '\\'`);
   }
   const tag = queryValue(url, 'tag', 64);
@@ -2515,7 +2516,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
         throw new ApiError('conflict', 'The account is being deleted.');
       }
     }
-    await enforceKeyRateLimit(auth.keyId);
+    if (mode.kind === 'console') await enforceConsoleRateLimit(auth.accountId);
+    else await enforceKeyRateLimit(auth.keyId);
     if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console'

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   handleApiRequest,
   handleConsoleApiRequest,
@@ -536,5 +536,27 @@ describe('Phase 4 console API', () => {
       [ownerAccountId],
     );
     expect(row.rows[0].action).toBe('billing.read');
+  });
+
+  it('rate limits console sessions per account', async () => {
+    const limitedUserId = `e2e_limited_${suffix}`;
+    vi.stubEnv('CONSOLE_REQUESTS_PER_MINUTE', '1');
+    try {
+      const first = await consoleRequest(limitedUserId, '/whoami');
+      expect(first.status).toBe(200);
+      const limitedAccountId = (await json(first)).accountId as string;
+      accountIds.push(limitedAccountId);
+      const limited = await consoleRequest(limitedUserId, '/whoami');
+      expect(limited.status).toBe(429);
+      expect(Number(limited.headers.get('Retry-After'))).toBeGreaterThan(0);
+      const audit = await pool.query(
+        `SELECT error_code, http_status FROM audit_events
+          WHERE account_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [limitedAccountId],
+      );
+      expect(audit.rows[0]).toMatchObject({ error_code: 'rate_limited', http_status: 429 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
