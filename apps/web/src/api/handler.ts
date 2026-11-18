@@ -1823,6 +1823,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     return { lockedIntent, mode };
   };
   let copied = false;
+  let copyReferenced = false;
   try {
     const precheck = await withTransaction((client) => lockAndCheck(client, true));
     if ('committed' in precheck) return response({ version: rowVersion(precheck.committed) });
@@ -1830,6 +1831,19 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     try {
       await copyObject(precheck.lockedIntent.staging_key, finalKey, stagedEtag);
     } catch (error) {
+      // A concurrent request may have committed this intent and deleted the staging object.
+      const committed = (
+        await getPool().query('SELECT committed_version_id FROM upload_intents WHERE id = $1', [
+          intentId,
+        ])
+      ).rows[0] as Row | undefined;
+      if (committed?.committed_version_id) {
+        const result = await getPool().query(
+          `SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1`,
+          [committed.committed_version_id],
+        );
+        return response({ version: rowVersion(result.rows[0] as Row) });
+      }
       const status =
         typeof error === 'object' && error !== null && '$metadata' in error
           ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
@@ -1846,6 +1860,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     const result = await withTransaction(async (client) => {
       const checked = await lockAndCheck(client, false);
       if ('committed' in checked) return checked;
+      copyReferenced = true;
       const version = await commitPut(client, {
         accountId: auth.accountId,
         driveId,
@@ -1875,7 +1890,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     await deleteObject(source.staging_key).catch(() => undefined);
     return response({ version: rowVersion(result.version) }, 201);
   } catch (error) {
-    if (copied && !(error instanceof TransactionCommitUnknownError))
+    if (copied && !(error instanceof TransactionCommitUnknownError && copyReferenced))
       await deleteObject(finalKey).catch(() => undefined);
     throw error;
   }
@@ -2329,6 +2344,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
     };
   };
   let copiedKey: string | undefined;
+  let copyReferenced = false;
   try {
     const prepared = await withTransaction((client) => prepare(client, requestedVersion, true));
     if ('undeleted' in prepared) return response({ version: rowVersion(prepared.undeleted) });
@@ -2342,6 +2358,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       // concurrent write moved the file's current version in between.
       const checked = await prepare(client, prepared.sourceVersionId, false);
       if ('undeleted' in checked) return checked;
+      copyReferenced = true;
       const fileId = checked.destinationFileId ?? randomUUID();
       if (!checked.destinationFileId)
         await client.query(
@@ -2398,7 +2415,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
     }
     return response({ version: rowVersion(result) }, 201);
   } catch (error) {
-    if (copiedKey && !(error instanceof TransactionCommitUnknownError))
+    if (copiedKey && !(error instanceof TransactionCommitUnknownError && copyReferenced))
       await deleteObject(copiedKey).catch(() => undefined);
     throw error;
   }

@@ -343,8 +343,8 @@ export async function enforceKeyRateLimit(keyId: string | null) {
     `INSERT INTO api_key_rate_limits (api_key_id, window_start, requests)
        VALUES ($1, date_trunc('minute',now()), 1)
      ON CONFLICT (api_key_id) DO UPDATE SET
-       window_start = date_trunc('minute',now()),
-       requests = CASE WHEN api_key_rate_limits.window_start = date_trunc('minute',now())
+       window_start = GREATEST(api_key_rate_limits.window_start, date_trunc('minute',now())),
+       requests = CASE WHEN api_key_rate_limits.window_start >= date_trunc('minute',now())
          THEN LEAST(api_key_rate_limits.requests + 1,10001) ELSE 1 END
      RETURNING requests, GREATEST(1,CEIL(EXTRACT(EPOCH FROM (window_start + interval '1 minute' - now()))))::int AS retry_after`,
     [keyId],
@@ -368,8 +368,8 @@ export async function enforceConsoleRateLimit(accountId: string) {
     `INSERT INTO console_rate_limits (account_id, window_start, requests)
        VALUES ($1, date_trunc('minute',now()), 1)
      ON CONFLICT (account_id) DO UPDATE SET
-       window_start = date_trunc('minute',now()),
-       requests = CASE WHEN console_rate_limits.window_start = date_trunc('minute',now())
+       window_start = GREATEST(console_rate_limits.window_start, date_trunc('minute',now())),
+       requests = CASE WHEN console_rate_limits.window_start >= date_trunc('minute',now())
          THEN LEAST(console_rate_limits.requests + 1,10001) ELSE 1 END
      RETURNING requests, GREATEST(1,CEIL(EXTRACT(EPOCH FROM (window_start + interval '1 minute' - now()))))::int AS retry_after`,
     [accountId],

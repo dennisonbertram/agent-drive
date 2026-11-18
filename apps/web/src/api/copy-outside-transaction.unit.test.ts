@@ -311,17 +311,55 @@ describe('commitIntent', () => {
     expect(deletedObjectKeys()).toHaveLength(1);
   });
 
+  it('returns the committed version when a concurrent commit removed the staged object', async () => {
+    vi.mocked(copyObject).mockImplementationOnce(async (source, target, etag) => {
+      state.copyCalls.push({ source, target, etag, depth: state.openTransactions });
+      state.intent!.committed_version_id = ids.committedVersion;
+      throw Object.assign(new Error('The specified key does not exist.'), {
+        name: 'NoSuchKey',
+        $metadata: { httpStatusCode: 404 },
+      });
+    });
+    const response = await commit();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { version?: { id?: string } };
+    expect(body.version?.id).toBe(ids.committedVersion);
+    expect(commitPut).not.toHaveBeenCalled();
+  });
+
   it('keeps the copied object when the commit acknowledgement is lost', async () => {
     let transactions = 0;
     vi.mocked(withTransaction).mockImplementation(async (callback) => {
       transactions += 1;
-      if (transactions === 3)
+      if (transactions === 3) {
+        await harness.transaction(callback);
         throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
+      }
       return harness.transaction(callback);
     });
     const response = await commit();
     expect(response.status).toBe(500);
     expect(deletedObjectKeys()).toEqual([]);
+  });
+
+  it('deletes the copied object when the commit acknowledgement is lost on the committed branch', async () => {
+    let transactions = 0;
+    vi.mocked(copyObject).mockImplementationOnce(async (source, target, etag) => {
+      state.copyCalls.push({ source, target, etag, depth: state.openTransactions });
+      state.intent!.committed_version_id = ids.committedVersion;
+    });
+    vi.mocked(withTransaction).mockImplementation(async (callback) => {
+      transactions += 1;
+      if (transactions === 3) {
+        await harness.transaction(callback);
+        throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
+      }
+      return harness.transaction(callback);
+    });
+    const response = await commit();
+    expect(response.status).toBe(500);
+    expect(commitPut).not.toHaveBeenCalled();
+    expect(deletedObjectKeys()).toHaveLength(1);
   });
 
   it('fails before copying when the pre-check conflicts', async () => {
