@@ -49,6 +49,7 @@ import {
   authorizeDownload,
   billingState,
   billingSummary,
+  enforceConsoleRateLimit,
   enforceKeyRateLimit,
   enforceOperationBudget,
   enforceWriteBudget,
@@ -2457,7 +2458,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
         throw new ApiError('conflict', 'The account is being deleted.');
       }
     }
-    await enforceKeyRateLimit(auth.keyId);
+    if (mode.kind === 'console') await enforceConsoleRateLimit(auth.accountId);
+    else await enforceKeyRateLimit(auth.keyId);
     if (quotaControlledActions.has(context.action)) await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console'
