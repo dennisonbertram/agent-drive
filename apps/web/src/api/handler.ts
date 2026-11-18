@@ -570,11 +570,11 @@ async function listChildren(
   };
 }
 
-function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
+export function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
   const clauses: string[] = [];
-  if (includeQuery) {
-    const q = queryValue(url, 'q', 128);
-    params.push(escapedLike(q ?? ''));
+  const q = includeQuery ? queryValue(url, 'q', 128) : null;
+  if (q) {
+    params.push(escapedLike(q));
     clauses.push(`f.path ILIKE $${params.length} ESCAPE '\\'`);
   }
   const tag = queryValue(url, 'tag', 64);
