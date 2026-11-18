@@ -1776,83 +1776,101 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   const stagedEtag = staged.etag;
   const versionId = randomUUID();
   const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
+  // Takes the account, intent and drive locks and runs every check that precedes the copy.
+  // reserveOnly keeps a commit that later fails from raising the billing period's peak storage.
+  const lockAndCheck = async (
+    client: PoolClient,
+    reserveOnly: boolean,
+  ): Promise<{ committed: Row } | { lockedIntent: Row; mode: PutMode }> => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedIntentResult = await client.query(
+      `SELECT * FROM upload_intents
+        WHERE id = $1 AND drive_id = $2 AND api_key_id = $3
+        FOR UPDATE`,
+      [intentId, driveId, auth.keyId],
+    );
+    const lockedIntent = lockedIntentResult.rows[0] as Row | undefined;
+    if (!lockedIntent) throw new ApiError('not_found', 'Upload intent not found.');
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    if (lockedIntent.committed_version_id) {
+      const existingVersion = await client.query(
+        'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
+        [lockedIntent.committed_version_id],
+      );
+      return { committed: existingVersion.rows[0] as Row };
+    }
+    await enforceWriteBudget(client, auth.accountId, {
+      bytes: BigInt(lockedIntent.ciphertext_size),
+      excludeIntentId: intentId,
+      reserveOnly,
+    });
+    if (new Date(lockedIntent.expires_at).getTime() < Date.now())
+      throw new ApiError('conflict', 'The upload intent has expired.');
+    const mode: PutMode =
+      lockedIntent.conditional_mode === 'create'
+        ? 'create'
+        : lockedIntent.conditional_mode === 'version'
+          ? { baseVersionId: lockedIntent.base_version_id as string }
+          : 'unconditional';
+    // Report a conflict or quota failure before copying the staged object; commitPut re-checks under the same locks.
+    await putConflict(client, driveId, source.path, mode);
+    await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
+    return { lockedIntent, mode };
+  };
   let copied = false;
   try {
+    const precheck = await withTransaction((client) => lockAndCheck(client, true));
+    if ('committed' in precheck) return response({ version: rowVersion(precheck.committed) });
+    // The destination key ends in a fresh random version id, so the copy can run unlocked.
+    try {
+      await copyObject(precheck.lockedIntent.staging_key, finalKey, stagedEtag);
+    } catch (error) {
+      const status =
+        typeof error === 'object' && error !== null && '$metadata' in error
+          ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
+          : undefined;
+      const name =
+        typeof error === 'object' && error !== null && 'name' in error
+          ? String((error as { name: unknown }).name)
+          : '';
+      if (status === 412 || name === 'PreconditionFailed')
+        throw new ApiError('conflict', 'The staged ciphertext changed before commit.');
+      throw error;
+    }
+    copied = true;
     const result = await withTransaction(async (client) => {
-      await lockBillingAccount(client, auth.accountId);
-      const lockedIntentResult = await client.query(
-        `SELECT * FROM upload_intents
-          WHERE id = $1 AND drive_id = $2 AND api_key_id = $3
-          FOR UPDATE`,
-        [intentId, driveId, auth.keyId],
-      );
-      const lockedIntent = lockedIntentResult.rows[0] as Row | undefined;
-      if (!lockedIntent) throw new ApiError('not_found', 'Upload intent not found.');
-      const lockedDrive = await client.query(
-        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
-        [driveId, auth.accountId],
-      );
-      if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
-      if (lockedIntent.committed_version_id) {
-        const existingVersion = await client.query(
-          'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
-          [lockedIntent.committed_version_id],
-        );
-        return { version: existingVersion.rows[0] as Row, idempotent: true };
-      }
-      await enforceWriteBudget(client, auth.accountId, {
-        bytes: BigInt(lockedIntent.ciphertext_size),
-        excludeIntentId: intentId,
-      });
-      if (new Date(lockedIntent.expires_at).getTime() < Date.now())
-        throw new ApiError('conflict', 'The upload intent has expired.');
-      const mode: PutMode =
-        lockedIntent.conditional_mode === 'create'
-          ? 'create'
-          : lockedIntent.conditional_mode === 'version'
-            ? { baseVersionId: lockedIntent.base_version_id as string }
-            : 'unconditional';
-      // Report a conflict or quota failure before copying the staged object; commitPut re-checks under the same locks.
-      await putConflict(client, driveId, source.path, mode);
-      await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
-      try {
-        await copyObject(lockedIntent.staging_key, finalKey, stagedEtag);
-      } catch (error) {
-        const status =
-          typeof error === 'object' && error !== null && '$metadata' in error
-            ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode
-            : undefined;
-        const name =
-          typeof error === 'object' && error !== null && 'name' in error
-            ? String((error as { name: unknown }).name)
-            : '';
-        if (status === 412 || name === 'PreconditionFailed')
-          throw new ApiError('conflict', 'The staged ciphertext changed before commit.');
-        throw error;
-      }
-      copied = true;
+      const checked = await lockAndCheck(client, false);
+      if ('committed' in checked) return checked;
       const version = await commitPut(client, {
         accountId: auth.accountId,
         driveId,
-        path: lockedIntent.path,
+        path: checked.lockedIntent.path,
         objectKey: finalKey,
-        ciphertextSize: Number(lockedIntent.ciphertext_size),
-        wrappedKey: lockedIntent.wrapped_key,
-        agentId: lockedIntent.agent_id,
-        machineId: lockedIntent.machine_id,
-        userId: lockedIntent.user_id,
-        tags: lockedIntent.tags,
-        description: lockedIntent.description,
-        mode,
+        ciphertextSize: Number(checked.lockedIntent.ciphertext_size),
+        wrappedKey: checked.lockedIntent.wrapped_key,
+        agentId: checked.lockedIntent.agent_id,
+        machineId: checked.lockedIntent.machine_id,
+        userId: checked.lockedIntent.user_id,
+        tags: checked.lockedIntent.tags,
+        description: checked.lockedIntent.description,
+        mode: checked.mode,
         versionId,
       });
       await client.query('UPDATE upload_intents SET committed_version_id = $1 WHERE id = $2', [
         versionId,
         intentId,
       ]);
-      return { version, idempotent: false };
+      return { version };
     });
-    if (result.idempotent) return response({ version: rowVersion(result.version) });
+    if ('committed' in result) {
+      // A concurrent request committed this intent while the copy ran; the copy is an orphan.
+      await deleteObject(finalKey).catch(() => undefined);
+      return response({ version: rowVersion(result.committed) });
+    }
     await deleteObject(source.staging_key).catch(() => undefined);
     return response({ version: rowVersion(result.version) }, 201);
   } catch (error) {
@@ -2230,66 +2248,101 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       ? undefined
       : uuid(typeof body.versionId === 'string' ? body.versionId : undefined, 'versionId');
   const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
-  let copiedKey: string | undefined;
-  let result: Row;
-  let undeleted = false;
-  try {
-    result = await withTransaction(async (client) => {
-      await lockBillingAccount(client, auth.accountId);
-      const lockedDrive = await client.query(
-        'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
-        [driveId, auth.accountId],
-      );
-      if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
-      const machine = await machineId(client, auth, request);
-      const source = await client.query(
-        `SELECT f.*, v.* FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
-       WHERE f.drive_id = $1 AND f.path = $2 AND v.file_id = f.id ${restore ? '' : 'AND f.deleted_at IS NULL'} FOR UPDATE`,
-        [driveId, sourcePath, requestedVersion ?? null],
-      );
-      const row = source.rows[0] as Row | undefined;
-      if (!row) throw new ApiError('not_found', 'Source file or version not found.');
-      if (restore && row.id === row.current_version_id) {
-        // Restoring the current version is an undelete: no copy, no new version, no quota check.
-        if (row.deleted_at) {
-          await client.query('UPDATE files SET deleted_at = NULL WHERE id = $1', [row.file_id]);
-          await client.query(
-            `INSERT INTO file_events
-              (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
-             VALUES ($1, $2, 'restore', $3, $4, $5, $6, $7)`,
-            [driveId, row.file_id, sourcePath, row.id, auth.agentId, machine, userId],
-          );
-        }
-        const current = await client.query(
-          'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
-          [row.id],
-        );
-        undeleted = true;
-        return current.rows[0] as Row;
+  // Takes the account and drive locks, re-reads the pinned (or current) source version and runs
+  // every check that precedes the copy. reserveOnly keeps a write that later fails from raising
+  // the billing period's peak storage.
+  const prepare = async (
+    client: PoolClient,
+    versionId: string | undefined,
+    reserveOnly: boolean,
+  ): Promise<
+    | { undeleted: Row }
+    | {
+        sourceVersionId: string;
+        sourceObjectKey: string;
+        ciphertextSize: number;
+        wrappedKey: string;
+        tags: string[];
+        description: string | null;
+        destinationFileId: string | undefined;
+        machine: string;
       }
-      await enforceWriteBudget(client, auth.accountId, { bytes: BigInt(row.ciphertext_size) });
-      const existing = await client.query(
-        'SELECT id FROM files WHERE drive_id = $1 AND path = $2',
-        [driveId, destinationPath],
+  > => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+    const machine = await machineId(client, auth, request);
+    const source = await client.query(
+      `SELECT f.*, v.* FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
+       WHERE f.drive_id = $1 AND f.path = $2 AND v.file_id = f.id ${restore ? '' : 'AND f.deleted_at IS NULL'} FOR UPDATE`,
+      [driveId, sourcePath, versionId ?? null],
+    );
+    const row = source.rows[0] as Row | undefined;
+    if (!row) throw new ApiError('not_found', 'Source file or version not found.');
+    if (restore && row.id === row.current_version_id) {
+      // Restoring the current version is an undelete: no copy, no new version, no quota check.
+      if (row.deleted_at) {
+        await client.query('UPDATE files SET deleted_at = NULL WHERE id = $1', [row.file_id]);
+        await client.query(
+          `INSERT INTO file_events
+            (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
+           VALUES ($1, $2, 'restore', $3, $4, $5, $6, $7)`,
+          [driveId, row.file_id, sourcePath, row.id, auth.agentId, machine, userId],
+        );
+      }
+      const current = await client.query(
+        'SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1',
+        [row.id],
       );
-      if (existing.rows[0] && (!restore || existing.rows[0].id !== row.file_id))
-        throw new ApiError('conflict', 'The destination exists.');
-      const used = await client.query(
-        'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
-        [driveId],
-      );
-      const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
-      if (
-        Number(used.rows[0].used) + Number(row.ciphertext_size) >
-        Number(quota.rows[0].quota_bytes)
-      )
-        throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
-      const fileId = existing.rows[0]?.id ?? randomUUID();
-      const versionId = randomUUID();
-      const objectKey = `objects/${auth.accountId}/${driveId}/${versionId}`;
-      await copyObject(row.object_key, objectKey);
-      copiedKey = objectKey;
-      if (!existing.rows[0])
+      return { undeleted: current.rows[0] as Row };
+    }
+    await enforceWriteBudget(client, auth.accountId, {
+      bytes: BigInt(row.ciphertext_size),
+      reserveOnly,
+    });
+    const existing = await client.query('SELECT id FROM files WHERE drive_id = $1 AND path = $2', [
+      driveId,
+      destinationPath,
+    ]);
+    if (existing.rows[0] && (!restore || existing.rows[0].id !== row.file_id))
+      throw new ApiError('conflict', 'The destination exists.');
+    const used = await client.query(
+      'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
+      [driveId],
+    );
+    const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
+    if (Number(used.rows[0].used) + Number(row.ciphertext_size) > Number(quota.rows[0].quota_bytes))
+      throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
+    return {
+      sourceVersionId: row.id as string,
+      sourceObjectKey: row.object_key as string,
+      ciphertextSize: Number(row.ciphertext_size),
+      wrappedKey: row.wrapped_key as string,
+      tags: row.tags as string[],
+      description: (row.description as string | null) ?? null,
+      destinationFileId: existing.rows[0]?.id as string | undefined,
+      machine,
+    };
+  };
+  let copiedKey: string | undefined;
+  try {
+    const prepared = await withTransaction((client) => prepare(client, requestedVersion, true));
+    if ('undeleted' in prepared) return response({ version: rowVersion(prepared.undeleted) });
+    // The destination key ends in a fresh random version id, so the copy can run unlocked.
+    const versionId = randomUUID();
+    const objectKey = `objects/${auth.accountId}/${driveId}/${versionId}`;
+    await copyObject(prepared.sourceObjectKey, objectKey);
+    copiedKey = objectKey;
+    const result = await withTransaction(async (client) => {
+      // Pin the version the bytes were copied from, so the row matches the object even if a
+      // concurrent write moved the file's current version in between.
+      const checked = await prepare(client, prepared.sourceVersionId, false);
+      if ('undeleted' in checked) return checked;
+      const fileId = checked.destinationFileId ?? randomUUID();
+      if (!checked.destinationFileId)
         await client.query(
           'INSERT INTO files (id,drive_id,path,current_version_id) VALUES ($1,$2,$3,$4)',
           [fileId, driveId, destinationPath, versionId],
@@ -2307,13 +2360,13 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
           fileId,
           driveId,
           objectKey,
-          row.ciphertext_size,
-          row.wrapped_key,
+          checked.ciphertextSize,
+          checked.wrappedKey,
           auth.agentId,
-          machine,
+          checked.machine,
           userId,
-          row.tags,
-          row.description,
+          checked.tags,
+          checked.description,
         ],
       );
       await client.query(
@@ -2327,7 +2380,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
           destinationPath,
           versionId,
           auth.agentId,
-          machine,
+          checked.machine,
           userId,
         ],
       );
@@ -2337,12 +2390,17 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       );
       return output.rows[0] as Row;
     });
+    if ('undeleted' in result) {
+      // A concurrent request made this version current while the copy ran; the copy is an orphan.
+      await deleteObject(objectKey).catch(() => undefined);
+      return response({ version: rowVersion(result.undeleted) });
+    }
+    return response({ version: rowVersion(result) }, 201);
   } catch (error) {
     if (copiedKey && !(error instanceof TransactionCommitUnknownError))
       await deleteObject(copiedKey).catch(() => undefined);
     throw error;
   }
-  return response({ version: rowVersion(result) }, undeleted ? 200 : 201);
 }
 
 type RequestMode =
