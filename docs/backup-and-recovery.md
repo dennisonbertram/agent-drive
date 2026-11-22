@@ -151,6 +151,8 @@ When a drive key is loaded in the tab, choose "Download recovery file" in the ke
 
 Key backup is separate from file backup. To upload a working directory to the drive before a sandbox ends, use `agent-drive backup`. See [Files, versions and sync](files-and-sync.md).
 
+`backup` scans the folder first and prints what it found, then uploads. `--gitignore` skips paths the folder's `.gitignore` excludes, and `--exclude GLOB` skips more paths. Neither is on by default, so ignored files such as `.env` and the `.git` folder are backed up. More than 5000 files or 1 GiB is refused unless `--yes` is passed — preview first with `--dry-run`. Only one backup runs per prefix at a time; progress goes to stderr every 10 seconds. `agent-drive --version` prints the CLI version.
+
 ## A login that replaces the API key
 
 When `agent-drive login` saves a different API key, the CLI clears all local backup records. The old bundle holds the revoked key, so it no longer counts as a backup. The CLI prints:

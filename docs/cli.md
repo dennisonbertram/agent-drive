@@ -88,9 +88,10 @@ Every command that works on a drive takes `--drive ID`. If you leave it out, the
 | `account seal`        | Seal held drive keys to the account key for the console.     | [Keys and recovery](keys-and-recovery.md)                    |
 | `skill install`       | Install the agent skill.                                     | [Agent skills](skills.md)                                    |
 | `capture`             | Run an agent and save its model calls as traces.             | [Capture traces](trace-capture.md)                           |
+| `version`             | Print the CLI version.                                       |                                                              |
 | `mcp`                 | Run the MCP server on stdio.                                 | [MCP server and tools](mcp-tools.md)                         |
 
-`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list.
+`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list. `agent-drive --version` and `agent-drive version` print the CLI version.
 
 ## Output and exit codes
 
@@ -217,13 +218,13 @@ agent-drive share revoke SHARE_ID [--drive ID]
 
 ```sh
 agent-drive sync LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--overwrite-existing]
-agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run] [--key-file PATH]
+agent-drive backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--exclude GLOB]... [--gitignore] [--dry-run] [--yes] [--key-file PATH]
 ```
 
-| Command  | Notes                                                                                                                                                                                                                                                                   |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync`   | Upload-only. Skips symlinks. Never deletes remote files. Default prefix `/`. Prints JSON: `uploaded`, `skipped`, `conflicts`, `accountId`, `manifestPath`. Exits 1 on a conflict. `--overwrite-existing` allows replacing remote files that have no local sync history. |
-| `backup` | Uploads every regular file with overwrite. Default prefix `/backups/<machine>`. `--dry-run` prints `would upload <path>` lines and uploads nothing. Prints `backup uploaded=N unchanged=N failed=N`. Exits 1 if any file failed.                                        |
+| Command  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync`   | Upload-only. Skips symlinks. Never deletes remote files. Default prefix `/`. Prints JSON: `uploaded`, `skipped`, `conflicts`, `accountId`, `manifestPath`. Exits 1 on a conflict. `--overwrite-existing` allows replacing remote files that have no local sync history.                                                                                                                                                                                                                                                                                                                                                                                     |
+| `backup` | Scans the folder, then uploads every regular file with overwrite. Default prefix `/backups/<machine>`. `--gitignore` skips paths the folder's `.gitignore` excludes (off by default, so ignored files such as `.env` are still backed up). `--exclude GLOB` skips paths matching the root-relative path (`build/**`, `**/node_modules`, `node_modules`); repeat it. Over 5000 files or 1 GiB, it refuses unless `--yes` is passed (`--dry-run` previews). One backup per prefix at a time via a lock file. `--dry-run` prints `would upload <path>` lines and uploads nothing. Prints `backup uploaded=N unchanged=N failed=N`. Exits 1 if any file failed. |
 
 See [Files, versions and sync](files-and-sync.md) for the rules.
 
