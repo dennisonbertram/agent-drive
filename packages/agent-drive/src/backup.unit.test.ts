@@ -487,9 +487,11 @@ describe('backupDirectory', () => {
 
   it('counts a file it cannot stat during the scan as one failure', async () => {
     const { dir, root } = await fixture();
-    // A path longer than PATH_MAX is listed by readdir but cannot be lstat'ed.
+    // A path longer than PATH_MAX (1024 on macOS, 4096 on Linux) is listed by readdir but cannot
+    // be lstat'ed. Each level stays below the limit; the renamed-in payload pushes past it.
+    const levels = process.platform === 'linux' ? 20 : 4;
     let deep = root;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < levels; i++) {
       deep = join(deep, 'd'.repeat(200));
       await mkdir(deep);
     }
