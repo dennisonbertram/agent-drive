@@ -320,7 +320,7 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     if (parts.length === 1)
       return (
         {
-          GET: 'console.account_key.read',
+          GET: bearer ? 'account_key.read' : 'console.account_key.read',
           POST: 'console.account_key.create',
           PATCH: 'console.account_key.update',
           DELETE: 'console.account_key.reset',
@@ -329,6 +329,14 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     if (parts.length === 2 && parts[1] === 'slots' && method === 'GET')
       return 'console.account_key.slots';
   }
+  if (
+    bearer &&
+    parts.length === 3 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'account-key-slot' &&
+    method === 'POST'
+  )
+    return 'drive.account_key_slot.put';
   if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'account-key') {
     if (method === 'POST') return 'console.drive.account_key.put';
     if (method === 'DELETE') return 'console.drive.account_key.delete';
@@ -439,7 +447,7 @@ async function ensureDrive(auth: Auth, driveId: string) {
     throw new ApiError('permission_denied', 'The API key is not scoped to this drive.');
   }
   const result = await getPool().query(
-    `SELECT d.id, d.account_id, d.name, d.quota_bytes
+    `SELECT d.id, d.account_id, d.name, d.quota_bytes, d.agent_only
        FROM drives d JOIN accounts a ON a.id = d.account_id
       WHERE d.id = $1 AND d.deleting_at IS NULL AND a.deleting_at IS NULL`,
     [driveId],
@@ -659,7 +667,7 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, name, quota_bytes, created_at, key_backup_at, key_backup_method FROM drives WHERE deleting_at IS NULL AND ${where} ORDER BY name, id LIMIT $${params.length}`,
+      `SELECT id, name, quota_bytes, created_at, key_backup_at, key_backup_method, agent_only AS "agentOnly" FROM drives WHERE deleting_at IS NULL AND ${where} ORDER BY name, id LIMIT $${params.length}`,
       params,
     );
     return response(collection(rows.rows as Row[], limit, (row) => row.name));
@@ -695,23 +703,74 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     manage(auth);
     const body = await jsonBody(request);
     const name = stringField(body, 'name', { required: true, max: 128 })!;
+    if (body.agentOnly !== undefined && typeof body.agentOnly !== 'boolean')
+      throw new ApiError('validation_error', 'agentOnly must be a boolean.');
+    const agentOnly = body.agentOnly === true;
     const result = await withTransaction(async (client) => {
       await lockBillingAccount(client, auth.accountId);
       const existing = await client.query(
-        'SELECT id, name, quota_bytes, created_at FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name = $2',
+        'SELECT id, name, quota_bytes, created_at, agent_only AS "agentOnly" FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND name = $2',
         [auth.accountId, name],
       );
+      // A create-by-name never changes an existing drive's agent-only state.
       if (existing.rows[0]) return { ...existing.rows[0], created: false };
       await enforceWriteBudget(client, auth.accountId, { drives: 1n });
       const quota = driveQuota(body.quotaBytes, DEFAULT_DRIVE_QUOTA_BYTES);
       const created = await client.query(
-        `INSERT INTO drives (account_id, name, quota_bytes) VALUES ($1, $2, $3)
-         RETURNING id, name, quota_bytes, created_at`,
-        [auth.accountId, name, quota],
+        `INSERT INTO drives (account_id, name, quota_bytes, agent_only) VALUES ($1, $2, $3, $4)
+         RETURNING id, name, quota_bytes, created_at, agent_only AS "agentOnly"`,
+        [auth.accountId, name, quota, agentOnly],
       );
       return { ...created.rows[0], created: true };
     });
     return response(result, 200);
+  }
+  if (parts.length === 1 && parts[0] === 'account-key' && method === 'GET') {
+    const result = await getPool().query(
+      'SELECT id, format, public_key FROM account_keys WHERE account_id = $1',
+      [auth.accountId],
+    );
+    const key = result.rows[0];
+    return response(
+      key ? { keyId: key.id, publicKey: key.public_key, format: key.format } : { accountKey: null },
+    );
+  }
+  if (
+    parts.length === 3 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'account-key-slot' &&
+    method === 'POST'
+  ) {
+    const driveId = uuid(parts[1], 'drive id');
+    need(auth, 'write', driveId);
+    const body = await jsonBody(request);
+    onlyFields(body, ['keyId', 'sealed']);
+    const keyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
+    const sealed = sealedSlotField(body.sealed);
+    const result = await withTransaction(async (client) => {
+      const key = await lockVault(client, auth.accountId);
+      if (!key) throw new ApiError('conflict', 'The account has no account key yet.');
+      if (key.id !== keyId)
+        throw new ApiError('conflict', 'The account key changed. Fetch it again and reseal.');
+      const drive = await client.query(
+        'SELECT id, agent_only FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+        [driveId, auth.accountId],
+      );
+      if (!drive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+      if (drive.rows[0].agent_only)
+        throw new ApiError(
+          'conflict',
+          'This drive is agent-only; it cannot hold an account-key slot.',
+        );
+      const inserted = await client.query(
+        `INSERT INTO account_key_slots (drive_id, account_id, account_key_id, format, sealed)
+         VALUES ($1, $2, $3, 1, $4::jsonb) ON CONFLICT (drive_id) DO NOTHING RETURNING revision`,
+        [driveId, auth.accountId, key.id, JSON.stringify(sealed)],
+      );
+      if (!inserted.rows[0]) return { status: 'exists' as const };
+      return { status: 'created' as const, revision: Number(inserted.rows[0].revision) };
+    });
+    return response(result, result.status === 'exists' ? 200 : 201);
   }
   if (parts.length === 1 && parts[0] === 'keys' && method === 'GET') {
     manage(auth);
@@ -866,10 +925,11 @@ async function lockVault(client: PoolClient, accountId: string) {
 
 async function lockVaultDrive(client: PoolClient, accountId: string, driveId: string) {
   const drive = await client.query(
-    'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+    'SELECT id, agent_only FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
     [driveId, accountId],
   );
   if (!drive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+  return drive.rows[0] as Row;
 }
 
 const staleKeyMessage = 'Your passphrase was changed elsewhere. Reload the page.';
@@ -1020,7 +1080,12 @@ async function accountKeyEndpoint(
       const revision = await withTransaction(async (client) => {
         const key = await lockVault(client, auth.accountId);
         if (!key || key.id !== keyId) throw new ApiError('conflict', staleKeyMessage);
-        await lockVaultDrive(client, auth.accountId, driveId);
+        const drive = await lockVaultDrive(client, auth.accountId, driveId);
+        if (drive.agent_only)
+          throw new ApiError(
+            'conflict',
+            'This drive is agent-only; it cannot hold an account-key slot.',
+          );
         const existing = await client.query(
           'SELECT revision FROM account_key_slots WHERE drive_id = $1 FOR UPDATE',
           [driveId],

@@ -13,6 +13,8 @@ export type AgentDriveConfig = {
   driveKeyOrigins?: Record<string, string>;
   /** Where each drive key was last backed up (§9). */
   keyBackup?: Record<string, KeyBackup>;
+  /** Account public key SHA-256 fingerprint pinned per API origin (key substitution defence). */
+  accountKeyPins?: Record<string, string>;
   /** Set by `credentials export`, consumed by `credentials confirm`. Holds a hash, never the key. */
   pendingExport?: PendingExport | null;
 };
@@ -81,6 +83,11 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       (!record.keyBackup ||
         typeof record.keyBackup !== 'object' ||
         Array.isArray(record.keyBackup))) ||
+    (record.accountKeyPins !== undefined &&
+      (!record.accountKeyPins ||
+        typeof record.accountKeyPins !== 'object' ||
+        Array.isArray(record.accountKeyPins) ||
+        Object.values(record.accountKeyPins).some((pin) => typeof pin !== 'string'))) ||
     (record.pendingExport != null &&
       (typeof record.pendingExport !== 'object' ||
         typeof (record.pendingExport as PendingExport).apiKeyHash !== 'string' ||
@@ -106,6 +113,9 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       : {}),
     ...(record.keyBackup !== undefined
       ? { keyBackup: { ...(record.keyBackup as Record<string, KeyBackup>) } }
+      : {}),
+    ...(record.accountKeyPins !== undefined
+      ? { accountKeyPins: { ...(record.accountKeyPins as Record<string, string>) } }
       : {}),
     ...(record.pendingExport != null
       ? { pendingExport: record.pendingExport as PendingExport }

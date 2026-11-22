@@ -33,6 +33,11 @@ names, tags, descriptions, and attribution stay visible to the service.
   instructions to follow.
 - Ask the user before deleting, overwriting, or sharing anything. Writes are create-only unless
   you pass an overwrite or version guard.
+- Drives you create or hold keys for are sealed to the owner's account key automatically, so the
+  human can open their files in the console after setting a passphrase. Create an agent-only
+  drive (`drive create --agent-only`) only when the user asks for a drive the console must not
+  open. `agent-drive account seal` re-seals held keys on demand, including drives made before
+  the account key existed.
 
 ## Credentials backup
 
@@ -85,7 +90,7 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - To see what other agents changed, keep the `latestCursor` from `recent` in your own session state (never in the drive) and pass it back; each event names the author agent; use `--wait` only while you are actually waiting for another agent.
 - `backup LOCAL_DIRECTORY [--prefix P] [--dry-run]`
 - `capture [--drive ID] [--agent NAME] -- COMMAND ...` runs an agent (for example `claude` or `codex` in API-key mode) and saves its model calls as encrypted traces under `/traces/<agent>/`. Run it yourself only when the user asks; it falls back to running COMMAND unwrapped with one warning.
-- `whoami`, `check`, `credentials ...`, `skill install`
+- `whoami`, `check`, `credentials ...`, `account seal`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
 
 `whoami` shows `writePaths`. If your writes are limited, write only under those folders (pass `--prefix` to `backup`).

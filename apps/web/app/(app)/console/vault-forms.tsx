@@ -16,11 +16,13 @@ export function PassphraseForm({
   note,
 }: {
   email: string;
-  onUnlock: Submit<[string]>;
+  /** The passphrase, then the "Keep this browser unlocked" checkbox. */
+  onUnlock: Submit<[string, boolean]>;
   onRecovery: () => void;
   note?: string | undefined;
 }) {
   const [value, setValue] = useState('');
+  const [keepUnlocked, setKeepUnlocked] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
@@ -29,14 +31,14 @@ export function PassphraseForm({
     setValue('');
     setBusy(true);
     setError('');
-    setError(await onUnlock(typed));
+    setError(await onUnlock(typed, keepUnlocked));
     setBusy(false);
   }
   return (
     <form onSubmit={(event) => void submit(event)}>
       <p>
-        Type your passphrase to open the drives you added to your account. The keys stay in this tab
-        only. Your drives stay unlocked until you reload, lock, or leave it for 30 minutes.
+        Type your passphrase to open the drives you added to your account. The keys stay in this
+        browser only.
       </p>
       {note && <p>{note}</p>}
       {/* Lets a password manager pair the passphrase with this account. */}
@@ -62,6 +64,15 @@ export function PassphraseForm({
           value={value}
           onChange={(event) => setValue(event.target.value)}
         />
+      </label>
+      <label className="check-label">
+        <input
+          type="checkbox"
+          checked={keepUnlocked}
+          disabled={busy}
+          onChange={(event) => setKeepUnlocked(event.target.checked)}
+        />
+        Keep this browser unlocked
       </label>
       <p className="field-error" role="alert">
         {error}

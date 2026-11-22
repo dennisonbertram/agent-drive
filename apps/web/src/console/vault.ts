@@ -21,6 +21,7 @@ import {
   type AccountKeyRecord,
   type AccountSlot,
 } from './account-key';
+import type { PersistedStore } from './persisted-key';
 
 export type VaultStatus = 'loading' | 'none' | 'locked' | 'unlocked' | 'error';
 export type LockReason = 'manual' | 'idle' | 'stale';
@@ -37,6 +38,8 @@ export type VaultDeps = {
   anyPath: (driveId: string) => Promise<string | undefined>;
   /** The drive's trace inbox record, or null when it has none. */
   inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
+  /** "Keep this browser unlocked" store (IndexedDB in the app, a stub in tests). */
+  persisted?: PersistedStore | undefined;
   onLocked?: ((reason: LockReason) => void) | undefined;
   onChange?: (() => void) | undefined;
 };
@@ -131,6 +134,9 @@ export class Vault {
     this.emit();
     try {
       if (!(await this.refreshRecord(live))) return;
+      // A "Keep this browser unlocked" key survives reloads; a passphrase reset elsewhere makes a
+      // new record id, which can never match the stored key.
+      if (this.record && !this.privateKey) await this.restorePersisted(live);
       this.beforeLoad = null;
       this.loadError = '';
       this.status = this.record ? (this.privateKey ? 'unlocked' : 'locked') : 'none';
@@ -190,11 +196,31 @@ export class Vault {
     }
   }
 
+  /** Installs the IndexedDB-held key when it belongs to the current record. */
+  private async restorePersisted(live: () => boolean) {
+    const store = this.deps.persisted;
+    const record = this.record;
+    if (!store || !record) return;
+    const stored = await store.read().catch(() => null);
+    if (!live() || !stored || stored.keyId !== record.id) return;
+    this.fetchingSlots = true;
+    let slots: Map<string, AccountSlot>;
+    try {
+      slots = await this.fetchSlots(record.id);
+    } finally {
+      if (live()) this.fetchingSlots = false;
+    }
+    if (!live()) return;
+    this.privateKey = stored.key;
+    this.slots = slots;
+  }
+
   /**
    * Checks the passphrase and loads the slots. Returns false (and installs nothing) if Lock,
    * idle, reset or a cancelled dialog happened first. Throws "That passphrase is not correct."
+   * `persist` is "Keep this browser unlocked"; an explicit unchecked box removes a stored key.
    */
-  async unlock(passphrase: string): Promise<boolean> {
+  async unlock(passphrase: string, persist = false): Promise<boolean> {
     const epoch = this.epoch;
     const seq = ++this.unlockSeq;
     this.fetchingSlots = false;
@@ -218,6 +244,10 @@ export class Vault {
     } finally {
       if (live()) this.fetchingSlots = false;
     }
+    // The browser-held key must be committed before 'unlocked' is observable: a reload that
+    // races the write would otherwise come back to a Locked vault (or a stale stored key).
+    if (persist) await this.deps.persisted?.write(record.id, privateKey).catch(() => {});
+    else await this.deps.persisted?.clear().catch(() => {});
     if (!live()) return false;
     this.privateKey = privateKey;
     this.slots = slots;
@@ -432,6 +462,9 @@ export class Vault {
       kdf: record.kdf,
     });
     if (!live()) return null;
+    // Awaited before 'unlocked' is emitted, so the key is durable before a reload can see it.
+    await this.deps.persisted?.write(record.id, privateKey).catch(() => {});
+    if (!live()) return null;
     this.record = record;
     this.fingerprint = print;
     this.privateKey = privateKey;
@@ -513,6 +546,7 @@ export class Vault {
     this.fingerprint = '';
     this.seen.delete(record.id);
     this.status = 'none';
+    void this.deps.persisted?.clear().catch(() => {});
     this.emit();
   }
 
@@ -527,7 +561,13 @@ export class Vault {
     this.deps.onLocked?.(reason);
   }
 
-  /** Unmount, sign-out or user change: drop account state, keeping the callbacks. */
+  /** "Lock this browser": same as Lock, and also deletes the IndexedDB-held key. */
+  lockBrowser() {
+    this.lock('manual');
+    void this.deps.persisted?.clear().catch(() => {});
+  }
+
+  /** Unmount: drop account state, keeping the callbacks and the browser-held key. */
   clear() {
     this.epoch += 1;
     this.privateKey = null;
@@ -540,5 +580,11 @@ export class Vault {
     this.beforeLoad = null;
     this.seen = new Map();
     this.status = 'loading';
+  }
+
+  /** Sign-out or a different user in this tab: also forget the browser-held key. */
+  clearBrowser() {
+    this.clear();
+    void this.deps.persisted?.clear().catch(() => {});
   }
 }

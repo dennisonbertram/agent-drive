@@ -12,6 +12,7 @@ import {
   machineName,
 } from './config.js';
 import { reportEnvBackups } from './credentials.js';
+import { autoSealHeldKeys } from './account-seal.js';
 import { DriveCryptoError } from './crypto.js';
 
 // Resolves to the package root from both src/ and dist/.
@@ -460,5 +461,11 @@ export async function runMcp() {
   const server = createMcpServer(client, (driveId) =>
     resolveDriveId(driveId, saved, connection.apiUrl),
   );
+  await autoSealHeldKeys({
+    client,
+    config: saved,
+    force: true,
+    warn: (line) => process.stderr.write(`${line}\n`),
+  });
   await server.connect(new StdioServerTransport());
 }

@@ -521,6 +521,29 @@ describe('account key: slot routes', () => {
     ).toBe(0);
   });
 
+  it('rejects slot writes on an agent-only drive', async () => {
+    const f = await fixture(1);
+    const body = await setup(f);
+    await pool.query('UPDATE drives SET agent_only = true WHERE id = $1', [f.driveIds[0]]);
+    const res = await call(f.userId, `drives/${f.driveIds[0]}/account-key`, 'POST', {
+      keyId: body.id,
+      expectedRevision: null,
+      sealed: sealed(),
+    });
+    expect(res.status).toBe(409);
+    expect(await json(res)).toMatchObject({ error: { code: 'conflict' } });
+    expect(
+      (await pool.query('SELECT 1 FROM account_key_slots WHERE drive_id = $1', [f.driveIds[0]]))
+        .rowCount,
+    ).toBe(0);
+    // Deleting a nonexistent slot on an agent-only drive still reports 404, not conflict.
+    const del = await call(f.userId, `drives/${f.driveIds[0]}/account-key`, 'DELETE', {
+      keyId: body.id,
+      expectedRevision: 1,
+    });
+    expect(del.status).toBe(404);
+  });
+
   it('the database rejects a slot whose account key belongs to another account', async () => {
     const a = await fixture(1);
     const b = await fixture(1);

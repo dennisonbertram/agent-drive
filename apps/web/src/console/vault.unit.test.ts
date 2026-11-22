@@ -10,7 +10,13 @@ import {
   sealFileKeyToInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
-import { createAccountKey, sealToAccount, type AccountKeyRecord } from './account-key';
+import {
+  createAccountKey,
+  sealToAccount,
+  unlockAccountKey,
+  type AccountKeyRecord,
+} from './account-key';
+import type { PersistedStore } from './persisted-key';
 import { Vault, vaultRequest, type LockReason } from './vault';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
@@ -65,6 +71,7 @@ function makeVault(
   envelopeOf: () => Promise<string> = async () => envelope,
   anyPath: () => Promise<string | undefined> = async () => '/a.txt',
   inbox: () => Promise<TraceInboxRecord | null> = async () => null,
+  persisted?: PersistedStore,
 ) {
   const locked: LockReason[] = [];
   const calls: { path: string; method: string; body: unknown }[] = [];
@@ -81,6 +88,7 @@ function makeVault(
     envelope: envelopeCalls,
     anyPath,
     inbox,
+    persisted,
     onLocked: (reason) => locked.push(reason),
   });
   return { vault, locked, calls, envelopeCalls };
@@ -522,6 +530,125 @@ describe('Vault setup', () => {
     expect(delayed.vault.status).toBe('none');
     expect(delayed.vault.slotCount).toBe(0);
     expect(delayed.calls.filter((call) => call.path.startsWith('drives/'))).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('browser-held key', () => {
+  const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
+    read: async () => null,
+    write: async () => {},
+    clear: async () => {},
+    ...over,
+  });
+
+  it('reports unlocked only after the persisted write has resolved', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+        },
+      }),
+    );
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE, true);
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    write.resolve();
+    expect(await unlocking).toBe(true);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('clears the stored key when Keep unlocked is off, before reporting unlocked', async () => {
+    const clear = deferred<void>();
+    let cleared = 0;
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          cleared += 1;
+          await clear.promise;
+        },
+      }),
+    );
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE, false);
+    await vi.waitFor(() => expect(cleared).toBe(1), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    clear.resolve();
+    expect(await unlocking).toBe(true);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('setup commits the browser key before reporting unlocked', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      {
+        whoami: () => ({ accountId: ACCOUNT }),
+        'account-key': () => ({ accountKey: null }),
+        'drives/': () => ({ revision: 1 }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+        },
+      }),
+    );
+    await vault.load();
+    const setting = vault.setup(PASSPHRASE, {});
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    write.resolve();
+    expect(await setting).toEqual({ added: 0, total: 0 });
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('restores the stored non-extractable key and it still satisfies deriveBits', async () => {
+    const storedKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    expect(storedKey.extractable).toBe(false);
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({ read: async () => ({ keyId: record.id, key: storedKey }) }),
+    );
+    await vault.load();
+    expect(vault.status).toBe('unlocked');
+    // keyFor unseals the slot with ECDH deriveBits on the restored key.
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+  }, 30_000);
+
+  it('ignores a stored key that belongs to another account key', async () => {
+    const storedKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        read: async () => ({
+          keyId: '55555555-5555-4555-8555-555555555555',
+          key: storedKey,
+        }),
+      }),
+    );
+    await vault.load();
+    expect(vault.status).toBe('locked');
   }, 30_000);
 });
 

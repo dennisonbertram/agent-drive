@@ -6,6 +6,14 @@ const curve = { name: 'ECDH', namedCurve: 'P-256' } as const;
 
 export type SealedDriveKey = { epk: string; iv: string; ct: string };
 
+/** HKDF salt and the label used as both HKDF info and AES-GCM AAD. Default is the device seal. */
+export type SealContext = { salt: string; label: string };
+
+const deviceContext = (driveId: string): SealContext => ({
+  salt: 'agent-drive-device-v1',
+  label: driveId,
+});
+
 export async function generateDeviceKeyPair() {
   const pair = await subtle.generateKey(curve, true, ['deriveBits']);
   const publicKey = Buffer.from(await subtle.exportKey('raw', pair.publicKey)).toString(
@@ -19,6 +27,7 @@ export async function unsealDriveKey(
   privateKey: webcrypto.CryptoKey,
   driveId: string,
   sealed: SealedDriveKey,
+  context: SealContext = deviceContext(driveId),
 ) {
   const epk = await subtle.importKey('raw', Buffer.from(sealed.epk, 'base64url'), curve, false, []);
   const bits = await subtle.deriveBits({ name: 'ECDH', public: epk }, privateKey, 256);
@@ -27,8 +36,8 @@ export async function unsealDriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: text.encode('agent-drive-device-v1'),
-      info: text.encode(driveId),
+      salt: text.encode(context.salt),
+      info: text.encode(context.label),
     },
     hkdf,
     { name: 'AES-GCM', length: 256 },
@@ -39,7 +48,7 @@ export async function unsealDriveKey(
     {
       name: 'AES-GCM',
       iv: Buffer.from(sealed.iv, 'base64url'),
-      additionalData: text.encode(driveId),
+      additionalData: text.encode(context.label),
     },
     aes,
     Buffer.from(sealed.ct, 'base64url'),
@@ -52,6 +61,7 @@ export async function sealDriveKey(
   devicePublicKey: string,
   driveId: string,
   secret: string,
+  context: SealContext = deviceContext(driveId),
 ): Promise<SealedDriveKey> {
   const agent = await subtle.importKey(
     'raw',
@@ -67,8 +77,8 @@ export async function sealDriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: text.encode('agent-drive-device-v1'),
-      info: text.encode(driveId),
+      salt: text.encode(context.salt),
+      info: text.encode(context.label),
     },
     hkdf,
     { name: 'AES-GCM', length: 256 },
@@ -77,7 +87,7 @@ export async function sealDriveKey(
   );
   const iv = webcrypto.getRandomValues(new Uint8Array(12));
   const ct = await subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: text.encode(driveId) },
+    { name: 'AES-GCM', iv, additionalData: text.encode(context.label) },
     aes,
     text.encode(secret),
   );
