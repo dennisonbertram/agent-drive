@@ -2,11 +2,20 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { Stats } from 'node:fs';
-import { lstat, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
+import {
+  link,
+  lstat,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  utimes,
+} from 'node:fs/promises';
 import { basename, dirname, join, matchesGlob, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { configPath } from './config.js';
-import { AgentDriveApiError } from './client.js';
 import type { AgentDriveClient } from './client.js';
 import { ensurePrivateStateDirectory } from './sync.js';
 
@@ -19,8 +28,8 @@ const LARGE_FILE_BYTES = 64 * 1024 ** 2;
 const UPLOAD_WORKERS = 4;
 const MANIFEST_SAVE_MS = 2_000;
 const PROGRESS_MS = 10_000;
-const PUT_ATTEMPTS = 5;
-const RATE_LIMIT_WAIT_SECONDS = 5;
+const LOCK_STALE_MS = 2 * 60 * 1000;
+const LOCK_REFRESH_MS = 30 * 1000;
 type BackupClient = Pick<AgentDriveClient, 'apiOrigin' | 'put'>;
 type Manifest = { files: Record<string, string> };
 type IgnoreRules = { files: Set<string>; directories: Set<string> };
@@ -44,7 +53,7 @@ async function canonical(path: string): Promise<string> {
 
 async function* walk(
   directory: string,
-  skip: (path: string) => boolean,
+  skip: (path: string, isDirectory: boolean) => boolean,
   onError: (directory: string, error: unknown) => void,
 ): AsyncGenerator<string> {
   let entries;
@@ -56,7 +65,7 @@ async function* walk(
   }
   for (const entry of entries) {
     const path = join(directory, entry.name);
-    if (skip(path)) continue;
+    if (skip(path, entry.isDirectory())) continue;
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) yield* walk(path, skip, onError);
     else if (entry.isFile()) yield path;
@@ -76,13 +85,21 @@ async function gitIgnored(root: string): Promise<IgnoreRules> {
       if (entry.endsWith('/')) rules.directories.add(entry.slice(0, -1));
       else if (entry) rules.files.add(entry);
     }
-  } catch {
-    // Git missing or the root is not in a work tree: nothing is ignored.
+    return rules;
+  } catch (error) {
+    // Outside a work tree nothing is ignored; anything else fails closed so an
+    // unreadable rule set can never turn into a full upload.
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === 'string' && /not a git repository/iu.test(stderr)) return rules;
+    throw new Error(
+      `could not read .gitignore rules: ${error instanceof Error ? error.message : 'error'}`,
+    );
   }
-  return rules;
 }
 
 function isIgnored(relativePath: string, rules: IgnoreRules) {
+  // A '.' directory entry means git collapsed the whole root to './'.
+  if (rules.directories.has('.')) return true;
   if (rules.files.has(relativePath) || rules.directories.has(relativePath)) return true;
   let slash = relativePath.indexOf('/');
   while (slash > 0) {
@@ -93,40 +110,60 @@ function isIgnored(relativePath: string, rules: IgnoreRules) {
 }
 
 /**
- * Creates backup-<key>.lock holding this pid. A live lock aborts the run; a lock
- * left by a dead process or one that cannot be read is replaced.
+ * Creates backup-<key>.lock holding this pid by linking a fully written temp
+ * file into place, so the lock never exists without a pid. A lock held by a
+ * live process with a fresh mtime aborts the run; anything else is stale and
+ * is moved aside, removed, and the link retried.
  */
 async function takeBackupLock(path: string, prefix: string) {
   for (;;) {
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      const handle = await open(path, 'wx', 0o600);
+      const handle = await open(temporary, 'wx', 0o600);
       try {
         await handle.writeFile(String(process.pid));
       } finally {
         await handle.close();
       }
-      return () => rm(path, { force: true }).then(() => undefined);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      try {
+        await link(temporary, path);
+        return () => rm(path, { force: true }).then(() => undefined);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
+    } finally {
+      await rm(temporary, { force: true });
     }
-    let pid: number | undefined;
+    let fresh = false;
+    let holder: number | undefined;
     try {
+      fresh = Date.now() - (await lstat(path)).mtimeMs < LOCK_STALE_MS;
       const parsed = Number.parseInt((await readFile(path, 'utf8')).trim(), 10);
       if (Number.isInteger(parsed)) {
         try {
           process.kill(parsed, 0);
-          pid = parsed;
+          holder = parsed;
         } catch (error) {
           // EPERM means the process exists but is owned by another user.
-          if ((error as NodeJS.ErrnoException).code === 'EPERM') pid = parsed;
+          if ((error as NodeJS.ErrnoException).code === 'EPERM') holder = parsed;
         }
       }
     } catch {
-      // Unreadable lock file: replace it.
+      // Unreadable or already removed: treat it as stale below.
     }
-    if (pid !== undefined)
-      throw new Error(`another backup to ${prefix} is already running (pid ${pid})`);
-    await rm(path, { force: true });
+    if (fresh && holder !== undefined)
+      throw new Error(`another backup to ${prefix} is already running (pid ${holder})`);
+    // Move the stale lock aside before removing it so a new lock can be linked.
+    // ponytail: two processes reclaiming the same stale lock at once can both
+    // reach the rename; the loser can rename and delete a live lock the winner
+    // just linked, after which both believe they hold it.
+    const stale = `${path}.${process.pid}.${randomUUID()}.stale`;
+    try {
+      await rename(path, stale);
+      await rm(stale, { force: true });
+    } catch {
+      // Somebody else reclaimed it first; retry the link.
+    }
   }
 }
 
@@ -169,28 +206,6 @@ async function saveManifest(path: string, manifest: Manifest) {
     await rename(temporary, path);
   } finally {
     await rm(temporary, { force: true });
-  }
-}
-
-const seconds = (ms: number) => new Promise<void>((resolve_) => setTimeout(resolve_, ms * 1000));
-
-async function putWithRetry(
-  client: BackupClient,
-  driveId: string,
-  remote: string,
-  bytes: Uint8Array,
-) {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await client.put(driveId, remote, bytes, { mode: 'overwrite' });
-      return;
-    } catch (error) {
-      if (error instanceof AgentDriveApiError && error.status === 429 && attempt < PUT_ATTEMPTS) {
-        await seconds(error.retryAfter ?? RATE_LIMIT_WAIT_SECONDS);
-        continue;
-      }
-      throw error;
-    }
   }
 }
 
@@ -237,12 +252,16 @@ export async function backupDirectory(
 
   const dryRun = options.dryRun ?? false;
   let releaseLock: (() => Promise<void>) | undefined;
+  let refreshLock: NodeJS.Timeout | undefined;
   if (!dryRun) {
     await ensurePrivateStateDirectory(stateDirectory);
-    releaseLock = await takeBackupLock(
-      join(stateDirectory, `backup-${key}.lock`),
-      remotePrefix || '/',
-    );
+    const lockPath = join(stateDirectory, `backup-${key}.lock`);
+    releaseLock = await takeBackupLock(lockPath, remotePrefix || '/');
+    // Keep the lock's mtime fresh so a reused pid cannot keep it alive forever.
+    refreshLock = setInterval(() => {
+      void utimes(lockPath, new Date(), new Date()).catch(() => undefined);
+    }, LOCK_REFRESH_MS);
+    refreshLock.unref();
   }
 
   const result = { uploaded: 0, unchanged: 0, failed: 0, wouldUpload: [] as string[] };
@@ -255,12 +274,18 @@ export async function backupDirectory(
       : { files: new Set<string>(), directories: new Set<string>() };
     const excludes = options.exclude ?? [];
     let skipped = 0;
-    const skip = (path: string) => {
+    const skip = (path: string, isDirectory: boolean) => {
       const relativePath = relative(root, path).split(sep).join('/');
       if (
         builtinSkip(path) ||
         isIgnored(relativePath, ignored) ||
-        excludes.some((glob) => matchesGlob(relativePath, glob))
+        excludes.some(
+          (glob) =>
+            matchesGlob(relativePath, glob) ||
+            // 'build/**' does not match 'build'; test 'build/' too so a matched
+            // directory is skipped whole, hidden files included.
+            (isDirectory && matchesGlob(`${relativePath}/`, glob)),
+        )
       ) {
         skipped++;
         return true;
@@ -276,10 +301,17 @@ export async function backupDirectory(
     const files: ScannedFile[] = [];
     let totalBytes = 0;
     for await (const path of walk(root, skip, onError)) {
-      const info = await lstat(path);
-      if (!info.isFile()) continue;
-      files.push({ path, relativePath: relative(root, path).split(sep).join('/'), info });
-      totalBytes += info.size;
+      try {
+        const info = await lstat(path);
+        if (!info.isFile()) continue;
+        files.push({ path, relativePath: relative(root, path).split(sep).join('/'), info });
+        totalBytes += info.size;
+      } catch (error) {
+        result.failed++;
+        options.log?.(
+          `failed ${path}: ${error instanceof Error ? error.message : 'cannot stat file'}`,
+        );
+      }
     }
     const totalMb = (totalBytes / 1024 ** 2).toFixed(1);
     options.log?.(
@@ -302,19 +334,15 @@ export async function backupDirectory(
     const saveSoon = () => {
       if (pendingSave || Date.now() - lastSave < MANIFEST_SAVE_MS) return;
       pendingSave = saveManifest(manifestPath, loaded)
-        .then(
-          () => {
-            lastSave = Date.now();
-          },
-          (error: unknown) => {
-            options.log?.(
-              `failed to save the backup manifest: ${
-                error instanceof Error ? error.message : 'error'
-              }`,
-            );
-          },
-        )
+        .then(undefined, (error: unknown) => {
+          options.log?.(
+            `failed to save the backup manifest: ${
+              error instanceof Error ? error.message : 'error'
+            }`,
+          );
+        })
         .finally(() => {
+          lastSave = Date.now();
           pendingSave = undefined;
         });
     };
@@ -324,6 +352,7 @@ export async function backupDirectory(
       try {
         if (file.info.size > MAX_BYTES) throw new Error('file exceeds the 5 GiB limit');
         const bytes = await readFileInside(file.path, root, file.info);
+        if (bytes.byteLength !== file.info.size) throw new Error('file changed since the scan');
         const hash = createHash('sha256').update(bytes).digest('hex');
         if (loaded.files[file.relativePath] === hash) {
           result.unchanged++;
@@ -333,7 +362,7 @@ export async function backupDirectory(
           result.wouldUpload.push(remote);
           return;
         }
-        await putWithRetry(client, driveId, remote, bytes);
+        await client.put(driveId, remote, bytes, { mode: 'overwrite' });
         loaded.files[file.relativePath] = hash;
         result.uploaded++;
         saveSoon();
@@ -359,9 +388,9 @@ export async function backupDirectory(
       return outcome;
     };
     let doneBytes = 0;
+    let done = 0;
     const startedAt = Date.now();
     const timer = setInterval(() => {
-      const done = result.uploaded + result.unchanged + result.failed;
       const rate = doneBytes / 1024 ** 2 / Math.max((Date.now() - startedAt) / 1000, 0.001);
       options.log?.(
         `backup progress ${done}/${files.length} uploaded=${result.uploaded} ` +
@@ -381,6 +410,7 @@ export async function backupDirectory(
             await oneLargeAtATime(() => processFile(file, true));
           else await processFile(file, true);
         } finally {
+          done++;
           doneBytes += file.info.size;
         }
       }
@@ -392,10 +422,22 @@ export async function backupDirectory(
     }
     return result;
   } finally {
+    clearInterval(refreshLock);
     try {
       // The manifest is always saved once at the end, even after a failure.
       if (pendingSave) await pendingSave;
-      if (!dryRun && manifest) await saveManifest(manifestPath, manifest);
+      if (!dryRun && manifest) {
+        try {
+          await saveManifest(manifestPath, manifest);
+        } catch (error) {
+          result.failed++;
+          options.log?.(
+            `failed to save the backup manifest: ${
+              error instanceof Error ? error.message : 'error'
+            }`,
+          );
+        }
+      }
     } finally {
       await releaseLock?.();
     }
