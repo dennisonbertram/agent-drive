@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -377,5 +378,17 @@ describe('capture command', () => {
     const r = await capture(['--drive', A, '--', process.execPath, script, '--help']);
     expect(r.code).toBe(5);
     expect(JSON.parse(await readFile(marker, 'utf8'))).toEqual(['--help']);
+  });
+});
+
+describe('version', () => {
+  const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+  it('prints the package version for --version and version', async () => {
+    const flag = await cli(['--version'], one);
+    expect(flag.out).toBe(`${version}\n`);
+    expect(flag.err).toBe('');
+    const command = await cli(['version'], one);
+    expect(command.out).toBe(`${version}\n`);
+    expect(command.err).toBe('');
   });
 });

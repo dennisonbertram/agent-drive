@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { readFile, writeFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
@@ -41,6 +42,11 @@ import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './
 import { runMcp } from './mcp.js';
 import { runCapture } from './capture.js';
 
+// Resolves to the package root from both src/ and dist/.
+const { version: cliVersion } = createRequire(import.meta.url)('../package.json') as {
+  version: string;
+};
+
 function parse(raw: string[]) {
   return parseArgs({
     args: raw,
@@ -75,6 +81,9 @@ function parse(raw: string[]) {
       'expires-in': { type: 'string' },
       'no-browser': { type: 'boolean' },
       'dry-run': { type: 'boolean' },
+      exclude: { type: 'string', multiple: true },
+      gitignore: { type: 'boolean' },
+      yes: { type: 'boolean' },
       to: { type: 'string' },
       from: { type: 'string' },
       force: { type: 'boolean' },
@@ -233,6 +242,9 @@ async function run(command: string, raw: string[]) {
       {
         dryRun,
         ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
+        ...(args.values.exclude ? { exclude: args.values.exclude } : {}),
+        gitignore: args.values.gitignore ?? false,
+        yes: args.values.yes ?? false,
         log: (line) => process.stderr.write(`${line}\n`),
       },
     );
@@ -678,7 +690,12 @@ Commands:
   share list --drive ID
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
-  backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--dry-run]
+  backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--exclude GLOB]... [--gitignore] [--dry-run] [--yes]
+                                        Scans the folder first, then uploads. --gitignore skips paths the folder's .gitignore excludes.
+                                        --exclude GLOB matches the root-relative path: 'build/**' skips everything under build/,
+                                        '**/node_modules' skips node_modules at any depth, a bare 'node_modules' only the top-level one.
+                                        Over 5000 files or 1 GiB needs --yes (or preview with --dry-run). One backup per prefix at a time.
+  version                               Print the CLI version
   grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...   Seal this machine's drive key for the login showing CODE; the owner then approves it on /connect
   credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
                                         Back up the API key and drive keys (bundle "adcred1.…"). Offer 1Password first, then the clipboard (for Apple Passwords or another manager), then a file outside the repo
@@ -701,6 +718,8 @@ memory, never written to disk; its drives count as backed up).
 const ownArgs = name === 'capture' && raw.includes('--') ? raw.slice(0, raw.indexOf('--')) : raw;
 if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);
+} else if (name === 'version' || name === '--version') {
+  process.stdout.write(`${cliVersion}\n`);
 } else if (name === 'mcp') {
   runMcp().catch(() => {
     process.stderr.write('MCP server failed to start.\n');
