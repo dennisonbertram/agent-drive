@@ -40,6 +40,8 @@ export type VaultDeps = {
   inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
   /** "Keep this browser unlocked" store (IndexedDB in the app, a stub in tests). */
   persisted?: PersistedStore | undefined;
+  /** The currently signed-in user id; persisted keys written under another user are ignored. */
+  owner?: (() => string | null) | undefined;
   onLocked?: ((reason: LockReason) => void) | undefined;
   onChange?: (() => void) | undefined;
 };
@@ -203,6 +205,12 @@ export class Vault {
     if (!store || !record) return;
     const stored = await store.read().catch(() => null);
     if (!live() || !stored || stored.keyId !== record.id) return;
+    // A key written under a different signed-in user (or before owners existed) must not open
+    // this session's vault: drop it instead of installing it.
+    if ((stored.owner ?? null) !== (this.deps.owner?.() ?? null)) {
+      await store.clear().catch(() => {});
+      return;
+    }
     this.fetchingSlots = true;
     let slots: Map<string, AccountSlot>;
     try {
@@ -244,9 +252,15 @@ export class Vault {
     } finally {
       if (live()) this.fetchingSlots = false;
     }
+    // The identity check runs again right before the write: a sign-out or dialog cancel that
+    // happened during fetchSlots must not leave a key behind in IndexedDB.
+    if (!live()) return false;
     // The browser-held key must be committed before 'unlocked' is observable: a reload that
     // races the write would otherwise come back to a Locked vault (or a stale stored key).
-    if (persist) await this.deps.persisted?.write(record.id, privateKey).catch(() => {});
+    if (persist)
+      await this.deps.persisted
+        ?.write(record.id, privateKey, this.deps.owner?.() ?? null)
+        .catch(() => {});
     else await this.deps.persisted?.clear().catch(() => {});
     if (!live()) return false;
     this.privateKey = privateKey;
@@ -463,7 +477,9 @@ export class Vault {
     });
     if (!live()) return null;
     // Awaited before 'unlocked' is emitted, so the key is durable before a reload can see it.
-    await this.deps.persisted?.write(record.id, privateKey).catch(() => {});
+    await this.deps.persisted
+      ?.write(record.id, privateKey, this.deps.owner?.() ?? null)
+      .catch(() => {});
     if (!live()) return null;
     this.record = record;
     this.fingerprint = print;
@@ -561,10 +577,14 @@ export class Vault {
     this.deps.onLocked?.(reason);
   }
 
-  /** "Lock this browser": same as Lock, and also deletes the IndexedDB-held key. */
-  lockBrowser() {
+  /**
+   * "Lock this browser": deletes the IndexedDB-held key, then locks. The delete is awaited and
+   * its failure propagates — only then is the browser really locked, so the vault stays
+   * 'unlocked' when the key could not be removed.
+   */
+  async lockBrowser() {
+    await this.deps.persisted?.clear();
     this.lock('manual');
-    void this.deps.persisted?.clear().catch(() => {});
   }
 
   /** Unmount: drop account state, keeping the callbacks and the browser-held key. */

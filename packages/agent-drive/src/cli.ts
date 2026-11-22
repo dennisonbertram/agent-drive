@@ -27,14 +27,22 @@ import { installSkill, packagedSkillPath } from './skill.js';
 import {
   configPath,
   driveKeyEnvironmentName,
+  keysForOrigin,
   machineName,
   resolveLoginApiUrl,
   resolveDriveId,
   resolveConnection,
   resolveDriveKey,
   writeConfig,
+  type AgentDriveConfig,
 } from './config.js';
-import { autoSealHeldKeys, heldSealTargets, sealDrivesToAccount } from './account-seal.js';
+import {
+  autoSealHeldKeys,
+  heldSealTargets,
+  recordAgentOnlyDrive,
+  sealClientWithDeadline,
+  sealDrivesToAccount,
+} from './account-seal.js';
 import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
 import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
@@ -123,6 +131,35 @@ async function stdinText() {
   });
 }
 
+// Automatic sealing runs in the background with its own deadline-bounded client so it can never
+// delay or fail the command it piggybacks on. `done` waits on this set so tests can observe it.
+const pendingSeals = new Set<Promise<void>>();
+
+function sealInBackground(work: () => Promise<void>) {
+  const task = Promise.resolve()
+    .then(work)
+    .catch(() => {})
+    .finally(() => pendingSeals.delete(task));
+  pendingSeals.add(task);
+}
+
+/** Deadline-bounded sealing hook shared by connect/backup/create/key-change paths. */
+function sealHook(
+  connection: { apiUrl: string; apiKey: string; config: AgentDriveConfig },
+  opts: { driveIds?: string[]; force?: boolean; selectedDriveId?: string; keyFile?: string },
+) {
+  const seal = sealClientWithDeadline(connection.apiUrl, connection.apiKey, machineName());
+  sealInBackground(() =>
+    autoSealHeldKeys({
+      client: seal.client,
+      config: connection.config,
+      ...opts,
+      deadline: seal.deadline,
+      warn: (line) => process.stderr.write(`${line}\n`),
+    }),
+  );
+}
+
 async function connect(args: ReturnType<typeof parse>) {
   const connection = await resolveConnection();
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
@@ -144,10 +181,9 @@ async function connect(args: ReturnType<typeof parse>) {
   });
   // Throttled (24h/drive) account-key sealing on any command that loads a drive key.
   if (driveKey)
-    await autoSealHeldKeys({
-      client,
-      config: connection.config,
-      warn: (line) => process.stderr.write(`${line}\n`),
+    sealHook(connection, {
+      ...(drive ? { selectedDriveId: drive } : {}),
+      ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
     });
   return client;
 }
@@ -157,18 +193,18 @@ let missingDrive: string | undefined;
 let defaultDrive: string | undefined;
 
 /** Forced account-key seal after login/grant/import put drive keys on this machine. */
-async function sealAfterKeyChange() {
-  const config = await loadConfig();
-  if (!config.apiUrl || !config.apiKey) return;
-  await autoSealHeldKeys({
-    client: new AgentDriveClient({
-      apiUrl: config.apiUrl,
-      apiKey: config.apiKey,
-      machine: machineName(),
-    }),
-    config,
-    force: true,
-    warn: (line) => process.stderr.write(`${line}\n`),
+function sealAfterKeyChange() {
+  sealInBackground(async () => {
+    const config = await loadConfig();
+    if (!config.apiUrl || !config.apiKey) return;
+    const seal = sealClientWithDeadline(config.apiUrl, config.apiKey, machineName());
+    await autoSealHeldKeys({
+      client: seal.client,
+      config,
+      force: true,
+      deadline: seal.deadline,
+      warn: (line) => process.stderr.write(`${line}\n`),
+    });
   });
 }
 
@@ -230,7 +266,7 @@ async function run(command: string, raw: string[]) {
         log: (line) => process.stdout.write(`${line}\n`),
         openBrowser: shouldOpenBrowser(args.values['no-browser']),
       });
-      await sealAfterKeyChange();
+      sealAfterKeyChange();
       return;
     }
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
@@ -246,6 +282,12 @@ async function run(command: string, raw: string[]) {
     await reportEnvBackups(connection.apiUrl, connection.apiKey);
     const driveId = resolveDriveId(args.values.drive?.[0], connection.config, connection.apiUrl);
     const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    // Throttled account-key sealing, same as the generic connect() path (backup bypasses it).
+    if (key)
+      sealHook(connection, {
+        selectedDriveId: driveId,
+        ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
+      });
     const backupClient = new AgentDriveClient({
       apiUrl: connection.apiUrl,
       apiKey: connection.apiKey,
@@ -365,7 +407,7 @@ async function run(command: string, raw: string[]) {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
       const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
       process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
-      await sealAfterKeyChange();
+      sealAfterKeyChange();
       return;
     }
     if (sub === 'status') {
@@ -404,7 +446,7 @@ async function run(command: string, raw: string[]) {
       config: connection.config,
       log: (line) => process.stdout.write(`${line}\n`),
     });
-    await sealAfterKeyChange();
+    sealAfterKeyChange();
     return;
   }
   if (command === 'account' && args.positionals[0] === 'seal') {
@@ -415,8 +457,40 @@ async function run(command: string, raw: string[]) {
       machine: machineName(),
     });
     const driveIds = args.values.drive?.length ? args.values.drive : undefined;
-    const drives = (await client.listDrives()).items;
-    const targets = heldSealTargets(connection.config, drives, driveIds);
+    // Paginate fully. A key without `read` cannot list (403): named drives still seal through
+    // the slot endpoint's own checks plus this machine's agent-only list.
+    const flags = new Map<string, boolean>();
+    let listed: string[] | null = [];
+    try {
+      let cursor: string | undefined;
+      for (let page = 0; page < 50; page += 1) {
+        const res = await client.listDrives(undefined, cursor);
+        for (const drive of res.items ?? []) {
+          listed.push(drive.id);
+          flags.set(drive.id, drive.agentOnly === true);
+        }
+        if (!res.nextCursor) break;
+        cursor = res.nextCursor;
+      }
+    } catch (error) {
+      if (!(error instanceof AgentDriveApiError && error.status === 403)) throw error;
+      listed = null;
+    }
+    const candidates = driveIds ?? [
+      ...new Set([
+        ...Object.keys(keysForOrigin(connection.config, client.apiOrigin)),
+        ...(listed ?? []),
+      ]),
+    ];
+    const targets = await heldSealTargets({
+      config: connection.config,
+      origin: client.apiOrigin,
+      driveIds: candidates,
+      agentOnly: flags,
+      // With a single --drive, AGENT_DRIVE_KEY and --key-file resolve for it like commands do.
+      ...(driveIds?.length === 1 ? { selectedDriveId: driveIds[0] } : {}),
+      ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
+    });
     if (driveIds?.length) {
       const missing = driveIds.filter((id) => !targets.some((t) => t.driveId === id));
       if (missing.length)
@@ -489,13 +563,17 @@ async function run(command: string, raw: string[]) {
       limit(args.values.quota),
       args.values['agent-only'] ? true : undefined,
     );
+    // Agent-only is recorded locally at creation: seals skip this drive even if a later
+    // listing (or a caller without it) says otherwise.
+    if (drive.agentOnly === true) await recordAgentOnlyDrive(drive.id);
+    const connection = await resolveConnection();
     const saved = await loadConfig();
     const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
     if (drive.created) {
       const key = generateDriveKey();
       await writeConfig({
         driveKeys: { [drive.id]: key },
-        driveKeyOrigins: { [drive.id]: new URL((await resolveConnection()).apiUrl).origin },
+        driveKeyOrigins: { [drive.id]: new URL(connection.apiUrl).origin },
       });
       output(drive);
       process.stderr.write(`${createdDriveNote(configPath())}\n${BACKUP_HINT}\n`);
@@ -506,13 +584,15 @@ async function run(command: string, raw: string[]) {
         );
       output(drive);
     }
-    await autoSealHeldKeys({
-      client,
-      config: await loadConfig(),
-      driveIds: [drive.id],
-      force: true,
-      warn: (line) => process.stderr.write(`${line}\n`),
-    });
+    // Reloaded after the write above so the seal sees the just-created key.
+    sealHook(
+      { ...connection, config: await loadConfig() },
+      {
+        driveIds: [drive.id],
+        force: true,
+        selectedDriveId: drive.id,
+      },
+    );
     return;
   }
   if (command === 'key' && args.positionals[0] === 'create') {
@@ -781,14 +861,16 @@ if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help'))
     process.exitCode = 1;
   });
 } else {
-  done = run(name, raw).catch((error: unknown) => {
-    if (error instanceof AgentDriveApiError) {
-      process.stderr.write(`${apiErrorLines(error).join('\n')}\n`);
-    } else {
-      process.stderr.write(`${error instanceof Error ? error.message : 'Command failed.'}\n`);
-    }
-    process.exitCode = 1;
-  });
+  done = run(name, raw)
+    .catch((error: unknown) => {
+      if (error instanceof AgentDriveApiError) {
+        process.stderr.write(`${apiErrorLines(error).join('\n')}\n`);
+      } else {
+        process.stderr.write(`${error instanceof Error ? error.message : 'Command failed.'}\n`);
+      }
+      process.exitCode = 1;
+    })
+    .then(() => Promise.allSettled([...pendingSeals]).then(() => undefined));
 }
 // Exported so in-process tests can await a command's full lifecycle (including best-effort
 // side effects like account sealing) instead of racing its first output line.

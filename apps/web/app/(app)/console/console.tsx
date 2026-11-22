@@ -405,8 +405,7 @@ function SortHeader({
 const IDLE_MESSAGE = 'Locked after 30 minutes without use. Enter your passphrase to continue.';
 const NOT_IN_ACCOUNT =
   'Load this drive’s recovery file to open it. We’ll try to save its key for passphrase unlock.';
-const MISMATCH =
-  'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
+const MISMATCH = 'This drive’s account copy is invalid — load its recovery file to repair it.';
 const AGENT_ONLY = 'Agent-only: open with a recovery file.';
 const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
 function useClerkIdentity() {
@@ -427,6 +426,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // clerkEnabled is constant for the life of the deployment, so the hook order never changes.
   const useIdentity = clerkEnabled ? useClerkIdentity : useNoIdentity;
   const identity = useIdentity();
+  // The vault reads the current user id through this ref, so a mid-load identity change is seen.
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
   const useWrap = (clerkEnabled ? useReverification : passThrough) as typeof passThrough;
   const strictRequest = useWrap(vaultRequest);
   const strictRef = useRef(strictRequest);
@@ -457,6 +459,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         inbox: async (driveId) =>
           (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
         persisted: persistedAccountKey,
+        owner: () => identityRef.current.userId,
         onLocked: (reason) => lockedRef.current(reason),
         onChange: () => bumpVault(),
       }),
@@ -1189,6 +1192,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         ),
       };
     const agentOnly = drives.find((item) => item.id === driveId)?.agentOnly === true;
+    let invalid = false;
     if (vault.status === 'unlocked' && vault.hasSlot(driveId) && !agentOnly) {
       const mark = actionEpoch.current;
       const epoch = vault.epochNow;
@@ -1199,10 +1203,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         keySources.current.set(driveId, 'vault');
         return { key, source: 'vault' };
       }
+      // The slot exists but could not be opened with the account key: a recovery file repairs it.
+      invalid = true;
     }
     actionEpoch.current += 1;
     setPendingAction({ driveId, kind: 'webhook' });
-    setRecoveryNote(agentOnly ? AGENT_ONLY : vault.status === 'unlocked' ? NOT_IN_ACCOUNT : '');
+    setRecoveryNote(
+      agentOnly
+        ? AGENT_ONLY
+        : invalid
+          ? MISMATCH
+          : vault.status === 'unlocked'
+            ? NOT_IN_ACCOUNT
+            : '',
+    );
     setUnlockMode(vault.status === 'locked' && !agentOnly ? 'passphrase' : 'recovery');
     open('unlock');
     return undefined;
@@ -1622,10 +1636,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       const result = await vault.setup(
         passphrase,
         Object.fromEntries(
-          Object.entries(driveKeys).map(([id, key]) => [
-            id,
-            { key, trusted: trustedDrives.current.get(id) === key },
-          ]),
+          Object.entries(driveKeys)
+            // Agent-only drives never get a slot, including via passphrase setup.
+            .filter(([id]) => drives.find((item) => item.id === id)?.agentOnly !== true)
+            .map(([id, key]) => [id, { key, trusted: trustedDrives.current.get(id) === key }]),
         ),
       );
       if (!result) return '';
@@ -2114,7 +2128,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 onSetup: () => openVaultDialog('setup'),
                                 onUnlock: () => openVaultDialog('passphrase'),
                                 onLock: () => vault.lock('manual'),
-                                onLockBrowser: () => vault.lockBrowser(),
+                                onLockBrowser: () => {
+                                  void vault
+                                    .lockBrowser()
+                                    .catch(() =>
+                                      setNotice(
+                                        'The stored key could not be removed; clear this browser’s site data to finish locking it.',
+                                      ),
+                                    );
+                                },
                                 onChange: () => openVaultDialog('change'),
                                 onReset: () => openVaultDialog('reset'),
                                 onRetry: retryVault,

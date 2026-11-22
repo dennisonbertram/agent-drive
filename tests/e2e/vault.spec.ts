@@ -143,35 +143,13 @@ const settle = (page: Page) =>
   );
 const dialogPassphrase = (page: Page) => page.getByLabel('Passphrase', { exact: true });
 
-// "Lock this browser" deletes the IndexedDB record asynchronously; wait until it is gone before
-// a reload so the page never sees a half-applied clear.
-async function persistedCleared(page: Page) {
-  await page.waitForFunction(async () => {
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      // Open exactly like the app does so this never creates a store-less database.
-      const open = indexedDB.open('agent-drive', 1);
-      open.onupgradeneeded = () => open.result.createObjectStore('console');
-      open.onsuccess = () => resolve(open.result);
-      open.onerror = () => reject(open.error);
-    });
-    try {
-      return await new Promise<boolean>((resolve, reject) => {
-        const get = db.transaction('console').objectStore('console').get('account-private-key');
-        get.onsuccess = () => resolve(get.result === undefined);
-        get.onerror = () => reject(get.error);
-      });
-    } finally {
-      db.close();
-    }
-  });
-}
-
-// "Lock this browser" from the key menu, then wait for the IndexedDB clear to land.
+// "Lock this browser" from the key menu. The vault only shows Locked once the IndexedDB
+// delete has committed, so the chip flipping is the wait — no separate IndexedDB poll.
 async function lockBrowser(page: Page) {
   await (await openMenu(page))
     .getByRole('button', { name: 'Lock this browser', exact: true })
     .click();
-  await persistedCleared(page);
+  await expect(chip(page)).toContainText('Locked');
 }
 
 // Loads drive A's key from its recovery file, then sets up a generated passphrase.
@@ -294,11 +272,26 @@ test('passphrase setup, reload, unlock, preview and download without the recover
           open.onerror = () => rejectDb(open.error);
         });
         try {
-          return await new Promise<unknown>((resolveGet, rejectGet) => {
+          const record = await new Promise<unknown>((resolveGet, rejectGet) => {
             const get = db.transaction('console').objectStore('console').get('account-private-key');
             get.onsuccess = () => resolveGet(get.result);
             get.onerror = () => rejectGet(get.error);
           });
+          if (!record || typeof record !== 'object') return null;
+          const { keyId, owner, key } = record as {
+            keyId?: unknown;
+            owner?: unknown;
+            key?: CryptoKey;
+          };
+          // A CryptoKey cannot cross evaluate's serialization, so its properties are read here
+          // in the page and returned as plain values.
+          return {
+            keyId,
+            owner: owner ?? null,
+            extractable: key?.extractable ?? null,
+            algorithm: key ? { ...key.algorithm } : null,
+            usages: key ? [...key.usages] : null,
+          };
         } finally {
           db.close();
         }
@@ -306,12 +299,18 @@ test('passphrase setup, reload, unlock, preview and download without the recover
     }));
     expect(stored.session).toEqual([]);
     expect(stored.databases).toEqual(['agent-drive']);
-    const persisted = stored.persisted as { keyId?: unknown; key?: CryptoKey } | undefined;
+    const persisted = stored.persisted as {
+      keyId?: unknown;
+      owner?: unknown;
+      extractable?: unknown;
+      algorithm?: unknown;
+      usages?: unknown;
+    } | null;
     expect(typeof persisted?.keyId).toBe('string');
     // The stored CryptoKey stays non-extractable and ECDH-only.
-    expect(persisted?.key?.extractable).toBe(false);
-    expect(persisted?.key?.algorithm).toMatchObject({ name: 'ECDH' });
-    expect(persisted?.key?.usages).toEqual(['deriveBits']);
+    expect(persisted?.extractable).toBe(false);
+    expect(persisted?.algorithm).toMatchObject({ name: 'ECDH' });
+    expect(persisted?.usages).toEqual(['deriveBits']);
     expect(stored.local.map(([name]) => name)).not.toContain(seeded.a.key);
     const everything = [...sent, ...logged, JSON.stringify(stored)];
     const secrets = [

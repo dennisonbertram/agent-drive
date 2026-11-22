@@ -46,7 +46,9 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
       const path = new URL(String(url)).pathname.replace('/api/v1/', '');
       paths.push(path);
       queries.push(new URL(String(url)).search);
-      return new Response(JSON.stringify(respond(path)), {
+      // A test that does not answer account-key gets "no key": the throttled seal stays silent.
+      const body = path === 'account-key' ? { accountKey: null } : respond(path);
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -140,8 +142,8 @@ describe('drive default at the command level', () => {
     expect(both.err).toContain('either --folder or --prefix');
     const bad = await cli(['ls', '--sort', 'size'], one);
     expect(bad.err).toContain('--sort must be path or modified');
-    // Only the throttled account-seal drive listing may have gone out.
-    expect(bad.paths).toEqual(['drives']);
+    // Only the throttled account-seal traffic may have gone out — never the ls list request.
+    expect(bad.paths.every((p) => !p.includes('/list'))).toBe(true);
   });
 
   it('versions hides wrapped keys too', async () => {

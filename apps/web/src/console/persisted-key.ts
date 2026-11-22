@@ -2,15 +2,18 @@
 // CryptoKey. Structured cloning stores the key handle, not bytes — extractable stays false, so the
 // key can only ever be used for ECDH deriveBits in this browser, never exported. Never a string,
 // never localStorage.
+//
+// `owner` is the signed-in user id the key belongs to: a record written under another user is
+// cleared on sight, so a new sign-in in this browser never inherits the previous user's key.
 
 const DB_NAME = 'agent-drive';
 const STORE = 'console';
 const RECORD = 'account-private-key';
 
-export type PersistedAccountKey = { keyId: string; key: CryptoKey };
+export type PersistedAccountKey = { keyId: string; owner?: string | null; key: CryptoKey };
 export type PersistedStore = {
   read: () => Promise<PersistedAccountKey | null>;
-  write: (keyId: string, key: CryptoKey) => Promise<void>;
+  write: (keyId: string, key: CryptoKey, owner?: string | null) => Promise<void>;
   clear: () => Promise<void>;
 };
 
@@ -40,7 +43,8 @@ async function read(): Promise<PersistedAccountKey | null> {
       !(value as { key?: unknown }).key
     )
       return null;
-    return value as PersistedAccountKey;
+    const record = value as PersistedAccountKey;
+    return { ...record, owner: typeof record.owner === 'string' ? record.owner : null };
   } finally {
     db.close();
   }
@@ -48,12 +52,12 @@ async function read(): Promise<PersistedAccountKey | null> {
 
 // Resolves on tx.oncomplete, not request.onsuccess: a reload between them would roll the write
 // back, so callers can rely on the promise meaning "committed", not "queued".
-async function write(keyId: string, key: CryptoKey) {
+async function write(keyId: string, key: CryptoKey, owner: string | null) {
   const db = await openDb();
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put({ keyId, key }, RECORD);
+      tx.objectStore(STORE).put({ keyId, owner, key }, RECORD);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -78,18 +82,19 @@ async function clear() {
   }
 }
 
-/** The real IndexedDB store; unavailable (or denied) browsers behave as {read→null, write→noop}. */
+// The real IndexedDB store. read/write swallow errors (the feature degrades to "ask again"),
+// but clear propagates: "Lock this browser" and the sign-out guard must know the delete landed.
 export const persistedAccountKey: PersistedStore = {
   read: () => {
     if (typeof indexedDB === 'undefined') return Promise.resolve(null);
     return read().catch(() => null);
   },
-  write: (keyId, key) => {
+  write: (keyId, key, owner) => {
     if (typeof indexedDB === 'undefined') return Promise.resolve();
-    return write(keyId, key).catch(() => {});
+    return write(keyId, key, owner ?? null).catch(() => {});
   },
   clear: () => {
     if (typeof indexedDB === 'undefined') return Promise.resolve();
-    return clear().catch(() => {});
+    return clear();
   },
 };

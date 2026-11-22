@@ -12,6 +12,7 @@ import zlib from 'node:zlib';
 import { codexOverride, codexProviderFlags } from './capture-codex.js';
 import { Drainer, Spool, SpoolFullError } from './capture-spool.js';
 import { AgentDriveClient } from './client.js';
+import { autoSealHeldKeys, sealClientWithDeadline } from './account-seal.js';
 import {
   configPath,
   machineName,
@@ -555,6 +556,16 @@ export async function runCapture(input: { command: string[]; agent?: string; dri
       apiKey: connection.apiKey,
       machine: machineName(),
       driveKey,
+    });
+    // Throttled account-key sealing on the capture path too; background, so the wrapped
+    // command never waits on it.
+    const seal = sealClientWithDeadline(connection.apiUrl, connection.apiKey, machineName());
+    void autoSealHeldKeys({
+      client: seal.client,
+      config: connection.config,
+      selectedDriveId: driveId,
+      deadline: seal.deadline,
+      warn: log,
     });
     const spool = await Spool.open(join(`${configPath()}.state`, 'capture', driveId));
     const drainer = new Drainer(spool, client, driveId, { log });

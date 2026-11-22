@@ -153,6 +153,32 @@ describe('bearer POST /drives/:id/account-key-slot', () => {
     expect(denied.status).toBe(403);
   });
 
+  it('accepts manage on the account as an alternative to write on the drive', async () => {
+    // Creator/manage-scoped keys seal drives they created even when the drive is absent from
+    // the key's drive_ids (a manage key is not drive-scoped at all).
+    const f = await fixture({ scopes: ['manage'] });
+    const keyId = await createAccountKey(f.accountId);
+    const unscoped = (
+      await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id', [
+        f.accountId,
+        `drive-${randomUUID()}`,
+      ])
+    ).rows[0].id as string;
+    const res = await request(`/drives/${unscoped}/account-key-slot`, f.token, 'POST', {
+      keyId,
+      sealed: sealedSlot(),
+    });
+    expect(res.status).toBe(201);
+    // And a write-scoped key still seals the drive it can write.
+    const w = await fixture({ scopes: ['write'] });
+    const wKey = await createAccountKey(w.accountId);
+    const ok = await request(`/drives/${w.driveIds[0]}/account-key-slot`, w.token, 'POST', {
+      keyId: wKey,
+      sealed: sealedSlot(),
+    });
+    expect(ok.status).toBe(201);
+  });
+
   it('rejects agent-only drives, stale key ids, missing keys, and bad bodies', async () => {
     const agentOnly = await fixture({ scopes: ['write'], agentOnly: true });
     const keyId = await createAccountKey(agentOnly.accountId);

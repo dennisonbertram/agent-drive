@@ -742,7 +742,8 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     method === 'POST'
   ) {
     const driveId = uuid(parts[1], 'drive id');
-    need(auth, 'write', driveId);
+    // A manage-scoped key creates drives, so it can seal them too; otherwise write on the drive.
+    if (!auth.scopes.includes('manage')) need(auth, 'write', driveId);
     const body = await jsonBody(request);
     onlyFields(body, ['keyId', 'sealed']);
     const keyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
