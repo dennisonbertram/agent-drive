@@ -44,6 +44,8 @@ const LABELS: Record<string, string> = {
   'console.account_key.slots': 'Listed drives added to the passphrase',
   'console.drive.account_key.put': 'Added a drive to the passphrase',
   'console.drive.account_key.delete': 'Removed a drive from the passphrase',
+  'account_key.read': 'Read the account public key',
+  'drive.account_key_slot.put': 'Added a drive to the passphrase',
   'console.drive.trace_inbox.create': 'Set up the trace inbox',
   'console.drive.webhook_token.read': 'Viewed the webhook token',
   'console.drive.webhook_token.create': 'Created a webhook token',

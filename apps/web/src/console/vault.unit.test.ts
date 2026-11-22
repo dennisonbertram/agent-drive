@@ -10,8 +10,15 @@ import {
   sealFileKeyToInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
-import { createAccountKey, sealToAccount, type AccountKeyRecord } from './account-key';
-import { Vault, vaultRequest, type LockReason } from './vault';
+import {
+  createAccountKey,
+  sealToAccount,
+  unlockAccountKey,
+  type AccountKeyRecord,
+} from './account-key';
+import type { PersistedStore } from './persisted-key';
+import { sealDriveKey } from '../device/seal';
+import { BROWSER_KEY_DELETE_FAILED, Vault, vaultRequest, type LockReason } from './vault';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 const OTHER_ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -65,6 +72,12 @@ function makeVault(
   envelopeOf: () => Promise<string> = async () => envelope,
   anyPath: () => Promise<string | undefined> = async () => '/a.txt',
   inbox: () => Promise<TraceInboxRecord | null> = async () => null,
+  persisted?: PersistedStore,
+  owner?: () => string | null,
+  extra?: {
+    peers?: { notify: () => void; subscribe: (onLock: () => void) => void };
+    onNotice?: (line: string) => void;
+  },
 ) {
   const locked: LockReason[] = [];
   const calls: { path: string; method: string; body: unknown }[] = [];
@@ -81,7 +94,11 @@ function makeVault(
     envelope: envelopeCalls,
     anyPath,
     inbox,
+    persisted,
+    owner,
     onLocked: (reason) => locked.push(reason),
+    peers: extra?.peers,
+    onNotice: extra?.onNotice,
   });
   return { vault, locked, calls, envelopeCalls };
 }
@@ -408,6 +425,45 @@ describe('Vault', () => {
     expect(await wrongFile.vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('skipped');
   }, 60_000);
 
+  it('replaces a slot the account key cannot open at all (squatted or corrupt)', async () => {
+    // A squatter's slot is well-formed but sealed to a foreign key: `current` unseals to
+    // null and the verified recovery key still replaces it at its revision.
+    const foreign = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ]);
+    const foreignPublic = btoa(
+      String.fromCharCode(
+        ...new Uint8Array(await crypto.subtle.exportKey('raw', foreign.publicKey)),
+      ),
+    )
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replace(/=+$/u, '');
+    const corruptSlot = {
+      driveId: DRIVE,
+      keyId: record.id,
+      format: 1,
+      revision: 4,
+      sealed: await sealDriveKey(foreignPublic, DRIVE, driveKey, {
+        salt: 'agent-drive-account-v1',
+        label: `${record.id}:${DRIVE}`,
+      }),
+    };
+    const posts: unknown[] = [];
+    const routes = {
+      ...base(corruptSlot),
+      [`drives/${DRIVE}/account-key`]: (_m: string, body: unknown) => {
+        posts.push(body);
+        return { revision: 9 };
+      },
+    };
+    const { vault } = makeVault(routes);
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(await vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('added');
+    expect(posts[0]).toMatchObject({ keyId: record.id, expectedRevision: 4 });
+  }, 30_000);
+
   it('locks when the server says the passphrase changed elsewhere', async () => {
     const routes = {
       ...base(),
@@ -522,6 +578,431 @@ describe('Vault setup', () => {
     expect(delayed.vault.status).toBe('none');
     expect(delayed.vault.slotCount).toBe(0);
     expect(delayed.calls.filter((call) => call.path.startsWith('drives/'))).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('browser-held key', () => {
+  const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
+    read: async () => null,
+    readLockGeneration: async () => 0,
+    write: async () => true,
+    clear: async () => {},
+    ...over,
+  });
+
+  it('reports unlocked only after the persisted write has resolved', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE, true);
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    write.resolve();
+    expect(await unlocking).toBe(true);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('clears the stored key when Keep unlocked is off, before reporting unlocked', async () => {
+    const clear = deferred<void>();
+    let cleared = 0;
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          cleared += 1;
+          await clear.promise;
+        },
+      }),
+    );
+    await vault.load();
+    const unlocking = vault.unlock(PASSPHRASE, false);
+    await vi.waitFor(() => expect(cleared).toBe(1), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    clear.resolve();
+    expect(await unlocking).toBe(true);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('drops a stored key owned by another user instead of installing it', async () => {
+    let cleared = 0;
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        read: async () => ({
+          keyId: record.id,
+          owner: 'user_b_previous',
+          key: {} as CryptoKey,
+        }),
+        clear: async () => {
+          cleared += 1;
+        },
+      }),
+      () => 'user_a_current',
+    );
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    expect(cleared).toBe(1);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+
+  it('restores a stored key owned by the signed-in user without a passphrase', async () => {
+    const privateKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({ read: async () => ({ keyId: record.id, owner: 'user_a_current', key: privateKey }) }),
+      () => 'user_a_current',
+    );
+    await vault.load();
+    expect(vault.status).toBe('unlocked');
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+  }, 30_000);
+
+  it('does not write the browser key when unlock is cancelled during the slot fetch', async () => {
+    const gate = deferred<unknown>();
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      { ...base(), 'account-key/slots': () => gate.promise },
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    const pending = vault.unlock(PASSPHRASE, true);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    vault.cancelUnlock();
+    gate.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await pending).toBe(false);
+    expect(writes).toEqual([]);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('surfaces a failed delete from Lock this browser and stays unlocked', async () => {
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          throw new Error('IDB unavailable');
+        },
+      }),
+    );
+    await vault.load();
+    // persist=true: the write path degrades softly, so the vault still unlocks.
+    await vault.unlock(PASSPHRASE, true);
+    await expect(vault.lockBrowser()).rejects.toThrow('IDB unavailable');
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('a committed browser write is deleted when the unlock is cancelled after it', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const clears: unknown[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+        clear: async (match) => {
+          clears.push(match ?? null);
+        },
+      }),
+    );
+    await vault.load();
+    const pending = vault.unlock(PASSPHRASE, true);
+    // The write has started; release it, then cancel before the vault's continuation runs.
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    expect(await pending).toBe(false);
+    // The committed write is removed — by this unlock's own {keyId, startedAt} match.
+    expect(clears).toEqual([{ keyId: record.id, startedAt: expect.any(Number) }]);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('unchecking Keep this browser unlocked surfaces a failed delete', async () => {
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          throw new Error('IDB unavailable');
+        },
+      }),
+    );
+    await vault.load();
+    await expect(vault.unlock(PASSPHRASE, false)).rejects.toThrow('IDB unavailable');
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('setup deletes a committed browser write when cancelled after it', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const clears: unknown[] = [];
+    const { vault } = makeVault(
+      {
+        whoami: () => ({ accountId: ACCOUNT }),
+        'account-key': () => ({ accountKey: null }),
+        'drives/': () => ({ revision: 1 }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+        clear: async (match) => {
+          clears.push(match ?? null);
+        },
+      }),
+    );
+    await vault.load();
+    const pending = vault.setup(PASSPHRASE, {});
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    expect(await pending).toBeNull();
+    expect(clears).toEqual([{ keyId: expect.any(String), startedAt: expect.any(Number) }]);
+    expect(vault.status).toBe('none');
+  }, 30_000);
+
+  it('repairs a slot it cannot open at the row revision the server has', async () => {
+    // A slot row this build cannot parse keeps its revision, so the repair write replaces it
+    // (expectedRevision) instead of inserting a second row that can never win.
+    const unopenable = {
+      driveId: DRIVE,
+      keyId: record.id,
+      format: 1,
+      revision: 7,
+      sealed: 'not-a-sealed-payload',
+    };
+    const posts: unknown[] = [];
+    const routes = {
+      ...base(unopenable),
+      [`drives/${DRIVE}/account-key`]: (_m: string, body: unknown) => {
+        posts.push(body);
+        return { revision: 8 };
+      },
+    };
+    const { vault } = makeVault(routes);
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    expect(await vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('added');
+    expect(posts[0]).toMatchObject({ keyId: record.id, expectedRevision: 7 });
+  }, 30_000);
+
+  it('setup commits the browser key before reporting unlocked', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      {
+        whoami: () => ({ accountId: ACCOUNT }),
+        'account-key': () => ({ accountKey: null }),
+        'drives/': () => ({ revision: 1 }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    const setting = vault.setup(PASSPHRASE, {});
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 10_000 });
+    expect(vault.status).not.toBe('unlocked');
+    write.resolve();
+    expect(await setting).toEqual({ added: 0, total: 0 });
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('restores the stored non-extractable key and it still satisfies deriveBits', async () => {
+    const storedKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    expect(storedKey.extractable).toBe(false);
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({ read: async () => ({ keyId: record.id, key: storedKey }) }),
+    );
+    await vault.load();
+    expect(vault.status).toBe('unlocked');
+    // keyFor unseals the slot with ECDH deriveBits on the restored key.
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+  }, 30_000);
+
+  it('ignores a stored key that belongs to another account key', async () => {
+    const storedKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        read: async () => ({
+          keyId: '55555555-5555-4555-8555-555555555555',
+          key: storedKey,
+        }),
+      }),
+    );
+    await vault.load();
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('writes under the lock generation snapshot taken when the unlock started', async () => {
+    const writes: { generation: number; startedAt: number | undefined }[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        readLockGeneration: async () => 7,
+        write: async (_keyId, _key, _owner, generation, startedAt) => {
+          writes.push({ generation, startedAt });
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    expect(await vault.unlock(PASSPHRASE, true)).toBe(true);
+    // The write carries the pre-unlock counter so a cross-tab lock can refuse it.
+    expect(writes).toEqual([{ generation: 7, startedAt: expect.any(Number) }]);
+  }, 30_000);
+
+  it('drops its in-memory key when another tab locks the browser', async () => {
+    let peerLock: (() => void) | undefined;
+    const { vault, locked } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        peers: {
+          notify: () => {},
+          subscribe: (onLock) => {
+            peerLock = onLock;
+          },
+        },
+      },
+    );
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.status).toBe('unlocked');
+    peerLock!();
+    expect(vault.status).toBe('locked');
+    expect(locked).toEqual(['manual']);
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'none' });
+  }, 30_000);
+
+  it('Lock this browser deletes the key, tells the other tabs, then locks', async () => {
+    const events: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          events.push('clear');
+        },
+      }),
+      undefined,
+      {
+        peers: {
+          notify: () => {
+            events.push('notify');
+          },
+          subscribe: () => {},
+        },
+      },
+    );
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    events.length = 0; // unlock with the box unchecked clears any stored key first
+    await vault.lockBrowser();
+    expect(events).toEqual(['clear', 'notify']);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('surfaces the notice when a cancelled unlock’s cleanup delete fails', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const notices: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+        clear: async () => {
+          throw new Error('IDB unavailable');
+        },
+      }),
+      undefined,
+      { onNotice: (line) => notices.push(line) },
+    );
+    await vault.load();
+    const pending = vault.unlock(PASSPHRASE, true);
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    // Still reports "cancelled" — but the leftover key is not silent anymore.
+    expect(await pending).toBe(false);
+    expect(notices).toEqual([BROWSER_KEY_DELETE_FAILED]);
   }, 30_000);
 });
 

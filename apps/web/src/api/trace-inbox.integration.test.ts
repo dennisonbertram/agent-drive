@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -16,7 +16,12 @@ const accountIds: string[] = [];
 const userIds: string[] = [];
 
 const b64 = (bytes: Buffer) => bytes.toString('base64url');
-const point = () => b64(Buffer.concat([Buffer.from([4]), randomBytes(64)]));
+// A real P-256 public point (uncompressed, 65 bytes): the API rejects off-curve values.
+const point = () => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return b64(ecdh.getPublicKey());
+};
 const wrapped = () => b64(Buffer.concat([Buffer.from([1]), randomBytes(12 + 16 + 48)]));
 const inboxBody = () => ({ keyId: randomUUID(), publicKey: point(), wrappedPrivateKey: wrapped() });
 const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex');

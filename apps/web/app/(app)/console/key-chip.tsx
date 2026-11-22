@@ -16,6 +16,7 @@ export function KeyChip({
   busy,
   vault,
   fingerprint,
+  agentOnly,
   vaultActions,
 }: {
   hasKey: boolean;
@@ -29,10 +30,12 @@ export function KeyChip({
   busy: boolean;
   vault: VaultStatus;
   fingerprint: string;
+  agentOnly?: boolean;
   vaultActions: {
     onSetup: () => void;
     onUnlock: () => void;
     onLock: () => void;
+    onLockBrowser: () => void;
     onChange: () => void;
     onReset: () => void;
     onRetry: () => void;
@@ -94,7 +97,9 @@ export function KeyChip({
         <p>
           {hasKey
             ? 'Key loaded in this tab.'
-            : 'Key not loaded. Downloads ask for your recovery file.'}
+            : agentOnly
+              ? 'Agent-only: open with a recovery file.'
+              : 'Key not loaded. Downloads ask for your recovery file.'}
         </p>
       )}
       <p>
@@ -176,6 +181,19 @@ export function KeyChip({
           }}
         >
           Lock
+        </button>
+      )}
+      {vault === 'unlocked' && (
+        <button
+          type="button"
+          className="button secondary"
+          data-testid="lock-browser"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onLockBrowser();
+          }}
+        >
+          Lock this browser
         </button>
       )}
       {vault === 'unlocked' && (

@@ -149,6 +149,9 @@ export async function loadConfig(): Promise<AgentDriveConfig> {
     driveKeys,
     driveKeyOrigins: { ...bundle.driveKeyOrigins, ...saved.driveKeyOrigins },
     keyBackup,
+    // Pins were read from config.json by the first version of auto-sealing; keep the legacy
+    // read as a fallback. New pins only ever live in `<config>.state/account-seal.json`.
+    ...(saved.accountKeyPins ? { accountKeyPins: saved.accountKeyPins } : {}),
   };
 }
 

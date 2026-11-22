@@ -96,7 +96,11 @@ export type Drive = {
   quota_bytes: number;
   created_at: string;
   created?: boolean;
+  agentOnly?: boolean;
 };
+
+/** The account's public key for sealing drive keys to the owner; null until a passphrase is set. */
+export type AccountPublicKey = { keyId: string; publicKey: string; format: number };
 
 export type Agent = { id: string; name: string; created_at: string };
 
@@ -406,9 +410,39 @@ export class AgentDriveClient {
     return this.request<Agent>('agents', { method: 'POST', body: JSON.stringify({ name }) });
   }
 
-  async createDrive(name: string, quotaBytes?: number) {
-    const body = quotaBytes === undefined ? { name } : { name, quotaBytes };
+  async createDrive(name: string, quotaBytes?: number, agentOnly?: boolean) {
+    const body = {
+      name,
+      ...(quotaBytes === undefined ? {} : { quotaBytes }),
+      ...(agentOnly === undefined ? {} : { agentOnly }),
+    };
     return this.request<Drive>('drives', { method: 'POST', body: JSON.stringify(body) });
+  }
+
+  /** The owner's account public key (sealed-slot target), or null when no passphrase is set up. */
+  async accountKey(): Promise<AccountPublicKey | null> {
+    const result = await this.request<
+      { keyId?: string; publicKey?: string; format?: number } & { accountKey?: unknown }
+    >('account-key');
+    if (result.accountKey === null) return null;
+    if (
+      typeof result.keyId !== 'string' ||
+      typeof result.publicKey !== 'string' ||
+      typeof result.format !== 'number'
+    )
+      throw new AgentDriveApiError('internal_error', 500, 'The account key response is invalid.');
+    return { keyId: result.keyId, publicKey: result.publicKey, format: result.format };
+  }
+
+  /** Idempotent: 201 {status:'created'} or 200 {status:'exists'} when a slot is already stored. */
+  async addAccountKeySlot(
+    driveId: string,
+    body: { keyId: string; sealed: SealedDriveKey },
+  ): Promise<{ status: 'created' | 'exists'; revision?: number }> {
+    return this.request<{ status: 'created' | 'exists'; revision?: number }>(
+      `drives/${encode(driveId)}/account-key-slot`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
   }
 
   async createKey(

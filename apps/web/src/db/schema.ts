@@ -85,6 +85,7 @@ export const drives = pgTable(
     quotaBytes: bigint('quota_bytes', { mode: 'number' })
       .notNull()
       .default(Number.MAX_SAFE_INTEGER),
+    agentOnly: boolean('agent_only').notNull().default(false),
     deletingAt: timestamp('deleting_at', { withTimezone: true, mode: 'date' }),
     keyBackupAt: timestamp('key_backup_at', { withTimezone: true, mode: 'date' }),
     keyBackupMethod: text('key_backup_method'),

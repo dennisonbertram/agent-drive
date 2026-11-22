@@ -18,7 +18,7 @@ export type VaultActions = {
   onRetry: () => void;
   /** True when a passphrase exists for this account, so recovery mode can offer it. */
   hasVault: boolean;
-  onUnlock: (passphrase: string) => Promise<string>;
+  onUnlock: (passphrase: string, keepUnlocked: boolean) => Promise<string>;
   onSetup: (_old: string, passphrase: string) => Promise<string>;
   onChange: (oldPassphrase: string, newPassphrase: string) => Promise<string>;
   onReset: () => Promise<string>;

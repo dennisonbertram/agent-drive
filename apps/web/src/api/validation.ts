@@ -1,3 +1,4 @@
+import { createPublicKey } from 'node:crypto';
 import { ApiError } from './errors';
 
 export const MAX_BODY_BYTES = 256 * 1024;
@@ -327,11 +328,27 @@ export function onlyFields(body: Record<string, unknown>, allowed: string[], nam
     throw new ApiError('validation_error', `Unknown field in ${name}: ${unknown.slice(0, 64)}.`);
 }
 
-/** A raw uncompressed P-256 point: 65 bytes starting with 0x04 (not checked to be on the curve). */
+/**
+ * A raw uncompressed P-256 point: 65 bytes starting with 0x04, and really on the curve — the
+ * browser's WebCrypto import enforces the same, so an off-curve point could never be opened.
+ */
 export function ecPointField(value: unknown, name: string): string {
   const bytes = canonicalBytes(value, name);
   if (bytes.length !== 65 || bytes[0] !== 4)
     throw new ApiError('validation_error', `${name} must be a 65-byte uncompressed point.`);
+  try {
+    createPublicKey({
+      key: {
+        kty: 'EC',
+        crv: 'P-256',
+        x: bytes.subarray(1, 33).toString('base64url'),
+        y: bytes.subarray(33, 65).toString('base64url'),
+      },
+      format: 'jwk',
+    });
+  } catch {
+    throw new ApiError('validation_error', `${name} must be a valid P-256 point.`);
+  }
   return value as string;
 }
 

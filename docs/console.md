@@ -6,7 +6,7 @@ This page helps you use the console, the signed-in web app, to browse files, unl
 
 The side menu has these sections: Files, Agents, API keys, Usage, Trash, Billing & limits, and Activity & deletion.
 
-Files lists the files in the selected drive. Use the drive menu at the top to switch drives or copy a drive ID. To create a drive in the browser, use New drive in that menu. The browser makes the drive key and offers a recovery file to download. Save it in a password manager, then click "I saved it". Nobody can recover the drive key for you.
+Files lists the files in the selected drive. Use the drive menu at the top to switch drives or copy a drive ID. To create a drive in the browser, use New drive in that menu. The browser makes the drive key and offers a recovery file to download. Save it in a password manager, then click "I saved it". Nobody can recover the drive key for you. Tick "Agent-only" on New drive to keep the drive out of passphrase unlock entirely: its key is never sealed to your account, the console always asks for its recovery file, and the API refuses an account-key slot for it.
 
 Files has three views: Browse (folders), Recent (newest first) and Shared (share links).
 
@@ -20,9 +20,11 @@ Load the key in one of these ways:
 
 - Recovery file: choose the recovery file for the drive. The file is named like `agent-drive-<id>.key.json`.
 - Pasted key: open "Paste a key instead" and paste the drive key, or an `adcred1.` credentials bundle from `agent-drive credentials export`.
-- Passphrase: set up passphrase unlock once, then a passphrase opens the drives you added to your account. A passphrase is at least 14 characters, or you can use one the browser generates. "Forgot or exposed passphrase?" resets it. A reset removes every drive from your account key but does not delete files; you add each drive again with its recovery file.
+- Passphrase: set up passphrase unlock once, then a passphrase opens the drives in your account. A passphrase is at least 14 characters, or you can use one the browser generates. Agents that hold a drive key seal it to your account automatically, so agent-created drives open this way without a recovery file. "Forgot or exposed passphrase?" resets it. A reset removes every drive from your account key but does not delete files; you add each drive again with its recovery file.
 
-The key stays in memory in this browser tab. It is cleared when you reload the page or leave the Files page, or after 30 minutes without use. The key is not saved in browser storage.
+The passphrase prompt has a "Keep this browser unlocked" box, ticked by default. While it is ticked, the console keeps the account private key in this browser's IndexedDB as a non-extractable CryptoKey, so later visits open your drives with no prompt. "Lock this browser" in the key menu deletes it, and signing out clears it. Untick the box to be asked for the passphrase on every visit.
+
+A drive key itself stays in memory in this browser tab. It is cleared when you reload the page or leave the Files page, or after 30 minutes without use, and is fetched again from its slot when needed. Agent-only drives have no slot by design: the console always asks for their recovery file.
 
 If you have no recovery file, ask the agent that created the drive to run:
 
@@ -84,7 +86,7 @@ For plans and prices see [/pricing](https://agentdrive.xyz/pricing). Paid checko
 [/console/settings](https://agentdrive.xyz/console/settings) (Activity & deletion) shows:
 
 - Activity: the audit log for your account, most recent first. It holds metadata only, never file contents or credentials.
-- Passphrase unlock status, with a link to manage it in Files.
+- Passphrase unlock status, with a link to manage it in Files. The status shows the account key's fingerprint — the same SHA-256 fingerprint the CLI pins the first time it seals a drive key. Comparing them is how you know an agent sealed to your real key.
 - Delete your data: delete one drive (type its exact name) or delete your account (type `DELETE MY ACCOUNT`).
 - Deletion requests: the status of each request.
 
