@@ -44,10 +44,17 @@ export async function reconcilePersistedKey(
   const store = opts.store ?? persistedAccountKey;
   const report = opts.report ?? ((line: string) => console.error(line));
   const flagged = retryFlag();
-  const stored = await store.read().catch(() => null);
-  // A read failure must not look like "nothing to delete" when a retry is already owed.
+  let stored: Awaited<ReturnType<PersistedStore['read']>> = null;
+  let readFailed = false;
+  try {
+    stored = await store.read();
+  } catch {
+    // A failed read must not look like "nothing to delete": attempt the delete anyway.
+    readFailed = true;
+  }
   const mustClear =
     flagged ||
+    readFailed ||
     (stored !== null &&
       (opts.clerkEnabled
         ? stored.owner == null || stored.owner !== userId

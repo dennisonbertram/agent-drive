@@ -29,8 +29,13 @@ import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
 import { keySourceFor, type Source } from '@/src/console/webhook-setup';
-import { Vault, vaultRequest, type LockReason } from '@/src/console/vault';
-import { persistedAccountKey } from '@/src/console/persisted-key';
+import {
+  BROWSER_KEY_DELETE_FAILED,
+  Vault,
+  vaultRequest,
+  type LockReason,
+} from '@/src/console/vault';
+import { persistedAccountKey, vaultLockPeers } from '@/src/console/persisted-key';
 import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
 import { FileIcon } from './file-icon';
@@ -463,9 +468,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         inbox: async (driveId) =>
           (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
         persisted: persistedAccountKey,
+        peers: vaultLockPeers,
         owner: () => identityRef.current.userId,
         onLocked: (reason) => lockedRef.current(reason),
         onChange: () => bumpVault(),
+        onNotice: (line) => setNotice(line),
       }),
   );
   const [unlockMode, setUnlockMode] = useState<UnlockMode>('recovery');
@@ -2139,11 +2146,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 onLockBrowser: () => {
                                   void vault
                                     .lockBrowser()
-                                    .catch(() =>
-                                      setNotice(
-                                        'The stored key could not be removed; clear this browser’s site data to finish locking it.',
-                                      ),
-                                    );
+                                    .catch(() => setNotice(BROWSER_KEY_DELETE_FAILED));
                                 },
                                 onChange: () => openVaultDialog('change'),
                                 onReset: () => openVaultDialog('reset'),

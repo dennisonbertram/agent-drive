@@ -40,6 +40,7 @@ export type SealStatus =
   | 'agent-only'
   | 'no account key'
   | 'failed'
+  | 'wrong origin'
   | 'unknown type';
 export type SealTarget = { driveId: string; driveKey: string; agentOnly?: boolean };
 
@@ -100,6 +101,9 @@ const isStringMap = (value: unknown): value is Record<string, string> =>
 const isStringList = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
+/** The exact shape accountKeyFingerprint produces: 'a1b2 c3d4 e5f6 7890'. */
+const isFingerprint = (value: string) => /^[0-9a-f]{4}( [0-9a-f]{4}){3}$/u.test(value);
+
 type SealStateRead =
   | { kind: 'missing' }
   | { kind: 'ok'; state: SealState }
@@ -135,10 +139,18 @@ async function readSealStateFile(): Promise<SealStateRead> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'unreadable' };
   const record = parsed as Record<string, unknown>;
   // The first version of this file was a flat {driveId: timestamp} map.
-  if (record.pins === undefined && record.checked === undefined && isStringMap(record))
+  const legacy =
+    record.pins === undefined &&
+    record.checked === undefined &&
+    record.agentOnly === undefined &&
+    record.pendingAgentOnly === undefined;
+  if (legacy && isStringMap(record))
     return { kind: 'ok', state: { ...emptyState(), checked: record } };
+  // A current-format file is damaged when `pins` is absent or not a map, or any pin is not a
+  // real fingerprint: an empty or hand-edited value is corruption, not "no pin". Fail closed.
   if (
-    (record.pins !== undefined && !isStringMap(record.pins)) ||
+    !isStringMap(record.pins) ||
+    Object.values(record.pins).some((pin) => !isFingerprint(pin)) ||
     (record.checked !== undefined && !isStringMap(record.checked)) ||
     (record.agentOnly !== undefined && !isStringList(record.agentOnly)) ||
     (record.pendingAgentOnly !== undefined && !isStringList(record.pendingAgentOnly))
@@ -147,7 +159,7 @@ async function readSealStateFile(): Promise<SealStateRead> {
   return {
     kind: 'ok',
     state: {
-      pins: (record.pins as Record<string, string> | undefined) ?? {},
+      pins: record.pins,
       checked: (record.checked as Record<string, string> | undefined) ?? {},
       agentOnly: (record.agentOnly as string[] | undefined) ?? [],
       pendingAgentOnly: (record.pendingAgentOnly as string[] | undefined) ?? [],
@@ -190,12 +202,18 @@ function isCode(error: unknown, code: string): boolean {
  * Reads then writes the seal state under an advisory lock, so a second process compares (and
  * merges) against what the first one committed. `update` mutates the fresh state and reports
  * whether it changed; a throw still releases the lock. An unreadable file throws
- * AccountSealStateUnreadable unless `replaceIfUnreadable` (--repin repairing the pin). The
- * lock wait is unref'd and bounded by `timeoutAt` (the automatic path's overall 5s budget).
+ * AccountSealStateUnreadable unless `replaceIfUnreadable` (--repin repairing the pin), in
+ * which case the state starts empty and `onReset` fires once — every other origin's pin is
+ * gone and the caller must say so. The lock wait is unref'd and bounded by `timeoutAt` (the
+ * automatic path's overall 5s budget).
  */
 async function withSealState(
   update: (state: SealState) => { changed: boolean } | Promise<{ changed: boolean }>,
-  opts: { replaceIfUnreadable?: boolean; timeoutAt?: number | undefined } = {},
+  opts: {
+    replaceIfUnreadable?: boolean;
+    timeoutAt?: number | undefined;
+    onReset?: () => void;
+  } = {},
 ): Promise<void> {
   const directory = `${configPath()}.state`;
   await ensurePrivateStateDirectory(directory);
@@ -226,6 +244,7 @@ async function withSealState(
     if (read.kind === 'unreadable') {
       if (!opts.replaceIfUnreadable) throw new AccountSealStateUnreadable();
       state = emptyState();
+      opts.onReset?.();
     } else {
       state = read.kind === 'ok' ? read.state : emptyState();
     }
@@ -330,6 +349,8 @@ export async function sealDrivesToAccount(opts: {
   force?: boolean;
   /** Accept a changed account public key (`account seal --repin`); also repairs an unreadable pin file. */
   repin?: boolean;
+  /** Fires once when --repin replaces an unreadable state file: every other origin's pin is gone. */
+  onRepair?: () => void;
   /** Collects per-drive failures; without it they only mark the 'failed' status. */
   onFailure?: (driveId: string, error: unknown) => void;
   /**
@@ -345,7 +366,16 @@ export async function sealDrivesToAccount(opts: {
   const { client, config, targets } = opts;
   const result = new Map<string, SealStatus>();
   const origin = client.apiOrigin;
-  const stateOpts = { timeoutAt: opts.stateDeadlineAt };
+  let repaired = false;
+  const stateOpts = {
+    timeoutAt: opts.stateDeadlineAt,
+    replaceIfUnreadable: opts.repin === true,
+    onReset: () => {
+      if (repaired) return;
+      repaired = true;
+      opts.onRepair?.();
+    },
+  };
   // Fail closed before any key can be posted: the pin cannot be compared.
   const initial = await readSealStateFile();
   if (initial.kind === 'unreadable' && !opts.repin) throw new AccountSealStateUnreadable();
@@ -358,6 +388,19 @@ export async function sealDrivesToAccount(opts: {
     ),
   );
   const pending = targets.filter((target) => {
+    // A target key identical to the saved one IS the saved key — it may only seal to the API
+    // origin it was saved for, whatever path (keys, resolveKey, env fallback) supplied it.
+    // Explicitly supplied keys (env/--key-file, a just-created drive key) differ from the
+    // saved value, so they stay allowed. No network call happens for a refused key.
+    const saved = config.driveKeys?.[target.driveId];
+    if (
+      saved !== undefined &&
+      saved === target.driveKey &&
+      config.driveKeyOrigins?.[target.driveId] !== origin
+    ) {
+      result.set(target.driveId, 'wrong origin');
+      return false;
+    }
     if (target.agentOnly === true || localOnly.has(target.driveId)) {
       result.set(target.driveId, 'agent-only');
       return false;
@@ -372,13 +415,10 @@ export async function sealDrivesToAccount(opts: {
   if (unknown.length) {
     // Stamp the check so a throttled caller does not re-warn on every command.
     const at = new Date().toISOString();
-    await withSealState(
-      (state) => {
-        for (const target of unknown) state.checked[scoped(origin, target.driveId)] = at;
-        return { changed: true };
-      },
-      { ...stateOpts, replaceIfUnreadable: opts.repin === true },
-    ).catch(() => {});
+    await withSealState((state) => {
+      for (const target of unknown) state.checked[scoped(origin, target.driveId)] = at;
+      return { changed: true };
+    }, stateOpts).catch(() => {});
   }
   if (!pending.length) return result;
   const key = await client.accountKey();
@@ -386,33 +426,27 @@ export async function sealDrivesToAccount(opts: {
     // Record the check: a throttled caller must not rediscover "no account key" every run.
     const at = new Date().toISOString();
     for (const target of pending) result.set(target.driveId, 'no account key');
-    await withSealState(
-      (state) => {
-        for (const target of pending) state.checked[scoped(origin, target.driveId)] = at;
-        return { changed: pending.length > 0 };
-      },
-      { ...stateOpts, replaceIfUnreadable: opts.repin === true },
-    ).catch(() => {});
+    await withSealState((state) => {
+      for (const target of pending) state.checked[scoped(origin, target.driveId)] = at;
+      return { changed: pending.length > 0 };
+    }, stateOpts).catch(() => {});
     return result;
   }
   const fingerprint = accountKeyFingerprint(key.publicKey);
   // The pin compare-and-set runs under the state lock, so a second concurrent process compares
   // against the pin the first one committed rather than a stale read.
   let checked: Record<string, string> = {};
-  await withSealState(
-    (state) => {
-      checked = { ...state.checked };
-      const pinned = state.pins[origin] ?? config.accountKeyPins?.[origin];
-      if (pinned && pinned !== fingerprint && !opts.repin)
-        throw new AccountKeyPinMismatch(pinned, fingerprint);
-      if (state.pins[origin] !== fingerprint) {
-        state.pins[origin] = fingerprint;
-        return { changed: true };
-      }
-      return { changed: false };
-    },
-    { ...stateOpts, replaceIfUnreadable: opts.repin === true },
-  );
+  await withSealState((state) => {
+    checked = { ...state.checked };
+    const pinned = state.pins[origin] ?? config.accountKeyPins?.[origin];
+    if (pinned && pinned !== fingerprint && !opts.repin)
+      throw new AccountKeyPinMismatch(pinned, fingerprint);
+    if (state.pins[origin] !== fingerprint) {
+      state.pins[origin] = fingerprint;
+      return { changed: true };
+    }
+    return { changed: false };
+  }, stateOpts);
   const now = Date.now();
   for (const target of pending) {
     if (!opts.force && recentlyChecked(checked, origin, target.driveId, now)) continue;

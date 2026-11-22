@@ -6,7 +6,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
   read: async () => null,
-  write: async () => {},
+  readLockGeneration: async () => 0,
+  write: async () => true,
   clear: async () => {},
   ...over,
 });
@@ -109,6 +110,47 @@ describe('reconcilePersistedKey', () => {
     expect(await reconcilePersistedKey('user_a', opts)).toBe('cleared');
     expect(localStorage.getItem('agent-drive:key-delete-failed')).toBeNull();
     expect(await reconcilePersistedKey('user_a', opts)).toBe('kept');
+  });
+
+  it('still attempts the delete when the record cannot be read', async () => {
+    vi.stubGlobal('localStorage', memoryStorage());
+    let clears = 0;
+    const broken = store({
+      read: async () => {
+        throw new Error('idb gone');
+      },
+      clear: async () => {
+        clears += 1;
+      },
+    });
+    // A failed read must not look like "nothing stored": the delete still runs.
+    expect(await reconcilePersistedKey('user_a', { clerkEnabled: true, store: broken })).toBe(
+      'cleared',
+    );
+    expect(clears).toBe(1);
+  });
+
+  it('flags the retry when a failed read is followed by a failed delete', async () => {
+    const storage = memoryStorage();
+    vi.stubGlobal('localStorage', storage);
+    const reports: string[] = [];
+    const broken = store({
+      read: async () => {
+        throw new Error('idb gone');
+      },
+      clear: async () => {
+        throw new Error('still gone');
+      },
+    });
+    expect(
+      await reconcilePersistedKey('user_a', {
+        clerkEnabled: true,
+        store: broken,
+        report: (line) => reports.push(line),
+      }),
+    ).toBe('retry');
+    expect(storage.getItem('agent-drive:key-delete-failed')).toBe('1');
+    expect(reports).toHaveLength(1);
   });
 
   it('a flagged retry deletes even when the record reads back empty', async () => {

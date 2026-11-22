@@ -18,7 +18,7 @@ import {
 } from './account-key';
 import type { PersistedStore } from './persisted-key';
 import { sealDriveKey } from '../device/seal';
-import { Vault, vaultRequest, type LockReason } from './vault';
+import { BROWSER_KEY_DELETE_FAILED, Vault, vaultRequest, type LockReason } from './vault';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
 const OTHER_ACCOUNT = '22222222-2222-4222-8222-222222222222';
@@ -74,6 +74,10 @@ function makeVault(
   inbox: () => Promise<TraceInboxRecord | null> = async () => null,
   persisted?: PersistedStore,
   owner?: () => string | null,
+  extra?: {
+    peers?: { notify: () => void; subscribe: (onLock: () => void) => void };
+    onNotice?: (line: string) => void;
+  },
 ) {
   const locked: LockReason[] = [];
   const calls: { path: string; method: string; body: unknown }[] = [];
@@ -93,6 +97,8 @@ function makeVault(
     persisted,
     owner,
     onLocked: (reason) => locked.push(reason),
+    peers: extra?.peers,
+    onNotice: extra?.onNotice,
   });
   return { vault, locked, calls, envelopeCalls };
 }
@@ -578,7 +584,8 @@ describe('Vault setup', () => {
 describe('browser-held key', () => {
   const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
     read: async () => null,
-    write: async () => {},
+    readLockGeneration: async () => 0,
+    write: async () => true,
     clear: async () => {},
     ...over,
   });
@@ -595,6 +602,7 @@ describe('browser-held key', () => {
         write: async (keyId) => {
           writes.push(keyId);
           await write.promise;
+          return true;
         },
       }),
     );
@@ -682,6 +690,7 @@ describe('browser-held key', () => {
       store({
         write: async (keyId) => {
           writes.push(keyId);
+          return true;
         },
       }),
     );
@@ -727,6 +736,7 @@ describe('browser-held key', () => {
         write: async (keyId) => {
           writes.push(keyId);
           await write.promise;
+          return true;
         },
         clear: async (match) => {
           clears.push(match ?? null);
@@ -779,6 +789,7 @@ describe('browser-held key', () => {
         write: async (keyId) => {
           writes.push(keyId);
           await write.promise;
+          return true;
         },
         clear: async (match) => {
           clears.push(match ?? null);
@@ -837,6 +848,7 @@ describe('browser-held key', () => {
         write: async (keyId) => {
           writes.push(keyId);
           await write.promise;
+          return true;
         },
       }),
     );
@@ -881,6 +893,116 @@ describe('browser-held key', () => {
     );
     await vault.load();
     expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('writes under the lock generation snapshot taken when the unlock started', async () => {
+    const writes: { generation: number; startedAt: number | undefined }[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        readLockGeneration: async () => 7,
+        write: async (_keyId, _key, _owner, generation, startedAt) => {
+          writes.push({ generation, startedAt });
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    expect(await vault.unlock(PASSPHRASE, true)).toBe(true);
+    // The write carries the pre-unlock counter so a cross-tab lock can refuse it.
+    expect(writes).toEqual([{ generation: 7, startedAt: expect.any(Number) }]);
+  }, 30_000);
+
+  it('drops its in-memory key when another tab locks the browser', async () => {
+    let peerLock: (() => void) | undefined;
+    const { vault, locked } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        peers: {
+          notify: () => {},
+          subscribe: (onLock) => {
+            peerLock = onLock;
+          },
+        },
+      },
+    );
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.status).toBe('unlocked');
+    peerLock!();
+    expect(vault.status).toBe('locked');
+    expect(locked).toEqual(['manual']);
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'none' });
+  }, 30_000);
+
+  it('Lock this browser deletes the key, tells the other tabs, then locks', async () => {
+    const events: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          events.push('clear');
+        },
+      }),
+      undefined,
+      {
+        peers: {
+          notify: () => {
+            events.push('notify');
+          },
+          subscribe: () => {},
+        },
+      },
+    );
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    events.length = 0; // unlock with the box unchecked clears any stored key first
+    await vault.lockBrowser();
+    expect(events).toEqual(['clear', 'notify']);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('surfaces the notice when a cancelled unlock’s cleanup delete fails', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const notices: string[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+          return true;
+        },
+        clear: async () => {
+          throw new Error('IDB unavailable');
+        },
+      }),
+      undefined,
+      { onNotice: (line) => notices.push(line) },
+    );
+    await vault.load();
+    const pending = vault.unlock(PASSPHRASE, true);
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    // Still reports "cancelled" — but the leftover key is not silent anymore.
+    expect(await pending).toBe(false);
+    expect(notices).toEqual([BROWSER_KEY_DELETE_FAILED]);
   }, 30_000);
 });
 

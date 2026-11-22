@@ -40,10 +40,17 @@ export type VaultDeps = {
   inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
   /** "Keep this browser unlocked" store (IndexedDB in the app, a stub in tests). */
   persisted?: PersistedStore | undefined;
+  /**
+   * Cross-tab lock channel: notified when this tab locks the browser key so every other tab
+   * drops its in-memory key; subscribe locks this vault when another tab posts one.
+   */
+  peers?: { notify: () => void; subscribe: (onLock: () => void) => void } | undefined;
   /** The currently signed-in user id; persisted keys written under another user are ignored. */
   owner?: (() => string | null) | undefined;
   onLocked?: ((reason: LockReason) => void) | undefined;
   onChange?: (() => void) | undefined;
+  /** Surfaces a failure the user must see even when the action that caused it was cancelled. */
+  onNotice?: ((line: string) => void) | undefined;
 };
 
 const STALE_RECORD =
@@ -51,6 +58,10 @@ const STALE_RECORD =
 const CHANGED = 'Your passphrase was changed elsewhere. Reload the page.';
 const SLOTS_FAILED = 'Couldn’t load your drives’ keys. Retry.';
 const MAX_SLOT_PAGES = 100;
+
+/** The notice shown whenever deleting the browser-held key cannot be confirmed. */
+export const BROWSER_KEY_DELETE_FAILED =
+  'The stored key could not be removed; clear this browser’s site data to finish locking it.';
 
 /** Console API call that hands Clerk's reverification body back unchanged. */
 export async function vaultRequest(path: string, method = 'GET', body?: unknown) {
@@ -106,7 +117,10 @@ export class Vault {
   /** Status before the pending load began; cancelUnlock() puts it back. */
   private beforeLoad: { status: VaultStatus; loadError: string } | null = null;
 
-  constructor(private deps: VaultDeps) {}
+  constructor(private deps: VaultDeps) {
+    // A "Lock this browser" in any other tab drops this tab's in-memory key immediately.
+    this.deps.peers?.subscribe(() => this.lock('manual'));
+  }
 
   get slotCount() {
     return this.slots.size;
@@ -238,6 +252,11 @@ export class Vault {
     const startedAt = Date.now();
     this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    // Snapshot the lock counter before the passphrase work: a "Lock this browser" anywhere
+    // else during the derivation or the slot fetch must refuse this attempt's write.
+    const generation = persist
+      ? await this.deps.persisted?.readLockGeneration().catch(() => undefined)
+      : undefined;
     // A fresh read, so a passphrase changed on another device is noticed.
     if (!(await this.refreshRecord(live))) return false;
     const record = this.record;
@@ -263,13 +282,23 @@ export class Vault {
     // The browser-held key must be committed before 'unlocked' is observable: a reload that
     // races the write would otherwise come back to a Locked vault (or a stale stored key).
     if (persist) {
-      await this.deps.persisted
-        ?.write(record.id, privateKey, this.deps.owner?.() ?? null, startedAt)
-        .catch(() => {});
+      // Commits only while the snapshot generation still stands — a lock landing meanwhile
+      // wins, and this write is refused.
+      if (generation !== undefined)
+        await this.deps.persisted?.write(
+          record.id,
+          privateKey,
+          this.deps.owner?.() ?? null,
+          generation,
+          startedAt,
+        );
       // Cancelled or superseded while the write committed: remove this attempt's record — but
-      // never a newer unlock's — before returning, and await the delete.
+      // never a newer unlock's — before returning, and await the delete. A failed delete
+      // surfaces through the notice instead of succeeding silently.
       if (!live()) {
-        await this.deps.persisted?.clear({ keyId: record.id, startedAt }).catch(() => {});
+        await this.deps.persisted?.clear({ keyId: record.id, startedAt }).catch(() => {
+          this.deps.onNotice?.(BROWSER_KEY_DELETE_FAILED);
+        });
         return false;
       }
     } else {
@@ -495,6 +524,7 @@ export class Vault {
     const startedAt = Date.now();
     // Checked after every await: Lock, idle, reset or a closed dialog cancel the whole setup.
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    const generation = await this.deps.persisted?.readLockGeneration().catch(() => undefined);
     if (!this.accountId && !(await this.refreshRecord(live))) return null;
     if (!live()) return null;
     const { record, privateKey } = await createAccountKey(this.accountId, passphrase);
@@ -508,14 +538,23 @@ export class Vault {
       kdf: record.kdf,
     });
     if (!live()) return null;
-    // Awaited before 'unlocked' is emitted, so the key is durable before a reload can see it.
-    await this.deps.persisted
-      ?.write(record.id, privateKey, this.deps.owner?.() ?? null, startedAt)
-      .catch(() => {});
+    // Awaited before 'unlocked' is emitted, so the key is durable before a reload can see it —
+    // and refused when the lock counter moved since this setup snapshot it.
+    if (generation !== undefined)
+      await this.deps.persisted?.write(
+        record.id,
+        privateKey,
+        this.deps.owner?.() ?? null,
+        generation,
+        startedAt,
+      );
     // Cancelled or superseded while the write committed: remove this setup's record — but never
-    // a newer unlock's — before returning, and await the delete.
+    // a newer unlock's — before returning, and await the delete. A failed delete surfaces
+    // through the notice instead of succeeding silently.
     if (!live()) {
-      await this.deps.persisted?.clear({ keyId: record.id, startedAt }).catch(() => {});
+      await this.deps.persisted?.clear({ keyId: record.id, startedAt }).catch(() => {
+        this.deps.onNotice?.(BROWSER_KEY_DELETE_FAILED);
+      });
       return null;
     }
     this.record = record;
@@ -601,6 +640,8 @@ export class Vault {
     this.fingerprint = '';
     this.seen.delete(record.id);
     this.status = 'none';
+    // The account key is gone; every tab holding its private key drops it too.
+    this.notifyPeers();
     void this.deps.persisted?.clear().catch(() => {});
     this.emit();
   }
@@ -617,13 +658,23 @@ export class Vault {
     this.deps.onLocked?.(reason);
   }
 
+  private notifyPeers() {
+    try {
+      this.deps.peers?.notify();
+    } catch {
+      // A broken channel only delays other tabs until their next read.
+    }
+  }
+
   /**
    * "Lock this browser": deletes the IndexedDB-held key, then locks. The delete is awaited and
    * its failure propagates — only then is the browser really locked, so the vault stays
-   * 'unlocked' when the key could not be removed.
+   * 'unlocked' when the key could not be removed. Other open tabs are told so they drop their
+   * in-memory key immediately.
    */
   async lockBrowser() {
     await this.deps.persisted?.clear();
+    this.notifyPeers();
     this.lock('manual');
   }
 
@@ -646,6 +697,7 @@ export class Vault {
   /** Sign-out or a different user in this tab: also forget the browser-held key. */
   clearBrowser() {
     this.clear();
+    this.notifyPeers();
     void this.deps.persisted?.clear().catch(() => {});
   }
 }

@@ -371,6 +371,31 @@ describe('sealDrivesToAccount', () => {
     expect(forced.get(A)).toBe('sealed');
     expect(posts).toHaveLength(2);
   });
+
+  it('refuses a caller-supplied key identical to one saved for another origin', async () => {
+    await dir();
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({ publicKey: account.publicKey });
+    const explicit = generateDriveKey();
+    const result = await sealDrivesToAccount({
+      client,
+      config: {
+        ...baseConfig,
+        driveKeys: { [A]: KEY_A, [B]: KEY_B },
+        driveKeyOrigins: { [A]: 'https://other.test', [B]: 'https://other.test' },
+      },
+      targets: [
+        // The saved foreign key, however the caller resolved it — refused before the network.
+        { driveId: A, driveKey: KEY_A },
+        // An explicitly supplied key differs from the saved value — still allowed this run.
+        { driveId: B, driveKey: explicit },
+      ],
+      force: true,
+    });
+    expect(result.get(A)).toBe('wrong origin');
+    expect(result.get(B)).toBe('sealed');
+    expect(posts.map((p) => p.driveId)).toEqual([B]);
+  });
 });
 
 /** Runs the real CLI in-process against a stubbed API (same harness as cli.command.unit.test). */
@@ -379,7 +404,13 @@ async function cli(
   argv: string[],
   saved: Saved,
   respond: (path: string, init?: RequestInit) => unknown,
-  extra?: { pins?: Record<string, string>; env?: Record<string, string>; dir?: string },
+  extra?: {
+    pins?: Record<string, string>;
+    env?: Record<string, string>;
+    dir?: string;
+    /** Runs after modules reset, just before cli.js is imported (e.g. to doMock a module). */
+    before?: () => void;
+  },
 ) {
   // `dir` reuses one config directory so private state (pins) carries across runs.
   const d = extra?.dir ?? (await mkdtemp(join(tmpdir(), 'agent-drive-cmd-')));
@@ -432,6 +463,7 @@ async function cli(
   vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', 'agent-drive', ...argv]);
   process.exitCode = undefined;
   vi.resetModules();
+  extra?.before?.();
   const mod = (await import('./cli.js')) as { done?: Promise<void> };
   // The CLI entry point runs the command without awaiting it; `done` settles when the whole
   // command (including best-effort account sealing) has finished.
@@ -652,6 +684,54 @@ describe('account sealing at the command level', () => {
     expect(r.err).toContain(`No drive key on this machine for ${A}`);
     expect(r.exitCode).toBe(1);
     expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
+  }, 15_000);
+
+  it('an ordinary command never seals a saved key bound to another origin', async () => {
+    // `ls --drive` resolves the saved key and hands it to the sealing hook — exactly the path
+    // the origin check inside the hook must refuse before any network call.
+    const { respond } = await api();
+    const foreign = { keys: { [A]: KEY_A }, origins: { [A]: 'https://other.test' } };
+    const r = await cli(['ls', '--drive', A], foreign, (path, init) =>
+      path === `drives/${A}/list` ? { items: [], nextCursor: null } : respond(path, init),
+    );
+    expect(r.exitCode ?? 0).toBe(0);
+    expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
+  }, 15_000);
+
+  it('drive create resolves the connection once — the seal reuses the one that created it', async () => {
+    const { respond } = await api();
+    const r = await cli(
+      ['drive', 'create', '--name', 'fresh'],
+      { keys: {}, origins: {} },
+      respond,
+      {
+        before: () => {
+          vi.doMock('./config.js', async (importOriginal) => {
+            const mod = await importOriginal<typeof import('./config.js')>();
+            return { ...mod, resolveConnection: vi.fn(mod.resolveConnection) };
+          });
+        },
+      },
+    );
+    expect(r.out).toContain(B);
+    try {
+      const { resolveConnection } = await import('./config.js');
+      // connect() once; no second resolve between POST drives and the seal.
+      expect(vi.mocked(resolveConnection).mock.calls.length).toBe(1);
+    } finally {
+      vi.doUnmock('./config.js');
+    }
+  }, 15_000);
+
+  it('account seal --repin on an unreadable pin file warns that other origins must re-pin', async () => {
+    const { respond } = await api();
+    const d = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
+    dirs.push(d);
+    await writeSealStateFile(d, '{broken');
+    const r = await cli(['account', 'seal', '--repin'], one, respond, { dir: d });
+    expect(r.out).toContain(`${A}: sealed`);
+    expect(r.err).toContain('other API origins');
+    expect(r.err).toContain('account seal --repin');
   }, 15_000);
 
   it('fails closed when the pin file is unreadable, and --repin repairs it', async () => {
@@ -1028,6 +1108,91 @@ describe('seal state file hardening', () => {
     });
     expect(await readFile(targetFile, 'utf8')).toBe('{}');
     expect(posts).toHaveLength(1);
+  });
+
+  it('fails closed on a current-format file with missing or damaged pins', async () => {
+    const d = await dir();
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({ publicKey: account.publicKey });
+    const sealed = { client, config: baseConfig, targets: [target()], force: true };
+    // `pins` absent on an otherwise current-format file is damage, not "nothing pinned".
+    await writeSealStateFile(
+      d,
+      JSON.stringify({ checked: { 'https://x.test\nk': 't' }, agentOnly: [] }),
+    );
+    await expect(sealDrivesToAccount(sealed)).rejects.toThrow(AccountSealStateUnreadable);
+    // An empty pin must not compare as "not pinned" and seal past the check.
+    await writeSealStateFile(
+      d,
+      JSON.stringify({
+        pins: { 'https://x.test': '' },
+        checked: {},
+        agentOnly: [],
+        pendingAgentOnly: [],
+      }),
+    );
+    await expect(sealDrivesToAccount(sealed)).rejects.toThrow(AccountSealStateUnreadable);
+    // A value that is not a real fingerprint is damage too.
+    await writeSealStateFile(
+      d,
+      JSON.stringify({
+        pins: { 'https://x.test': 'bogus pin' },
+        checked: {},
+        agentOnly: [],
+        pendingAgentOnly: [],
+      }),
+    );
+    await expect(sealDrivesToAccount(sealed)).rejects.toThrow(AccountSealStateUnreadable);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('--repin replaces only this origin’s pin and keeps the others', async () => {
+    const d = await dir();
+    const account = await accountKeyPair();
+    const { client } = mockClient({ publicKey: account.publicKey });
+    const otherPin = 'aaaa bbbb cccc dddd';
+    await writeSealStateFile(
+      d,
+      JSON.stringify({
+        pins: { 'https://x.test': '0000 0000 0000 0000', 'https://other.test': otherPin },
+        checked: {},
+        agentOnly: [],
+        pendingAgentOnly: [],
+      }),
+    );
+    await sealDrivesToAccount({
+      client,
+      config: baseConfig,
+      targets: [target()],
+      force: true,
+      repin: true,
+    });
+    const state = await readSealState();
+    expect(state.pins['https://x.test']).toBe(accountKeyFingerprint(account.publicKey));
+    expect(state.pins['https://other.test']).toBe(otherPin);
+  });
+
+  it('--repin on an unreadable file starts a new file and reports the reset once', async () => {
+    const d = await dir();
+    const account = await accountKeyPair();
+    const { client } = mockClient({ publicKey: account.publicKey });
+    await writeSealStateFile(d, '{broken');
+    let repairs = 0;
+    await sealDrivesToAccount({
+      client,
+      config: baseConfig,
+      targets: [target()],
+      force: true,
+      repin: true,
+      onRepair: () => {
+        repairs += 1;
+      },
+    });
+    expect(repairs).toBe(1);
+    // The new file contains exactly this origin's pin — nothing else survived.
+    const state = await readSealState();
+    expect(Object.keys(state.pins)).toEqual(['https://x.test']);
+    expect(state.pins['https://x.test']).toBe(accountKeyFingerprint(account.publicKey));
   });
 
   it('bounds state-lock waits by the shared deadline', async () => {

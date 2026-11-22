@@ -210,7 +210,9 @@ async function connect(args: ReturnType<typeof parse>) {
       keys: { [drive]: driveKey },
       ...(args.values['key-file'] ? { keyFile: args.values['key-file'] } : {}),
     });
-  return client;
+  // Callers that seal later work (drive create) must reuse this exact connection: resolving
+  // again could seal through an account or origin that changed since the command connected.
+  return { client, connection };
 }
 
 // Set by connect() when no --drive was given and no single default exists.
@@ -400,7 +402,7 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'issue') {
       if (!args.values.name) throw new Error('--name is required.');
-      const client = await connect(args);
+      const { client } = await connect(args);
       const result = await issueCredentials(
         {
           name: args.values.name,
@@ -539,6 +541,10 @@ async function run(command: string, raw: string[]) {
       targets,
       force: true,
       repin: args.values.repin === true,
+      onRepair: () =>
+        process.stderr.write(
+          'The account-key pin file was unreadable, so a new one was started. Pins for other API origins are gone — run `agent-drive account seal --repin` under each of them.\n',
+        ),
       requireVerifiedType: true,
       verifiedDriveIds: new Set(listed ?? []),
     });
@@ -550,7 +556,7 @@ async function run(command: string, raw: string[]) {
       process.exitCode = 1;
     return;
   }
-  const client = await connect(args);
+  const { client, connection } = await connect(args);
   if (command === 'whoami') {
     const who = await client.whoami();
     const config = await loadConfig();
@@ -603,7 +609,8 @@ async function run(command: string, raw: string[]) {
     // command stops here, so a state failure can never strand a remote drive with no mark.
     if (agentOnly) await recordAgentOnlyIntent(name, origin);
     const drive = await client.createDrive(name, limit(args.values.quota), agentOnly || undefined);
-    const connection = await resolveConnection();
+    // Seal through the same connection that created the drive — a second resolveConnection
+    // could pick up an account or origin another process just changed.
     const saved = await loadConfig();
     const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
     let sealedKey = existingKey;
