@@ -564,7 +564,9 @@ export async function runCapture(input: { command: string[]; agent?: string; dri
       client: seal.client,
       config: connection.config,
       selectedDriveId: driveId,
+      keys: { [driveId]: driveKey },
       deadline: seal.deadline,
+      deadlineAt: seal.deadlineAt,
       warn: log,
     });
     const spool = await Spool.open(join(`${configPath()}.state`, 'capture', driveId));

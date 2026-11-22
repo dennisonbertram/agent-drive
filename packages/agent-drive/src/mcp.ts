@@ -9,6 +9,7 @@ import {
   resolveConnection,
   resolveDriveId,
   driveKeyEnvironmentName,
+  keysForOrigin,
   machineName,
 } from './config.js';
 import { reportEnvBackups } from './credentials.js';
@@ -449,26 +450,33 @@ export async function runMcp() {
   const connection = await resolveConnection();
   const saved = connection.config;
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
+  const apiOrigin = new URL(connection.apiUrl).origin;
+  // One resolver for tools and sealing alike: env per drive, then the saved key — but only
+  // when its recorded origin is this API's, so a foreign key is never served or sealed.
+  const driveKey = (driveId: string) =>
+    process.env[driveKeyEnvironmentName(driveId)]?.trim() ||
+    process.env.AGENT_DRIVE_KEY?.trim() ||
+    keysForOrigin(saved, apiOrigin)[driveId];
   const client = new AgentDriveClient({
     apiUrl: connection.apiUrl,
     apiKey: connection.apiKey,
     machine: machineName(),
-    driveKey: (driveId) =>
-      process.env[driveKeyEnvironmentName(driveId)]?.trim() ||
-      process.env.AGENT_DRIVE_KEY?.trim() ||
-      saved.driveKeys?.[driveId],
+    driveKey,
   });
   const server = createMcpServer(client, (driveId) =>
     resolveDriveId(driveId, saved, connection.apiUrl),
   );
-  // Stdio connects first: sealing is background work and must never delay MCP startup.
+  // Stdio connects first: sealing is background work and must never delay MCP startup. It
+  // resolves keys per drive through the very same resolver the tools use.
   await server.connect(new StdioServerTransport());
   const seal = sealClientWithDeadline(connection.apiUrl, connection.apiKey, machineName());
   void autoSealHeldKeys({
     client: seal.client,
     config: saved,
     force: true,
+    resolveKey: driveKey,
     deadline: seal.deadline,
+    deadlineAt: seal.deadlineAt,
     warn: (line) => process.stderr.write(`${line}\n`),
   });
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
@@ -12,9 +12,11 @@ import {
   accountKeyFingerprint,
   accountSealStatePath,
   AccountKeyPinMismatch,
+  AccountSealStateUnreadable,
   autoSealHeldKeys,
   heldSealTargets,
   recordAgentOnlyDrive,
+  recordAgentOnlyIntent,
   sealDrivesToAccount,
 } from './account-seal.js';
 
@@ -89,9 +91,19 @@ type StateFile = {
   pins: Record<string, string>;
   checked: Record<string, string>;
   agentOnly: string[];
+  pendingAgentOnly?: string[];
 };
 async function readSealState(): Promise<StateFile> {
   return JSON.parse(await readFile(accountSealStatePath(), 'utf8')) as StateFile;
+}
+
+/** The `${origin}\n${driveId}` composite key seal state is stored under. */
+const scoped = (id: string, origin = 'https://x.test') => `${origin}\n${id}`;
+
+async function writeSealStateFile(d: string, contents: string) {
+  const dirName = join(d, 'config.json.state');
+  await mkdir(dirName, { recursive: true, mode: 0o700 });
+  await writeFile(join(dirName, 'account-seal.json'), contents);
 }
 
 const baseConfig = {
@@ -274,13 +286,13 @@ describe('sealDrivesToAccount', () => {
     expect(failures).toEqual([A]);
     expect(posts.map((p) => p.driveId)).toEqual([B]);
     const state = await readSealState();
-    expect(state.checked[A]).toBeUndefined();
-    expect(typeof state.checked[B]).toBe('string');
+    expect(state.checked[scoped(A)]).toBeUndefined();
+    expect(typeof state.checked[scoped(B)]).toBe('string');
   });
 
   it('never posts a locally recorded agent-only drive, whatever the listing says', async () => {
     await dir();
-    await recordAgentOnlyDrive(B);
+    await recordAgentOnlyDrive(B, 'https://x.test');
     const account = await accountKeyPair();
     const { client, posts } = mockClient({ publicKey: account.publicKey });
     const result = await sealDrivesToAccount({
@@ -313,7 +325,9 @@ describe('sealDrivesToAccount', () => {
       force: true,
     });
     expect(second.get(A)).toBe('agent-only');
-    expect((await readSealState()).agentOnly).toContain(A);
+    expect((await readSealState()).agentOnly).toContain(scoped(A));
+    // The mark is origin-scoped: a cloned API at another origin does not inherit it.
+    expect((await readSealState()).agentOnly).not.toContain(A);
   });
 
   it('records the no-account-key check so the throttled path skips it next run', async () => {
@@ -333,7 +347,7 @@ describe('sealDrivesToAccount', () => {
     const warn = (line: string) => warnings.push(line);
     await autoSealHeldKeys({ client, config, warn });
     expect(vi.mocked(client.accountKey).mock.calls.length).toBe(1);
-    expect(typeof (await readSealState()).checked[A]).toBe('string');
+    expect(typeof (await readSealState()).checked[scoped(A)]).toBe('string');
     // The throttled follow-up does not even list drives.
     await autoSealHeldKeys({ client, config, warn });
     expect(vi.mocked(client.listDrives).mock.calls.length).toBe(1);
@@ -431,6 +445,9 @@ async function cli(
     get err() {
       return err.join('');
     },
+    get exitCode() {
+      return process.exitCode;
+    },
     paths,
   };
 }
@@ -505,6 +522,24 @@ describe('account sealing at the command level', () => {
     expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
   }, 15_000);
 
+  it('drive create --agent-only aborts before the remote create when the state write fails', async () => {
+    // The --agent-only mark is recorded locally first; if that write cannot land, no remote
+    // drive may exist unmarked — the command stops before POST drives.
+    const { respond } = await api({ agentOnly: true });
+    const d = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
+    dirs.push(d);
+    await writeFile(join(d, 'config.json.state'), 'not a directory');
+    const r = await cli(
+      ['drive', 'create', '--name', 'fresh', '--agent-only'],
+      { keys: {}, origins: {} },
+      respond,
+      { dir: d },
+    );
+    expect(r.exitCode).toBe(1);
+    expect(r.paths.some((p) => p === 'POST drives')).toBe(false);
+    expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
+  }, 15_000);
+
   it('drive create warns once when the account has no account key', async () => {
     const { respond } = await api({ noAccountKey: true });
     const r = await cli(['drive', 'create', '--name', 'fresh'], { keys: {}, origins: {} }, respond);
@@ -567,9 +602,9 @@ describe('account sealing at the command level', () => {
     expect((await readConfig()).accountKeyPins?.['https://x.test']).toBe('0000 0000 0000 0000');
   }, 15_000);
 
-  it('seals a named drive when the key cannot list drives', async () => {
-    // A write-only agent key gets 403 on GET /drives; --drive must still seal through the
-    // slot endpoint's own checks.
+  it('skips a named drive the key cannot verify and exits 1 with the repair hint', async () => {
+    // A write-only agent key gets 403 on GET /drives: with no local mark, the drive's type is
+    // unproven and the key must not be sent — even for an explicit --drive.
     const one = {
       keys: { [A]: KEY_A, [B]: KEY_B },
       origins: { [A]: 'https://x.test', [B]: 'https://x.test' },
@@ -585,9 +620,58 @@ describe('account sealing at the command level', () => {
       if (path === 'account-key') return { keyId: KEY_ID, publicKey: account.publicKey, format: 1 };
       return { status: 'created' };
     });
-    expect(r.out).toContain(`${B}: sealed`);
+    expect(r.out).toContain(`${B}: unknown type`);
     expect(r.out).not.toContain(`${A}:`);
-    expect(r.paths.some((p) => p === `POST drives/${B}/account-key-slot`)).toBe(true);
+    expect(r.err).toContain('unknown drive type');
+    expect(r.err).toContain(`agent-drive account seal --drive`);
+    expect(r.exitCode).toBe(1);
+    expect(r.paths.some((p) => p === `POST drives/${B}/account-key-slot`)).toBe(false);
+  }, 15_000);
+
+  it('account seal exits 1 when any drive fails', async () => {
+    const { respond } = await api();
+    const wrapped = (path: string, init?: RequestInit): unknown =>
+      path.endsWith('/account-key-slot')
+        ? new Response(JSON.stringify({ error: { message: 'nope' } }), { status: 500 })
+        : respond(path, init);
+    const two = {
+      keys: { [A]: KEY_A },
+      origins: { [A]: 'https://x.test' },
+    };
+    const r = await cli(['account', 'seal', '--drive', A], two, wrapped);
+    expect(r.out).toContain(`${A}: failed`);
+    expect(r.exitCode).toBe(1);
+  }, 15_000);
+
+  it('account seal --drive never seals a key saved for another origin', async () => {
+    // The drive key exists in config.json but belongs to a different API origin: sealing it
+    // here would transmit it to the wrong service, so it is not even a candidate.
+    const { respond } = await api();
+    const foreign = { keys: { [A]: KEY_A }, origins: { [A]: 'https://other.test' } };
+    const r = await cli(['account', 'seal', '--drive', A], foreign, respond);
+    expect(r.err).toContain(`No drive key on this machine for ${A}`);
+    expect(r.exitCode).toBe(1);
+    expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
+  }, 15_000);
+
+  it('fails closed when the pin file is unreadable, and --repin repairs it', async () => {
+    const { account, respond } = await api();
+    const d = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
+    dirs.push(d);
+    await writeSealStateFile(d, '{"pins": 42');
+    const r = await cli(['account', 'seal'], one, respond, { dir: d });
+    await vi.waitFor(() => expect(r.err).toContain('pin file is unreadable'), { timeout: 3000 });
+    expect(r.err).toContain('--repin');
+    expect(r.exitCode).toBe(1);
+    expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
+    // The same run with --repin replaces the file with a valid pin.
+    const repinned = await cli(['account', 'seal', '--repin'], one, respond, { dir: d });
+    expect(repinned.out).toContain(`${A}: sealed`);
+    const state = await readSealState();
+    expect(state.pins['https://x.test']).toBe(accountKeyFingerprint(account.publicKey));
+    // And no stray temp file is left behind by the atomic write.
+    const names = await readdir(join(d, 'config.json.state'));
+    expect(names.filter((n) => n.endsWith('.tmp'))).toEqual([]);
   }, 15_000);
 
   it('seals via an env-bundle credential and enforces the pin without persisting secrets', async () => {
@@ -700,7 +784,7 @@ describe('account sealing at the command level', () => {
     expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);
   }, 15_000);
 
-  it('backup also schedules the seal after the command', async () => {
+  it('backup --dry-run never schedules a seal', async () => {
     const one = {
       keys: { [A]: KEY_A },
       origins: { [A]: 'https://x.test' },
@@ -709,7 +793,6 @@ describe('account sealing at the command level', () => {
     dirs.push(source);
     await writeFile(join(source, 'note.txt'), 'hi');
     const account = await accountKeyPair();
-    // --dry-run keeps backupDirectory offline; the seal hook still runs against the stubbed API.
     const r = await cli(['backup', source, '--dry-run'], one, (path) => {
       if (path === 'account-key') return { keyId: KEY_ID, publicKey: account.publicKey, format: 1 };
       if (path === 'drives')
@@ -720,7 +803,59 @@ describe('account sealing at the command level', () => {
       return { status: 'created' };
     });
     expect(r.out).toContain('backup uploaded=0 unchanged=0 failed=0');
-    expect(r.paths.some((p) => p === `POST drives/${A}/account-key-slot`)).toBe(true);
+    // A dry run previews; sealing must not touch the account-key endpoints at all.
+    expect(r.paths.some((p) => p.includes('account-key'))).toBe(false);
+  }, 15_000);
+
+  it('seals after the command output is written', async () => {
+    const one = {
+      keys: { [A]: KEY_A },
+      origins: { [A]: 'https://x.test' },
+    };
+    const account = await accountKeyPair();
+    const r = await cli(['ls'], one, (path) => {
+      if (path === 'account-key') return { keyId: KEY_ID, publicKey: account.publicKey, format: 1 };
+      if (path === `drives/${A}/list`) return { items: [], nextCursor: null };
+      if (path === 'drives')
+        return {
+          items: [{ id: A, name: 'a', agentOnly: false, created_at: 't' }],
+          nextCursor: null,
+        };
+      return { status: 'created' };
+    });
+    const sealAt = r.paths.findIndex((p) => p === `POST drives/${A}/account-key-slot`);
+    expect(sealAt).toBeGreaterThan(-1);
+    // The command's own request happened strictly before the seal's first call.
+    const listAt = r.paths.findIndex((p) => p === `GET drives/${A}/list`);
+    expect(listAt).toBeGreaterThan(-1);
+    expect(listAt).toBeLessThan(sealAt);
+  }, 15_000);
+
+  it('drive create seals the fresh key, not an env override', async () => {
+    const { account, respond } = await api();
+    const envKey = generateDriveKey();
+    const r = await cli(
+      ['drive', 'create', '--name', 'fresh'],
+      { keys: {}, origins: {} },
+      respond,
+      { env: { AGENT_DRIVE_KEY: envKey } },
+    );
+    expect(r.out).toContain(B);
+    await waitForPath(r.paths, `POST drives/${B}/account-key-slot`);
+    const calls = vi.mocked(fetch).mock.calls as [URL | string, RequestInit?][];
+    const slot = calls.find(([url, init]) => {
+      const path = new URL(String(url)).pathname;
+      return path.endsWith('/account-key-slot') && init?.method === 'POST';
+    });
+    const posted = JSON.parse(String(slot![1]!.body)) as { sealed: SealedDriveKey };
+    const config = await readConfig();
+    const sealed = await unsealDriveKey(account.privateKey, B, posted.sealed, {
+      salt: 'agent-drive-account-v1',
+      label: `${KEY_ID}:${B}`,
+    });
+    // The exact key this command wrote — never the AGENT_DRIVE_KEY env value.
+    expect(sealed).toBe(config.driveKeys?.[B]);
+    expect(sealed).not.toBe(envKey);
   }, 15_000);
 });
 
@@ -801,12 +936,24 @@ describe('autoSealHeldKeys', () => {
     expect(posts.map((p) => p.driveId).sort()).toEqual([A, B].sort());
   });
 
-  it('still seals held keys when the listing is denied (write-only key)', async () => {
+  it('skips unmarked drives when a write-only key cannot list (unknown type)', async () => {
     await dir();
     const account = await accountKeyPair();
     const { client, posts } = mockClient({ publicKey: account.publicKey, list: 'deny' });
-    await autoSealHeldKeys({ client, config: config(), warn: () => {} });
-    expect(posts.map((p) => p.driveId).sort()).toEqual([A, B].sort());
+    const warnings: string[] = [];
+    await autoSealHeldKeys({ client, config: config(), warn: (l) => warnings.push(l) });
+    // With no listing and no local mark, a drive's type is unproven — the key must NOT be sent.
+    expect(posts).toHaveLength(0);
+    expect(warnings.join('\n')).toContain('unknown drive type');
+    expect(warnings.join('\n')).toContain('account seal --drive');
+    // The check is stamped, so the throttled follow-up stays quiet.
+    warnings.length = 0;
+    await autoSealHeldKeys({ client, config: config(), warn: (l) => warnings.push(l) });
+    expect(warnings).toEqual([]);
+    // A locally marked agent-only drive reports 'agent-only', still never posted.
+    await recordAgentOnlyDrive(A, 'https://x.test');
+    const state = await readSealState();
+    expect(state.agentOnly).toContain(scoped(A));
   });
 
   it('stays silent once the deadline aborts the attempt', async () => {
@@ -821,5 +968,140 @@ describe('autoSealHeldKeys', () => {
     const warnings: string[] = [];
     await autoSealHeldKeys({ client, config: config(), deadline, warn: (l) => warnings.push(l) });
     expect(warnings).toEqual([]);
+  });
+});
+
+describe('seal state file hardening', () => {
+  const target = () => ({ driveId: A, driveKey: KEY_A });
+
+  it('fails closed on a corrupt file and repairs it under --repin', async () => {
+    const d = await dir();
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({ publicKey: account.publicKey });
+    await writeSealStateFile(d, '{truncated');
+    await expect(
+      sealDrivesToAccount({ client, config: baseConfig, targets: [target()], force: true }),
+    ).rejects.toThrow(AccountSealStateUnreadable);
+    await expect(
+      sealDrivesToAccount({ client, config: baseConfig, targets: [target()], force: true }),
+    ).rejects.toThrow(/--repin/);
+    expect(posts).toHaveLength(0);
+    const ok = await sealDrivesToAccount({
+      client,
+      config: baseConfig,
+      targets: [target()],
+      force: true,
+      repin: true,
+    });
+    expect(ok.get(A)).toBe('sealed');
+    expect(posts).toHaveLength(1);
+    expect((await readSealState()).pins['https://x.test']).toBe(
+      accountKeyFingerprint(account.publicKey),
+    );
+  });
+
+  it('fails closed on an invalid pins field and on a symlink', async () => {
+    const d = await dir();
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({ publicKey: account.publicKey });
+    await writeSealStateFile(d, JSON.stringify({ pins: 42 }));
+    await expect(
+      sealDrivesToAccount({ client, config: baseConfig, targets: [target()], force: true }),
+    ).rejects.toThrow(AccountSealStateUnreadable);
+
+    // A symlink at the state path is never followed (O_NOFOLLOW): unreadable, never reset.
+    await rm(accountSealStatePath(), { force: true });
+    const targetFile = join(d, 'innocent.json');
+    await writeFile(targetFile, '{}');
+    await symlink(targetFile, accountSealStatePath());
+    await expect(
+      sealDrivesToAccount({ client, config: baseConfig, targets: [target()], force: true }),
+    ).rejects.toThrow(AccountSealStateUnreadable);
+    expect(posts).toHaveLength(0);
+    // --repin's atomic rename replaces the symlink itself; the target file is untouched.
+    await sealDrivesToAccount({
+      client,
+      config: baseConfig,
+      targets: [target()],
+      force: true,
+      repin: true,
+    });
+    expect(await readFile(targetFile, 'utf8')).toBe('{}');
+    expect(posts).toHaveLength(1);
+  });
+
+  it('bounds state-lock waits by the shared deadline', async () => {
+    const d = await dir();
+    await mkdir(join(d, 'config.json.state', 'account-seal.lock'), {
+      recursive: true,
+      mode: 0o700,
+    });
+    const account = await accountKeyPair();
+    const { client } = mockClient({ publicKey: account.publicKey });
+    const started = Date.now();
+    await expect(
+      sealDrivesToAccount({
+        client,
+        config: baseConfig,
+        targets: [target()],
+        force: true,
+        stateDeadlineAt: started + 300,
+      }),
+    ).rejects.toThrow('Timed out waiting for the account-seal state lock');
+    expect(Date.now() - started).toBeLessThan(5_000);
+  }, 10_000);
+});
+
+describe('heldSealTargets caller resolution', () => {
+  it('prefers the exact key the caller used, then the shared resolver', async () => {
+    await dir();
+    const exact = generateDriveKey();
+    const resolved = generateDriveKey();
+    const envKey = generateDriveKey();
+    vi.stubEnv(`AGENT_DRIVE_KEY_${B.replace(/-/g, '_').toUpperCase()}`, envKey);
+    // `keys` (the command's own key) wins over env and config for A; `resolveKey` (the caller's
+    // per-drive resolver, e.g. MCP's) supplies B before env is consulted.
+    const targets = await heldSealTargets({
+      config: {
+        ...baseConfig,
+        driveKeys: { [A]: generateDriveKey() },
+        driveKeyOrigins: { [A]: 'https://x.test' },
+      },
+      origin: 'https://x.test',
+      driveIds: [A, B],
+      keys: { [A]: exact },
+      resolveKey: (id) => (id === B ? resolved : undefined),
+    });
+    expect(targets).toEqual([
+      { driveId: A, driveKey: exact, agentOnly: false },
+      { driveId: B, driveKey: resolved, agentOnly: false },
+    ]);
+  });
+});
+
+describe('pending agent-only create intents', () => {
+  it('a recorded intent skips the drive even when the listing shows it ordinary', async () => {
+    await dir();
+    await recordAgentOnlyIntent('fresh', 'https://x.test');
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({
+      publicKey: account.publicKey,
+      list: async () => ({
+        items: [
+          { id: A, name: 'a', agentOnly: false, created_at: 't', quota_bytes: 0 },
+          // Created remotely but the id mark was never recorded locally (state failure); the
+          // pending name intent still protects it.
+          { id: B, name: 'fresh', agentOnly: false, created_at: 't', quota_bytes: 0 },
+        ],
+        nextCursor: null,
+      }),
+    });
+    const config = {
+      ...baseConfig,
+      driveKeys: { [A]: KEY_A, [B]: KEY_B },
+      driveKeyOrigins: { [A]: 'https://x.test', [B]: 'https://x.test' },
+    };
+    await autoSealHeldKeys({ client, config, warn: () => {} });
+    expect(posts.map((p) => p.driveId)).toEqual([A]);
   });
 });

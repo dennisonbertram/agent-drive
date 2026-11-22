@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -17,7 +17,14 @@ const accountIds: string[] = [];
 const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex');
 const key = () => `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
 const b64 = (bytes: Buffer) => bytes.toString('base64url');
-const point = () => b64(Buffer.concat([Buffer.from([4]), randomBytes(64)]));
+// A real P-256 public point (uncompressed, 65 bytes): the API rejects off-curve values.
+const point = () => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return b64(ecdh.getPublicKey());
+};
+// 65 bytes starting 0x04 but almost surely not on the curve — structurally valid only.
+const offCurve = () => b64(Buffer.concat([Buffer.from([4]), randomBytes(64)]));
 const wrapped = (n = 48) => b64(Buffer.concat([Buffer.from([1]), randomBytes(12 + 16 + n)]));
 const sealedSlot = () => ({ epk: point(), iv: b64(randomBytes(12)), ct: b64(randomBytes(59)) });
 
@@ -241,6 +248,8 @@ describe('bearer POST /drives/:id/account-key-slot', () => {
       { sealed: s },
       { keyId: live },
       { ...good, sealed: { ...s, epk: b64(randomBytes(65)).replace(/^./, 'A') } },
+      // 65-byte uncompressed shape but not a point on P-256: the browser could never open it.
+      { ...good, sealed: { ...s, epk: offCurve() } },
       { ...good, sealed: { epk: s.epk, iv: s.iv } },
       { ...good, sealed: 'x' },
     ];

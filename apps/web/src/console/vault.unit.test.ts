@@ -708,9 +708,117 @@ describe('browser-held key', () => {
       }),
     );
     await vault.load();
-    await vault.unlock(PASSPHRASE);
+    // persist=true: the write path degrades softly, so the vault still unlocks.
+    await vault.unlock(PASSPHRASE, true);
     await expect(vault.lockBrowser()).rejects.toThrow('IDB unavailable');
     expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('a committed browser write is deleted when the unlock is cancelled after it', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const clears: unknown[] = [];
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+        },
+        clear: async (match) => {
+          clears.push(match ?? null);
+        },
+      }),
+    );
+    await vault.load();
+    const pending = vault.unlock(PASSPHRASE, true);
+    // The write has started; release it, then cancel before the vault's continuation runs.
+    await vi.waitFor(() => expect(writes).toEqual([record.id]), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    expect(await pending).toBe(false);
+    // The committed write is removed — by this unlock's own {keyId, startedAt} match.
+    expect(clears).toEqual([{ keyId: record.id, startedAt: expect.any(Number) }]);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('unchecking Keep this browser unlocked surfaces a failed delete', async () => {
+    const { vault } = makeVault(
+      base(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          throw new Error('IDB unavailable');
+        },
+      }),
+    );
+    await vault.load();
+    await expect(vault.unlock(PASSPHRASE, false)).rejects.toThrow('IDB unavailable');
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('setup deletes a committed browser write when cancelled after it', async () => {
+    const write = deferred<void>();
+    const writes: string[] = [];
+    const clears: unknown[] = [];
+    const { vault } = makeVault(
+      {
+        whoami: () => ({ accountId: ACCOUNT }),
+        'account-key': () => ({ accountKey: null }),
+        'drives/': () => ({ revision: 1 }),
+      },
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          await write.promise;
+        },
+        clear: async (match) => {
+          clears.push(match ?? null);
+        },
+      }),
+    );
+    await vault.load();
+    const pending = vault.setup(PASSPHRASE, {});
+    await vi.waitFor(() => expect(writes).toHaveLength(1), { timeout: 10_000 });
+    write.resolve();
+    vault.cancelUnlock();
+    expect(await pending).toBeNull();
+    expect(clears).toEqual([{ keyId: expect.any(String), startedAt: expect.any(Number) }]);
+    expect(vault.status).toBe('none');
+  }, 30_000);
+
+  it('repairs a slot it cannot open at the row revision the server has', async () => {
+    // A slot row this build cannot parse keeps its revision, so the repair write replaces it
+    // (expectedRevision) instead of inserting a second row that can never win.
+    const unopenable = {
+      driveId: DRIVE,
+      keyId: record.id,
+      format: 1,
+      revision: 7,
+      sealed: 'not-a-sealed-payload',
+    };
+    const posts: unknown[] = [];
+    const routes = {
+      ...base(unopenable),
+      [`drives/${DRIVE}/account-key`]: (_m: string, body: unknown) => {
+        posts.push(body);
+        return { revision: 8 };
+      },
+    };
+    const { vault } = makeVault(routes);
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    expect(await vault.addKey(DRIVE, driveKey, { path: '/a.txt' })).toBe('added');
+    expect(posts[0]).toMatchObject({ keyId: record.id, expectedRevision: 7 });
   }, 30_000);
 
   it('setup commits the browser key before reporting unlocked', async () => {

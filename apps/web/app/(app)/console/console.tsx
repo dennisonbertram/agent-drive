@@ -409,11 +409,15 @@ const MISMATCH = 'This drive’s account copy is invalid — load its recovery f
 const AGENT_ONLY = 'Agent-only: open with a recovery file.';
 const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
 function useClerkIdentity() {
-  const { user } = useUser();
-  return { userId: user?.id ?? null, email: user?.primaryEmailAddress?.emailAddress ?? '' };
+  const { isLoaded, user } = useUser();
+  return {
+    loaded: isLoaded,
+    userId: user?.id ?? null,
+    email: user?.primaryEmailAddress?.emailAddress ?? '',
+  };
 }
 function useNoIdentity() {
-  return { userId: null as string | null, email: '' };
+  return { loaded: true, userId: null as string | null, email: '' };
 }
 // Clerk's reverification cancel, or any other failure, as one line for a form.
 function vaultFailure(reason: unknown, doing: string) {
@@ -992,11 +996,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyKey, vaultOpen, unlockOpen]);
-  // Load the passphrase record once. Unmounting (leaving the page) drops the account key.
+  // Load the passphrase record once Clerk reports a real identity — before isLoaded, userId
+  // would read as signed-out and a stored key could be judged against the wrong owner.
+  // Unmounting (leaving the page) drops the account key.
   useEffect(() => {
+    if (!identity.loaded) return;
     void vault.load();
     return () => vault.clear();
-  }, [vault]);
+  }, [vault, identity.loaded]);
   // Sign-out or another user in the same tab: nothing from the old user may stay.
   const lastUser = useRef(identity.userId);
   useEffect(() => {
@@ -1637,8 +1644,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         passphrase,
         Object.fromEntries(
           Object.entries(driveKeys)
-            // Agent-only drives never get a slot, including via passphrase setup.
-            .filter(([id]) => drives.find((item) => item.id === id)?.agentOnly !== true)
+            // Agent-only drives never get a slot, including via passphrase setup — and neither
+            // does a held key for a drive the listing does not show (deleted or foreign).
+            .filter(([id]) => drives.some((item) => item.id === id && item.agentOnly !== true))
             .map(([id, key]) => [id, { key, trusted: trustedDrives.current.get(id) === key }]),
         ),
       );

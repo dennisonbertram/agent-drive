@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
@@ -17,7 +17,14 @@ const accountIds: string[] = [];
 const userIds: string[] = [];
 
 const b64 = (bytes: Buffer) => bytes.toString('base64url');
-const point = () => b64(Buffer.concat([Buffer.from([4]), randomBytes(64)]));
+// A real P-256 public point (uncompressed, 65 bytes): the API rejects off-curve values.
+const point = () => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return b64(ecdh.getPublicKey());
+};
+// 65 bytes starting 0x04 but almost surely not on the curve — structurally valid only.
+const offCurve = () => b64(Buffer.concat([Buffer.from([4]), randomBytes(64)]));
 const wrapped = (n = 48) => b64(Buffer.concat([Buffer.from([1]), randomBytes(12 + 16 + n)]));
 const kdf = (iterations = 600000) => ({
   name: 'PBKDF2-SHA256',
@@ -243,6 +250,8 @@ describe('account key: record routes', () => {
       { ...good, id: 'not-a-uuid' },
       { ...good, publicKey: b64(randomBytes(65)).replace(/^./, 'A') },
       { ...good, publicKey: b64(Buffer.concat([Buffer.from([4]), randomBytes(63)])) },
+      // 65-byte uncompressed shape but not a point on P-256: WebCrypto could never open it.
+      { ...good, publicKey: offCurve() },
       { ...good, publicKey: `${good.publicKey}=` },
       { ...good, wrappedPrivateKey: b64(Buffer.concat([Buffer.from([2]), randomBytes(76)])) },
       { ...good, wrappedPrivateKey: wrapped(31) },
