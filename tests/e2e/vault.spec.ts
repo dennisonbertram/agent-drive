@@ -719,7 +719,7 @@ test('Lock while a file key is being verified: no key, no preview', async ({
     await nameButton(page, 'note.txt').click();
     await reached;
     await expect(chip(page)).toContainText('Unlocked');
-    await (await openMenu(page)).getByRole('button', { name: 'Lock' }).click();
+    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
     await expect(chip(page)).toContainText('Locked');
     const stale = page.waitForResponse((r) => /\/versions\?/.test(r.url()));
     release();
@@ -934,8 +934,7 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
     // The browser key restores the vault: the click reaches the bad slot without a prompt.
     await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'note.txt').click();
-    const mismatch =
-      'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
+    const mismatch = 'This drive’s account copy is invalid — load its recovery file to repair it.';
     await expect(page.getByText(mismatch)).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
