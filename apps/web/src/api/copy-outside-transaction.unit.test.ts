@@ -72,8 +72,8 @@ const harness = vi.hoisted(() => {
       return { rows: [], rowCount: 1 };
     return { rows: [], rowCount: 0 };
   };
-  const pool = { query };
-  const client = { query };
+  const client = { query, release: () => undefined };
+  const pool = { query, connect: async () => client };
   const transaction: typeof import('../db/client').withTransaction = async (callback) => {
     state.openTransactions += 1;
     try {
@@ -376,9 +376,12 @@ describe('commitIntent', () => {
   });
 
   it('deletes the copy when the final transaction conflicts', async () => {
-    vi.mocked(putConflict).mockRejectedValueOnce(
-      new ApiError('conflict', 'The file already exists.', 409, { state: 'exists' }),
-    );
+    // The unlocked pre-check passes; the conflict appears only under the lock.
+    vi.mocked(putConflict)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new ApiError('conflict', 'The file already exists.', 409, { state: 'exists' }),
+      );
     const response = await commit();
     expect(response.status).toBe(409);
     expect(await errorCode(response)).toBe('conflict');
@@ -387,14 +390,37 @@ describe('commitIntent', () => {
   });
 
   it('deletes the copy when the quota check fails after the copy', async () => {
-    vi.mocked(checkDriveQuota).mockRejectedValueOnce(
-      new ApiError('quota_exceeded', 'The drive quota would be exceeded.'),
-    );
+    // The unlocked pre-check passes; the quota failure appears only under the lock.
+    vi.mocked(checkDriveQuota)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new ApiError('quota_exceeded', 'The drive quota would be exceeded.'));
     const response = await commit();
     expect(response.status).toBe(413);
     expect(await errorCode(response)).toBe('quota_exceeded');
     expect(state.copyCalls).toHaveLength(1);
     expect(deletedObjectKeys()).toHaveLength(1);
+  });
+
+  it('rejects a stale conditional write without copying', async () => {
+    state.intent!.conditional_mode = 'version';
+    state.intent!.base_version_id = ids.sourceVersion;
+    vi.mocked(putConflict).mockRejectedValueOnce(
+      new ApiError('conflict', 'The file changed since the conditional write was prepared.', 409, {
+        state: 'changed',
+        currentVersionId: ids.committedVersion,
+      }),
+    );
+    const response = await commit();
+    expect(response.status).toBe(409);
+    expect(await errorCode(response)).toBe('conflict');
+    expect(putConflict).toHaveBeenCalledWith(expect.anything(), ids.drive, '/file.bin', {
+      baseVersionId: ids.sourceVersion,
+    });
+    expect(copyObject).not.toHaveBeenCalled();
+    expect(state.copyCalls).toHaveLength(0);
+    expect(deletedObjectKeys()).toEqual([]);
+    // Only the operation-reservation transaction ran; no locked commit transaction opened.
+    expect(withTransaction).toHaveBeenCalledTimes(1);
   });
 });
 

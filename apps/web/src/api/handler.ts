@@ -1777,6 +1777,23 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   const stagedEtag = staged.etag;
   const versionId = randomUUID();
   const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
+  const intentMode = (row: Row): PutMode =>
+    row.conditional_mode === 'create'
+      ? 'create'
+      : row.conditional_mode === 'version'
+        ? { baseVersionId: row.base_version_id as string }
+        : 'unconditional';
+  // Cheap unlocked reads reject the common conflict and quota failures before the S3 copy,
+  // so a rejected commit leaves nothing in objects/ to clean up. The FOR UPDATE in putConflict
+  // is only a statement-scoped lock here; lockAndCheck re-runs the same checks under the
+  // locks and stays authoritative.
+  const precheck = await getPool().connect();
+  try {
+    await putConflict(precheck, driveId, source.path, intentMode(source));
+    await checkDriveQuota(precheck, driveId, Number(source.ciphertext_size));
+  } finally {
+    precheck.release();
+  }
   // Takes the account, intent and drive locks and re-runs every pre-commit check under them.
   const lockAndCheck = async (
     client: PoolClient,
@@ -1808,12 +1825,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     });
     if (new Date(lockedIntent.expires_at).getTime() < Date.now())
       throw new ApiError('conflict', 'The upload intent has expired.');
-    const mode: PutMode =
-      lockedIntent.conditional_mode === 'create'
-        ? 'create'
-        : lockedIntent.conditional_mode === 'version'
-          ? { baseVersionId: lockedIntent.base_version_id as string }
-          : 'unconditional';
+    const mode = intentMode(lockedIntent);
     // Report a conflict or quota failure before commitPut, which re-checks under the same locks.
     await putConflict(client, driveId, source.path, mode);
     await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
