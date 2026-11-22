@@ -1,17 +1,23 @@
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import {
   chmod,
   lstat,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rename,
   rm,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AgentDriveApiError } from './client.js';
 import type { AgentDriveClient } from './client.js';
 import { backupDirectory, readFileInside } from './backup.js';
 
@@ -109,7 +115,7 @@ describe('backupDirectory', () => {
     await mkdir(join(real, 'cfg'), { recursive: true });
     await writeFile(join(real, 'a.txt'), 'A');
     await writeFile(join(real, 'cfg', 'config.json'), '{"apiKey":"x"}');
-    await mkdir(join(real, 'cfg', 'config.json.state'));
+    await mkdir(join(real, 'cfg', 'config.json.state'), { mode: 0o700 });
     await writeFile(join(real, 'cfg', 'config.json.state', 'm.json'), '{}');
     const link = join(dir, 'link');
     await symlink(real, link);
@@ -156,6 +162,213 @@ describe('backupDirectory', () => {
     await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
   });
 
+  it('with gitignore, skips .gitignore entries but keeps .git, and reports the scan counts', async () => {
+    const { root } = await fixture();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+    await writeFile(join(root, '.gitignore'), 'ignored/\n*.log\n');
+    await mkdir(join(root, 'ignored'));
+    await writeFile(join(root, 'ignored', 'x.txt'), 'X');
+    await writeFile(join(root, 'a.log'), 'L');
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    await backupDirectory(client, 'd', root, '/p', { gitignore: true, log: (l) => lines.push(l) });
+    const paths = puts.map((p) => p.path);
+    expect(paths).not.toContain('/p/ignored/x.txt');
+    expect(paths).not.toContain('/p/a.log');
+    expect(paths).toContain('/p/a.txt');
+    expect(paths.some((p) => p.startsWith('/p/.git/'))).toBe(true);
+    expect(lines.join('\n')).toMatch(
+      /backup found \d+ files \([\d.]+ MB\) in .+; skipped 2 ignored paths/u,
+    );
+  });
+
+  it('uploads gitignored files and .git by default', async () => {
+    const { root } = await fixture();
+    execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+    await writeFile(join(root, '.gitignore'), 'ignored/\n*.log\n');
+    await mkdir(join(root, 'ignored'));
+    await writeFile(join(root, 'ignored', 'x.txt'), 'X');
+    await writeFile(join(root, 'a.log'), 'L');
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', root, '/p');
+    const paths = puts.map((p) => p.path);
+    expect(paths).toContain('/p/ignored/x.txt');
+    expect(paths).toContain('/p/a.log');
+    expect(paths.some((p) => p.startsWith('/p/.git/'))).toBe(true);
+  });
+
+  it('applies --exclude globs to the root-relative path', async () => {
+    const { root } = await fixture();
+    await mkdir(join(root, 'node_modules'));
+    await writeFile(join(root, 'node_modules', 'x.js'), 'X');
+    await mkdir(join(root, 'sub', 'node_modules'), { recursive: true });
+    await writeFile(join(root, 'sub', 'node_modules', 'y.js'), 'Y');
+    await mkdir(join(root, 'build'));
+    await writeFile(join(root, 'build', 'out.js'), 'O');
+    // A bare name matches only at the top level.
+    let run = mock();
+    await backupDirectory(run.client, 'd', root, '/p1', { exclude: ['node_modules'] });
+    expect(run.puts.map((p) => p.path).sort()).toEqual([
+      '/p1/a.txt',
+      '/p1/build/out.js',
+      '/p1/sub/b.txt',
+      '/p1/sub/node_modules/y.js',
+    ]);
+    // A ** pattern matches at any depth.
+    run = mock();
+    await backupDirectory(run.client, 'd', root, '/p2', { exclude: ['**/node_modules'] });
+    expect(run.puts.map((p) => p.path).sort()).toEqual([
+      '/p2/a.txt',
+      '/p2/build/out.js',
+      '/p2/sub/b.txt',
+    ]);
+    // build/** matches everything under build/ at the top level only.
+    run = mock();
+    await backupDirectory(run.client, 'd', root, '/p3', { exclude: ['build/**'] });
+    expect(run.puts.map((p) => p.path).sort()).toEqual([
+      '/p3/a.txt',
+      '/p3/node_modules/x.js',
+      '/p3/sub/b.txt',
+      '/p3/sub/node_modules/y.js',
+    ]);
+  });
+
+  it('refuses a large backup without --yes and never uploads', async () => {
+    const { root } = await fixture();
+    const { client, puts } = mock();
+    await expect(backupDirectory(client, 'd', root, '/p', { maxFiles: 1 })).rejects.toThrow(
+      /2 files.+--exclude.+--dry-run.+--yes/su,
+    );
+    expect(puts).toEqual([]);
+    await expect(backupDirectory(client, 'd', root, '/p', { maxBytes: 1 })).rejects.toThrow(
+      /--yes/u,
+    );
+    // Dry-run is exempt from the guard.
+    const dry = await backupDirectory(client, 'd', root, '/p', { maxFiles: 0, dryRun: true });
+    expect(dry.wouldUpload).toHaveLength(2);
+    expect(puts).toEqual([]);
+  });
+
+  it('uploads over the threshold when --yes is passed', async () => {
+    const { root } = await fixture();
+    const { client, puts } = mock();
+    const result = await backupDirectory(client, 'd', root, '/p', { maxFiles: 1, yes: true });
+    expect(result).toMatchObject({ uploaded: 2, failed: 0 });
+    expect(puts).toHaveLength(2);
+  });
+
+  it('refuses to run when a live lock exists for the same prefix', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const lock = join(state, `backup-${key}.lock`);
+    await writeFile(lock, String(process.pid));
+    await expect(backupDirectory(mock().client, 'd', root, '/p')).rejects.toThrow(
+      `another backup to /p is already running (pid ${process.pid})`,
+    );
+  });
+
+  it('takes over a stale or unreadable lock and removes it at the end', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const lock = join(state, `backup-${key}.lock`);
+    await writeFile(lock, '999999999');
+    await expect(backupDirectory(mock().client, 'd', root, '/p')).resolves.toMatchObject({
+      uploaded: 2,
+    });
+    await expect(lstat(lock)).rejects.toThrow();
+    await writeFile(lock, 'not a pid');
+    await expect(backupDirectory(mock().client, 'd', root, '/p')).resolves.toMatchObject({
+      unchanged: 2,
+    });
+    await expect(lstat(lock)).rejects.toThrow();
+  });
+
+  it('does not take the lock on a dry run', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    await writeFile(join(state, `backup-${key}.lock`), String(process.pid));
+    const result = await backupDirectory(mock().client, 'd', root, '/p', { dryRun: true });
+    expect(result.wouldUpload).toHaveLength(2);
+  });
+
+  it('counts a 429 as a failed file and does not retry the put', async () => {
+    const { root } = await fixture();
+    let calls = 0;
+    const client = {
+      apiOrigin: 'https://x.test',
+      put: async (_d: string, path: string) => {
+        if (path.endsWith('a.txt')) {
+          calls++;
+          throw new AgentDriveApiError('rate_limited', 429, 'slow down', { retryAfter: 0 });
+        }
+        return { id: 'v' };
+      },
+    } as unknown as AgentDriveClient;
+    const result = await backupDirectory(client, 'd', root, '/p');
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(calls).toBe(1);
+  });
+
+  it('prints a progress line on the injected interval', async () => {
+    const { root } = await fixture();
+    const client = {
+      apiOrigin: 'https://x.test',
+      put: async () => {
+        await new Promise((r) => setTimeout(r, 30));
+        return { id: 'v' };
+      },
+    } as unknown as AgentDriveClient;
+    const lines: string[] = [];
+    await backupDirectory(client, 'd', root, '/p', {
+      progressIntervalMs: 5,
+      log: (l) => lines.push(l),
+    });
+    expect(
+      lines.some((l) =>
+        /^backup progress \d+\/2 uploaded=\d+ unchanged=\d+ failed=\d+ [\d.]+ MB\/s$/u.test(l),
+      ),
+    ).toBe(true);
+  });
+
+  it('never runs more than four puts at once', async () => {
+    const { root } = await fixture();
+    for (let i = 0; i < 10; i++) await writeFile(join(root, `f${i}.txt`), `f${i}`);
+    let inflight = 0;
+    let max = 0;
+    const client = {
+      apiOrigin: 'https://x.test',
+      put: async () => {
+        inflight++;
+        max = Math.max(max, inflight);
+        await new Promise((r) => setTimeout(r, 10));
+        inflight--;
+        return { id: 'v' };
+      },
+    } as unknown as AgentDriveClient;
+    const result = await backupDirectory(client, 'd', root, '/p');
+    expect(result).toMatchObject({ uploaded: 12, failed: 0 });
+    expect(max).toBe(4);
+  });
+
+  it('still writes the manifest when a file fails mid-run', async () => {
+    const { dir, root } = await fixture();
+    const { client } = mock('a.txt');
+    const result = await backupDirectory(client, 'd', root, '/p');
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const manifest = JSON.parse(await readFile(join(state, `backup-${key}.json`), 'utf8')) as {
+      files: Record<string, string>;
+    };
+    expect(Object.keys(manifest.files)).toEqual(['sub/b.txt']);
+  });
+
   it.skipIf(process.getuid?.() === 0)('reports an unreadable directory and continues', async () => {
     const { root } = await fixture();
     await chmod(join(root, 'sub'), 0);
@@ -170,4 +383,196 @@ describe('backupDirectory', () => {
       await chmod(join(root, 'sub'), 0o700);
     }
   });
+
+  it('keeps its pid in the lock file for the whole run', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const lock = join(state, `backup-${key}.lock`);
+    const seen: string[] = [];
+    const client = {
+      apiOrigin: 'https://x.test',
+      put: async () => {
+        seen.push((await readFile(lock, 'utf8')).trim());
+        return { id: 'v' };
+      },
+    } as unknown as AgentDriveClient;
+    await backupDirectory(client, 'd', root, '/p');
+    expect(seen).toHaveLength(2);
+    expect(seen.every((content) => content === String(process.pid))).toBe(true);
+  });
+
+  it('reclaims a lock with a live pid but a stale mtime', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const lock = join(state, `backup-${key}.lock`);
+    await writeFile(lock, String(process.pid));
+    const stale = new Date(Date.now() - 3 * 60 * 1000);
+    await utimes(lock, stale, stale);
+    await expect(backupDirectory(mock().client, 'd', root, '/p')).resolves.toMatchObject({
+      uploaded: 2,
+    });
+    await expect(lstat(lock)).rejects.toThrow();
+  });
+
+  it('with gitignore, treats a root inside an ignored directory as all ignored', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-backup-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'cfg', 'config.json'));
+    execFileSync('git', ['init'], { cwd: dir, stdio: 'pipe' });
+    await writeFile(join(dir, '.gitignore'), 'ignored-root/\n');
+    const root = join(dir, 'ignored-root');
+    await mkdir(root);
+    await writeFile(join(root, 'a.txt'), 'A');
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      gitignore: true,
+      log: (line) => lines.push(line),
+    });
+    expect(result.uploaded).toBe(0);
+    expect(puts).toEqual([]);
+    expect(lines.join('\n')).toContain('backup found 0 files');
+  });
+
+  it('with gitignore, fails closed when git exits non-zero', async () => {
+    const { dir, root } = await fixture();
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    const fake = join(bin, 'git');
+    await writeFile(fake, '#!/bin/sh\necho bogus >&2\nexit 42\n');
+    await chmod(fake, 0o755);
+    vi.stubEnv('PATH', bin);
+    const { client, puts } = mock();
+    await expect(backupDirectory(client, 'd', root, '/p', { gitignore: true })).rejects.toThrow(
+      /could not read \.gitignore rules: /u,
+    );
+    expect(puts).toEqual([]);
+  });
+
+  it('with gitignore, backs up everything outside a work tree', async () => {
+    const { root } = await fixture();
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', root, '/p', { gitignore: true });
+    expect(puts).toHaveLength(2);
+  });
+
+  it('skips a whole directory matched by an exclude glob, including hidden files', async () => {
+    const { root } = await fixture();
+    await mkdir(join(root, 'build'));
+    await writeFile(join(root, 'build', '.env'), 'SECRET');
+    await writeFile(join(root, 'build', 'out.js'), 'O');
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', root, '/p', { exclude: ['build/**'] });
+    expect(puts.map((p) => p.path).sort()).toEqual(['/p/a.txt', '/p/sub/b.txt']);
+  });
+
+  it('fails a file that changed since the scan', async () => {
+    const { root } = await fixture();
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => {
+        lines.push(line);
+        if (line.startsWith('backup found'))
+          appendFileSync(join(root, 'a.txt'), 'grew after the scan');
+      },
+    });
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(puts.map((p) => p.path)).toEqual(['/p/sub/b.txt']);
+    expect(lines.join('\n')).toContain('file changed since the scan');
+  });
+
+  it('counts a file it cannot stat during the scan as one failure', async () => {
+    const { dir, root } = await fixture();
+    // A path longer than PATH_MAX (1024 on macOS, 4096 on Linux) is listed by readdir but cannot
+    // be lstat'ed. Each level stays below the limit; the renamed-in payload pushes past it.
+    const levels = process.platform === 'linux' ? 20 : 4;
+    let deep = root;
+    for (let i = 0; i < levels; i++) {
+      deep = join(deep, 'd'.repeat(200));
+      await mkdir(deep);
+    }
+    const payload = join(dir, 'payload');
+    await mkdir(payload);
+    await writeFile(join(payload, `${'f'.repeat(200)}.txt`), 'X');
+    await rename(payload, join(deep, 'payload'));
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    try {
+      const result = await backupDirectory(client, 'd', root, '/p', {
+        log: (line) => lines.push(line),
+      });
+      expect(result).toMatchObject({ uploaded: 2, failed: 1 });
+      expect(puts).toHaveLength(2);
+      expect(lines.join('\n')).toMatch(/failed .+payload/u);
+    } finally {
+      // Shorten the path again so cleanup can address it.
+      await rename(join(root, 'd'.repeat(200)), join(root, 'cleanup'));
+    }
+  });
+
+  it('returns the counts when the final manifest save fails', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const manifest = join(state, `backup-${key}.json`);
+    const { client } = mock();
+    await backupDirectory(client, 'd', root, '/p');
+    await rm(manifest);
+    await mkdir(manifest);
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => lines.push(line),
+    });
+    expect(result).toMatchObject({ uploaded: 2, failed: 1 });
+    expect(lines.join('\n')).toContain('failed to save the backup manifest');
+  });
+
+  it('throttles manifest saves even when they fail', async () => {
+    const { dir, root } = await fixture();
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    await mkdir(state, { recursive: true, mode: 0o700 });
+    // A directory at the manifest path makes every save fail.
+    await mkdir(join(state, `backup-${key}.json`));
+    for (let i = 0; i < 10; i++) await writeFile(join(root, `f${i}.txt`), `f${i}`);
+    const { client } = mock();
+    const lines: string[] = [];
+    await backupDirectory(client, 'd', root, '/p', { log: (line) => lines.push(line) });
+    const saves = lines.filter((line) => line.startsWith('failed to save the backup manifest'));
+    expect(saves).toHaveLength(2);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'reports progress with a numerator that only counts scanned files',
+    async () => {
+      const { root } = await fixture();
+      await chmod(join(root, 'sub'), 0);
+      const client = {
+        apiOrigin: 'https://x.test',
+        put: async () => {
+          await new Promise((r) => setTimeout(r, 30));
+          return { id: 'v' };
+        },
+      } as unknown as AgentDriveClient;
+      try {
+        const lines: string[] = [];
+        await backupDirectory(client, 'd', root, '/p', {
+          progressIntervalMs: 5,
+          log: (line) => lines.push(line),
+        });
+        const progress = lines.filter((line) => line.startsWith('backup progress '));
+        expect(progress.length).toBeGreaterThan(0);
+        for (const line of progress) {
+          const [, done, total] = /progress (\d+)\/(\d+)/u.exec(line) ?? [];
+          expect(Number(done)).toBeLessThanOrEqual(Number(total));
+        }
+      } finally {
+        await chmod(join(root, 'sub'), 0o700);
+      }
+    },
+  );
 });
