@@ -977,7 +977,8 @@
     width: 130px;
   }
   .file-panel.trash th:nth-child(2) {
-    width: 190px;
+    /* Fits a two-digit hour, e.g. "Nov 22, 2026, 10:37 PM". */
+    width: 210px;
   }
   .file-panel.trash th:nth-child(3) {
     width: 130px;
