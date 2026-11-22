@@ -276,6 +276,19 @@ describe('commitIntent', () => {
     expect(state.deletedKeys).toEqual([state.intent!.staging_key]);
   });
 
+  it('runs a single transaction on the success path', async () => {
+    const response = await commit();
+    expect(response.status).toBe(201);
+    // One transaction reserves the operation; the commit itself runs exactly one.
+    expect(withTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns 201 without waiting for the staging delete', async () => {
+    vi.mocked(deleteObject).mockImplementationOnce(() => new Promise<void>(() => undefined));
+    const response = await commit();
+    expect(response.status).toBe(201);
+  });
+
   it('maps a staging ETag precondition failure to a conflict and skips commitPut', async () => {
     vi.mocked(copyObject).mockRejectedValueOnce(
       Object.assign(new Error('precondition'), { name: 'PreconditionFailed' }),
@@ -331,7 +344,7 @@ describe('commitIntent', () => {
     let transactions = 0;
     vi.mocked(withTransaction).mockImplementation(async (callback) => {
       transactions += 1;
-      if (transactions === 3) {
+      if (transactions === 2) {
         await harness.transaction(callback);
         throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
       }
@@ -350,7 +363,7 @@ describe('commitIntent', () => {
     });
     vi.mocked(withTransaction).mockImplementation(async (callback) => {
       transactions += 1;
-      if (transactions === 3) {
+      if (transactions === 2) {
         await harness.transaction(callback);
         throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
       }
@@ -362,14 +375,26 @@ describe('commitIntent', () => {
     expect(deletedObjectKeys()).toHaveLength(1);
   });
 
-  it('fails before copying when the pre-check conflicts', async () => {
+  it('deletes the copy when the final transaction conflicts', async () => {
     vi.mocked(putConflict).mockRejectedValueOnce(
       new ApiError('conflict', 'The file already exists.', 409, { state: 'exists' }),
     );
     const response = await commit();
     expect(response.status).toBe(409);
     expect(await errorCode(response)).toBe('conflict');
-    expect(copyObject).not.toHaveBeenCalled();
+    expect(state.copyCalls).toHaveLength(1);
+    expect(deletedObjectKeys()).toHaveLength(1);
+  });
+
+  it('deletes the copy when the quota check fails after the copy', async () => {
+    vi.mocked(checkDriveQuota).mockRejectedValueOnce(
+      new ApiError('quota_exceeded', 'The drive quota would be exceeded.'),
+    );
+    const response = await commit();
+    expect(response.status).toBe(413);
+    expect(await errorCode(response)).toBe('quota_exceeded');
+    expect(state.copyCalls).toHaveLength(1);
+    expect(deletedObjectKeys()).toHaveLength(1);
   });
 });
 

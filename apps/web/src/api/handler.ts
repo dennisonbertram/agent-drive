@@ -1777,11 +1777,9 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   const stagedEtag = staged.etag;
   const versionId = randomUUID();
   const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
-  // Takes the account, intent and drive locks and runs every check that precedes the copy.
-  // reserveOnly keeps a commit that later fails from raising the billing period's peak storage.
+  // Takes the account, intent and drive locks and re-runs every pre-commit check under them.
   const lockAndCheck = async (
     client: PoolClient,
-    reserveOnly: boolean,
   ): Promise<{ committed: Row } | { lockedIntent: Row; mode: PutMode }> => {
     await lockBillingAccount(client, auth.accountId);
     const lockedIntentResult = await client.query(
@@ -1807,7 +1805,6 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     await enforceWriteBudget(client, auth.accountId, {
       bytes: BigInt(lockedIntent.ciphertext_size),
       excludeIntentId: intentId,
-      reserveOnly,
     });
     if (new Date(lockedIntent.expires_at).getTime() < Date.now())
       throw new ApiError('conflict', 'The upload intent has expired.');
@@ -1817,7 +1814,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         : lockedIntent.conditional_mode === 'version'
           ? { baseVersionId: lockedIntent.base_version_id as string }
           : 'unconditional';
-    // Report a conflict or quota failure before copying the staged object; commitPut re-checks under the same locks.
+    // Report a conflict or quota failure before commitPut, which re-checks under the same locks.
     await putConflict(client, driveId, source.path, mode);
     await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
     return { lockedIntent, mode };
@@ -1825,11 +1822,9 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   let copied = false;
   let copyReferenced = false;
   try {
-    const precheck = await withTransaction((client) => lockAndCheck(client, true));
-    if ('committed' in precheck) return response({ version: rowVersion(precheck.committed) });
     // The destination key ends in a fresh random version id, so the copy can run unlocked.
     try {
-      await copyObject(precheck.lockedIntent.staging_key, finalKey, stagedEtag);
+      await copyObject(source.staging_key, finalKey, stagedEtag);
     } catch (error) {
       // A concurrent request may have committed this intent and deleted the staging object.
       const committed = (
@@ -1858,7 +1853,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     }
     copied = true;
     const result = await withTransaction(async (client) => {
-      const checked = await lockAndCheck(client, false);
+      const checked = await lockAndCheck(client);
       if ('committed' in checked) return checked;
       copyReferenced = true;
       const version = await commitPut(client, {
@@ -1887,7 +1882,8 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       await deleteObject(finalKey).catch(() => undefined);
       return response({ version: rowVersion(result.committed) });
     }
-    await deleteObject(source.staging_key).catch(() => undefined);
+    // upload-cleanup.ts deletes staging objects of all expired intents and a bucket lifecycle rule expires `staging/`, so a dropped delete is cleaned up later.
+    void deleteObject(source.staging_key).catch(() => undefined);
     return response({ version: rowVersion(result.version) }, 201);
   } catch (error) {
     if (copied && !(error instanceof TransactionCommitUnknownError && copyReferenced))
