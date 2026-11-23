@@ -47,7 +47,9 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
       const path = new URL(String(url)).pathname.replace('/api/v1/', '');
       paths.push(path);
       queries.push(new URL(String(url)).search);
-      return new Response(JSON.stringify(respond(path)), {
+      // A test that does not answer account-key gets "no key": the throttled seal stays silent.
+      const body = path === 'account-key' ? { accountKey: null } : respond(path);
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -59,9 +61,22 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   vi.spyOn(process.stderr, 'write').mockImplementation((s) => (err.push(String(s)), true));
   vi.spyOn(process, 'argv', 'get').mockReturnValue(['node', 'agent-drive', ...argv]);
   vi.resetModules();
-  await import('./cli.js');
-  await vi.waitFor(() => expect(out.length + err.length).toBeGreaterThan(0), { timeout: 3000 });
-  return { out: out.join(''), err: err.join(''), paths, queries };
+  const mod = (await import('./cli.js')) as { done?: Promise<void> };
+  // The CLI entry point runs the command without awaiting it; `done` settles when the whole
+  // command (including best-effort account sealing) has finished.
+  await mod.done;
+  // Getters, not snapshots: best-effort account sealing can write to stderr after the first
+  // output line, and tests poll these inside vi.waitFor.
+  return {
+    get out() {
+      return out.join('');
+    },
+    get err() {
+      return err.join('');
+    },
+    paths,
+    queries,
+  };
 }
 
 const one: Saved = { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } };
@@ -69,9 +84,12 @@ const version = { id: 'v1', path: '/a.md', wrappedKey: 'WRAPPED', downloadUrl: '
 
 describe('drive default at the command level', () => {
   it('ls uses the only drive key saved for this origin, and hides wrapped keys', async () => {
-    const r = await cli(['ls'], one, () => ({ items: [version], nextCursor: null }));
+    const r = await cli(['ls'], one, (path) =>
+      path === 'drives' ? { items: [], nextCursor: null } : { items: [version], nextCursor: null },
+    );
     expect(r.err).toBe('');
-    expect(r.paths[0]).toContain(`drives/${A}/list`);
+    // paths[0] is the throttled account-seal drive listing; the ls request follows.
+    expect(r.paths.some((p) => p.includes(`drives/${A}/list`))).toBe(true);
     expect(r.out).toContain('"/a.md"');
     expect(r.out).not.toContain('WRAPPED');
     expect(r.out).not.toContain('downloadUrl');
@@ -85,38 +103,48 @@ describe('drive default at the command level', () => {
       ciphertext_size: '12',
       created_at: 't',
     };
-    const r = await cli(['ls', '--folder', '/', '--sort', 'modified', '--limit', '5'], one, () => ({
-      items: [folder, { ...version, id: 'f1', version_id: 'v1', ciphertext_size: 1 }],
-      nextCursor: null,
-    }));
+    const r = await cli(
+      ['ls', '--folder', '/', '--sort', 'modified', '--limit', '5'],
+      one,
+      (path) =>
+        path === 'drives'
+          ? { items: [], nextCursor: null }
+          : {
+              items: [folder, { ...version, id: 'f1', version_id: 'v1', ciphertext_size: 1 }],
+              nextCursor: null,
+            },
+    );
     expect(r.err).toBe('');
-    expect(r.queries[0]).toContain('delimiter=%2F');
-    expect(r.queries[0]).toContain('prefix=%2F');
-    expect(r.queries[0]).toContain('sort=modified');
-    expect(r.queries[0]).toContain('limit=5');
+    // The throttled account-seal GET drives carries no query; find the ls request instead.
+    const list = r.queries.find((q) => q.includes('delimiter'));
+    expect(list).toContain('delimiter=%2F');
+    expect(list).toContain('prefix=%2F');
+    expect(list).toContain('sort=modified');
+    expect(list).toContain('limit=5');
     expect(r.out).toContain('"kind":"folder"');
     expect(r.out).toContain('"items":2');
     expect(r.out).not.toContain('WRAPPED');
     const plain = await cli(['ls'], one, () => ({ items: [], nextCursor: null }));
-    expect(plain.queries[0]).not.toContain('delimiter');
-    expect(plain.queries[0]).not.toContain('sort=');
+    expect(plain.queries.every((q) => !q.includes('delimiter') && !q.includes('sort='))).toBe(true);
     const flat = await cli(['ls', '--sort', 'modified', '--prefix', '/a'], one, () => ({
       items: [],
       nextCursor: null,
     }));
-    expect(flat.queries[0]).toContain('sort=modified');
-    expect(flat.queries[0]).toContain('prefix=%2Fa');
-    expect(flat.queries[0]).not.toContain('delimiter');
+    const flatList = flat.queries.find((q) => q.includes('sort='));
+    expect(flatList).toContain('sort=modified');
+    expect(flatList).toContain('prefix=%2Fa');
+    expect(flatList).not.toContain('delimiter');
     const explicitPath = await cli(['ls', '--sort', 'path', '--prefix', '/a'], one, () => ({
       items: [],
       nextCursor: null,
     }));
-    expect(explicitPath.queries[0]).toBe('?prefix=%2Fa');
+    expect(explicitPath.queries.some((q) => q === '?prefix=%2Fa')).toBe(true);
     const both = await cli(['ls', '--folder', '/a', '--prefix', '/b'], one);
     expect(both.err).toContain('either --folder or --prefix');
     const bad = await cli(['ls', '--sort', 'size'], one);
     expect(bad.err).toContain('--sort must be path or modified');
-    expect(bad.paths).toEqual([]);
+    // Only the throttled account-seal traffic may have gone out — never the ls list request.
+    expect(bad.paths.every((p) => !p.includes('/list'))).toBe(true);
   });
 
   it('versions hides wrapped keys too', async () => {

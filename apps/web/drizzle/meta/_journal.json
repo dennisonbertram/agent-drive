@@ -169,6 +169,13 @@
       "when": 1795035674427,
       "tag": "0023_modern_firedrake",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795370838894,
+      "tag": "0024_wandering_mercury",
+      "breakpoints": true
     }
   ]
 }

@@ -24,7 +24,7 @@ The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on
 The CLI keeps the API key and drive keys in `~/.config/agent-drive/config.json`, or in the file named by `AGENT_DRIVE_CONFIG`.
 
 - The directory has mode `0700` and the file has mode `0600`. Updates are atomic (write to a temp file, then rename).
-- Private state for `sync`, `backup` and `capture` is stored in `<config path>.state`. An existing state directory with unsafe permissions is rejected without changing its mode.
+- Private state for `sync`, `backup`, `capture` and account-key sealing is stored in `<config path>.state`. An existing state directory with unsafe permissions is rejected without changing its mode.
 - Config updates take an exclusive lock, the directory `<config path>.lock`. If a CLI process crashes it may leave the lock behind. Remove it manually only after you confirm no Agent Drive process is running. A command that waits more than 10 seconds for the lock fails with a message naming the stale lock.
 - Drive keys never leave your machine. They are not sent to the API or to storage.
 
@@ -85,6 +85,7 @@ Every command that works on a drive takes `--drive ID`. If you leave it out, the
 | `credentials confirm` | Record that an exported bundle was stored.                   | [Back up and recover your drive key](backup-and-recovery.md) |
 | `credentials import`  | Merge a bundle into the config.                              | [Back up and recover your drive key](backup-and-recovery.md) |
 | `credentials status`  | Show which drive keys are backed up.                         | [Back up and recover your drive key](backup-and-recovery.md) |
+| `account seal`        | Seal held drive keys to the account key for the console.     | [Keys and recovery](keys-and-recovery.md)                    |
 | `skill install`       | Install the agent skill.                                     | [Agent skills](skills.md)                                    |
 | `capture`             | Run an agent and save its model calls as traces.             | [Capture traces](trace-capture.md)                           |
 | `version`             | Print the CLI version.                                       |                                                              |
@@ -152,17 +153,17 @@ A key without the `write` scope decrypts an existing file instead and prints `ch
 
 ```sh
 agent-drive agent create --name NAME
-agent-drive drive create --name NAME [--quota BYTES] [--key-file PATH]
+agent-drive drive create --name NAME [--quota BYTES] [--key-file PATH] [--agent-only]
 agent-drive key create --agent ID --drive ID --label LABEL [--scope read --scope write] [--write-path PATH]...
 agent-drive key revoke KEY_ID
 ```
 
-| Command        | Notes                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent create` | Needs the `manage` scope. The name can also be passed as the second positional argument. Prints the agent as JSON.                                                                                                                                                                                                                                                     |
-| `drive create` | Needs the `manage` scope. Idempotent. A new drive gets a generated drive key, saved to the config; the CLI prints the drive as JSON and a backup note on stderr. It never prints the key. Re-running against an existing drive uses the saved key, and fails if the key is missing.                                                                                    |
-| `key create`   | Needs the `manage` scope. `--agent`, `--drive` and `--label` are required. `--drive` and `--scope` can be repeated. `--scope` defaults to `read` and `write`. `--write-path` (repeat, up to 16, each a canonical absolute path) limits writes, moves, copies, deletes and restores to those folders; reads stay drive-wide. Prints the new key once, with its `token`. |
-| `key revoke`   | Needs the `manage` scope. Prints the key id and `revoked_at`.                                                                                                                                                                                                                                                                                                          |
+| Command        | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent create` | Needs the `manage` scope. The name can also be passed as the second positional argument. Prints the agent as JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `drive create` | Needs the `manage` scope. Idempotent. A new drive gets a generated drive key, saved to the config; the CLI prints the drive as JSON and a backup note on stderr. It never prints the key. Re-running against an existing drive uses the saved key, and fails if the key is missing. `--agent-only` marks the drive so it is never sealed to the account key: the console always asks for its recovery file and the API refuses an account-key slot for it. The flag is only read when the drive is created; it does not change an existing drive. |
+| `key create`   | Needs the `manage` scope. `--agent`, `--drive` and `--label` are required. `--drive` and `--scope` can be repeated. `--scope` defaults to `read` and `write`. `--write-path` (repeat, up to 16, each a canonical absolute path) limits writes, moves, copies, deletes and restores to those folders; reads stay drive-wide. Prints the new key once, with its `token`.                                                                                                                                                                            |
+| `key revoke`   | Needs the `manage` scope. Prints the key id and `revoked_at`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 Scopes are `read`, `write`, `delete`, `share`, `manage` and `delegate`.
 
@@ -269,6 +270,18 @@ Needs the `delegate` scope. Creates a new agent named `NAME` with its own API ke
 ### grant
 
 Needs the `delegate` scope. `CODE` is the code a new agent's `agent-drive login` printed. `grant` seals this machine's drive key to that login and posts it as an offer. It does not approve anything: the owner opens `<origin>/connect?code=CODE` and approves once. The drive defaults to the only configured drive key. Scopes default to `read write` (`read` with `--read-only`) and must be within yours. Write paths default to yours. It only offers a drive key saved for the current API origin. See [Connect an agent](connect-an-agent.md).
+
+## Account
+
+```sh
+agent-drive account seal [--drive ID]... [--repin]
+```
+
+Every drive key this machine holds can be sealed to the owner's account public key, so the console's passphrase unlock opens those drives with no recovery file. `account seal` does it on demand and prints one line per drive: `sealed`, `already sealed`, `agent-only`, `no account key`, `unknown type` or `failed` (a failing drive does not stop the rest, but the command exits 1 if any drive fails or its type cannot be proven). A slot is only inserted when the drive has none, so repeat runs are safe. `--drive` limits the run to the named drives and fails if no key for one is saved here. `unknown type` means the key cannot list drives (a write-only key) and no local mark proves the drive's type — the key is not sent; re-run `account seal --drive ID` with a key that can read drives.
+
+The CLI also seals on its own, and sealing never fails or slows the command you ran: on `drive create`, `login` (and `grant`), `credentials import` and MCP server start it seals every held key, and at most once every 24 hours per drive on any other command that loads a drive key — it starts only after the command's own output has been written. The last check per drive is kept in `<config path>.state/account-seal.json`, never in the drive. Agent-only drives are skipped, and a failure becomes one line on stderr. If the account has no account key yet, nothing is sealed; the named commands then print one warning saying to set a passphrase in the console. Dry runs (`backup --dry-run` and any other `--dry-run` path) never seal.
+
+The first time the CLI sees the account public key for an API origin it pins its fingerprint (SHA-256 of the raw key) in `<config path>.state/account-seal.json`, next to the throttle timestamps — never in `config.json`, so a credentials bundle's keys cannot be written to disk. The file is written atomically and never followed through a symlink; if it exists but cannot be read or parsed, sealing refuses rather than silently dropping the pin — confirm the fingerprint in the console and run `agent-drive account seal --repin` to repair it. A later answer with a different key is refused with an error naming both fingerprints, so a compromised server cannot silently substitute its own account key. After the owner confirms in the console that the passphrase was reset, `--repin` pins the new key. The console's Settings page shows the same fingerprint for comparison.
 
 ## Skill install
 

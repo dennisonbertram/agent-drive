@@ -1,0 +1,1 @@
+ALTER TABLE "drives" ADD COLUMN "agent_only" boolean DEFAULT false NOT NULL;

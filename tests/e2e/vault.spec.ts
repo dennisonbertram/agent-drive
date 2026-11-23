@@ -143,6 +143,15 @@ const settle = (page: Page) =>
   );
 const dialogPassphrase = (page: Page) => page.getByLabel('Passphrase', { exact: true });
 
+// "Lock this browser" from the key menu. The vault only shows Locked once the IndexedDB
+// delete has committed, so the chip flipping is the wait — no separate IndexedDB poll.
+async function lockBrowser(page: Page) {
+  await (await openMenu(page))
+    .getByRole('button', { name: 'Lock this browser', exact: true })
+    .click();
+  await expect(chip(page)).toContainText('Locked');
+}
+
 // Loads drive A's key from its recovery file, then sets up a generated passphrase.
 async function setUpPassphrase(page: Page, seeded: Seeded) {
   await page.goto(`/console?drive=${seeded.a.id}`);
@@ -197,6 +206,17 @@ test('passphrase setup, reload, unlock, preview and download without the recover
   await withSeed(context, baseURL!, async (seeded) => {
     const { raw, grouped } = await setUpPassphrase(page, seeded);
     await page.reload();
+    // "Keep this browser unlocked" is the default: the reload opens with no prompt at all.
+    await expect(chip(page)).toContainText('Unlocked');
+    await nameButton(page, 'note.txt').click();
+    const preview = page.getByRole('dialog', { name: 'note.txt' });
+    await expect(preview.locator('pre.preview-text')).toHaveText(`NOTE ${seeded.sentinel}\n`);
+    await page.keyboard.press('Escape');
+
+    // "Lock this browser" deletes the stored key: the next visit asks for the passphrase again.
+    await lockBrowser(page);
+    await expect(chip(page)).toContainText('Locked');
+    await page.reload();
     await expect(chip(page)).toContainText('Locked');
     // Preview asks for the passphrase, and says what happens next.
     await nameButton(page, 'note.txt').click();
@@ -204,7 +224,6 @@ test('passphrase setup, reload, unlock, preview and download without the recover
     // Typed the way people copy it: lower case, with dashes and spaces.
     await dialogPassphrase(page).fill(grouped.toLowerCase().replaceAll(' ', '- '));
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-    const preview = page.getByRole('dialog', { name: 'note.txt' });
     await expect(preview.locator('pre.preview-text')).toHaveText(`NOTE ${seeded.sentinel}\n`);
     await expect(chip(page)).toContainText('Unlocked');
     await page.keyboard.press('Escape');
@@ -238,15 +257,60 @@ test('passphrase setup, reload, unlock, preview and download without the recover
       '/console',
     );
 
-    // Nothing is stored in the browser, and no secret left it.
+    // The only browser storage is the non-extractable CryptoKey in IndexedDB — a handle, never
+    // bytes — and no secret left it.
     await page.goto(`/console?drive=${seeded.a.id}`);
     const stored = await page.evaluate(async () => ({
       local: Object.entries(localStorage),
       session: Object.entries(sessionStorage),
       databases: (await indexedDB.databases()).map((database) => database.name),
+      persisted: await (async () => {
+        const db = await new Promise<IDBDatabase>((resolveDb, rejectDb) => {
+          const open = indexedDB.open('agent-drive', 1);
+          open.onupgradeneeded = () => open.result.createObjectStore('console');
+          open.onsuccess = () => resolveDb(open.result);
+          open.onerror = () => rejectDb(open.error);
+        });
+        try {
+          const record = await new Promise<unknown>((resolveGet, rejectGet) => {
+            const get = db.transaction('console').objectStore('console').get('account-private-key');
+            get.onsuccess = () => resolveGet(get.result);
+            get.onerror = () => rejectGet(get.error);
+          });
+          if (!record || typeof record !== 'object') return null;
+          const { keyId, owner, key } = record as {
+            keyId?: unknown;
+            owner?: unknown;
+            key?: CryptoKey;
+          };
+          // A CryptoKey cannot cross evaluate's serialization, so its properties are read here
+          // in the page and returned as plain values.
+          return {
+            keyId,
+            owner: owner ?? null,
+            extractable: key?.extractable ?? null,
+            algorithm: key ? { ...key.algorithm } : null,
+            usages: key ? [...key.usages] : null,
+          };
+        } finally {
+          db.close();
+        }
+      })(),
     }));
     expect(stored.session).toEqual([]);
-    expect(stored.databases).toEqual([]);
+    expect(stored.databases).toEqual(['agent-drive']);
+    const persisted = stored.persisted as {
+      keyId?: unknown;
+      owner?: unknown;
+      extractable?: unknown;
+      algorithm?: unknown;
+      usages?: unknown;
+    } | null;
+    expect(typeof persisted?.keyId).toBe('string');
+    // The stored CryptoKey stays non-extractable and ECDH-only.
+    expect(persisted?.extractable).toBe(false);
+    expect(persisted?.algorithm).toMatchObject({ name: 'ECDH' });
+    expect(persisted?.usages).toEqual(['deriveBits']);
     expect(stored.local.map(([name]) => name)).not.toContain(seeded.a.key);
     const everything = [...sent, ...logged, JSON.stringify(stored)];
     const secrets = [
@@ -271,6 +335,8 @@ test('a wrong passphrase is refused and nothing opens', async ({ page, context, 
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
     await setUpPassphrase(page, seeded);
+    // The passphrase prompt only returns after the browser key is locked.
+    await lockBrowser(page);
     await page.reload();
     await nameButton(page, 'note.txt').click();
     await dialogPassphrase(page).fill('this is not the passphrase');
@@ -314,6 +380,8 @@ test('ux round 07: failed status loading retries without losing the pending prev
         body: JSON.stringify({ error: { message: 'synthetic status failure' } }),
       });
     });
+    // The retry must reach the passphrase prompt, so this browser does not restore the key.
+    await lockBrowser(page);
     await page.reload();
     await initialRequest;
     const menu = await openMenu(page);
@@ -356,13 +424,13 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
 }) => {
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
-    const { raw } = await setUpPassphrase(page, seeded);
+    await setUpPassphrase(page, seeded);
     await page.reload();
-    // Drive B is not in the account yet.
+    // Drive B is not in the account yet; the vault is already unlocked, so the dialog goes
+    // straight to the recovery file.
     await page.goto(`/console?drive=${seeded.b.id}`);
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'other.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     await expect(
       page.getByText(
@@ -379,9 +447,8 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     ).toBeVisible();
     await page.keyboard.press('Escape');
     await page.reload();
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'other.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
       `OTHER ${seeded.sentinel}`,
     );
@@ -398,9 +465,9 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
     const { raw } = await setUpPassphrase(page, seeded);
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
+    // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'other.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
 
     let releaseVerification!: () => void;
@@ -486,9 +553,9 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
         body: JSON.stringify({ error: { message: 'synthetic slot-save failure' } }),
       });
     });
+    // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'other.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     const slotResponse = page.waitForResponse(
       (response) =>
@@ -524,12 +591,12 @@ test('ux round 08: late slot-save completion after a drive switch stays silent',
 }) => {
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
-    const { raw } = await setUpPassphrase(page, seeded);
+    await setUpPassphrase(page, seeded);
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
+    // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'other.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     let releaseSave!: () => void;
     const saveGate = new Promise<void>((resolve) => (releaseSave = resolve));
@@ -597,6 +664,8 @@ test('change passphrase: the old one stops working, the new one works; reset rem
       timeout: 60_000,
     });
 
+    // The same private key stays valid; lock this browser so the passphrase prompt returns.
+    await lockBrowser(page);
     await page.reload();
     await nameButton(page, 'note.txt').click();
     await dialogPassphrase(page).fill(raw);
@@ -633,11 +702,8 @@ test('Lock while a file key is being verified: no key, no preview', async ({
 }) => {
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
-    const { raw } = await setUpPassphrase(page, seeded);
-    await page.reload();
-    await nameButton(page, 'note.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    // Hold the verification request (the file's wrapped key) once the slots are loaded.
+    await setUpPassphrase(page, seeded);
+    // Hold the verification request (the file's wrapped key) once the slot is unsealed.
     let release!: () => void;
     const gate = new Promise<void>((resolveGate) => (release = resolveGate));
     let held!: () => void;
@@ -647,10 +713,13 @@ test('Lock while a file key is being verified: no key, no preview', async ({
       await gate;
       await route.continue();
     });
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await page.reload();
+    // The browser key restores the vault; the click itself reaches the held request.
+    await expect(chip(page)).toContainText('Unlocked');
+    await nameButton(page, 'note.txt').click();
     await reached;
     await expect(chip(page)).toContainText('Unlocked');
-    await (await openMenu(page)).getByRole('button', { name: 'Lock' }).click();
+    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
     await expect(chip(page)).toContainText('Locked');
     const stale = page.waitForResponse((r) => /\/versions\?/.test(r.url()));
     release();
@@ -673,6 +742,8 @@ test('leaving while the slots are loading installs nothing and resumes nothing',
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
     const { raw } = await setUpPassphrase(page, seeded);
+    // A restored browser key would skip the passphrase prompt this test cancels mid-flight.
+    await lockBrowser(page);
     await page.reload();
     await page.evaluate(() => history.pushState(null, '', location.href));
     await nameButton(page, 'note.txt').click();
@@ -707,12 +778,12 @@ test('30 minutes idle locks the vault and closes the preview', async ({
 }) => {
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
-    const { raw } = await setUpPassphrase(page, seeded);
+    await setUpPassphrase(page, seeded);
     await page.clock.install();
     await page.reload();
+    // The stored browser key restores the vault; the click opens the preview directly.
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'note.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toBeVisible({ timeout: 30_000 });
     await page.clock.fastForward('31:00');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -731,6 +802,8 @@ test('idle closes the unlock dialog and drops what was typed', async ({
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
     const { raw } = await setUpPassphrase(page, seeded);
+    // This test needs the passphrase dialog open during idle, so lock the browser key first.
+    await lockBrowser(page);
     await page.clock.install();
     await page.reload();
     await nameButton(page, 'note.txt').click();
@@ -814,6 +887,8 @@ test('a key loaded from a recovery file while locked shows Key loaded, and Lock 
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
     await setUpPassphrase(page, seeded);
+    // The chip must show a loaded key beside a locked vault, so the browser key is removed.
+    await lockBrowser(page);
     await page.reload();
     await (await openMenu(page)).getByRole('button', { name: 'Load key' }).click();
     await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.a));
@@ -832,7 +907,7 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
 }) => {
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
-    const { raw } = await setUpPassphrase(page, seeded);
+    await setUpPassphrase(page, seeded);
     // Plant a validly sealed slot that holds a different drive key.
     const database = new Pool({ connectionString: process.env.DATABASE_URL });
     try {
@@ -856,11 +931,10 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
       await database.end();
     }
     await page.reload();
+    // The browser key restores the vault: the click reaches the bad slot without a prompt.
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'note.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
-    const mismatch =
-      'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
+    const mismatch = 'This drive’s account copy is invalid — load its recovery file to repair it.';
     await expect(page.getByText(mismatch)).toBeVisible();
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
@@ -880,9 +954,8 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
     ).toBeVisible();
     await page.keyboard.press('Escape');
     await page.reload();
+    await expect(chip(page)).toContainText('Unlocked');
     await nameButton(page, 'note.txt').click();
-    await dialogPassphrase(page).fill(raw);
-    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText(
       `NOTE ${seeded.sentinel}`,
     );
@@ -925,6 +998,8 @@ test('screenshots of setup, unlock, unlocked chip, change and reset', async ({
       await (await openMenu(page)).waitFor();
       await page.screenshot({ path: join(folder, `${label}-unlocked-menu.png`) });
       await page.keyboard.press('Escape');
+      // Lock this browser so the unlock prompt appears for the screenshot.
+      await lockBrowser(page);
       await page.reload();
       await nameButton(page, 'note.txt').click();
       await page.screenshot({ path: join(folder, `${label}-unlock.png`) });

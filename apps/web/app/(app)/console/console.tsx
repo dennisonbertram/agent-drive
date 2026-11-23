@@ -29,7 +29,13 @@ import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
 import { keySourceFor, type Source } from '@/src/console/webhook-setup';
-import { Vault, vaultRequest, type LockReason } from '@/src/console/vault';
+import {
+  BROWSER_KEY_DELETE_FAILED,
+  Vault,
+  vaultRequest,
+  type LockReason,
+} from '@/src/console/vault';
+import { persistedAccountKey, vaultLockPeers } from '@/src/console/persisted-key';
 import { PreviewBody, type PreviewView } from './preview-panel';
 import { PREVIEW_MAX_BYTES, previewKind } from '@/src/console/preview';
 import { FileIcon } from './file-icon';
@@ -60,6 +66,7 @@ type Drive = {
   quota_bytes: string | number;
   key_backup_at?: string | null;
   key_backup_method?: string | null;
+  agentOnly?: boolean;
 };
 type Agent = { id: string; name: string };
 type ApiKey = {
@@ -403,15 +410,19 @@ function SortHeader({
 const IDLE_MESSAGE = 'Locked after 30 minutes without use. Enter your passphrase to continue.';
 const NOT_IN_ACCOUNT =
   'Load this drive’s recovery file to open it. We’ll try to save its key for passphrase unlock.';
-const MISMATCH =
-  'The saved key for this drive doesn’t open this file. Load its recovery file to open it. We’ll try to update its key for passphrase unlock.';
+const MISMATCH = 'This drive’s account copy is invalid — load its recovery file to repair it.';
+const AGENT_ONLY = 'Agent-only: open with a recovery file.';
 const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
 function useClerkIdentity() {
-  const { user } = useUser();
-  return { userId: user?.id ?? null, email: user?.primaryEmailAddress?.emailAddress ?? '' };
+  const { isLoaded, user } = useUser();
+  return {
+    loaded: isLoaded,
+    userId: user?.id ?? null,
+    email: user?.primaryEmailAddress?.emailAddress ?? '',
+  };
 }
 function useNoIdentity() {
-  return { userId: null as string | null, email: '' };
+  return { loaded: true, userId: null as string | null, email: '' };
 }
 // Clerk's reverification cancel, or any other failure, as one line for a form.
 function vaultFailure(reason: unknown, doing: string) {
@@ -424,6 +435,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // clerkEnabled is constant for the life of the deployment, so the hook order never changes.
   const useIdentity = clerkEnabled ? useClerkIdentity : useNoIdentity;
   const identity = useIdentity();
+  // The vault reads the current user id through this ref, so a mid-load identity change is seen.
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
   const useWrap = (clerkEnabled ? useReverification : passThrough) as typeof passThrough;
   const strictRequest = useWrap(vaultRequest);
   const strictRef = useRef(strictRequest);
@@ -453,8 +467,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         },
         inbox: async (driveId) =>
           (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
+        persisted: persistedAccountKey,
+        peers: vaultLockPeers,
+        owner: () => identityRef.current.userId,
         onLocked: (reason) => lockedRef.current(reason),
         onChange: () => bumpVault(),
+        onNotice: (line) => setNotice(line),
       }),
   );
   const [unlockMode, setUnlockMode] = useState<UnlockMode>('recovery');
@@ -985,11 +1003,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyKey, vaultOpen, unlockOpen]);
-  // Load the passphrase record once. Unmounting (leaving the page) drops the account key.
+  // Load the passphrase record once Clerk reports a real identity — before isLoaded, userId
+  // would read as signed-out and a stored key could be judged against the wrong owner.
+  // Unmounting (leaving the page) drops the account key.
   useEffect(() => {
+    if (!identity.loaded) return;
     void vault.load();
     return () => vault.clear();
-  }, [vault]);
+  }, [vault, identity.loaded]);
   // Sign-out or another user in the same tab: nothing from the old user may stay.
   const lastUser = useRef(identity.userId);
   useEffect(() => {
@@ -997,7 +1018,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const hadUser = lastUser.current !== null;
     lastUser.current = identity.userId;
     if (!hadUser) return;
-    vault.clear();
+    vault.clearBrowser();
     inboxCache.current.clear();
     recordedBackups.current = {};
     setDrives([]);
@@ -1109,15 +1130,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const key = generateDriveKey();
     const created = await api<Drive & { created: boolean }>('drives', 'POST', {
       name: String(data.get('name')).trim(),
+      agentOnly: data.get('agentOnly') === 'on',
     });
     if (!created.created)
       throw new Error(
         'A drive with this name already exists. Load its original drive key instead.',
       );
     setDriveKeys((current) => ({ ...current, [created.id]: key }));
-    // Skipped by the vault itself if it is locked before the write.
+    // Skipped by the vault itself if it is locked before the write. Agent-only drives are never
+    // sealed to the account, by definition.
     trustedDrives.current.set(created.id, key);
-    if (vault.status === 'unlocked') void vault.addKey(created.id, key, { trusted: true });
+    if (vault.status === 'unlocked' && !created.agentOnly)
+      void vault.addKey(created.id, key, { trusted: true });
     setDriveReceipt({ id: created.id, key });
     setReceiptSaved(false);
     setSaved(false);
@@ -1135,14 +1159,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     kind: 'download' | 'preview' | 'share',
   ): Promise<string | undefined> {
     const driveId = selected;
+    const agentOnly = drives.find((item) => item.id === driveId)?.agentOnly === true;
     const cached = driveKeys[driveId];
     if (cached) {
-      if (vault.status === 'unlocked' && !vault.hasSlot(driveId))
+      if (vault.status === 'unlocked' && !vault.hasSlot(driveId) && !agentOnly)
         void addToAccount(driveId, cached, file.path);
       return cached;
     }
     let note = '';
-    if (vault.status === 'unlocked') {
+    if (vault.status === 'unlocked' && !agentOnly) {
       note = NOT_IN_ACCOUNT;
       if (vault.hasSlot(driveId)) {
         const mark = actionEpoch.current;
@@ -1160,8 +1185,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     }
     actionEpoch.current += 1;
     setPendingAction({ driveId, file, kind });
-    setRecoveryNote(note);
-    setUnlockMode(vault.status === 'locked' ? 'passphrase' : 'recovery');
+    setRecoveryNote(agentOnly ? AGENT_ONLY : note);
+    setUnlockMode(vault.status === 'locked' && !agentOnly ? 'passphrase' : 'recovery');
     open('unlock');
     return undefined;
   }
@@ -1180,7 +1205,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           cached,
         ),
       };
-    if (vault.status === 'unlocked' && vault.hasSlot(driveId)) {
+    const agentOnly = drives.find((item) => item.id === driveId)?.agentOnly === true;
+    let invalid = false;
+    if (vault.status === 'unlocked' && vault.hasSlot(driveId) && !agentOnly) {
       const mark = actionEpoch.current;
       const epoch = vault.epochNow;
       const key = await vault.slotKey(driveId);
@@ -1190,11 +1217,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         keySources.current.set(driveId, 'vault');
         return { key, source: 'vault' };
       }
+      // The slot exists but could not be opened with the account key: a recovery file repairs it.
+      invalid = true;
     }
     actionEpoch.current += 1;
     setPendingAction({ driveId, kind: 'webhook' });
-    setRecoveryNote(vault.status === 'unlocked' ? NOT_IN_ACCOUNT : '');
-    setUnlockMode(vault.status === 'locked' ? 'passphrase' : 'recovery');
+    setRecoveryNote(
+      agentOnly
+        ? AGENT_ONLY
+        : invalid
+          ? MISMATCH
+          : vault.status === 'unlocked'
+            ? NOT_IN_ACCOUNT
+            : '',
+    );
+    setUnlockMode(vault.status === 'locked' && !agentOnly ? 'passphrase' : 'recovery');
     open('unlock');
     return undefined;
   }
@@ -1575,7 +1612,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setDriveKeys((current) => ({ ...current, [selected]: key }));
     keySources.current.set(selected, source);
     // A key the user supplied also goes into the account, once it opens a real file.
-    if (vault.status === 'unlocked')
+    if (
+      vault.status === 'unlocked' &&
+      drives.find((item) => item.id === selected)?.agentOnly !== true
+    )
       void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path, true);
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
@@ -1590,11 +1630,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     else void act(() => download(pending.file));
   }
 
-  async function unlockWithPassphrase(passphrase: string) {
+  async function unlockWithPassphrase(passphrase: string, keepUnlocked: boolean) {
     const mark = actionEpoch.current;
     const pending = pendingAction;
     try {
-      if (!(await vault.unlock(passphrase))) return '';
+      if (!(await vault.unlock(passphrase, keepUnlocked))) return '';
     } catch (reason) {
       return vaultFailure(reason, 'unlock');
     }
@@ -1610,10 +1650,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       const result = await vault.setup(
         passphrase,
         Object.fromEntries(
-          Object.entries(driveKeys).map(([id, key]) => [
-            id,
-            { key, trusted: trustedDrives.current.get(id) === key },
-          ]),
+          Object.entries(driveKeys)
+            // Agent-only drives never get a slot, including via passphrase setup — and neither
+            // does a held key for a drive the listing does not show (deleted or foreign).
+            .filter(([id]) => drives.some((item) => item.id === id && item.agentOnly !== true))
+            .map(([id, key]) => [id, { key, trusted: trustedDrives.current.get(id) === key }]),
         ),
       );
       if (!result) return '';
@@ -1795,6 +1836,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <span className="notice-text">{notice}</span>
                     <button type="button" className="notice-dismiss" onClick={() => setNotice('')}>
                       Dismiss
+                    </button>
+                  </>
+                ) : vault.status === 'none' && tab === 'Files' ? (
+                  <>
+                    <span className="notice-text">
+                      Set a passphrase and agents will add every drive’s key to your account — then
+                      each one opens here automatically.
+                    </span>
+                    <button
+                      type="button"
+                      className="notice-dismiss"
+                      data-testid="setup-passphrase-banner"
+                      onClick={() => openVaultDialog('setup')}
+                    >
+                      Set up
                     </button>
                   </>
                 ) : (
@@ -2082,10 +2138,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               onLoad={() => openVaultDialog('recovery')}
                               vault={vault.status}
                               fingerprint={vault.fingerprint}
+                              agentOnly={drive?.agentOnly === true}
                               vaultActions={{
                                 onSetup: () => openVaultDialog('setup'),
                                 onUnlock: () => openVaultDialog('passphrase'),
                                 onLock: () => vault.lock('manual'),
+                                onLockBrowser: () => {
+                                  void vault
+                                    .lockBrowser()
+                                    .catch(() => setNotice(BROWSER_KEY_DELETE_FAILED));
+                                },
                                 onChange: () => openVaultDialog('change'),
                                 onReset: () => openVaultDialog('reset'),
                                 onRetry: retryVault,
@@ -2927,6 +2989,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     : {})}
                 />
               </label>
+              <label className="check-label">
+                <input type="checkbox" name="agentOnly" />
+                Agent-only — never add this drive to passphrase unlock
+              </label>
               <button className="button primary" disabled={busy}>
                 Create drive
               </button>
@@ -3021,7 +3087,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 email: identity.email,
                 status: vault.status,
                 onRetry: retryVault,
-                hasVault: vault.status === 'locked',
+                hasVault: vault.status === 'locked' && drive?.agentOnly !== true,
                 onUnlock: unlockWithPassphrase,
                 onSetup: setUpPassphrase,
                 onChange: changePassphrase,
@@ -3098,7 +3164,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 void refresh();
                 // The inbox may be new: drop a cached "no inbox" so v2 files open.
                 inboxCache.current.delete(selected);
-                if (vault.status === 'unlocked') void addToAccount(selected, key);
+                if (vault.status === 'unlocked' && !drive?.agentOnly)
+                  void addToAccount(selected, key);
               }}
             />
           )}
