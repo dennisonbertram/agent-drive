@@ -358,7 +358,20 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     await expect(page.getByText('1 live files · 3 stored versions')).toBeVisible();
     const storageTile = page.locator('.stat', { hasText: 'ENCRYPTED STORAGE' });
     await expect(storageTile).toContainText(' of 5 GB');
+    await expect(storageTile).toContainText(/free · .* used|over plan limit by/);
     await expect(storageTile.locator('progress')).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Storage by folder' })).toBeVisible();
+    const outputsRow = page.locator('button.folder-row').filter({ hasText: 'outputs' });
+    await expect(outputsRow).toBeVisible();
+    await outputsRow.click();
+    await expect(page.locator('.folder-crumbs .crumb[aria-current="page"]')).toHaveText('outputs');
+    await expect(
+      page.locator('.usage-row').filter({ hasText: 'Files in this folder' }),
+    ).toBeVisible();
+    // Refresh reloads the summary and the folder panel together.
+    const folderReload = page.waitForRequest('**/api/console/usage/folders*');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await folderReload;
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke Browser regression key', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke key', exact: true }).click();

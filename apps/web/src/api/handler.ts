@@ -88,6 +88,7 @@ type Row = QueryResultRow & Record<string, any>;
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_FOLDER_ROWS = 200;
 const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
@@ -348,6 +349,8 @@ export function actionFor(method: string, parts: string[], bearer = false) {
   if (parts.length === 1 && parts[0] === 'session' && method === 'GET')
     return 'console.session.read';
   if (parts.length === 1 && parts[0] === 'usage' && method === 'GET') return 'console.usage.read';
+  if (parts.length === 2 && parts[0] === 'usage' && parts[1] === 'folders' && method === 'GET')
+    return 'console.usage.folders.read';
   if (parts[0] === 'billing') {
     if (parts.length === 1 && method === 'GET') return 'billing.read';
     if (parts.length === 2 && parts[1] === 'statements' && method === 'GET')
@@ -1432,7 +1435,7 @@ async function consoleEndpoint(
           WHERE owned.account_id = $1 AND f.deleted_at IS NULL
           GROUP BY f.drive_id
        )
-       SELECT d.id, d.name, d.quota_bytes,
+       SELECT d.id, d.name, d.quota_bytes, d.deleting_at IS NOT NULL AS deleting,
               COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
               COALESCE(lu.live_files, 0)::int AS live_files,
               COALESCE((SELECT sum(e.bytes_sent) FROM billing_egress_events e
@@ -1481,6 +1484,7 @@ async function consoleEndpoint(
       id: row.id,
       name: row.name,
       quotaBytes: Number(row.quota_bytes),
+      deleting: Boolean(row.deleting),
       storageBytes: Number(row.storage_bytes),
       liveFiles: Number(row.live_files),
       versions: Number(row.versions),
@@ -1509,6 +1513,70 @@ async function consoleEndpoint(
       egressMeteringConfigured: observedEgressConfigured,
       egressNotMetered: process.env.S3_EGRESS_METERING === 'none',
       cost: billing.overageConfigured ? billing.totalCents : null,
+    });
+  }
+  if (
+    parts.length === 2 &&
+    parts[0] === 'usage' &&
+    parts[1] === 'folders' &&
+    request.method === 'GET'
+  ) {
+    const driveId = uuid(url.searchParams.get('drive') ?? undefined, 'drive');
+    const rawPrefix = url.searchParams.get('prefix');
+    if (rawPrefix === '')
+      throw new ApiError('validation_error', 'prefix must be an absolute POSIX path.');
+    const base = !rawPrefix || rawPrefix === '/' ? '/' : `${canonicalPath(rawPrefix, 'prefix')}/`;
+    const owned = await getPool().query(
+      `SELECT d.id FROM drives d JOIN accounts a ON a.id = d.account_id
+        WHERE d.id = $1 AND d.account_id = $2 AND d.deleting_at IS NULL AND a.deleting_at IS NULL`,
+      [driveId, auth.accountId],
+    );
+    if (!owned.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    const rows = await getPool().query(
+      `SELECT CASE WHEN folder THEN segment END AS segment, folder,
+              COALESCE(SUM(ciphertext_size), 0)::bigint AS bytes,
+              COUNT(DISTINCT file_id)::int AS files
+         FROM (
+           SELECT f.id AS file_id, v.ciphertext_size,
+                  split_part(rest, '/', 1) AS segment,
+                  position('/' IN rest) > 0 AS folder
+             FROM (
+               SELECT f.id, substr(f.path, length($2::text) + 1) AS rest
+                 FROM files f
+                WHERE f.drive_id = $1 AND f.path LIKE $3 ESCAPE '\\'
+             ) f JOIN versions v ON v.file_id = f.id
+         ) scoped
+        GROUP BY folder, CASE WHEN folder THEN segment END
+        ORDER BY bytes DESC, segment`,
+      [driveId, base, `${escapeLikeLiteral(base)}%`],
+    );
+    const folders: { name: string; path: string; bytes: number; files: number }[] = [];
+    let directBytes = 0;
+    let directFiles = 0;
+    for (const row of rows.rows as Row[]) {
+      if (row.folder) {
+        folders.push({
+          name: row.segment,
+          path: `${base}${row.segment}`,
+          bytes: Number(row.bytes),
+          files: Number(row.files),
+        });
+      } else {
+        directBytes += Number(row.bytes);
+        directFiles += Number(row.files);
+      }
+    }
+    const rest = folders.slice(MAX_FOLDER_ROWS);
+    return response({
+      prefix: base === '/' ? '/' : base.slice(0, -1),
+      totalBytes: folders.reduce((total, item) => total + item.bytes, directBytes),
+      folders: folders.slice(0, MAX_FOLDER_ROWS),
+      moreFolders: {
+        count: rest.length,
+        bytes: rest.reduce((total, item) => total + item.bytes, 0),
+      },
+      directBytes,
+      directFiles,
     });
   }
   if (
@@ -2531,6 +2599,8 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     parts.length === 1 &&
     ['session', 'usage', 'whoami', 'drives', 'agents', 'keys'].includes(parts[0]!)
   )
+    return true;
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'usage' && parts[1] === 'folders')
     return true;
   if (method === 'POST' && parts.length === 1 && ['drives', 'agents', 'keys'].includes(parts[0]!))
     return true;

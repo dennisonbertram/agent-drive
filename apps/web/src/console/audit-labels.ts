@@ -35,6 +35,7 @@ const LABELS: Record<string, string> = {
   'console.audit.list': 'Viewed activity',
   'console.session.read': 'Opened the console',
   'console.usage.read': 'Viewed usage',
+  'console.usage.folders.read': 'Viewed folder usage',
   'console.drive.delete': 'Requested drive deletion',
   'console.account.delete': 'Requested account deletion',
   'console.account_key.read': 'Viewed the passphrase record',
