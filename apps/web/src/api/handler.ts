@@ -88,6 +88,7 @@ type Row = QueryResultRow & Record<string, any>;
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_FOLDER_ROWS = 200;
 const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
@@ -1434,7 +1435,7 @@ async function consoleEndpoint(
           WHERE owned.account_id = $1 AND f.deleted_at IS NULL
           GROUP BY f.drive_id
        )
-       SELECT d.id, d.name, d.quota_bytes,
+       SELECT d.id, d.name, d.quota_bytes, d.deleting_at IS NOT NULL AS deleting,
               COALESCE(vu.storage_bytes, 0)::bigint AS storage_bytes,
               COALESCE(lu.live_files, 0)::int AS live_files,
               COALESCE((SELECT sum(e.bytes_sent) FROM billing_egress_events e
@@ -1483,6 +1484,7 @@ async function consoleEndpoint(
       id: row.id,
       name: row.name,
       quotaBytes: Number(row.quota_bytes),
+      deleting: Boolean(row.deleting),
       storageBytes: Number(row.storage_bytes),
       liveFiles: Number(row.live_files),
       versions: Number(row.versions),
@@ -1521,6 +1523,8 @@ async function consoleEndpoint(
   ) {
     const driveId = uuid(url.searchParams.get('drive') ?? undefined, 'drive');
     const rawPrefix = url.searchParams.get('prefix');
+    if (rawPrefix === '')
+      throw new ApiError('validation_error', 'prefix must be an absolute POSIX path.');
     const base = !rawPrefix || rawPrefix === '/' ? '/' : `${canonicalPath(rawPrefix, 'prefix')}/`;
     const owned = await getPool().query(
       `SELECT d.id FROM drives d JOIN accounts a ON a.id = d.account_id
@@ -1529,7 +1533,8 @@ async function consoleEndpoint(
     );
     if (!owned.rows[0]) throw new ApiError('not_found', 'Drive not found.');
     const rows = await getPool().query(
-      `SELECT segment, folder, COALESCE(SUM(ciphertext_size), 0)::bigint AS bytes,
+      `SELECT CASE WHEN folder THEN segment END AS segment, folder,
+              COALESCE(SUM(ciphertext_size), 0)::bigint AS bytes,
               COUNT(DISTINCT file_id)::int AS files
          FROM (
            SELECT f.id AS file_id, v.ciphertext_size,
@@ -1541,7 +1546,7 @@ async function consoleEndpoint(
                 WHERE f.drive_id = $1 AND f.path LIKE $3 ESCAPE '\\'
              ) f JOIN versions v ON v.file_id = f.id
          ) scoped
-        GROUP BY segment, folder
+        GROUP BY folder, CASE WHEN folder THEN segment END
         ORDER BY bytes DESC, segment`,
       [driveId, base, `${escapeLikeLiteral(base)}%`],
     );
@@ -1561,10 +1566,15 @@ async function consoleEndpoint(
         directFiles += Number(row.files);
       }
     }
+    const rest = folders.slice(MAX_FOLDER_ROWS);
     return response({
       prefix: base === '/' ? '/' : base.slice(0, -1),
       totalBytes: folders.reduce((total, item) => total + item.bytes, directBytes),
-      folders,
+      folders: folders.slice(0, MAX_FOLDER_ROWS),
+      moreFolders: {
+        count: rest.length,
+        bytes: rest.reduce((total, item) => total + item.bytes, 0),
+      },
       directBytes,
       directFiles,
     });

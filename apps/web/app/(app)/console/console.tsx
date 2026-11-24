@@ -109,6 +109,7 @@ type Usage = {
     id: string;
     name: string;
     quotaBytes: number;
+    deleting: boolean;
     storageBytes: number;
     liveFiles: number;
     versions: number;
@@ -125,6 +126,7 @@ type FolderUsage = {
   prefix: string;
   totalBytes: number;
   folders: { name: string; path: string; bytes: number; files: number }[];
+  moreFolders: { count: number; bytes: number };
   directBytes: number;
   directFiles: number;
 };
@@ -660,11 +662,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     rows = sortRows(matches, sort.key, sort.dir);
   }
   const drive = drives.find((item) => item.id === selected);
-  // Storage by folder: the select defaults to the open drive, then the first drive with usage.
+  // Storage by folder: drives pending deletion still count in the account total but are
+  // not offered here — the folders endpoint already refuses them. The select defaults to
+  // the open drive, then the first drive with usage.
+  const folderDrives = usage?.drives.filter((item) => !item.deleting) ?? [];
   const folderDriveId =
-    (folderDrive && usage?.drives.some((item) => item.id === folderDrive) ? folderDrive : '') ||
-    (selected && usage?.drives.some((item) => item.id === selected) ? selected : '') ||
-    (usage?.drives[0]?.id ?? '');
+    (folderDrive && folderDrives.some((item) => item.id === folderDrive) ? folderDrive : '') ||
+    (selected && folderDrives.some((item) => item.id === selected) ? selected : '') ||
+    (folderDrives[0]?.id ?? '');
+  const [folderDriveSeen, setFolderDriveSeen] = useState('');
+  if (folderDriveSeen !== folderDriveId) {
+    // The effective drive changed — maybe the open drive did — so the old prefix does not apply.
+    setFolderDriveSeen(folderDriveId);
+    setFolderPrefix('/');
+  }
   const folderScope = `${folderDriveId}:${folderPrefix}`;
   const folderData = folderUsage?.key === folderScope ? folderUsage.data : null;
   const folderError = folderFailure?.key === folderScope ? folderFailure.message : '';
@@ -869,6 +880,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       setSlowScope('');
     };
   }, [selected, tab, fileScope, sharedView]);
+  // `usage` is a dependency on purpose: a reload of the summary (Refresh, or any other
+  // usage refetch) reruns the folder request so both numbers describe the same moment.
   useEffect(() => {
     if (tab !== 'Usage' || !folderDriveId) return;
     let active = true;
@@ -876,15 +889,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       `usage/folders?drive=${encodeURIComponent(folderDriveId)}&prefix=${encodeURIComponent(folderPrefix)}`,
     )
       .then((data) => {
-        if (active) setFolderUsage({ key: folderScope, data });
+        if (!active) return;
+        setFolderUsage({ key: folderScope, data });
+        setFolderFailure((current) => (current?.key === folderScope ? null : current));
       })
       .catch((reason: Error) => {
-        if (active) setFolderFailure({ key: folderScope, message: reason.message });
+        if (!active) return;
+        setFolderFailure({ key: folderScope, message: reason.message });
+        setFolderUsage((current) => (current?.key === folderScope ? null : current));
       });
     return () => {
       active = false;
     };
-  }, [tab, folderDriveId, folderPrefix, folderScope]);
+  }, [tab, folderDriveId, folderPrefix, folderScope, usage]);
   // Back and Forward leave other tabs for the list they changed.
   useEffect(() => {
     const onPop = () => {
@@ -2879,7 +2896,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <small>
                         {Number(usage.limits.storageBytes) - usage.storageBytes >= 0
                           ? `${formatMetered(Number(usage.limits.storageBytes) - usage.storageBytes)} free · ${shareOf(usage.storageBytes, Number(usage.limits.storageBytes))} used`
-                          : `0 free · over plan limit by ${formatMetered(usage.storageBytes - Number(usage.limits.storageBytes))}`}
+                          : `0 free · ${shareOf(usage.storageBytes, Number(usage.limits.storageBytes))} used · over plan limit by ${formatMetered(usage.storageBytes - Number(usage.limits.storageBytes))}`}
                       </small>
                       <small>All versions count, including Trash.</small>
                     </article>
@@ -2943,7 +2960,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <h2>Storage by folder</h2>
                       <span className="muted">All versions count, including Trash.</span>
                     </div>
-                    {!usage.drives.length ? (
+                    {!folderDrives.length ? (
                       <p className="empty">No files in this folder.</p>
                     ) : (
                       <>
@@ -2981,12 +2998,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               className="folder-drive"
                               aria-label="Drive for folder usage"
                               value={folderDriveId}
-                              onChange={(event) => {
-                                setFolderDrive(event.target.value);
-                                setFolderPrefix('/');
-                              }}
+                              onChange={(event) => setFolderDrive(event.target.value)}
                             >
-                              {usage.drives.map((item) => (
+                              {folderDrives.map((item) => (
                                 <option key={item.id} value={item.id}>
                                   {item.name}
                                 </option>
@@ -3038,6 +3052,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   aria-label="Files in this folder share of drive storage"
                                 />
                                 <small>{count(folderData.directFiles, 'file')}</small>
+                              </div>
+                            )}
+                            {folderData.moreFolders.count > 0 && (
+                              <div className="usage-row">
+                                <div className="split">
+                                  <strong>
+                                    {count(folderData.moreFolders.count, 'more folder')}
+                                  </strong>
+                                  <span>{formatMetered(folderData.moreFolders.bytes)}</span>
+                                </div>
                               </div>
                             )}
                             {!folderData.folders.length && !folderData.directFiles && (

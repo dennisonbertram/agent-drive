@@ -199,4 +199,79 @@ describe('console usage folders', () => {
     expect(body.directBytes).toBe(0);
     expect(body.directFiles).toBe(0);
   });
+
+  it('rejects an empty prefix but treats an omitted prefix as /', async () => {
+    const f = await fixture();
+    await addFile(f, '/a/x', [10]);
+
+    const empty = await call(f.userId, `usage/folders?drive=${f.driveId}&prefix=`);
+    expect(empty.status).toBe(400);
+    expect((await json(empty)).error.code).toBe('validation_error');
+
+    const omitted = await call(f.userId, `usage/folders?drive=${f.driveId}`);
+    expect(omitted.status).toBe(200);
+    const body = await json(omitted);
+    expect(body.prefix).toBe('/');
+    expect(body.totalBytes).toBe(10);
+  });
+
+  it('aggregates every file stored directly at the prefix into one bucket', async () => {
+    const f = await fixture();
+    // A flat folder must collapse to a single direct bucket, not one row per file.
+    for (let index = 0; index < 40; index += 1) await addFile(f, `/f${index}`, [index + 1]);
+    await addFile(f, '/sub/x', [5]);
+
+    const res = await call(f.userId, `usage/folders?drive=${f.driveId}`);
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.folders).toEqual([{ name: 'sub', path: '/sub', bytes: 5, files: 1 }]);
+    expect(body.directFiles).toBe(40);
+    expect(body.directBytes).toBe((40 * 41) / 2);
+    expect(body.totalBytes).toBe((40 * 41) / 2 + 5);
+  });
+
+  it('caps the folder list at 200 largest and aggregates the rest into moreFolders', async () => {
+    const f = await fixture();
+    // Sizes rank the folders: d004..d204 (sizes 5..205) fit, d000..d003 spill into moreFolders.
+    for (let index = 0; index < 205; index += 1)
+      await addFile(f, `/d${String(index).padStart(3, '0')}/x`, [index + 1]);
+    await addFile(f, '/loose', [7]);
+
+    const res = await call(f.userId, `usage/folders?drive=${f.driveId}`);
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.folders).toHaveLength(200);
+    expect(body.folders[0]).toEqual({ name: 'd204', path: '/d204', bytes: 205, files: 1 });
+    const names = (body.folders as { name: string }[]).map((row) => row.name);
+    expect(names).not.toContain('d004');
+    expect(body.moreFolders).toEqual({ count: 5, bytes: 1 + 2 + 3 + 4 + 5 });
+    expect(body.directFiles).toBe(1);
+    expect(body.directBytes).toBe(7);
+    expect(body.totalBytes).toBe((205 * 206) / 2 + 7);
+  });
+
+  it('keeps a drive pending deletion in the account total and marks it deleting', async () => {
+    const f = await fixture();
+    await addFile(f, '/a/x', [10]);
+    const gone = await pool.query(
+      'INSERT INTO drives (account_id, name, deleting_at) VALUES ($1, $2, now()) RETURNING id',
+      [f.accountId, `gone-${randomUUID()}`],
+    );
+    const goneId = gone.rows[0].id as string;
+    await addFile({ driveId: goneId, agentId: f.agentId }, '/b/y', [20]);
+
+    const res = await call(f.userId, 'usage');
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    const rows = body.drives as { id: string; deleting: boolean; storageBytes: number }[];
+    expect(rows.find((row) => row.id === goneId)).toMatchObject({
+      deleting: true,
+      storageBytes: 20,
+    });
+    expect(rows.find((row) => row.id === f.driveId)).toMatchObject({ deleting: false });
+    expect(body.storageBytes).toBe(30);
+
+    const folders = await call(f.userId, `usage/folders?drive=${goneId}`);
+    expect(folders.status).toBe(404);
+  });
 });

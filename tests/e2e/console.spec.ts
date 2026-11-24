@@ -368,6 +368,10 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     await expect(
       page.locator('.usage-row').filter({ hasText: 'Files in this folder' }),
     ).toBeVisible();
+    // Refresh reloads the summary and the folder panel together.
+    const folderReload = page.waitForRequest('**/api/console/usage/folders*');
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await folderReload;
     await page.getByRole('button', { name: 'API keys', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke Browser regression key', exact: true }).click();
     await page.getByRole('button', { name: 'Revoke key', exact: true }).click();
