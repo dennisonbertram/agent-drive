@@ -18,7 +18,7 @@ const firsts = [
   'keys',
   'account-key',
 ];
-const seconds = [ID, 'statements', 'settings', 'checkout', 'portal', 'slots'];
+const seconds = [ID, 'statements', 'settings', 'checkout', 'portal', 'slots', 'folders'];
 const thirds = [
   'approve',
   'deny',

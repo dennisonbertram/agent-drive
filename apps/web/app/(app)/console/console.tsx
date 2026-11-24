@@ -121,6 +121,13 @@ type Usage = {
     operations: number;
   }[];
 };
+type FolderUsage = {
+  prefix: string;
+  totalBytes: number;
+  folders: { name: string; path: string; bytes: number; files: number }[];
+  directBytes: number;
+  directFiles: number;
+};
 type Tab = 'Files' | 'Agents' | 'API keys' | 'Usage' | 'Trash';
 type ModalName =
   | 'drive'
@@ -171,6 +178,13 @@ function shortDate(value?: string) {
 
 function count(n: number, noun: string) {
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+// Whole percents; a real but sub-1% share reads "<1%" instead of rounding to 0%.
+function shareOf(part: number, total: number) {
+  if (total <= 0 || part <= 0) return '0%';
+  const pct = (part / total) * 100;
+  return pct < 1 ? '<1%' : `${Math.round(pct)}%`;
 }
 
 // Identical GETs started within half a second of each other share one request (React strict mode
@@ -488,6 +502,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [folderDrive, setFolderDrive] = useState('');
+  const [folderPrefix, setFolderPrefix] = useState('/');
+  const [folderUsage, setFolderUsage] = useState<{ key: string; data: FolderUsage } | null>(null);
+  const [folderFailure, setFolderFailure] = useState<{ key: string; message: string } | null>(null);
   const [chosenDrive, setSelected] = useState('');
   const [driveKeys, setDriveKeys] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
@@ -642,6 +660,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     rows = sortRows(matches, sort.key, sort.dir);
   }
   const drive = drives.find((item) => item.id === selected);
+  // Storage by folder: the select defaults to the open drive, then the first drive with usage.
+  const folderDriveId =
+    (folderDrive && usage?.drives.some((item) => item.id === folderDrive) ? folderDrive : '') ||
+    (selected && usage?.drives.some((item) => item.id === selected) ? selected : '') ||
+    (usage?.drives[0]?.id ?? '');
+  const folderScope = `${folderDriveId}:${folderPrefix}`;
+  const folderData = folderUsage?.key === folderScope ? folderUsage.data : null;
+  const folderError = folderFailure?.key === folderScope ? folderFailure.message : '';
+  const folderDriveTotal =
+    usage?.drives.find((item) => item.id === folderDriveId)?.storageBytes ?? 0;
+  const folderSegments = folderPrefix === '/' ? [] : folderPrefix.slice(1).split('/');
   const agentInstruction = useAgentInstruction();
   const origin =
     typeof window === 'undefined' ? 'https://your-agent-drive-host' : window.location.origin;
@@ -840,6 +869,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       setSlowScope('');
     };
   }, [selected, tab, fileScope, sharedView]);
+  useEffect(() => {
+    if (tab !== 'Usage' || !folderDriveId) return;
+    let active = true;
+    api<FolderUsage>(
+      `usage/folders?drive=${encodeURIComponent(folderDriveId)}&prefix=${encodeURIComponent(folderPrefix)}`,
+    )
+      .then((data) => {
+        if (active) setFolderUsage({ key: folderScope, data });
+      })
+      .catch((reason: Error) => {
+        if (active) setFolderFailure({ key: folderScope, message: reason.message });
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, folderDriveId, folderPrefix, folderScope]);
   // Back and Forward leave other tabs for the list they changed.
   useEffect(() => {
     const onPop = () => {
@@ -1025,6 +1070,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setAgents([]);
     setApiKeys([]);
     setUsage(null);
+    setFolderDrive('');
+    setFolderPrefix('/');
+    setFolderUsage(null);
+    setFolderFailure(null);
     setSelected('');
     setReady(false);
     lockAll('');
@@ -2827,6 +2876,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         max={Number(usage.limits.storageBytes)}
                         aria-label="Storage used of plan limit"
                       />
+                      <small>
+                        {Number(usage.limits.storageBytes) - usage.storageBytes >= 0
+                          ? `${formatMetered(Number(usage.limits.storageBytes) - usage.storageBytes)} free · ${shareOf(usage.storageBytes, Number(usage.limits.storageBytes))} used`
+                          : `0 free · over plan limit by ${formatMetered(usage.storageBytes - Number(usage.limits.storageBytes))}`}
+                      </small>
                       <small>All versions count, including Trash.</small>
                     </article>
                     <article className="panel stat">
@@ -2867,6 +2921,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             {item.quotaBytes === Number.MAX_SAFE_INTEGER
                               ? ' · account limits apply'
                               : ` / ${formatMetered(item.quotaBytes)}`}
+                            {` · ${shareOf(item.storageBytes, usage.storageBytes)} of total`}
                           </span>
                         </div>
                         {item.quotaBytes !== Number.MAX_SAFE_INTEGER && (
@@ -2882,6 +2937,116 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       </div>
                     ))}
                     {!usage.drives.length && <p className="empty">No storage used yet.</p>}
+                  </section>
+                  <section className="panel">
+                    <div className="panel-toolbar">
+                      <h2>Storage by folder</h2>
+                      <span className="muted">All versions count, including Trash.</span>
+                    </div>
+                    {!usage.drives.length ? (
+                      <p className="empty">No files in this folder.</p>
+                    ) : (
+                      <>
+                        <div className="usage-row folder-head">
+                          <div className="split">
+                            <nav className="folder-crumbs" aria-label="Folder">
+                              <button
+                                type="button"
+                                className="crumb"
+                                aria-current={folderPrefix === '/' ? 'page' : undefined}
+                                onClick={() => setFolderPrefix('/')}
+                              >
+                                All files
+                              </button>
+                              {folderSegments.map((segment, index) => {
+                                const path = `/${folderSegments.slice(0, index + 1).join('/')}`;
+                                return (
+                                  <span className="folder-crumb" key={path}>
+                                    <span className="crumb-sep">/</span>
+                                    <button
+                                      type="button"
+                                      className="crumb"
+                                      aria-current={
+                                        index === folderSegments.length - 1 ? 'page' : undefined
+                                      }
+                                      onClick={() => setFolderPrefix(path)}
+                                    >
+                                      {segment}
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                            </nav>
+                            <select
+                              className="folder-drive"
+                              aria-label="Drive for folder usage"
+                              value={folderDriveId}
+                              onChange={(event) => {
+                                setFolderDrive(event.target.value);
+                                setFolderPrefix('/');
+                              }}
+                            >
+                              {usage.drives.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {folderData && (
+                            <small>{formatMetered(folderData.totalBytes)} total</small>
+                          )}
+                        </div>
+                        {folderError && <p className="empty">{folderError}</p>}
+                        {!folderError && !folderData && <p className="empty">Loading…</p>}
+                        {folderData && (
+                          <>
+                            {folderData.folders.map((item) => (
+                              <button
+                                type="button"
+                                className="usage-row folder-row"
+                                key={item.path}
+                                onClick={() => setFolderPrefix(item.path)}
+                              >
+                                <div className="split">
+                                  <strong>{item.name}</strong>
+                                  <span>
+                                    {formatMetered(item.bytes)} ·{' '}
+                                    {shareOf(item.bytes, folderDriveTotal)} of drive
+                                  </span>
+                                </div>
+                                <progress
+                                  value={item.bytes}
+                                  max={Math.max(1, folderDriveTotal)}
+                                  aria-label={`${item.name} share of drive storage`}
+                                />
+                                <small>{count(item.files, 'file')}</small>
+                              </button>
+                            ))}
+                            {folderData.directFiles > 0 && (
+                              <div className="usage-row">
+                                <div className="split">
+                                  <strong>Files in this folder</strong>
+                                  <span>
+                                    {formatMetered(folderData.directBytes)} ·{' '}
+                                    {shareOf(folderData.directBytes, folderDriveTotal)} of drive
+                                  </span>
+                                </div>
+                                <progress
+                                  value={folderData.directBytes}
+                                  max={Math.max(1, folderDriveTotal)}
+                                  aria-label="Files in this folder share of drive storage"
+                                />
+                                <small>{count(folderData.directFiles, 'file')}</small>
+                              </div>
+                            )}
+                            {!folderData.folders.length && !folderData.directFiles && (
+                              <p className="empty">No files in this folder.</p>
+                            )}
+                          </>
+                        )}
+                      </>
+                    )}
                   </section>
                   <section className="panel">
                     <div className="panel-toolbar">

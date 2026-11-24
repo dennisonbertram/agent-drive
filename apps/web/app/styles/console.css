@@ -1494,3 +1494,81 @@
     display: none;
   }
 }
+
+/* usage: storage by folder (rows reuse .usage-row from console-panels.css) */
+.folder-head .split {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.folder-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  font: 500 15px var(--sans, 'Inter Tight', system-ui, sans-serif);
+}
+.folder-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.folder-crumbs .crumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted, #6b6963);
+  font: inherit;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.folder-crumbs .crumb:hover {
+  text-decoration: underline;
+}
+.folder-crumbs .crumb[aria-current='page'] {
+  color: var(--ink, #111);
+}
+.folder-crumbs .crumb-sep {
+  color: var(--muted, #6b6963);
+}
+.folder-drive {
+  flex: none;
+  max-width: 45%;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 4px;
+  background: var(--panel, #fff);
+  color: var(--ink, #111);
+  font: 400 12px var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+}
+button.usage-row.folder-row {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.usage-row.folder-row:hover {
+  background: var(--paper-2, #f6f5f2);
+}
+button.usage-row.folder-row:focus-visible {
+  outline: 2px solid var(--ink, #111);
+  outline-offset: -2px;
+}
+button.usage-row.folder-row:last-child {
+  border-bottom: 0;
+}
+.folder-row .split strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .folder-drive {
+    min-height: 44px;
+  }
+}

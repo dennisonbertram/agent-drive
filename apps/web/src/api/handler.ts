@@ -348,6 +348,8 @@ export function actionFor(method: string, parts: string[], bearer = false) {
   if (parts.length === 1 && parts[0] === 'session' && method === 'GET')
     return 'console.session.read';
   if (parts.length === 1 && parts[0] === 'usage' && method === 'GET') return 'console.usage.read';
+  if (parts.length === 2 && parts[0] === 'usage' && parts[1] === 'folders' && method === 'GET')
+    return 'console.usage.folders.read';
   if (parts[0] === 'billing') {
     if (parts.length === 1 && method === 'GET') return 'billing.read';
     if (parts.length === 2 && parts[1] === 'statements' && method === 'GET')
@@ -1512,6 +1514,62 @@ async function consoleEndpoint(
     });
   }
   if (
+    parts.length === 2 &&
+    parts[0] === 'usage' &&
+    parts[1] === 'folders' &&
+    request.method === 'GET'
+  ) {
+    const driveId = uuid(url.searchParams.get('drive') ?? undefined, 'drive');
+    const rawPrefix = url.searchParams.get('prefix');
+    const base = !rawPrefix || rawPrefix === '/' ? '/' : `${canonicalPath(rawPrefix, 'prefix')}/`;
+    const owned = await getPool().query(
+      `SELECT d.id FROM drives d JOIN accounts a ON a.id = d.account_id
+        WHERE d.id = $1 AND d.account_id = $2 AND d.deleting_at IS NULL AND a.deleting_at IS NULL`,
+      [driveId, auth.accountId],
+    );
+    if (!owned.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    const rows = await getPool().query(
+      `SELECT segment, folder, COALESCE(SUM(ciphertext_size), 0)::bigint AS bytes,
+              COUNT(DISTINCT file_id)::int AS files
+         FROM (
+           SELECT f.id AS file_id, v.ciphertext_size,
+                  split_part(rest, '/', 1) AS segment,
+                  position('/' IN rest) > 0 AS folder
+             FROM (
+               SELECT f.id, substr(f.path, length($2::text) + 1) AS rest
+                 FROM files f
+                WHERE f.drive_id = $1 AND f.path LIKE $3 ESCAPE '\\'
+             ) f JOIN versions v ON v.file_id = f.id
+         ) scoped
+        GROUP BY segment, folder
+        ORDER BY bytes DESC, segment`,
+      [driveId, base, `${escapeLikeLiteral(base)}%`],
+    );
+    const folders: { name: string; path: string; bytes: number; files: number }[] = [];
+    let directBytes = 0;
+    let directFiles = 0;
+    for (const row of rows.rows as Row[]) {
+      if (row.folder) {
+        folders.push({
+          name: row.segment,
+          path: `${base}${row.segment}`,
+          bytes: Number(row.bytes),
+          files: Number(row.files),
+        });
+      } else {
+        directBytes += Number(row.bytes);
+        directFiles += Number(row.files);
+      }
+    }
+    return response({
+      prefix: base === '/' ? '/' : base.slice(0, -1),
+      totalBytes: folders.reduce((total, item) => total + item.bytes, directBytes),
+      folders,
+      directBytes,
+      directFiles,
+    });
+  }
+  if (
     parts.length === 3 &&
     parts[0] === 'agents' &&
     parts[2] === 'revoke' &&
@@ -2531,6 +2589,8 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     parts.length === 1 &&
     ['session', 'usage', 'whoami', 'drives', 'agents', 'keys'].includes(parts[0]!)
   )
+    return true;
+  if (method === 'GET' && parts.length === 2 && parts[0] === 'usage' && parts[1] === 'folders')
     return true;
   if (method === 'POST' && parts.length === 1 && ['drives', 'agents', 'keys'].includes(parts[0]!))
     return true;
