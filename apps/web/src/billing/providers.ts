@@ -458,7 +458,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
       cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
       branding_settings: {
         display_name: 'Agent Drive',
-        icon: { type: 'url', url: `${billingOrigin()}/apple-icon` },
+        icon: { type: 'url', url: `${billingOrigin()}/icon.svg` },
       },
     };
     session = await client.checkout.sessions.create(params, {

@@ -327,7 +327,7 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     cancel_url: 'https://drive.example.test/console/billing?checkout=cancelled',
     'branding_settings[display_name]': 'Agent Drive',
     'branding_settings[icon][type]': 'url',
-    'branding_settings[icon][url]': 'https://drive.example.test/apple-icon',
+    'branding_settings[icon][url]': 'https://drive.example.test/icon.svg',
   });
   expect(form.has('line_items[1][quantity]')).toBe(false);
   const reservedAt: Date = (await billingRow()).checkout_created_at;
