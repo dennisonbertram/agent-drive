@@ -88,7 +88,7 @@ export async function billingState(
 ) {
   const account = await lockBillingAccount(client, accountId, options);
   const storageLimitBytes =
-    account.storage_limit_bytes === null ? null : BigInt(account.storage_limit_bytes);
+    account.storage_limit_bytes == null ? null : BigInt(account.storage_limit_bytes);
   const clock = await client.query<{ now: Date }>('SELECT now() AS now');
   const { start, end } = monthBounds(periodStart ?? clock.rows[0]!.now);
   const currentMonth = monthBounds(clock.rows[0]!.now).start.getTime() === start.getTime();

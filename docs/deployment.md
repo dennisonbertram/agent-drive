@@ -109,7 +109,10 @@ must be positive when set). When set it replaces the plan's included storage for
 everywhere the limit is enforced or shown; drives, egress, operations, base price and overage rates
 still come from the plan, and NULL restores plan behavior. There is no admin UI or API for it —
 set it with SQL, for example 100 GiB:
-`UPDATE billing_accounts SET storage_limit_bytes = 107374182400 WHERE account_id = '<account id>';`
+`INSERT INTO billing_accounts (account_id, storage_limit_bytes) VALUES ('<account id>', 107374182400) ON CONFLICT (account_id) DO UPDATE SET storage_limit_bytes = EXCLUDED.storage_limit_bytes RETURNING account_id, plan, storage_limit_bytes;`
+(billing rows are created lazily, so a plain UPDATE can match nothing). Change an override on a
+paid account only at the start of a billing period: past statements are recomputed with the
+current value.
 
 ## Every production release
 
