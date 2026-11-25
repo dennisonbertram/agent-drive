@@ -451,6 +451,8 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
         proration_behavior: 'create_prorations',
         metadata: { accountId, plan, app: 'agent-drive' },
+        // API clover defaults new subscriptions to flexible billing; keep the classic behavior.
+        billing_mode: { type: 'classic' },
       },
       success_url: `${billingOrigin()}/console/billing?checkout=success`,
       cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,

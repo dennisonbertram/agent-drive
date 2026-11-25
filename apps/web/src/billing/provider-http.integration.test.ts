@@ -322,6 +322,7 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     'line_items[1][price]': 'price_usage_http',
     'subscription_data[metadata][accountId]': accountId,
     'subscription_data[metadata][app]': 'agent-drive',
+    'subscription_data[billing_mode][type]': 'classic',
     success_url: 'https://drive.example.test/console/billing?checkout=success',
     cancel_url: 'https://drive.example.test/console/billing?checkout=cancelled',
     'branding_settings[display_name]': 'Agent Drive',
