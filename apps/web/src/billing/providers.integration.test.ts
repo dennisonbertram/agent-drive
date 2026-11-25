@@ -569,9 +569,13 @@ it('uses a persisted checkout idempotency key for concurrent session creation', 
     },
     success_url: 'https://billing.example.test/console/billing?checkout=success',
     cancel_url: 'https://billing.example.test/console/billing?checkout=cancelled',
+    branding_settings: {
+      display_name: 'Agent Drive',
+      icon: { type: 'url', url: 'https://billing.example.test/apple-icon' },
+    },
   });
   expect(secondParams).toEqual(firstParams);
-  expect(firstOptions.idempotencyKey).toEqual(expect.any(String));
+  expect(firstOptions.idempotencyKey).toMatch(/^checkout\/v3\//u);
   expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey);
   expect(
     (

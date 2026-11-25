@@ -237,7 +237,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   const client = stripe();
   await validatePrices(client);
   const customer = await customerForAccount(accountId, client);
-  const idempotencyKey = `checkout/v2/${accountId}/${plan}/${randomUUID()}`;
+  const idempotencyKey = `checkout/v3/${accountId}/${plan}/${randomUUID()}`;
   const reserved = await withTransaction(async (db) => {
     const billing = await lockBillingAccount(db, accountId);
     const checkout = await db.query<{
@@ -435,22 +435,34 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   const usage = process.env.STRIPE_USAGE_PRICE_ID!;
   let session: Stripe.Checkout.Session;
   try {
-    session = await client.checkout.sessions.create(
-      {
-        mode: 'subscription',
-        customer,
-        client_reference_id: accountId,
-        line_items: [{ price, quantity: 1 }, { price: usage }],
-        subscription_data: {
-          billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
-          proration_behavior: 'create_prorations',
-          metadata: { accountId, plan, app: 'agent-drive' },
-        },
-        success_url: `${billingOrigin()}/console/billing?checkout=success`,
-        cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
+    // branding_settings requires API 2025-09-30.clover, which the pinned stripe@18.5.0
+    // types predate, so it is requested for this call only and the field is typed here.
+    const params: Stripe.Checkout.SessionCreateParams & {
+      branding_settings: {
+        display_name: string;
+        icon: { type: 'url'; url: string };
+      };
+    } = {
+      mode: 'subscription',
+      customer,
+      client_reference_id: accountId,
+      line_items: [{ price, quantity: 1 }, { price: usage }],
+      subscription_data: {
+        billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
+        proration_behavior: 'create_prorations',
+        metadata: { accountId, plan, app: 'agent-drive' },
       },
-      { idempotencyKey: reserved.idempotencyKey! },
-    );
+      success_url: `${billingOrigin()}/console/billing?checkout=success`,
+      cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
+      branding_settings: {
+        display_name: 'Agent Drive',
+        icon: { type: 'url', url: `${billingOrigin()}/apple-icon` },
+      },
+    };
+    session = await client.checkout.sessions.create(params, {
+      idempotencyKey: reserved.idempotencyKey!,
+      apiVersion: '2025-09-30.clover',
+    });
   } catch (error) {
     const failure = error as { type?: string; param?: string };
     const now = new Date();
