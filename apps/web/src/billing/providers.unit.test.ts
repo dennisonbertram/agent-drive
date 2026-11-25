@@ -155,6 +155,53 @@ describe('billing provider adapters', () => {
     }
   });
 
+  it('treats restricted keys as drop-in secret keys for API calls and webhook mode', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', 'rk_test_provider_fixture');
+    vi.stubEnv('STRIPE_METER_EVENT_NAME', 'agent_drive_usage');
+    stripeMocks.meterEvent.mockResolvedValue({});
+    await sendMeterReport({
+      id: 'rk-fixture',
+      customer: 'cus_fixture',
+      cents: '1',
+      timestamp: 1_800_000_000,
+    });
+    expect(stripeMocks.constructor).toHaveBeenCalledWith('rk_test_provider_fixture', {
+      timeout: 10_000,
+    });
+
+    vi.stubEnv('STRIPE_SECRET_KEY', 'rk_live_provider_fixture');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_provider_fixture');
+    stripeMocks.constructEvent.mockReturnValue({
+      id: 'evt_fixture',
+      created: 1,
+      livemode: false,
+      type: 'customer.subscription.updated',
+      data: { object: {} },
+    });
+    await expect(processStripeWebhook('fixture body', 'fixture signature')).rejects.toMatchObject({
+      code: 'unauthorized',
+    });
+
+    stripeMocks.constructEvent.mockReturnValue({
+      id: 'evt_fixture',
+      created: 1,
+      livemode: true,
+      type: 'account.updated',
+      data: { object: {} },
+    });
+    await expect(processStripeWebhook('fixture body', 'fixture signature')).resolves.toEqual({
+      received: true,
+    });
+  });
+
+  it('rejects keys without a secret or restricted prefix', async () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', 'pk_test_provider_fixture');
+    vi.stubEnv('STRIPE_METER_EVENT_NAME', 'agent_drive_usage');
+    await expect(
+      sendMeterReport({ id: 'fixture', customer: 'cus_fixture', cents: '1', timestamp: 1 }),
+    ).rejects.toMatchObject({ code: 'internal_error' });
+  });
+
   it('rejects invalid webhook signatures without processing an event', async () => {
     vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_provider_fixture');
     vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_provider_fixture');

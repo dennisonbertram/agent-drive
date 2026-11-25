@@ -62,6 +62,87 @@ Use separate preview resources when testing migration/provider changes against n
 Configure Stripe and optional email only as described in the README. Synthetic signatures and
 mocked providers do not establish live payments, email delivery, or final-invoice correctness.
 
+## Going live with Stripe
+
+Production checkout needs live-mode Stripe objects and the matching `STRIPE_*` environment
+variables. A deployment pointed at a test sandbox only produces an unclaimed-sandbox checkout.
+
+1. Install the Vercel Stripe Marketplace integration on the production project and connect the
+   live Stripe account (DpapHero Corp). The integration provisions `STRIPE_SECRET_KEY` itself —
+   possibly a restricted `rk_live_` key, which the app treats as live just like `sk_live_`.
+2. In the Stripe dashboard, create a live-mode secret key (`sk_live_...`) for the one-time
+   provisioning run only. Keep it out of shell history, files, and command arguments.
+3. From a checkout linked to the production Vercel project at the repository root, supply the
+   key through the environment only and dry-run the go-live script:
+
+   ```sh
+   read -rs STRIPE_SECRET_KEY
+   export STRIPE_SECRET_KEY
+   pnpm --filter @agent-drive/web stripe:go-live --dry-run --apply-vercel
+   ```
+
+   The script refuses anything but an `sk_live_` key (`--test` provisions a sandbox instead and
+   cannot be combined with `--apply-vercel`). It finds or creates the usage meter, the three
+   products and their monthly USD prices, and the
+   `https://agentdrive.xyz/api/stripe/webhook` endpoint with the exact event set the webhook
+   handler processes, printing only non-secret object IDs.
+
+4. Clear the sandbox billing pointers before writing the live configuration. Dry-run the reset
+   script against the production database, have the owner approve the listed rows, then apply:
+
+   ```sh
+   DATABASE_URL=postgres://... pnpm --filter @agent-drive/web stripe:reset-sandbox-state
+   DATABASE_URL=postgres://... pnpm --filter @agent-drive/web stripe:reset-sandbox-state --apply --confirm-sandbox-only
+   ```
+
+   In one transaction it nulls `stripe_customer_id`, `stripe_subscription_id`,
+   `subscription_status`, and the checkout fields on every billing account, sets non-free plans
+   to `free`, and parks unreported meter reports as abandoned (aged past the retry window with
+   an explanatory note — never deleted; the owner deletes them manually after review).
+
+5. Run the go-live script for real:
+
+   ```sh
+   pnpm --filter @agent-drive/web stripe:go-live --apply-vercel
+   ```
+
+   `--apply-vercel` first verifies that the repository-root `.vercel/project.json` links the
+   `agent-drive` project, then pipes `STRIPE_WEBHOOK_SECRET`, the three price IDs, and
+   `STRIPE_METER_EVENT_NAME` on stdin to `vercel env add ... production --force` run from the
+   repository root; it never sets `STRIPE_SECRET_KEY` (the integration owns it), removes that
+   key from the vercel child's environment, and does not trigger a deploy. Because Stripe
+   returns the webhook signing secret only at creation, a re-run stops when the endpoint
+   already exists — pass `--replace-webhook` to create a replacement, write the env vars, and
+   only then disable (never delete) the old endpoint, whose id is printed for the operator.
+   If an env write fails the script reports which names were and were not written, leaves both
+   endpoints enabled, and exits nonzero; fix the error and re-run with `--replace-webhook`.
+
+   The live Stripe account also serves other products (FreePi). On a shared account the
+   script tags every object it creates with `metadata.app=agent-drive` (Stripe meters do not
+   support metadata), reuses existing prices and products only when they are provably Agent
+   Drive's (exact `Agent Drive *` names and the `app` tag — ambiguous or foreign-tagged
+   matches stop the run), and `--replace-webhook` only ever touches endpoints at the exact
+   Agent Drive webhook URL that carry `metadata.app=agent-drive`; an untagged endpoint at
+   that URL must be removed in the dashboard first. Products are created with the statement
+   descriptor `AGENT DRIVE`, which Stripe applies to subscription payments on the customer's
+   card statement. Customers and subscriptions the app creates carry the same `app` metadata,
+   so Agent Drive revenue can be isolated in the Stripe dashboard. The webhook handler
+   acknowledges events for customers it does not have mapped (other products' events on a
+   shared endpoint) instead of rejecting them, so Stripe does not retry those deliveries and
+   disable the endpoint.
+
+6. Redeploy production so the new environment variables take effect
+   (`git push origin origin/main:prod`, or the release path below). If `--replace-webhook`
+   disabled an old endpoint, delete it in the Stripe dashboard after the redeploy.
+7. Run a real checkout and confirm deliveries for the endpoint succeed in the Stripe
+   dashboard.
+
+If a customer is deleted in the live Stripe dashboard, the stored `stripe_customer_id` stops
+resolving: checkout and portal calls create a fresh live customer automatically, but the old
+customer's subscription keeps billing. Cancel the subscription in the Stripe dashboard first,
+then let the next checkout create the replacement customer; webhook events for the deleted
+customer id no longer map to the account, so they are acknowledged and ignored.
+
 ## Maintenance is required
 
 On Vercel Pro, the checked-in cron schedules run these maintenance jobs through

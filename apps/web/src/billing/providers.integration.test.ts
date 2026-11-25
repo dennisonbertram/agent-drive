@@ -212,6 +212,12 @@ beforeAll(async () => {
     value_settings: { event_payload_key: 'value' },
     status: 'active',
   });
+  stripeMocks.customerRetrieve.mockImplementation(async (id: string) => ({
+    id,
+    deleted: false,
+    livemode: false,
+    metadata: {},
+  }));
   stripeMocks.subscriptionRetrieve.mockImplementation(async (id: string) => ({
     id,
     customer: stripeCustomerId,
@@ -461,6 +467,74 @@ it('reconciles signed subscription events from current Stripe state and ignores 
   ).toHaveLength(1);
 });
 
+it('acknowledges supported events for unmapped or incomplete foreign objects without writing', async () => {
+  const foreignCustomer = `cus_foreign_${randomUUID().replaceAll('-', '')}`;
+  const foreignSubscription = `sub_foreign_${randomUUID().replaceAll('-', '')}`;
+  const cases: [string, Record<string, unknown>][] = [
+    [
+      'checkout.session.completed',
+      {
+        id: 'cs_foreign',
+        customer: foreignCustomer,
+        subscription: foreignSubscription,
+        mode: 'subscription',
+        client_reference_id: randomUUID(),
+      },
+    ],
+    ['customer.subscription.created', { id: foreignSubscription, customer: foreignCustomer }],
+    ['customer.subscription.updated', { id: foreignSubscription, customer: foreignCustomer }],
+    ['customer.subscription.deleted', { id: foreignSubscription, customer: foreignCustomer }],
+    [
+      'invoice.payment_succeeded',
+      {
+        id: 'in_foreign_succeeded',
+        customer: foreignCustomer,
+        parent: {
+          type: 'subscription_details',
+          subscription_details: { subscription: foreignSubscription },
+        },
+      },
+    ],
+    [
+      'invoice.payment_failed',
+      {
+        id: 'in_foreign_failed',
+        customer: foreignCustomer,
+        parent: {
+          type: 'subscription_details',
+          subscription_details: { subscription: foreignSubscription },
+        },
+      },
+    ],
+    ['checkout.session.completed', { id: 'cs_foreign_incomplete', mode: 'payment' }],
+    ['invoice.payment_succeeded', { id: 'in_foreign_incomplete', customer: foreignCustomer }],
+    ['customer.subscription.updated', { customer: foreignCustomer }],
+  ];
+  const eventsBefore = (
+    await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM stripe_events')
+  ).rows[0]!.n;
+  const retrievesBefore = stripeMocks.subscriptionRetrieve.mock.calls.length;
+
+  for (const [type, object] of cases) {
+    stripeMocks.constructEvent.mockReturnValue({
+      id: `evt_foreign_${randomUUID().replaceAll('-', '')}`,
+      created: duplicateTime + 500,
+      livemode: false,
+      type,
+      data: { object },
+    });
+    await expect(
+      processStripeWebhook('foreign fixture body', 'valid-fixture-signature'),
+    ).resolves.toEqual({ received: true });
+  }
+
+  const eventsAfter = (
+    await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM stripe_events')
+  ).rows[0]!.n;
+  expect(eventsAfter).toBe(eventsBefore);
+  expect(stripeMocks.subscriptionRetrieve.mock.calls.length).toBe(retrievesBefore);
+});
+
 it('uses a persisted checkout idempotency key for concurrent session creation', async () => {
   let releaseSession: (session: { id: string; url: string }) => void = () => undefined;
   const sessionPromise = new Promise<{ id: string; url: string }>((resolveSession) => {
@@ -490,7 +564,7 @@ it('uses a persisted checkout idempotency key for concurrent session creation', 
     ],
     subscription_data: {
       proration_behavior: 'create_prorations',
-      metadata: { accountId: checkoutAccountId, plan: 'developer' },
+      metadata: { accountId: checkoutAccountId, plan: 'developer', app: 'agent-drive' },
       billing_cycle_anchor: expect.any(Number),
     },
     success_url: 'https://billing.example.test/console/billing?checkout=success',
