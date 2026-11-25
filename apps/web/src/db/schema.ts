@@ -446,6 +446,7 @@ export const billingAccounts = pgTable(
     spendCapCents: bigint('spend_cap_cents', { mode: 'bigint' }),
     alertThresholdCents: bigint('alert_threshold_cents', { mode: 'bigint' }),
     alertEmail: text('alert_email'),
+    storageLimitBytes: bigint('storage_limit_bytes', { mode: 'bigint' }),
     stripeEventCreated: bigint('stripe_event_created', { mode: 'bigint' })
       .notNull()
       .default(sql`0`),
@@ -465,6 +466,10 @@ export const billingAccounts = pgTable(
     check(
       'billing_accounts_alert_threshold_nonnegative',
       sql`${table.alertThresholdCents} IS NULL OR ${table.alertThresholdCents} >= 0`,
+    ),
+    check(
+      'billing_accounts_storage_limit_positive',
+      sql`${table.storageLimitBytes} IS NULL OR ${table.storageLimitBytes} > 0`,
     ),
   ],
 );

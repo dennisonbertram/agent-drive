@@ -155,6 +155,65 @@ async function dropAccount(id: string) {
   await getPool().query('DELETE FROM accounts WHERE id = $1', [id]);
 }
 
+async function seededFreeAccount(storageBytes: bigint) {
+  const id = (
+    await getPool().query<{ id: string }>('INSERT INTO accounts (name) VALUES ($1) RETURNING id', [
+      `storage-override-${randomUUID()}`,
+    ])
+  ).rows[0]!.id;
+  const agentId = (
+    await getPool().query<{ id: string }>(
+      'INSERT INTO agents (account_id,name) VALUES ($1,$2) RETURNING id',
+      [id, 'storage-override-agent'],
+    )
+  ).rows[0]!.id;
+  const driveId = (
+    await getPool().query<{ id: string }>(
+      'INSERT INTO drives (account_id,name) VALUES ($1,$2) RETURNING id',
+      [id, 'storage-override-drive'],
+    )
+  ).rows[0]!.id;
+  const fileId = (
+    await getPool().query<{ id: string }>(
+      'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+      [driveId, '/seeded'],
+    )
+  ).rows[0]!.id;
+  await getPool().query(
+    `INSERT INTO versions (file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+     VALUES ($1,$2,$3,$4,'synthetic-quota-metadata',$5)`,
+    [fileId, driveId, `objects/${id}/${driveId}/${randomUUID()}`, storageBytes.toString(), agentId],
+  );
+  return { id, driveId };
+}
+
+it('lets a Free account with a storage override commit a put a plain Free account cannot', async () => {
+  const plain = await seededFreeAccount(5n * GIB);
+  const boosted = await seededFreeAccount(5n * GIB);
+  try {
+    await getPool().query(
+      `INSERT INTO billing_accounts (account_id,storage_limit_bytes) VALUES ($1,$2)
+       ON CONFLICT (account_id) DO UPDATE SET storage_limit_bytes = $2`,
+      [boosted.id, (100n * GIB).toString()],
+    );
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, plain.id, { bytes: 1n })),
+    ).rejects.toMatchObject({
+      code: 'payment_required',
+      status: 402,
+      details: { limit: 'storage' },
+    });
+    await expect(
+      withTransaction((client) => enforceWriteBudget(client, boosted.id, { bytes: 1n })),
+    ).resolves.toBeDefined();
+    expect((await billingSummary(boosted.id)).limits.storageBytes).toBe((100n * GIB).toString());
+    expect((await billingSummary(plain.id)).limits.storageBytes).toBe((5n * GIB).toString());
+  } finally {
+    await dropAccount(plain.id);
+    await dropAccount(boosted.id);
+  }
+});
+
 it('does not count a drive that is being deleted toward the drive allowance', async () => {
   const id = await freeAccount(3);
   try {

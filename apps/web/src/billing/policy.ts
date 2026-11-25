@@ -26,6 +26,20 @@ export const PLANS = {
   },
 } as const;
 export type PlanName = keyof typeof PLANS;
+export type PlanLimits = {
+  baseCents: number;
+  drives: bigint;
+  storageBytes: bigint;
+  egressBytes: bigint;
+  operations: bigint;
+};
+
+// An account's effective allowances: a per-account storage_limit_bytes override replaces the
+// plan's included storageBytes; every other allowance still comes from the plan.
+export function planLimits(plan: PlanName, storageLimitBytes?: bigint | null): PlanLimits {
+  const included = PLANS[plan];
+  return storageLimitBytes == null ? included : { ...included, storageBytes: storageLimitBytes };
+}
 export type Usage = {
   drives: bigint;
   storageBytes: bigint;
@@ -54,8 +68,13 @@ const cents = (units: bigint, rate: bigint, divisor = 1n) =>
   (units * rate + divisor - 1n) / divisor;
 
 // Storage and drive overage use the calendar month's high-water allocation, not GB-hours.
-export function quoteUsage(plan: PlanName, usage: Usage, rates: Rates | null) {
-  const included = PLANS[plan];
+export function quoteUsage(
+  plan: PlanName,
+  usage: Usage,
+  rates: Rates | null,
+  storageLimitBytes?: bigint | null,
+) {
+  const included = planLimits(plan, storageLimitBytes);
   const overage = {
     drives: excess(usage.drives, included.drives),
     storageBytes: excess(usage.storageBytes, included.storageBytes),
@@ -122,8 +141,9 @@ export function limitExceeded(
   before: Pick<Usage, 'drives' | 'storageBytes'>,
   resetsOn?: Date,
   only?: LimitName,
+  storageLimitBytes?: bigint | null,
 ) {
-  const p = PLANS[plan];
+  const p = planLimits(plan, storageLimitBytes);
   const name = plan[0]!.toUpperCase() + plan.slice(1);
   const upgrade = plan === 'team' ? '' : ' or upgrade';
   const resets = resetsOn ? `on ${resetsOn.toISOString().slice(0, 10)}` : 'next month';
