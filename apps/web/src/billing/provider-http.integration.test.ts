@@ -459,7 +459,7 @@ it('replaces a stored sandbox or deleted customer during checkout and portal', a
     expect(replaced).not.toBe(staleCustomerId);
     const createRequests = posts('/v1/customers');
     expect(createRequests.at(-1)!.idempotency).toBe(
-      `customer-replace/${staleAccountId}/${staleCustomerId}`,
+      `customer-replace/v2/${staleAccountId}/${staleCustomerId}`,
     );
     const checkoutForm = new URLSearchParams(posts('/v1/checkout/sessions').at(-1)!.body);
     expect(checkoutForm.get('customer')).toBe(replaced);
@@ -478,7 +478,7 @@ it('replaces a stored sandbox or deleted customer during checkout and portal', a
     expect(portalReplaced).not.toBe(deletedCustomerId);
     expect(posts('/v1/customers')).toHaveLength(customersBeforePortal + 1);
     expect(posts('/v1/customers').at(-1)!.idempotency).toBe(
-      `customer-replace/${deletedAccountId}/${deletedCustomerId}`,
+      `customer-replace/v2/${deletedAccountId}/${deletedCustomerId}`,
     );
     const portalForm = new URLSearchParams(posts('/v1/billing_portal/sessions').at(-1)!.body);
     expect(portalForm.get('customer')).toBe(portalReplaced);

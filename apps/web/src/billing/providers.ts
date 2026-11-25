@@ -149,7 +149,9 @@ async function usableCustomerId(
   const created = await client.customers.create(
     { metadata: { accountId, app: 'agent-drive' } },
     {
-      idempotencyKey: stored ? `customer-replace/${accountId}/${stored}` : `customer/${accountId}`,
+      idempotencyKey: stored
+        ? `customer-replace/v2/${accountId}/${stored}`
+        : `customer/v2/${accountId}`,
     },
   );
   await db.query('UPDATE billing_accounts SET stripe_customer_id = $2 WHERE account_id = $1', [
@@ -226,12 +228,16 @@ function nextMonthStart(createdAt: Date) {
   return Math.floor(Date.UTC(createdAt.getUTCFullYear(), createdAt.getUTCMonth() + 1, 1) / 1000);
 }
 
+function checkoutKeyMatchesPlan(key: string | null | undefined, accountId: string, plan: string) {
+  return !!key?.startsWith('checkout/') && key.includes(`/${accountId}/${plan}/`);
+}
+
 export async function createCheckout(accountId: string, plan: 'developer' | 'team') {
   if (!checkoutConfigured()) throw new ApiError('conflict', 'Paid checkout is not configured.');
   const client = stripe();
   await validatePrices(client);
   const customer = await customerForAccount(accountId, client);
-  const idempotencyKey = `checkout/${accountId}/${plan}/${randomUUID()}`;
+  const idempotencyKey = `checkout/v2/${accountId}/${plan}/${randomUUID()}`;
   const reserved = await withTransaction(async (db) => {
     const billing = await lockBillingAccount(db, accountId);
     const checkout = await db.query<{
@@ -270,7 +276,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         createdAt: null,
       };
     if (currentKey) {
-      if (!currentKey.startsWith(`checkout/${accountId}/${plan}/`) && !currentSession)
+      if (!checkoutKeyMatchesPlan(currentKey, accountId, plan) && !currentSession)
         throw new ApiError('conflict', 'Resume the previous plan checkout before changing plans.');
       if (
         !currentSession &&
@@ -399,7 +405,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   if (reserved.sessionId) {
     let previous = await client.checkout.sessions.retrieve(reserved.sessionId);
     if (previous.status === 'open') {
-      if (reserved.idempotencyKey?.startsWith(`checkout/${accountId}/${plan}/`)) {
+      if (checkoutKeyMatchesPlan(reserved.idempotencyKey, accountId, plan)) {
         if (previous.url) return { url: previous.url };
         throw new ApiError('internal_error', 'Stripe did not return a checkout URL.');
       }

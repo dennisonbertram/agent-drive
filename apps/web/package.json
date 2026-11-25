@@ -12,7 +12,8 @@
     "deletion:maintenance": "tsx src/api/deletion-cli.ts",
     "maintenance:cleanup-expired-uploads": "tsx src/api/cleanup-expired-uploads-cli.ts",
     "provision:local": "node scripts/provision.mjs --local",
-    "stripe:go-live": "node scripts/stripe-go-live.mjs"
+    "stripe:go-live": "node scripts/stripe-go-live.mjs",
+    "stripe:reset-sandbox-state": "node scripts/stripe-reset-sandbox-state.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.883.0",

@@ -2,22 +2,33 @@
 // endpoint) and, with --apply-vercel, sets the production STRIPE_* environment variables in
 // the linked Vercel project — except STRIPE_SECRET_KEY, which the Vercel Stripe integration
 // provisions itself. The secret key is read from STRIPE_SECRET_KEY only; it is never taken
-// from argv, printed, or written to disk. Safe to re-run: existing objects are reused.
-// The Stripe account may be shared with other products, so everything this script creates is
-// tagged metadata.app=agent-drive (meters do not support metadata), existing objects are
-// reused only by exact Agent Drive names or that tag, and --replace-webhook can only delete
-// the endpoint whose URL is exactly this app's webhook URL.
+// from argv, printed, passed to the vercel child's environment, or written to disk.
+// Safe to re-run: existing objects are reused. The Stripe account may be shared with other
+// products, so everything this script creates is tagged metadata.app=agent-drive (meters do
+// not support metadata), existing objects are reused only by exact Agent Drive names or that
+// tag, and --replace-webhook only ever disables endpoints tagged app=agent-drive.
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import Stripe from 'stripe';
 
-const DEFAULT_URL = 'https://agentdrive.xyz';
+const WEBHOOK_URL = 'https://agentdrive.xyz/api/stripe/webhook';
 const DEFAULT_METER_EVENT_NAME = 'agent_drive_usage';
 const APP_METADATA_KEY = 'app';
 const APP_METADATA_VALUE = 'agent-drive';
 const APP_STATEMENT_DESCRIPTOR = 'AGENT DRIVE';
+const EXPECTED_VERCEL_PROJECT = 'agent-drive';
+// `vercel` must run from the repository root, where `vercel link` writes .vercel/project.json.
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const VERCEL_ENV_NAMES = [
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_DEVELOPER_PRICE_ID',
+  'STRIPE_TEAM_PRICE_ID',
+  'STRIPE_USAGE_PRICE_ID',
+  'STRIPE_METER_EVENT_NAME',
+];
 const WEBHOOK_EVENTS = [
   'checkout.session.completed',
   'customer.subscription.created',
@@ -53,14 +64,19 @@ async function collect(iterable) {
   return items;
 }
 
-async function defaultVercelEnvAdd(name, value) {
-  const cwd = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+async function defaultVercelEnvAdd(name, value, repoRoot) {
   await new Promise((resolve, reject) => {
+    const childEnv = { ...process.env };
+    // The Stripe secret key must not reach the vercel child's environment.
+    delete childEnv.STRIPE_SECRET_KEY;
     const child = spawn('vercel', ['env', 'add', name, 'production', '--force'], {
-      cwd,
+      cwd: repoRoot,
+      env: childEnv,
       stdio: ['pipe', 'inherit', 'inherit'],
     });
     child.on('error', reject);
+    // An early vercel exit makes stdin fail with EPIPE; route it through the same failure path.
+    child.stdin.on('error', reject);
     child.on('close', (code) => {
       if (code === 0) resolve();
       else reject(new Error(`vercel env add ${name} production exited with code ${code}.`));
@@ -69,9 +85,29 @@ async function defaultVercelEnvAdd(name, value) {
   });
 }
 
+async function verifyVercelLink(repoRoot) {
+  const linkPath = path.join(repoRoot, '.vercel', 'project.json');
+  let project;
+  try {
+    project = JSON.parse(await readFile(linkPath, 'utf8'));
+  } catch {
+    throw new Error(
+      `Cannot verify the Vercel project link: ${linkPath} is missing or unreadable. ` +
+        'Link the repository root to the agent-drive project (vercel link) before using --apply-vercel.',
+    );
+  }
+  if (project?.projectName !== EXPECTED_VERCEL_PROJECT)
+    throw new Error(
+      `${linkPath} names project "${project?.projectName}", not "${EXPECTED_VERCEL_PROJECT}". ` +
+        'Refusing to write production environment variables into the wrong Vercel project.',
+    );
+}
+
 function meterProblems(meter, eventName) {
   const problems = [];
   if (meter.event_name !== eventName) problems.push('event_name');
+  if (meter.event_time_window !== null && meter.event_time_window !== undefined)
+    problems.push('event_time_window');
   if (meter.default_aggregation?.formula !== 'sum') problems.push('default_aggregation.formula');
   if (meter.customer_mapping?.type !== 'by_id') problems.push('customer_mapping.type');
   if (meter.customer_mapping?.event_payload_key !== 'stripe_customer_id')
@@ -98,29 +134,34 @@ function priceProblems(price, spec, meterId) {
   return problems;
 }
 
+function foreignAppTag(metadata) {
+  const tag = metadata?.[APP_METADATA_KEY];
+  return tag !== undefined && tag !== APP_METADATA_VALUE;
+}
+
 /**
  * @param {object} options
  * @param {any} options.client Stripe client for the target mode (real or injected fake).
  * @param {string} options.secretKey The key, used only to check the required mode.
  * @param {boolean} [options.test] Require an sk_test_ key instead of sk_live_.
- * @param {string} [options.url] Public origin; the endpoint is <url>/api/stripe/webhook.
  * @param {string} [options.meterEventName]
  * @param {boolean} [options.dryRun] Report what would be created without creating.
- * @param {boolean} [options.replaceWebhook] Recreate a matching existing webhook endpoint.
+ * @param {boolean} [options.replaceWebhook] Replace the tagged endpoint at the fixed webhook URL.
  * @param {boolean} [options.applyVercel] Pipe each STRIPE_* value to `vercel env add`.
  * @param {(name: string, value: string) => Promise<void>} [options.vercelEnvAdd]
+ * @param {string} [options.repoRoot] Repo root holding .vercel/project.json (vercel cwd).
  * @param {(line: string) => void} [options.log]
  */
 export async function goLive({
   client,
   secretKey,
   test = false,
-  url = DEFAULT_URL,
   meterEventName = DEFAULT_METER_EVENT_NAME,
   dryRun = false,
   replaceWebhook = false,
   applyVercel = false,
-  vercelEnvAdd = defaultVercelEnvAdd,
+  vercelEnvAdd,
+  repoRoot = REPO_ROOT,
   log = (line) => console.log(line),
 } = {}) {
   const required = test ? 'sk_test_' : 'sk_live_';
@@ -129,7 +170,14 @@ export async function goLive({
       `STRIPE_SECRET_KEY must start with ${required}${test ? ' when --test is passed' : ''}.` +
         (test ? '' : ' Pass --test to provision a test-mode sandbox instead.'),
     );
-  const webhookUrl = new URL('/api/stripe/webhook', url).toString();
+  if (test && applyVercel)
+    throw new Error(
+      '--test cannot be combined with --apply-vercel: test-mode objects must not be ' +
+        'written to the production Vercel project.',
+    );
+  // Single-operator tool: idempotency across concurrent invocations is intentionally not enforced.
+  if (applyVercel && !dryRun) await verifyVercelLink(repoRoot);
+  const envAdd = vercelEnvAdd ?? ((name, value) => defaultVercelEnvAdd(name, value, repoRoot));
   const report = { mode: test ? 'test' : 'live', dryRun, steps: [], env: [] };
   const step = (line) => {
     report.steps.push(line);
@@ -138,20 +186,40 @@ export async function goLive({
 
   log(`Stripe go-live (${report.mode} mode${dryRun ? ', dry run' : ''})`);
 
-  const existingEndpoint = (await collect(client.webhookEndpoints.list({ limit: 100 }))).find(
-    (endpoint) => endpoint.url === webhookUrl,
+  const endpoints = await collect(client.webhookEndpoints.list({ limit: 100 }));
+  const atUrl = endpoints.filter(
+    (endpoint) => endpoint.url === WEBHOOK_URL && endpoint.status !== 'disabled',
   );
-  if (existingEndpoint && !replaceWebhook)
+  const foreign = atUrl.filter(
+    (endpoint) => endpoint.metadata?.[APP_METADATA_KEY] !== APP_METADATA_VALUE,
+  );
+  if (foreign.length)
     throw new Error(
-      `A webhook endpoint for ${webhookUrl} already exists (${existingEndpoint.id}). ` +
+      `Webhook endpoint(s) ${foreign.map((endpoint) => endpoint.id).join(', ')} already exist ` +
+        `for ${WEBHOOK_URL} but are not tagged metadata.app=${APP_METADATA_VALUE}. This script ` +
+        'only manages endpoints it tags; remove them in the Stripe dashboard and re-run.',
+    );
+  const existingEndpoints = atUrl;
+  if (existingEndpoints.length && !replaceWebhook)
+    throw new Error(
+      `A webhook endpoint for ${WEBHOOK_URL} already exists ` +
+        `(${existingEndpoints.map((endpoint) => endpoint.id).join(', ')}). ` +
         'Stripe returns the signing secret only when the endpoint is created; re-run with ' +
-        '--replace-webhook to delete that endpoint and create a new one, or copy its secret ' +
-        'from the Stripe dashboard and set STRIPE_WEBHOOK_SECRET yourself.',
+        '--replace-webhook to create a replacement and disable the old one once the new secret ' +
+        'is stored in Vercel, or copy its secret from the Stripe dashboard and set ' +
+        'STRIPE_WEBHOOK_SECRET yourself.',
     );
 
-  let meter = (await collect(client.billing.meters.list({ status: 'active', limit: 100 }))).find(
-    (candidate) => candidate.event_name === meterEventName,
-  );
+  const meters = (
+    await collect(client.billing.meters.list({ status: 'active', limit: 100 }))
+  ).filter((candidate) => candidate.event_name === meterEventName);
+  if (meters.length > 1)
+    throw new Error(
+      `More than one active billing meter emits event ${meterEventName} ` +
+        `(${meters.map((meter) => meter.id).join(', ')}). Remove the duplicates in the Stripe ` +
+        'dashboard or pass --meter-event-name for a different event.',
+    );
+  let meter = meters[0];
   if (meter) {
     const problems = meterProblems(meter, meterEventName);
     if (problems.length)
@@ -177,10 +245,35 @@ export async function goLive({
   const products = await collect(client.products.list({ active: true, limit: 100 }));
   const prices = {};
   for (const spec of PRICES) {
-    const existing = (await collect(client.prices.list({ lookup_keys: [spec.lookupKey] }))).find(
+    const matched = (await collect(client.prices.list({ lookup_keys: [spec.lookupKey] }))).filter(
       (price) => price.lookup_key === spec.lookupKey,
     );
+    if (matched.length > 1)
+      throw new Error(
+        `More than one price carries lookup_key ${spec.lookupKey} ` +
+          `(${matched.map((price) => price.id).join(', ')}). Resolve the duplicates in the ` +
+          'Stripe dashboard and re-run.',
+      );
+    const existing = matched[0];
     if (existing) {
+      const priceTag = existing.metadata?.[APP_METADATA_KEY];
+      if (priceTag !== undefined && priceTag !== APP_METADATA_VALUE)
+        throw new Error(
+          `Price ${existing.id} with lookup_key ${spec.lookupKey} is tagged ` +
+            `metadata.app=${priceTag}, so it belongs to a different app. Resolve the lookup key ` +
+            'conflict in the Stripe dashboard and re-run.',
+        );
+      const productId =
+        typeof existing.product === 'string' ? existing.product : existing.product?.id;
+      const product =
+        products.find((candidate) => candidate.id === productId) ??
+        (productId ? await client.products.retrieve(productId) : null);
+      if (!product || product.name !== spec.productName || foreignAppTag(product.metadata))
+        throw new Error(
+          `Price ${existing.id} with lookup_key ${spec.lookupKey} belongs to product ` +
+            `${productId} ("${product?.name ?? 'unknown'}"), which is not the "${spec.productName}" ` +
+            'Agent Drive product. Reconcile it in the Stripe dashboard and re-run.',
+        );
       const problems = priceProblems(existing, spec, meter?.id);
       if (problems.length)
         throw new Error(
@@ -192,12 +285,29 @@ export async function goLive({
       step(`price ${existing.id} ${spec.lookupKey} (existing)`);
       continue;
     }
-    const product = products.find(
+    const foreignNamed = products.filter(
+      (candidate) => candidate.name === spec.productName && foreignAppTag(candidate.metadata),
+    );
+    if (foreignNamed.length)
+      throw new Error(
+        `Product ${foreignNamed.map((candidate) => candidate.id).join(', ')} is named ` +
+          `"${spec.productName}" but tagged metadata.app=${foreignNamed[0].metadata[APP_METADATA_KEY]}, ` +
+          'so it belongs to a different app. Resolve the name conflict in the Stripe dashboard ' +
+          'and re-run.',
+      );
+    const candidates = products.filter(
       (candidate) =>
         candidate.name === spec.productName ||
         (candidate.metadata?.[APP_METADATA_KEY] === APP_METADATA_VALUE &&
           candidate.metadata?.price_lookup_key === spec.lookupKey),
     );
+    if (candidates.length > 1)
+      throw new Error(
+        `More than one product matches "${spec.productName}" ` +
+          `(${candidates.map((candidate) => candidate.id).join(', ')}). Remove the ambiguous ` +
+          'products in the Stripe dashboard and re-run.',
+      );
+    const product = candidates[0];
     if (dryRun) {
       step(
         `would ${product ? 'reuse' : 'create'} product "${spec.productName}" and create price ` +
@@ -235,24 +345,21 @@ export async function goLive({
 
   let webhookSecret = null;
   let endpoint = null;
-  if (existingEndpoint) {
-    if (dryRun) step(`would delete webhook ${existingEndpoint.id} and create a replacement`);
-    else {
-      if (existingEndpoint.url !== webhookUrl)
-        throw new Error(`Refusing to delete webhook ${existingEndpoint.id} for a different URL.`);
-      await client.webhookEndpoints.del(existingEndpoint.id);
-      step(`webhook ${existingEndpoint.id} (deleted for replacement)`);
-    }
-  }
   if (dryRun) {
-    if (!existingEndpoint) step(`would create webhook ${webhookUrl}`);
+    if (existingEndpoints.length)
+      step(
+        `would create a replacement webhook for ${WEBHOOK_URL}, set the Vercel env vars, then ` +
+          `disable ${existingEndpoints.map((existing) => existing.id).join(', ')}`,
+      );
+    else step(`would create webhook ${WEBHOOK_URL}`);
   } else {
     endpoint = await client.webhookEndpoints.create({
-      url: webhookUrl,
+      url: WEBHOOK_URL,
       enabled_events: WEBHOOK_EVENTS,
+      metadata: { [APP_METADATA_KEY]: APP_METADATA_VALUE },
     });
     webhookSecret = endpoint.secret ?? null;
-    step(`webhook ${endpoint.id} for ${webhookUrl} (created)`);
+    step(`webhook ${endpoint.id} for ${WEBHOOK_URL} (created)`);
   }
 
   if (applyVercel && !dryRun) {
@@ -265,22 +372,42 @@ export async function goLive({
       STRIPE_USAGE_PRICE_ID: prices.agent_drive_usage_monthly.id,
       STRIPE_METER_EVENT_NAME: meterEventName,
     };
-    for (const [name, value] of Object.entries(env)) {
-      await vercelEnvAdd(name, value);
+    const written = [];
+    for (const name of VERCEL_ENV_NAMES) {
+      try {
+        await envAdd(name, env[name]);
+      } catch {
+        const notWritten = VERCEL_ENV_NAMES.filter((pending) => !written.includes(pending));
+        log(`Failed to write Vercel production env ${name}; see the vercel output above.`);
+        log(`  written: ${written.length ? written.join(', ') : '(none)'}`);
+        log(`  not written: ${notWritten.join(', ')}`);
+        log(
+          'Both webhook endpoints were left enabled, so production keeps working with the ' +
+            'previous endpoint.',
+        );
+        log(
+          'Recovery: fix the vercel error, then re-run this script with --replace-webhook — ' +
+            'it replaces the endpoint just created and retries every env write.',
+        );
+        throw new Error(`Failed to set Vercel production env ${name}.`);
+      }
+      written.push(name);
       report.env.push(name);
       step(`vercel production env ${name} (set)`);
     }
     step('STRIPE_SECRET_KEY is managed by the Vercel Stripe integration (unchanged)');
+    // The old endpoint is disabled — never deleted — only once production holds the new secret.
+    for (const old of existingEndpoints) {
+      await client.webhookEndpoints.update(old.id, { disabled: true });
+      step(`webhook ${old.id} (disabled; delete it in the Stripe dashboard after the redeploy)`);
+    }
   } else if (applyVercel) {
-    for (const name of [
-      'STRIPE_WEBHOOK_SECRET',
-      'STRIPE_DEVELOPER_PRICE_ID',
-      'STRIPE_TEAM_PRICE_ID',
-      'STRIPE_USAGE_PRICE_ID',
-      'STRIPE_METER_EVENT_NAME',
-    ])
-      step(`would set vercel production env ${name}`);
+    for (const name of VERCEL_ENV_NAMES) step(`would set vercel production env ${name}`);
     step('STRIPE_SECRET_KEY is managed by the Vercel Stripe integration (unchanged)');
+    if (existingEndpoints.length)
+      step(
+        `would then disable webhook ${existingEndpoints.map((existing) => existing.id).join(', ')}`,
+      );
   }
 
   if (!dryRun) {
@@ -290,6 +417,21 @@ export async function goLive({
     log(`  team price: ${prices.agent_drive_team_monthly.id}`);
     log(`  usage price: ${prices.agent_drive_usage_monthly.id}`);
     log(`  webhook endpoint: ${endpoint.id}`);
+    if (existingEndpoints.length) {
+      if (applyVercel)
+        log(
+          `  replaced endpoint(s) ${existingEndpoints
+            .map((existing) => existing.id)
+            .join(', ')} were disabled; delete them in the Stripe dashboard after the redeploy.`,
+        );
+      else
+        log(
+          `  replaced endpoint(s) ${existingEndpoints
+            .map((existing) => existing.id)
+            .join(', ')} are still enabled; set STRIPE_WEBHOOK_SECRET from the Stripe ` +
+            'dashboard, then disable them there.',
+        );
+    }
     if (webhookSecret && !applyVercel)
       log(
         '  webhook signing secret was not stored; retrieve it in the Stripe dashboard or ' +
@@ -300,7 +442,7 @@ export async function goLive({
   return report;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -308,27 +450,31 @@ function parseArgs(argv) {
     else if (arg === '--dry-run') options.dryRun = true;
     else if (arg === '--replace-webhook') options.replaceWebhook = true;
     else if (arg === '--apply-vercel') options.applyVercel = true;
-    else if (arg === '--url') options.url = argv[++index];
-    else if (arg === '--meter-event-name') options.meterEventName = argv[++index];
-    else if (arg === '--help' || arg === '-h') options.help = true;
-    else throw new Error(`Unknown argument: ${arg}`);
+    else if (arg === '--meter-event-name') {
+      const value = argv[++index];
+      if (value === undefined || value.startsWith('--'))
+        throw new Error('--meter-event-name requires a value.');
+      options.meterEventName = value;
+    } else if (arg === '--help' || arg === '-h') options.help = true;
+    else if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
+    else throw new Error('Unexpected argument.');
   }
-  if (options.url === undefined && argv.includes('--url'))
-    throw new Error('--url requires a value.');
-  if (options.meterEventName === undefined && argv.includes('--meter-event-name'))
-    throw new Error('--meter-event-name requires a value.');
   return options;
 }
 
 const USAGE = `Usage: STRIPE_SECRET_KEY=sk_live_... node scripts/stripe-go-live.mjs [options]
 
 Options:
-  --test                 require an sk_test_ key instead of sk_live_
-  --url URL              public origin for the webhook endpoint (default ${DEFAULT_URL})
+  --test                 require an sk_test_ key instead of sk_live_ (cannot be combined
+                         with --apply-vercel)
   --meter-event-name N   billing meter event name (default ${DEFAULT_METER_EVENT_NAME})
-  --replace-webhook      delete the webhook endpoint matching <url>/api/stripe/webhook and recreate it
+  --replace-webhook      create a replacement for the tagged endpoint at ${WEBHOOK_URL};
+                         after every Vercel env write succeeds the old endpoint is disabled
+                         (never deleted) so the operator can remove it after the redeploy
   --apply-vercel         pipe STRIPE_* values (except STRIPE_SECRET_KEY, managed by the Vercel
-                         Stripe integration) on stdin to 'vercel env add ... production --force'
+                         Stripe integration) on stdin to 'vercel env add ... production --force',
+                         run from the repository root; requires .vercel/project.json to link
+                         the ${EXPECTED_VERCEL_PROJECT} project
   --dry-run              list what would be created without creating anything
 `;
 
