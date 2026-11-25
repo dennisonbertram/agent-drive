@@ -44,7 +44,13 @@ const accountId = randomUUID();
 const customerId = `cus_${randomUUID().replaceAll('-', '')}`;
 const subscriptionId = `sub_${randomUUID().replaceAll('-', '')}`;
 const eventIds: string[] = [];
-const requests: { method: string; path: string; body: string; idempotency?: string }[] = [];
+const requests: {
+  method: string;
+  path: string;
+  body: string;
+  idempotency?: string;
+  stripeVersion?: string;
+}[] = [];
 const unexpected: string[] = [];
 const nativeFetch = globalThis.fetch;
 let checkoutOutage = true;
@@ -89,7 +95,13 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url!, 'http://localhost');
   const path = url.pathname;
   const method = request.method!;
-  requests.push({ method, path, body, idempotency: request.headers['idempotency-key'] as string });
+  requests.push({
+    method,
+    path,
+    body,
+    idempotency: request.headers['idempotency-key'] as string,
+    stripeVersion: request.headers['stripe-version'] as string,
+  });
   const send = (value: unknown, status = 200) => {
     response.writeHead(status, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(value));
@@ -291,8 +303,10 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
   expect(await createCheckout(accountId, 'developer')).toEqual({ url: checkout().url });
   const checkouts = posts('/v1/checkout/sessions');
   expect(checkouts).toHaveLength(2);
-  expect(checkouts[0]!.idempotency).toBeTruthy();
+  expect(checkouts[0]!.idempotency).toMatch(/^checkout\/v3\//u);
   expect(checkouts[1]!.idempotency).toBe(checkouts[0]!.idempotency);
+  for (const checkout of checkouts) expect(checkout.stripeVersion).toBe('2025-09-30.clover');
+  expect(posts('/v1/customers')[0]!.stripeVersion).toBe('2025-08-27.basil');
   expect(posts('/v1/customers')).toHaveLength(1);
   expect(Object.fromEntries(new URLSearchParams(posts('/v1/customers')[0]!.body))).toMatchObject({
     'metadata[accountId]': accountId,
@@ -308,8 +322,12 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     'line_items[1][price]': 'price_usage_http',
     'subscription_data[metadata][accountId]': accountId,
     'subscription_data[metadata][app]': 'agent-drive',
+    'subscription_data[billing_mode][type]': 'classic',
     success_url: 'https://drive.example.test/console/billing?checkout=success',
     cancel_url: 'https://drive.example.test/console/billing?checkout=cancelled',
+    'branding_settings[display_name]': 'Agent Drive',
+    'branding_settings[icon][type]': 'url',
+    'branding_settings[icon][url]': 'https://drive.example.test/apple-icon',
   });
   expect(form.has('line_items[1][quantity]')).toBe(false);
   const reservedAt: Date = (await billingRow()).checkout_created_at;
