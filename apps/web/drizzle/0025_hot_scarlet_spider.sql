@@ -1,0 +1,2 @@
+ALTER TABLE "billing_accounts" ADD COLUMN "storage_limit_bytes" bigint;--> statement-breakpoint
+ALTER TABLE "billing_accounts" ADD CONSTRAINT "billing_accounts_storage_limit_positive" CHECK ("billing_accounts"."storage_limit_bytes" IS NULL OR "billing_accounts"."storage_limit_bytes" > 0);

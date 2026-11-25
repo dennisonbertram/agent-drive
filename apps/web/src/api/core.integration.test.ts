@@ -5,7 +5,8 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { PLANS } from '../billing/policy';
+import { GIB, PLANS } from '../billing/policy';
+import { billingSummary } from '../billing/ledger';
 import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { copyObject, deleteObject, objectInfo } from './storage';
 import { handleApiRequest, handlePublicShareRequest } from './handler';
@@ -1654,6 +1655,58 @@ describe('Phase 1 core API', () => {
     });
     expect(intent.status).toBe(413);
     expect((await json(intent)).error.code).toBe('quota_exceeded');
+  });
+
+  it('commits a put for a Free account with a storage limit override that a plain Free account cannot', async () => {
+    const seed = async (label: string) => {
+      const f = await fixture(label, `${label}-agent`, `${label}-drive`, ['read', 'write']);
+      const file = await pool.query(
+        'INSERT INTO files (drive_id,path) VALUES ($1,$2) RETURNING id',
+        [f.driveId, `/${label}-seeded`],
+      );
+      await pool.query(
+        `INSERT INTO versions (file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+         VALUES ($1,$2,$3,$4,'synthetic-quota-metadata',$5)`,
+        [
+          file.rows[0].id,
+          f.driveId,
+          `objects/${f.accountId}/${f.driveId}/${randomUUID()}`,
+          (5n * GIB).toString(),
+          f.agentId,
+        ],
+      );
+      return f;
+    };
+    const plain = await seed('override-plain');
+    const boosted = await seed('override-boosted');
+    await pool.query(
+      `INSERT INTO billing_accounts (account_id,storage_limit_bytes) VALUES ($1,$2)
+       ON CONFLICT (account_id) DO UPDATE SET storage_limit_bytes = $2`,
+      [boosted.accountId, (100n * GIB).toString()],
+    );
+
+    // The identical write is refused at the Free plan's 5 GiB …
+    const denied = await request(`/drives/${plain.driveId}/put`, plain.token, 'POST', {
+      path: '/blocked.bin',
+      ciphertextSize: 16,
+      wrappedKey: 'opaque-wrapped-key',
+    });
+    expect(denied.status).toBe(402);
+    expect((await json(denied)).error.limit).toBe('storage');
+
+    // … but goes end to end under the account's 100 GiB override.
+    const committed = await uploadCommit(
+      boosted.token,
+      boosted.driveId,
+      `/override-${randomUUID()}.bin`,
+      Buffer.from('override ciphertext'),
+    );
+    expect(committed.response.status).toBe(201);
+    expect(committed.body.version.id).toEqual(expect.any(String));
+
+    expect((await billingSummary(boosted.accountId)).limits.storageBytes).toBe(
+      (100n * GIB).toString(),
+    );
   });
 
   it('enforces scopes, tenants, revocation, validation, management and immutable staging', async () => {

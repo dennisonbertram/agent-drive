@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GIB,
   PLANS,
+  planLimits,
   quoteUsage,
   monthBounds,
   accruedOverage,
@@ -102,5 +103,47 @@ describe('limitExceeded', () => {
     const dl = limitExceeded('developer', { ...zero, egressBytes: 101n * GIB }, zero);
     expect(dl.limit).toBe('downloads');
     expect(dl.message).toContain('resets next month');
+  });
+});
+
+describe('per-account storage limit override', () => {
+  const over = { drives: 1n, storageBytes: 6n * GIB, egressBytes: 0n, operations: 0n };
+  it('replaces only the included storage allowance and leaves NULL unchanged', () => {
+    const limits = planLimits('free', 100n * GIB);
+    expect(limits.storageBytes).toBe(100n * GIB);
+    expect(limits.drives).toBe(PLANS.free.drives);
+    expect(limits.egressBytes).toBe(PLANS.free.egressBytes);
+    expect(limits.operations).toBe(PLANS.free.operations);
+    expect(limits.baseCents).toBe(PLANS.free.baseCents);
+    expect(planLimits('free', null)).toEqual(PLANS.free);
+    expect(planLimits('free')).toEqual(PLANS.free);
+  });
+  it('raises the storage quota without touching drives, operations or egress', () => {
+    expect(quoteUsage('free', over, rates, 100n * GIB).overLimit).toBe(false);
+    expect(quoteUsage('free', over, rates).overLimit).toBe(true);
+    expect(quoteUsage('free', { ...over, drives: 4n }, rates, 100n * GIB).overLimit).toBe(true);
+    expect(
+      quoteUsage('free', { ...over, operations: 1_000_001n }, rates, 100n * GIB).overLimit,
+    ).toBe(true);
+    expect(
+      quoteUsage('free', { ...over, egressBytes: 6n * GIB }, rates, 100n * GIB).overLimit,
+    ).toBe(true);
+  });
+  it('counts the override as the included amount for paid-plan overage', () => {
+    const quote = quoteUsage('developer', { ...over, storageBytes: 105n * GIB }, rates, 100n * GIB);
+    expect(quote.overageCents).toBe(25n);
+    expect(quote.totalCents).toBe(2025n);
+  });
+  it('names the overridden allowance in the storage-limit message', () => {
+    const r = limitExceeded(
+      'free',
+      { ...over, storageBytes: 101n * GIB },
+      { drives: 1n, storageBytes: 100n * GIB },
+      undefined,
+      undefined,
+      100n * GIB,
+    );
+    expect(r.limit).toBe('storage');
+    expect(r.message).toContain("Free plan's 100 GB storage (100 GB used)");
   });
 });
