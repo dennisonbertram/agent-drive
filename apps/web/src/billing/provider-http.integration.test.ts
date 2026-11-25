@@ -54,6 +54,13 @@ let declineUpgrade = true;
 let basePrice = 'price_developer_http';
 let subscriptionStatus = 'active';
 let checkoutStatus = 'open';
+const simulatedCustomers = new Map<string, Record<string, unknown> | 'deleted'>();
+simulatedCustomers.set(customerId, {
+  id: customerId,
+  object: 'customer',
+  livemode: false,
+  metadata: { accountId },
+});
 const subscription = () => ({
   id: subscriptionId,
   object: 'subscription',
@@ -120,15 +127,35 @@ const server = createServer(async (request, response) => {
       value_settings: { event_payload_key: 'value' },
       status: 'active',
     });
-  if (method === 'POST' && path === '/v1/customers')
-    return send({
-      id: customerId,
+  if (method === 'POST' && path === '/v1/customers') {
+    const owner = form.get('metadata[accountId]');
+    const id = owner === accountId ? customerId : `cus_${randomUUID().replaceAll('-', '')}`;
+    const record = {
+      id,
       object: 'customer',
       livemode: false,
-      metadata: { accountId: form.get('metadata[accountId]') },
-    });
-  if (method === 'GET' && path === `/v1/customers/${customerId}`)
-    return send({ id: customerId, livemode: false, metadata: { accountId } });
+      metadata: { accountId: owner },
+    };
+    simulatedCustomers.set(id, record);
+    return send(record);
+  }
+  if (method === 'GET' && path.startsWith('/v1/customers/')) {
+    const id = path.split('/').at(-1)!;
+    const record = simulatedCustomers.get(id);
+    if (record === 'deleted') return send({ id, object: 'customer', deleted: true });
+    if (record) return send(record);
+    return send(
+      {
+        error: {
+          type: 'invalid_request_error',
+          code: 'resource_missing',
+          param: 'id',
+          message: `No such customer: '${id}'`,
+        },
+      },
+      404,
+    );
+  }
   if (method === 'POST' && path === '/v1/checkout/sessions') {
     if (checkoutOutage) {
       checkoutOutage = false;
@@ -267,6 +294,10 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
   expect(checkouts[0]!.idempotency).toBeTruthy();
   expect(checkouts[1]!.idempotency).toBe(checkouts[0]!.idempotency);
   expect(posts('/v1/customers')).toHaveLength(1);
+  expect(Object.fromEntries(new URLSearchParams(posts('/v1/customers')[0]!.body))).toMatchObject({
+    'metadata[accountId]': accountId,
+    'metadata[app]': 'agent-drive',
+  });
   const form = new URLSearchParams(checkouts[1]!.body);
   expect(Object.fromEntries(form)).toMatchObject({
     customer: customerId,
@@ -276,6 +307,7 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     'line_items[0][quantity]': '1',
     'line_items[1][price]': 'price_usage_http',
     'subscription_data[metadata][accountId]': accountId,
+    'subscription_data[metadata][app]': 'agent-drive',
     success_url: 'https://drive.example.test/console/billing?checkout=success',
     cancel_url: 'https://drive.example.test/console/billing?checkout=cancelled',
   });
@@ -394,4 +426,72 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
   await processStripeWebhook(deleted.payload, deleted.signature);
   expect(await billingRow()).toMatchObject({ plan: 'free', subscription_status: 'canceled' });
   expect(unexpected).toEqual([]);
+});
+
+it('replaces a stored sandbox or deleted customer during checkout and portal', async () => {
+  const staleAccountId = randomUUID();
+  const staleCustomerId = `cus_sandbox_${randomUUID().replaceAll('-', '')}`;
+  const deletedAccountId = randomUUID();
+  const deletedCustomerId = `cus_deleted_${randomUUID().replaceAll('-', '')}`;
+  await pool.query('INSERT INTO accounts (id,name) VALUES ($1,$2),($3,$4)', [
+    staleAccountId,
+    `http-simulation-stale-${staleAccountId}`,
+    deletedAccountId,
+    `http-simulation-deleted-${deletedAccountId}`,
+  ]);
+  await pool.query(
+    'INSERT INTO billing_accounts (account_id, stripe_customer_id) VALUES ($1,$2),($3,$4)',
+    [staleAccountId, staleCustomerId, deletedAccountId, deletedCustomerId],
+  );
+  simulatedCustomers.set(deletedCustomerId, 'deleted');
+  const unexpectedBefore = unexpected.length;
+  try {
+    await expect(createCheckout(staleAccountId, 'developer')).resolves.toEqual({
+      url: 'https://checkout.example.test/simulated',
+    });
+    const replaced = (
+      await pool.query<{ stripe_customer_id: string }>(
+        'SELECT stripe_customer_id FROM billing_accounts WHERE account_id=$1',
+        [staleAccountId],
+      )
+    ).rows[0]!.stripe_customer_id;
+    expect(replaced).toMatch(/^cus_/u);
+    expect(replaced).not.toBe(staleCustomerId);
+    const createRequests = posts('/v1/customers');
+    expect(createRequests.at(-1)!.idempotency).toBe(
+      `customer-replace/${staleAccountId}/${staleCustomerId}`,
+    );
+    const checkoutForm = new URLSearchParams(posts('/v1/checkout/sessions').at(-1)!.body);
+    expect(checkoutForm.get('customer')).toBe(replaced);
+
+    const customersBeforePortal = createRequests.length;
+    await expect(createPortal(deletedAccountId)).resolves.toEqual({
+      url: 'https://billing.example.test/simulated',
+    });
+    const portalReplaced = (
+      await pool.query<{ stripe_customer_id: string }>(
+        'SELECT stripe_customer_id FROM billing_accounts WHERE account_id=$1',
+        [deletedAccountId],
+      )
+    ).rows[0]!.stripe_customer_id;
+    expect(portalReplaced).toMatch(/^cus_/u);
+    expect(portalReplaced).not.toBe(deletedCustomerId);
+    expect(posts('/v1/customers')).toHaveLength(customersBeforePortal + 1);
+    expect(posts('/v1/customers').at(-1)!.idempotency).toBe(
+      `customer-replace/${deletedAccountId}/${deletedCustomerId}`,
+    );
+    const portalForm = new URLSearchParams(posts('/v1/billing_portal/sessions').at(-1)!.body);
+    expect(portalForm.get('customer')).toBe(portalReplaced);
+
+    const customersBeforeResume = posts('/v1/customers').length;
+    await expect(createPortal(deletedAccountId)).resolves.toEqual({
+      url: 'https://billing.example.test/simulated',
+    });
+    expect(posts('/v1/customers')).toHaveLength(customersBeforeResume);
+    expect(unexpected).toHaveLength(unexpectedBefore);
+  } finally {
+    await pool.query('DELETE FROM accounts WHERE id = ANY($1::uuid[])', [
+      [staleAccountId, deletedAccountId],
+    ]);
+  }
 });

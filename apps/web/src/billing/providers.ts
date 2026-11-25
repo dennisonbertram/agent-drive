@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
 import Stripe from 'stripe';
 import { ApiError } from '../api/errors';
 import { getPool, withTransaction } from '../db/client';
@@ -107,31 +108,61 @@ export async function closeStripeBillingForDeletion(
   return true;
 }
 
+function stripeKeyMode() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (key?.startsWith('sk_live_') || key?.startsWith('rk_live_')) return 'live';
+  if (key?.startsWith('sk_test_') || key?.startsWith('rk_test_')) return 'test';
+  return null;
+}
+
 function stripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!configured(key)) throw new ApiError('internal_error', 'Stripe billing is not configured.');
-  if (!key!.startsWith('sk_live_') && !key!.startsWith('sk_test_'))
-    throw new ApiError('internal_error', 'The Stripe key mode is invalid.');
+  if (!stripeKeyMode()) throw new ApiError('internal_error', 'The Stripe key mode is invalid.');
   return new Stripe(key!, { timeout: 10_000 });
 }
 
 function stripeLiveMode() {
-  return process.env.STRIPE_SECRET_KEY!.startsWith('sk_live_');
+  return stripeKeyMode() === 'live';
+}
+
+function stripeCustomerMissing(error: unknown) {
+  return (
+    error instanceof Stripe.errors.StripeInvalidRequestError && error.code === 'resource_missing'
+  );
+}
+
+async function usableCustomerId(
+  db: PoolClient,
+  accountId: string,
+  stored: string | null,
+  client: Stripe,
+) {
+  if (stored) {
+    try {
+      const existing = await client.customers.retrieve(stored);
+      if (!existing.deleted) return existing.id;
+    } catch (error) {
+      if (!stripeCustomerMissing(error)) throw error;
+    }
+  }
+  const created = await client.customers.create(
+    { metadata: { accountId, app: 'agent-drive' } },
+    {
+      idempotencyKey: stored ? `customer-replace/${accountId}/${stored}` : `customer/${accountId}`,
+    },
+  );
+  await db.query('UPDATE billing_accounts SET stripe_customer_id = $2 WHERE account_id = $1', [
+    accountId,
+    created.id,
+  ]);
+  return created.id;
 }
 
 async function customerForAccount(accountId: string, client: Stripe) {
   const customer = await withTransaction(async (db) => {
     const billing = await lockBillingAccount(db, accountId);
-    if (billing.stripe_customer_id) return billing.stripe_customer_id;
-    const created = await client.customers.create(
-      { metadata: { accountId } },
-      { idempotencyKey: `customer/${accountId}` },
-    );
-    await db.query('UPDATE billing_accounts SET stripe_customer_id = $2 WHERE account_id = $1', [
-      accountId,
-      created.id,
-    ]);
-    return created.id;
+    return usableCustomerId(db, accountId, billing.stripe_customer_id, client);
   });
   return customer;
 }
@@ -407,7 +438,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         subscription_data: {
           billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
           proration_behavior: 'create_prorations',
-          metadata: { accountId, plan },
+          metadata: { accountId, plan, app: 'agent-drive' },
         },
         success_url: `${billingOrigin()}/console/billing?checkout=success`,
         cancel_url: `${billingOrigin()}/console/billing?checkout=cancelled`,
@@ -452,13 +483,14 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
 }
 
 export async function createPortal(accountId: string) {
+  const client = stripe();
   const customer = await withTransaction(async (db) => {
     const billing = await lockBillingAccount(db, accountId);
     if (!billing.stripe_customer_id)
       throw new ApiError('conflict', 'A Stripe customer has not been created yet.');
-    return billing.stripe_customer_id;
+    return usableCustomerId(db, accountId, billing.stripe_customer_id, client);
   });
-  const session = await stripe().billingPortal.sessions.create({
+  const session = await client.billingPortal.sessions.create({
     customer,
     return_url: `${billingOrigin()}/console/billing`,
   });
@@ -520,7 +552,7 @@ export async function processStripeWebhook(rawBody: string, signature: string | 
   } catch {
     throw new ApiError('unauthorized', 'Invalid Stripe signature.');
   }
-  const expectedLive = process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_') ?? false;
+  const expectedLive = stripeLiveMode();
   if (event.livemode !== expectedLive)
     throw new ApiError('unauthorized', 'Stripe mode does not match configuration.');
   const supported = new Set([
@@ -555,12 +587,10 @@ export async function processStripeWebhook(rawBody: string, signature: string | 
           : event.type.startsWith('customer.subscription.')
             ? object.id
             : undefined));
-  if (event.type.startsWith('invoice.') && !subscriptionId) return { received: true };
-  if (!customerId || !subscriptionId)
-    throw new ApiError(
-      'validation_error',
-      'The Stripe event is missing its customer or subscription.',
-    );
+  // The Stripe account can be shared with other products; events that cannot be
+  // attributed to an Agent Drive customer must still be acknowledged so Stripe does
+  // not retry the delivery and disable the endpoint.
+  if (!customerId || !subscriptionId) return { received: true };
   const mapped = await getPool().query(
     `SELECT ba.account_id, a.deleting_at
        FROM billing_accounts ba
@@ -569,9 +599,7 @@ export async function processStripeWebhook(rawBody: string, signature: string | 
     [customerId],
   );
   const accountId = mapped.rows[0]?.account_id as string | undefined;
-  if (!accountId && event.type === 'customer.subscription.deleted') return { received: true };
-  if (!accountId)
-    throw new ApiError('unauthorized', 'The Stripe customer is not mapped to an account.');
+  if (!accountId) return { received: true };
   if (
     event.type === 'checkout.session.completed' &&
     (object.mode !== 'subscription' || object.client_reference_id !== accountId)

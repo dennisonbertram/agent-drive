@@ -62,6 +62,54 @@ Use separate preview resources when testing migration/provider changes against n
 Configure Stripe and optional email only as described in the README. Synthetic signatures and
 mocked providers do not establish live payments, email delivery, or final-invoice correctness.
 
+## Going live with Stripe
+
+Production checkout needs live-mode Stripe objects and the matching `STRIPE_*` environment
+variables. A deployment pointed at a test sandbox only produces an unclaimed-sandbox checkout.
+
+1. Install the Vercel Stripe Marketplace integration on the production project and connect the
+   live Stripe account (DpapHero Corp). The integration provisions `STRIPE_SECRET_KEY` itself —
+   possibly a restricted `rk_live_` key, which the app treats as live just like `sk_live_`.
+2. In the Stripe dashboard, create a live-mode secret key (`sk_live_...`) for the one-time
+   provisioning run only. Keep it out of shell history, files, and command arguments.
+3. From a checkout linked to the production Vercel project, supply the key through the
+   environment only and run the go-live script:
+
+   ```sh
+   read -rs STRIPE_SECRET_KEY
+   export STRIPE_SECRET_KEY
+   pnpm --filter @agent-drive/web stripe:go-live --apply-vercel
+   ```
+
+   The script refuses anything but an `sk_live_` key (`--test` provisions a sandbox instead).
+   It finds or creates the usage meter, the three products and their monthly USD prices, and
+   the `/api/stripe/webhook` endpoint with the exact event set the webhook handler processes,
+   printing only non-secret object IDs. `--dry-run` previews the changes. `--apply-vercel`
+   pipes `STRIPE_WEBHOOK_SECRET`, the three price IDs, and `STRIPE_METER_EVENT_NAME` on stdin
+   to `vercel env add ... production --force`; it never sets `STRIPE_SECRET_KEY` (the
+   integration owns it) and does not trigger a deploy. Because Stripe returns the webhook
+   signing secret only at creation, a re-run stops when the endpoint already exists — pass
+   `--replace-webhook` to delete that endpoint and recreate it with a fresh secret.
+
+   The live Stripe account also serves other products (FreePi). On a shared account the
+   script tags every object it creates with `metadata.app=agent-drive` (Stripe meters do not
+   support metadata), reuses existing products only by their exact `Agent Drive *` names or
+   that tag plus the matching price lookup key, and `--replace-webhook` only ever deletes the
+   endpoint whose URL is exactly the Agent Drive webhook URL. Products are created with the
+   statement descriptor `AGENT DRIVE`, which Stripe applies to subscription payments on the
+   customer's card statement. Customers and subscriptions the app creates carry the same
+   `app` metadata, so Agent Drive revenue can be isolated in the Stripe dashboard. The
+   webhook handler acknowledges events for customers it does not have mapped (other
+   products' events on a shared endpoint) instead of rejecting them, so Stripe does not
+   retry those deliveries and disable the endpoint.
+
+4. Redeploy production so the new environment variables take effect
+   (`git push origin origin/main:prod`, or the release path below).
+5. Run a real checkout and confirm deliveries for the endpoint succeed in the Stripe
+   dashboard. Accounts that stored a test-mode customer during sandbox testing get a fresh
+   live-mode customer on their next checkout or portal visit; stored plan/subscription rows
+   are not migrated — reconcile any sandbox-granted paid plan before going live.
+
 ## Maintenance is required
 
 On Vercel Pro, the checked-in cron schedules run these maintenance jobs through
