@@ -104,6 +104,13 @@ These notes moved from the public API reference.
   events are ordered by their timestamps.
 - Maintenance deletes device-authorization requests older than 24 hours.
 
+A per-account storage override lives on `billing_accounts.storage_limit_bytes` (nullable bigint,
+must be positive when set). When set it replaces the plan's included storage for that account
+everywhere the limit is enforced or shown; drives, egress, operations, base price and overage rates
+still come from the plan, and NULL restores plan behavior. There is no admin UI or API for it —
+set it with SQL, for example 100 GiB:
+`UPDATE billing_accounts SET storage_limit_bytes = 107374182400 WHERE account_id = '<account id>';`
+
 ## Every production release
 
 The Vercel project is connected to GitHub with `prod` as its production branch.

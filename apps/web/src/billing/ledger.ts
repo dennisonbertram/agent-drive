@@ -8,6 +8,7 @@ import {
   limitExceeded,
   monthBounds,
   paymentRequired,
+  planLimits,
   PLANS,
   quoteUsage,
   type PlanName,
@@ -25,6 +26,7 @@ type BillingAccount = {
   spend_cap_cents: string | null;
   alert_threshold_cents: string | null;
   alert_email: string | null;
+  storage_limit_bytes: string | null;
 };
 type BillingPeriod = {
   account_id: string;
@@ -85,6 +87,8 @@ export async function billingState(
   options: { allowDeleting?: boolean } = {},
 ) {
   const account = await lockBillingAccount(client, accountId, options);
+  const storageLimitBytes =
+    account.storage_limit_bytes === null ? null : BigInt(account.storage_limit_bytes);
   const clock = await client.query<{ now: Date }>('SELECT now() AS now');
   const { start, end } = monthBounds(periodStart ?? clock.rows[0]!.now);
   const currentMonth = monthBounds(clock.rows[0]!.now).start.getTime() === start.getTime();
@@ -133,12 +137,13 @@ export async function billingState(
       storageBytes: BigInt(periodRow.peak_storage_bytes),
     };
     const earned = accruedOverage(
-      quoteUsage(periodRow.plan, peak, decodeRates(periodRow.rates)).overageCents,
+      quoteUsage(periodRow.plan, peak, decodeRates(periodRow.rates), storageLimitBytes)
+        .overageCents,
       BigInt(periodRow.baseline_cents),
       BigInt(periodRow.earned_cents),
     );
     const rates = billingRates();
-    const baseline = quoteUsage(account.plan, peak, rates).overageCents;
+    const baseline = quoteUsage(account.plan, peak, rates, storageLimitBytes).overageCents;
     const changed = await client.query<BillingPeriod>(
       `UPDATE billing_periods SET plan = $3, rates = $4::jsonb, earned_cents = $5, baseline_cents = $6,
         base_cents = GREATEST(base_cents,$7) WHERE account_id = $1 AND period_start = $2 RETURNING *`,
@@ -162,6 +167,7 @@ export async function billingState(
     start,
     end,
     rates: decodeRates(periodRow.rates),
+    storageLimitBytes,
   };
 }
 export type BillingState = Awaited<ReturnType<typeof billingState>>;
@@ -175,7 +181,7 @@ function peakUsage(state: BillingState): Usage {
 }
 
 export function quoteState(state: BillingState, usage = peakUsage(state)) {
-  const quote = quoteUsage(state.account.plan, usage, state.rates);
+  const quote = quoteUsage(state.account.plan, usage, state.rates, state.storageLimitBytes);
   const overageCents = accruedOverage(
     quote.overageCents,
     BigInt(state.period.baseline_cents),
@@ -230,7 +236,7 @@ export async function enforceWriteBudget(
     storageBytes: stored + BigInt(pending.rows[0]!.bytes),
   };
   if (
-    quoteUsage(state.account.plan, allowanceUsage, rates).overLimit &&
+    quoteUsage(state.account.plan, allowanceUsage, rates, state.storageLimitBytes).overLimit &&
     (state.account.plan === 'free' || !rates)
   ) {
     const { limit, message } = limitExceeded(
@@ -238,6 +244,8 @@ export async function enforceWriteBudget(
       allowanceUsage,
       { drives: activeDrives, storageBytes: state.current.storageBytes },
       state.end,
+      undefined,
+      state.storageLimitBytes,
     );
     paymentRequired(message, limit);
   }
@@ -294,6 +302,7 @@ export async function authorizeDownload(
         state.current,
         state.end,
         'downloads',
+        state.storageLimitBytes,
       );
       paymentRequired(message, limit);
     }
@@ -320,6 +329,7 @@ export async function enforceOperationBudget(client: PoolClient, accountId: stri
       state.current,
       state.end,
       'operations',
+      state.storageLimitBytes,
     );
     paymentRequired(message, limit);
   }
@@ -518,7 +528,9 @@ export async function billingSummary(accountId: string, periodStart?: Date) {
       hasCustomer: !!state.account.stripe_customer_id,
       agents: agents.rows,
       limits: Object.fromEntries(
-        Object.entries(PLANS[state.account.plan]).map(([key, value]) => [key, String(value)]),
+        Object.entries(planLimits(state.account.plan, state.storageLimitBytes)).map(
+          ([key, value]) => [key, String(value)],
+        ),
       ),
     };
     await client.query(
