@@ -236,9 +236,18 @@ function sealAfterKeyChange(connection: Awaited<ReturnType<typeof resolveConnect
 }
 
 async function sealSavedConnectionAfterKeyChange() {
-  const config = await readConfig();
-  if (!config.apiUrl || !config.apiKey) return;
-  sealAfterKeyChange({ apiUrl: config.apiUrl, apiKey: config.apiKey, config });
+  const saved = await readConfig();
+  if (!saved.apiUrl || !saved.apiKey) return;
+  let config = saved;
+  try {
+    // Keep the imported/saved connection as the seal client, but include valid in-scope
+    // environment-bundle keys using the same origin-aware merge as ordinary config loads.
+    config = await loadConfig(saved.apiUrl, saved.apiKey);
+  } catch {
+    // A malformed or unrelated environment bundle must not turn a successful import into a
+    // command failure. The saved keys remain safe to seal with their saved connection.
+  }
+  sealAfterKeyChange({ apiUrl: saved.apiUrl, apiKey: saved.apiKey, config });
 }
 
 function requiredDrive(args: ReturnType<typeof parse>) {
