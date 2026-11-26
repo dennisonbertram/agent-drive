@@ -37,7 +37,15 @@ else
   effective_registry='public.ecr.aws/docker/library'
 fi
 printf '%s\\t%s\\t%s\\n' "\${DOCKER_OFFICIAL_REGISTRY-<unset>}" "$effective_registry" "$*" >> "$DOCKER_CALL_LOG"
-if [ "\${DOCKER_FAIL_REGISTRY:-}" = "$effective_registry" ] && [ "\${DOCKER_FAIL_COMMAND:-}" = "$*" ]; then
+if [ "$*" = 'compose config --images' ]; then
+  printf '%s/postgres:17.11-bookworm\\n' "$effective_registry"
+  exit 0
+fi
+case ",\${DOCKER_FAIL_REGISTRY:-}," in
+  *,"$effective_registry",*) fail_registry=true ;;
+  *) fail_registry=false ;;
+esac
+if [ "$fail_registry" = true ] && [ "\${DOCKER_FAIL_COMMAND:-}" = "$*" ]; then
   printf '%s\\n' "\${DOCKER_ERROR:-simulated failure}" >&2
   exit 17
 fi
@@ -118,7 +126,7 @@ describe('local service startup', () => {
       registry,
       failRegistry: registry,
       failCommand: 'compose build minio',
-      error: 'Data limit exceeded',
+      error: `toomanyrequests: GET https://${registry}/postgres:17.11-bookworm: Data limit exceeded`,
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -138,7 +146,7 @@ describe('local service startup', () => {
       dotenvRegistry: mirror,
       failRegistry: mirror,
       failCommand: 'compose build minio',
-      error: 'Data limit exceeded',
+      error: `toomanyrequests: GET https://${mirror}/postgres:17.11-bookworm: Data limit exceeded`,
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -147,6 +155,63 @@ describe('local service startup', () => {
       `${hub}\t${hub}\tcompose build minio`,
       `${hub}\t${hub}\tcompose up -d --wait postgres minio`,
       `${hub}\t${hub}\tcompose run --rm minio-init`,
+    ]);
+  });
+
+  it('skips Hub when Compose .env selected Hub and it throttled', async () => {
+    const hub = 'docker.io/library';
+    const ecr = 'public.ecr.aws/docker/library';
+    const { result, calls } = await runServices({
+      dotenvRegistry: hub,
+      failRegistry: hub,
+      failCommand: 'compose build minio',
+      error: 'toomanyrequests: GET https://docker.io/library/postgres:17.11-bookworm: Data limit exceeded',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain(`${hub} was throttled`);
+    expect(calls).toEqual([
+      `<unset>\t${hub}\tcompose build minio`,
+      `${ecr}\t${ecr}\tcompose build minio`,
+      `${ecr}\t${ecr}\tcompose up -d --wait postgres minio`,
+      `${ecr}\t${ecr}\tcompose run --rm minio-init`,
+    ]);
+  });
+
+  it('keeps the default ECR to Hub fallback order when ECR is throttled', async () => {
+    const ecr = 'public.ecr.aws/docker/library';
+    const hub = 'docker.io/library';
+    const { result, calls } = await runServices({
+      failRegistry: ecr,
+      failCommand: 'compose build minio',
+      error: 'Data limit exceeded',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toEqual([
+      `<unset>\t${ecr}\tcompose build minio`,
+      `<unset>\t${ecr}\tcompose config --images`,
+      `${hub}\t${hub}\tcompose build minio`,
+      `${hub}\t${hub}\tcompose up -d --wait postgres minio`,
+      `${hub}\t${hub}\tcompose run --rm minio-init`,
+    ]);
+  });
+
+  it('stops after each fallback registry is throttled', async () => {
+    const hub = 'docker.io/library';
+    const ecr = 'public.ecr.aws/docker/library';
+    const { result, calls } = await runServices({
+      dotenvRegistry: hub,
+      failRegistry: `${hub},${ecr}`,
+      failCommand: 'compose build minio',
+      error: 'Data limit exceeded',
+    });
+
+    expect(result.status).toBe(17);
+    expect(calls).toEqual([
+      `<unset>\t${hub}\tcompose build minio`,
+      `<unset>\t${hub}\tcompose config --images`,
+      `${ecr}\t${ecr}\tcompose build minio`,
     ]);
   });
 });

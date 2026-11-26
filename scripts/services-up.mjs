@@ -24,6 +24,7 @@ const steps = [
 ];
 const throttled =
   /(?:too many requests|toomanyrequests|data limit exceeded|rate limit exceeded|pull rate limit)/iu;
+const registriesInError = /(?:https?:\/\/)?([a-z0-9.-]+(?::\d+)?(?:\/[a-z0-9._-]+)*)\/(?:postgres|alpine)(?=[:\s@]|$)/giu;
 
 function run(args, registry) {
   return new Promise((resolve) => {
@@ -63,8 +64,33 @@ for (let registryIndex = 0; registryIndex < attempts.length; registryIndex += 1)
       process.exitCode = result.code;
       process.exit();
     }
+    // Docker's throttle errors name the registry that actually served the image.
+    // Compose may have selected it from .env, so use that evidence without reading
+    // .env or changing normal startup precedence.
+    let failedImageRegistries = [...result.output.matchAll(registriesInError)]
+      .map((match) => match[1])
+      .filter((value, index, all) => all.indexOf(value) === index);
+    if (failedImageRegistries.length === 0) {
+      const images = await run(['compose', 'config', '--images']);
+      failedImageRegistries = [...images.output.matchAll(registriesInError)]
+        .map((match) => match[1])
+        .filter((value, index, all) => all.indexOf(value) === index);
+    }
+    const alreadyTried = new Set([...attempts.slice(0, registryIndex + 1), ...failedImageRegistries]);
+    const remainingRegistries = fallbackRegistries.filter((candidate) => !alreadyTried.has(candidate));
+    const preferredRegistry = remainingRegistries.find(
+      (candidate) => !failedImageRegistries.includes(candidate),
+    );
+    const retryRegistries = preferredRegistry
+      ? [preferredRegistry, ...remainingRegistries.filter((candidate) => candidate !== preferredRegistry)]
+      : remainingRegistries;
+    if (retryRegistries.length === 0) {
+      process.exitCode = result.code;
+      process.exit();
+    }
+    attempts.splice(registryIndex + 1, attempts.length, ...retryRegistries);
     process.stderr.write(
-      `\n${registry ?? initialRegistry ?? 'Configured Compose registry'} was throttled. Retrying local services with ${attempts[registryIndex + 1]}.\n`,
+      `\n${failedImageRegistries[0] ?? registry ?? initialRegistry ?? 'Configured Compose registry'} was throttled. Retrying local services with ${attempts[registryIndex + 1]}.\n`,
     );
     retry = true;
     break;
