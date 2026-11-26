@@ -321,25 +321,78 @@ const childExit = new Promise((resolveExit) => {
   child.once('exit', (code, signal) => resolveExit({ code, signal }));
 });
 
-const isMounted = async () => {
+let ownedMountId;
+let shutdownSignalSent = false;
+let fallbackUnmountUsed = false;
+const mountIdsAtPath = async () => {
   const mountInfo = await readFile('/proc/self/mountinfo', 'utf8');
-  return mountInfo.split('\n').some((line) => line.split(' ')[4] === mountpoint);
+  const escapedMountpoint = mountpoint
+    .replaceAll('\\', '\\134')
+    .replaceAll(' ', '\\040')
+    .replaceAll('\t', '\\011')
+    .replaceAll('\n', '\\012');
+  return mountInfo.split('\n').flatMap((line) => {
+    const fields = line.split(' ');
+    return fields[4] === escapedMountpoint ? [Number(fields[0])] : [];
+  });
+};
+const captureOwnedMount = async () => {
+  const mountIds = await mountIdsAtPath();
+  if (ownedMountId === undefined && mountIds.length === 1) ownedMountId = mountIds[0];
+  return mountIds;
+};
+const isMountpointMounted = async () => {
+  const mountIds = await captureOwnedMount();
+  return mountIds.length > 0;
 };
 async function waitForMount() {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     const exit = await Promise.race([childExit, delay(0).then(() => null)]);
     if (exit) throw new Error(`CLI exited before mount (code ${exit.code ?? 'none'}).`);
-    if (await isMounted()) return;
+    const mountIds = await captureOwnedMount();
+    assert(mountIds.length <= 1, 'the unique smoke mountpoint must not contain stacked mounts');
+    if (ownedMountId !== undefined) return;
     await delay(50);
   }
   throw new Error('CLI did not mount within 15 seconds.');
 }
 
+async function waitForGracefulShutdown(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const exit = await Promise.race([childExit, delay(0).then(() => null)]);
+    const stillMounted = await isMountpointMounted();
+    if (exit && !stillMounted) return { exit, stillMounted };
+    await delay(100, undefined, { ref: false });
+  }
+  return {
+    exit: await Promise.race([childExit, delay(0).then(() => null)]),
+    stillMounted: await isMountpointMounted(),
+  };
+}
+
+async function fallbackUnmountOwnedMount() {
+  const mountIds = await captureOwnedMount();
+  if (ownedMountId === undefined || !mountIds.includes(ownedMountId)) return;
+  assert.deepEqual(
+    mountIds,
+    [ownedMountId],
+    'refusing fallback cleanup because another mount shares the unique smoke mountpoint',
+  );
+  fallbackUnmountUsed = true;
+  await execFileAsync('fusermount3', ['-u', '-q', '--', mountpoint], { timeout: 5_000 });
+  assert.equal(
+    await isMountpointMounted(),
+    false,
+    'fallback unmount must detach the smoke-owned mount',
+  );
+}
+
 let testError;
+let shutdownError;
 let unmountError;
 let cleanupError;
-let mounted = false;
 let outcome;
 const openedHandles = [];
 try {
@@ -436,6 +489,8 @@ try {
   assert(storageRequests.length > 0, 'file reads should retrieve encrypted storage bytes');
   outcome = {
     result: 'PASS',
+    gracefulShutdown: true,
+    detachedBeforeFallback: true,
     rootApiPages: pageCrossingCount,
     nestedListRequests: listRequests.filter((request) => request.prefix === '/nested').length,
     metadataRequests: getMetadataRequests.length,
@@ -457,17 +512,43 @@ try {
   testError = error;
 } finally {
   for (const handle of openedHandles.splice(0)) await handle.close().catch(() => {});
-  mounted = await isMounted().catch(() => false);
+  let exit = await Promise.race([childExit, delay(0).then(() => null)]);
+  let mounted = await isMountpointMounted().catch((error) => {
+    shutdownError ??= error;
+    return true;
+  });
+  if (!exit && child.exitCode === null && child.signalCode === null) {
+    shutdownSignalSent = child.kill('SIGTERM');
+    const shutdown = await waitForGracefulShutdown(mounted ? 18_000 : 3_000).catch((error) => {
+      shutdownError ??= error;
+      return null;
+    });
+    exit = shutdown?.exit ?? exit;
+    mounted = shutdown?.stillMounted ?? mounted;
+  }
+  if (!shutdownSignalSent) {
+    shutdownError ??= new Error('ordinary SIGTERM was not delivered to a live CLI process');
+  }
+  if (exit && (exit.error || exit.code !== 0)) {
+    shutdownError ??= new Error(
+      `ordinary SIGTERM shutdown exited with code ${exit.code ?? 'none'}${exit.signal ? ` (${exit.signal})` : ''}`,
+    );
+  }
+  if (!exit) {
+    shutdownError ??= new Error('CLI did not exit within the graceful shutdown deadline');
+  }
   if (mounted) {
+    shutdownError ??= new Error(
+      'ordinary SIGTERM did not detach the smoke-owned mount before fallback cleanup',
+    );
     try {
-      await execFileAsync('fusermount3', ['-u', mountpoint], { timeout: 5_000 });
-      mounted = await isMounted();
+      await fallbackUnmountOwnedMount();
+      mounted = false;
     } catch (error) {
       unmountError = error;
     }
   }
-  const exit = await Promise.race([childExit, delay(3_000).then(() => null)]);
-  if (!exit) {
+  if (!exit && child.exitCode === null && child.signalCode === null) {
     child.kill('SIGTERM');
     const gracefulExit = await Promise.race([childExit, delay(2_000).then(() => null)]);
     if (!gracefulExit) {
@@ -475,9 +556,12 @@ try {
       await Promise.race([childExit, delay(2_000)]);
     }
   }
-  mounted = await isMounted().catch(() => false);
+  mounted = await isMountpointMounted().catch((error) => {
+    cleanupError ??= error;
+    return true;
+  });
   if (mounted) {
-    cleanupError = new Error(
+    cleanupError ??= new Error(
       `FUSE mount remains active at ${mountpoint}; left ${temporaryRoot} intact.`,
     );
   } else {
@@ -495,8 +579,24 @@ try {
 }
 
 const safeExit = await Promise.race([childExit, delay(0).then(() => null)]);
-if (testError || cleanupError || unmountError || !safeExit || safeExit.code !== 0) {
-  const parts = [testError?.message, cleanupError?.message, unmountError?.message].filter(Boolean);
+if (
+  testError ||
+  shutdownError ||
+  cleanupError ||
+  unmountError ||
+  fallbackUnmountUsed ||
+  !safeExit ||
+  safeExit.code !== 0
+) {
+  const parts = [
+    testError?.message,
+    shutdownError?.message,
+    cleanupError?.message,
+    unmountError?.message,
+  ].filter(Boolean);
+  if (fallbackUnmountUsed) {
+    parts.push('The smoke required fallback unmount cleanup; graceful shutdown did not pass.');
+  }
   if (safeExit && safeExit.code !== 0) parts.push(`CLI exit status was ${safeExit.code}.`);
   const redact = (value) =>
     value
