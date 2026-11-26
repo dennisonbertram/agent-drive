@@ -53,6 +53,8 @@ With the drive unlocked you can:
 - Open Versions from the row menu. Each version shows its time, size and author. "Restore this version" makes an older version the current one by creating a new version. Existing history stays.
 - Trash a file from the row menu.
 
+Downloads up to 32 MiB save with one click. Larger downloads use the browser file picker when available, or a temporary origin-private file before the browser starts the download. The temporary file contains plaintext and is removed after 15 minutes; the console also removes abandoned Agent Drive download files on a later visit. If the browser cannot stage a file to disk or storage is full, the console offers an explicit browser-memory download that may use memory equal to the file size.
+
 Version and trash behavior:
 
 - Overwriting a file or restoring an older version creates a new version.

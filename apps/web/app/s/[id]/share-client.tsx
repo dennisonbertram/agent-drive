@@ -2,17 +2,22 @@
 
 import { formatBytes } from '@/src/format/bytes';
 import Link from 'next/link';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { BrandMark } from '../../brand-mark';
 import { FileIcon } from '../../(app)/console/file-icon';
 import {
-  decryptWithFileKey,
+  decryptWithFileKeyStream,
   DriveCryptoError,
   plaintextSize,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { fileKind } from '@/src/console/file-tree';
 import { validateDownloadUrl } from '@/src/share/url';
 import { parseShareFragment } from '@/src/share/fragment';
+import {
+  cleanupDownloadScratch,
+  createDownloadSink,
+  DownloadSaveError,
+} from '@/src/share/download';
 
 type ShareMetadata = {
   name: string;
@@ -85,26 +90,36 @@ async function fetchShare(id: string, download = false): Promise<ShareMetadata> 
   return response.json() as Promise<ShareMetadata>;
 }
 
-/** Reads the encrypted body, reporting whole percent of `total` as bytes arrive (never sent anywhere). */
-async function readBody(response: Response, total: number, onPercent: (percent: number) => void) {
-  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+async function* responseChunks(
+  response: Response,
+  total: number,
+  onPercent: (percent: number) => void,
+  signal: AbortSignal,
+) {
+  if (!response.body) throw new Error('This browser could not stream the encrypted file.');
   const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
+  let complete = false;
   let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    onPercent(total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0);
+  const cancel = () => void reader.cancel(signal.reason).catch(() => undefined);
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    for (;;) {
+      if (signal.aborted) throw new DOMException('The download was canceled.', 'AbortError');
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw new DOMException('The download was canceled.', 'AbortError');
+      if (done) {
+        complete = true;
+        return;
+      }
+      received += value.byteLength;
+      onPercent(total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0);
+      yield value;
+    }
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    if (!complete) await reader.cancel(signal.reason).catch(() => undefined);
+    reader.releaseLock();
   }
-  const body = new Uint8Array(received);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return body;
 }
 
 function subscribeToHash(onChange: () => void) {
@@ -154,6 +169,13 @@ export default function ShareClient({ id }: { id: string }) {
   const [attempt, setAttempt] = useState(0);
   const [pasted, setPasted] = useState('');
   const [pasteProblem, setPasteProblem] = useState('');
+  const activeDownload = useRef<AbortController | null>(null);
+  const cancelRequested = useRef(false);
+
+  useEffect(() => {
+    void cleanupDownloadScratch();
+  }, []);
+  useEffect(() => () => activeDownload.current?.abort(), []);
 
   useEffect(() => {
     if (!fileKey) return;
@@ -179,43 +201,85 @@ export default function ShareClient({ id }: { id: string }) {
     };
   }, [fileKey, id, attempt]);
 
-  async function download(key = fileKey) {
+  async function download(key = fileKey, allowMemory = false) {
     if (!share || !key) return;
+    const controller = new AbortController();
+    activeDownload.current = controller;
+    let sink: Awaited<ReturnType<typeof createDownloadSink>> | undefined;
     setPhase('downloading');
     setPercent(null);
     setSaved('');
     setError(null);
     setErrorCode('');
     try {
+      sink = await createDownloadSink(share.name, plaintextSize(share.ciphertextSize), {
+        allowLargeBlob: allowMemory,
+      });
       const metadata = await fetchShare(id, true);
       if (!metadata.downloadUrl) throw new Error('The download could not be authorized.');
+      if (metadata.ciphertextSize !== share.ciphertextSize)
+        throw new Error('This shared file changed. Reload the page and try again.');
       const response = await fetch(validateDownloadUrl(metadata.downloadUrl), {
         credentials: 'omit',
         redirect: 'error',
         cache: 'no-store',
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error('The encrypted file could not be downloaded.');
-      const encrypted = await readBody(response, metadata.ciphertextSize, setPercent);
-      setPhase('decrypting');
-      const bytes = await decryptWithFileKey(encrypted, key);
-      const url = URL.createObjectURL(
-        new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }),
-      );
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = metadata.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      let bytesWritten = 0;
+      for await (const bytes of decryptWithFileKeyStream(
+        responseChunks(response, metadata.ciphertextSize, setPercent, controller.signal),
+        key,
+        metadata.ciphertextSize,
+      )) {
+        if (controller.signal.aborted) {
+          bytes.fill(0);
+          throw new DOMException('The download was canceled.', 'AbortError');
+        }
+        bytesWritten += bytes.byteLength;
+        setPhase('decrypting');
+        await sink.write(bytes);
+      }
+      if (bytesWritten !== plaintextSize(metadata.ciphertextSize))
+        throw new Error('The decrypted file did not match its expected size.');
+      await sink.finish();
+      sink = undefined;
       setSaved(metadata.name);
     } catch (reason) {
+      await sink?.abort(reason).catch(() => {
+        reason = new Error(
+          'The download failed, and the temporary plaintext file could not be removed.',
+        );
+      });
       if (reason instanceof DriveCryptoError && reason.code === 'decryption_failed') {
         setErrorCode('decryption-failed');
         setError("This link's key doesn't match this file");
+      } else if (
+        (reason instanceof DownloadSaveError && reason.code === 'unsupported-large-download') ||
+        (reason instanceof DOMException && reason.name === 'QuotaExceededError')
+      ) {
+        setErrorCode('large-download-memory');
+        setError(
+          'The browser could not stage this large download to disk. You can continue with a browser download that may use memory equal to this file size.',
+        );
+      } else if (reason instanceof DownloadSaveError && reason.code === 'save-gesture-required') {
+        setErrorCode('save-picker-gesture');
+        setError('Choose Save file again to open the browser file picker.');
+      } else if (
+        cancelRequested.current ||
+        controller.signal.aborted ||
+        (reason instanceof DOMException && reason.name === 'AbortError') ||
+        (reason instanceof DownloadSaveError && reason.code === 'aborted')
+      ) {
+        setErrorCode('unavailable');
+        setError('The download was canceled.');
       } else {
         setErrorCode(reason instanceof ShareError ? reason.code : 'unavailable');
         setError(reason instanceof Error ? reason.message : 'The file could not be decrypted.');
       }
     } finally {
+      cancelRequested.current = false;
+      if (activeDownload.current === controller) activeDownload.current = null;
       setPhase('idle');
     }
   }
@@ -319,6 +383,24 @@ export default function ShareClient({ id }: { id: string }) {
                     Try again
                   </button>
                 ) : null}
+                {displayErrorCode === 'large-download-memory' ? (
+                  <button
+                    className="button share-retry"
+                    disabled={busy}
+                    onClick={() => void download(fileKey, true)}
+                  >
+                    Download using browser memory
+                  </button>
+                ) : null}
+                {displayErrorCode === 'save-picker-gesture' ? (
+                  <button
+                    className="button share-retry"
+                    disabled={busy}
+                    onClick={() => void download(fileKey)}
+                  >
+                    Save file again
+                  </button>
+                ) : null}
                 <Link className="share-home" href="/">
                   Go to Agent Drive
                 </Link>
@@ -362,6 +444,19 @@ export default function ShareClient({ id }: { id: string }) {
                     ? 'Decrypting…'
                     : 'Download'}
               </button>
+              {busy ? (
+                <button
+                  className="button share-retry"
+                  onClick={() => {
+                    cancelRequested.current = true;
+                    activeDownload.current?.abort();
+                    setError('The download was canceled.');
+                    setErrorCode('unavailable');
+                  }}
+                >
+                  Cancel download
+                </button>
+              ) : null}
               <p className="share-status" role="status">
                 {saved ? `Download started: ${saved}. Check your downloads.` : ''}
               </p>

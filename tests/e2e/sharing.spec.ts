@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +20,16 @@ function cli(args: string[], environment: NodeJS.ProcessEnv) {
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => (stderr += chunk));
     child.on('close', (status) => resolveResult({ status, stdout, stderr }));
   });
+}
+
+async function fileDigest(path: string) {
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of createReadStream(path)) {
+    size += chunk.byteLength;
+    hash.update(chunk);
+  }
+  return { size, sha256: hash.digest('hex') };
 }
 
 test('CLI share links download, expire, revoke, and never send fragment keys', async ({
@@ -244,6 +255,9 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
   baseURL,
 }) => {
   test.setTimeout(180_000);
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined });
+  });
   const database = new Pool({
     connectionString:
       process.env.DATABASE_URL ??
@@ -345,7 +359,7 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
       const original = window.fetch.bind(window);
       window.fetch = async (input, init) => {
         const response = await original(input, init);
-        if (!String(input).startsWith(origin)) return response;
+        if (!String(input).startsWith(origin)) return original(input, init);
         const whole = new Uint8Array(await response.arrayBuffer());
         const step = Math.ceil(whole.length / 4);
         let offset = 0;
@@ -369,7 +383,9 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
     const downloaded = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Download' }).click();
     await expect(page.getByRole('button', { name: /^Downloading [1-9]\d*%$/u })).toBeVisible();
-    expect((await readFile((await (await downloaded).path())!)).equals(big)).toBe(true);
+    const downloadedFile = await downloaded;
+    expect(await downloadedFile.failure()).toBeNull();
+    expect((await readFile((await downloadedFile.path())!)).equals(big)).toBe(true);
     await expect(page.getByRole('status')).toHaveText(
       `Download started: ${hostile}. Check your downloads.`,
     );
@@ -377,6 +393,20 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
       () => (window as unknown as { __labels: string[] }).__labels,
     );
     expect(labels.some((label) => /^Downloading \d+%$/u.test(label))).toBe(true);
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+
+    const scratchCount = () =>
+      page.evaluate(async () => {
+        const root = await navigator.storage.getDirectory();
+        let count = 0;
+        for await (const [name] of root.entries()) {
+          if (name.startsWith('agent-drive-download-')) count += 1;
+        }
+        return count;
+      });
+    // The 1.99 MiB file is below the 32 MiB Blob cutoff and leaves no OPFS scratch file.
+    expect(await scratchCount()).toBe(0);
+    await page.reload();
     await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
 
     // 3. Wrong key: new heading and body, paste field has a placeholder.
@@ -431,6 +461,217 @@ test('share page: file card, progress, saved state, wrong-key copy, way out of e
               Key: item.Key,
             }),
           );
+    }
+    await database.query('DELETE FROM audit_events WHERE account_id=$1', [accountId]);
+    await database.query('DELETE FROM file_events WHERE drive_id=$1', [driveId]);
+    await database.query('DELETE FROM versions WHERE drive_id=$1', [driveId]);
+    await database.query('DELETE FROM accounts WHERE id=$1', [accountId]);
+    storage.destroy();
+    await database.end();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('share page: streams and verifies a 34 MiB download through OPFS', async ({
+  browser,
+  baseURL,
+}) => {
+  test.setTimeout(180_000);
+  const database = new Pool({
+    connectionString:
+      process.env.DATABASE_URL ??
+      'postgresql://agent_drive:agent_drive_local_only@127.0.0.1:5432/agent_drive',
+  });
+  const storage = new S3Client({
+    endpoint: process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000',
+    region: process.env.S3_REGION ?? 'us-east-1',
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'agent_drive_local',
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'agent_drive_local_secret',
+    },
+  });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined });
+  });
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-share-34m-e2e-'));
+  const accountId = randomUUID();
+  const agentId = randomUUID();
+  const driveId = randomUUID();
+  const token = `adk_${randomBytes(32).toString('base64url')}`;
+  const environment = {
+    ...process.env,
+    AGENT_DRIVE_API_URL: baseURL!,
+    AGENT_DRIVE_API_KEY: token,
+    AGENT_DRIVE_KEY: randomBytes(32).toString('base64url'),
+    AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+  };
+  const mark = (label: string, started: number) =>
+    console.log(`[share-34m] ${label}: ${Date.now() - started}ms`);
+  try {
+    await database.query('INSERT INTO accounts (id, name) VALUES ($1, $2)', [
+      accountId,
+      `share-34m-e2e-${randomUUID()}`,
+    ]);
+    await database.query('INSERT INTO agents (id,account_id,name) VALUES ($1,$2,$3)', [
+      agentId,
+      accountId,
+      `share-34m-agent-${randomUUID()}`,
+    ]);
+    await database.query('INSERT INTO drives (id,account_id,name) VALUES ($1,$2,$3)', [
+      driveId,
+      accountId,
+      `share-34m-drive-${randomUUID()}`,
+    ]);
+    await database.query(
+      `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+       VALUES ($1,$2,'share-34m-e2e',$3,$4::uuid[],ARRAY['read','write','share']::text[])`,
+      [accountId, agentId, createHash('sha256').update(token).digest('hex'), [driveId]],
+    );
+
+    const source = Buffer.alloc(34 * 1024 * 1024);
+    for (let index = 0; index < source.length; index += 1) source[index] = index % 251;
+    const sourcePath = join(root, '34m.bin');
+    await writeFile(sourcePath, source, { mode: 0o600 });
+    const uploadStarted = Date.now();
+    const upload = await cli(
+      ['put', sourcePath, '/large/34m.bin', '--drive', driveId],
+      environment,
+    );
+    expect(upload.status).toBe(0);
+    mark('upload', uploadStarted);
+    const shareResult = await cli(['share', '/large/34m.bin', '--drive', driveId], environment);
+    expect(shareResult.status).toBe(0);
+    const share = JSON.parse(shareResult.stdout) as { id: string; url: string };
+    const s3Origin = new URL(process.env.S3_ENDPOINT ?? 'http://127.0.0.1:9000').origin;
+    const scratchCount = () =>
+      page.evaluate(async () => {
+        const directory = await navigator.storage.getDirectory();
+        let count = 0;
+        for await (const [name] of directory.entries())
+          if (name.startsWith('agent-drive-download-')) count += 1;
+        return count;
+      });
+    await page.goto(share.url);
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+
+    // The held route is bounded and awaited after cancel, so teardown cannot retain a handler.
+    let resolveRequest!: () => void;
+    let resolveRoute!: () => void;
+    const requestSeen = new Promise<void>((resolve) => (resolveRequest = resolve));
+    const routeFinished = new Promise<void>((resolve) => (resolveRoute = resolve));
+    await page.route(`${s3Origin}/**`, async (route) => {
+      resolveRequest();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await route.abort().catch(() => undefined);
+      } finally {
+        resolveRoute();
+      }
+    });
+    let downloads = 0;
+    page.on('download', () => (downloads += 1));
+    const cancelStarted = Date.now();
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    await requestSeen;
+    await page.getByRole('button', { name: 'Cancel download' }).click();
+    await expect(page.getByTestId('share-error')).toBeVisible();
+    await expect.poll(scratchCount).toBe(0);
+    await routeFinished;
+    await page.unroute(`${s3Origin}/**`);
+    expect(downloads).toBe(0);
+    mark('cancel and scratch cleanup', cancelStarted);
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+
+    // Corrupt the last authenticated frame only after the response is fully available.
+    // Decryption must fail before a browser download starts and remove staged plaintext.
+    await page.evaluate((origin) => {
+      const original = window.fetch.bind(window);
+      (window as unknown as { __originalFetch: typeof fetch }).__originalFetch = original;
+      window.fetch = async (input, init) => {
+        const response = await original(input, init);
+        if (!String(input).startsWith(origin)) return response;
+        const ciphertext = new Uint8Array(await response.arrayBuffer());
+        ciphertext[ciphertext.length - 1] = (ciphertext.at(-1) ?? 0) ^ 1;
+        return new Response(ciphertext, { status: response.status });
+      };
+    }, s3Origin);
+    const corruptionStarted = Date.now();
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    await expect(page.getByTestId('share-error-decryption-failed')).toBeVisible();
+    await expect.poll(scratchCount).toBe(0);
+    expect(downloads).toBe(0);
+    mark('corrupt-frame rejection', corruptionStarted);
+    await page.evaluate(() => {
+      const windowWithFetch = window as unknown as { __originalFetch?: typeof fetch };
+      if (windowWithFetch.__originalFetch) window.fetch = windowWithFetch.__originalFetch;
+      delete windowWithFetch.__originalFetch;
+    });
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+
+    const downloadStarted = Date.now();
+    const downloadPromise = page.waitForEvent('download', { timeout: 90_000 });
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    const download = await downloadPromise;
+    const downloadedPath = await download.path();
+    expect(downloadedPath).not.toBeNull();
+    expect(await download.failure()).toBeNull();
+    expect(await fileDigest(downloadedPath!)).toEqual({
+      size: source.length,
+      sha256: createHash('sha256').update(source).digest('hex'),
+    });
+    expect(await scratchCount()).toBe(1);
+    mark('34 MiB browser download and SHA-256', downloadStarted);
+
+    // A later share visit removes only files with our scratch prefix after the download settles.
+    await page.evaluate(async () => {
+      const directory = await navigator.storage.getDirectory();
+      const stale = await directory.getFileHandle('agent-drive-download-1-stale.tmp', {
+        create: true,
+      });
+      const writer = await stale.createWritable();
+      await writer.write(new Uint8Array([1, 2, 3]));
+      await writer.close();
+      localStorage.setItem('agent-drive-download-scratch', '1');
+    });
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
+    await expect.poll(scratchCount).toBe(0);
+    expect(
+      await page.evaluate(async () => {
+        const directory = await navigator.storage.getDirectory();
+        let found = false;
+        for await (const [name] of directory.entries())
+          if (name === 'agent-drive-download-1-stale.tmp') found = true;
+        return found;
+      }),
+    ).toBe(false);
+  } finally {
+    await context.close();
+    for (const prefix of [`objects/${accountId}/`, `staging/${accountId}/`]) {
+      let continuationToken: string | undefined;
+      do {
+        const result = await storage.send(
+          new ListObjectsV2Command({
+            Bucket: process.env.S3_BUCKET ?? 'agent-drive-local',
+            Prefix: prefix,
+            ContinuationToken: continuationToken,
+          }),
+        );
+        for (const item of result.Contents ?? [])
+          if (item.Key)
+            await storage.send(
+              new DeleteObjectCommand({
+                Bucket: process.env.S3_BUCKET ?? 'agent-drive-local',
+                Key: item.Key,
+              }),
+            );
+        continuationToken = result.NextContinuationToken;
+      } while (continuationToken);
     }
     await database.query('DELETE FROM audit_events WHERE account_id=$1', [accountId]);
     await database.query('DELETE FROM file_events WHERE drive_id=$1', [driveId]);

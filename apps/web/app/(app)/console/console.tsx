@@ -16,9 +16,14 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
-import { generateDriveKey } from '../../../../../packages/agent-drive/src/crypto.ts';
+import { generateDriveKey, plaintextSize } from '../../../../../packages/agent-drive/src/crypto.ts';
 import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
-import { loadInbox, openVersion, type InboxCache } from '@/src/console/open-version';
+import {
+  loadInbox,
+  openVersion,
+  openVersionStream,
+  type InboxCache,
+} from '@/src/console/open-version';
 import { BrandLogo, BrandMark } from '../../brand-mark';
 import { CopyButton } from '../copy-button';
 import { DriveMenu } from './drive-menu';
@@ -46,6 +51,11 @@ import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './sh
 import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import { formatBytes, formatMetered } from '@/src/format/bytes';
+import {
+  cleanupDownloadScratch,
+  createDownloadSink,
+  DownloadSaveError,
+} from '@/src/share/download';
 import {
   ROOT,
   crumbs,
@@ -527,6 +537,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // WebAuthn + PRF support, probed once; drives the passkey affordances in menu and dialog.
   const [passkeyCapable, setPasskeyCapable] = useState(false);
   useEffect(() => {
+    void cleanupDownloadScratch();
+  }, []);
+  useEffect(() => {
     let on = true;
     void detectPasskey().then((ok) => {
       if (on) setPasskeyCapable(ok);
@@ -611,6 +624,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [keyReceipt, setKeyReceipt] = useState('');
   const [saved, setSaved] = useState(false);
   const [downloadingId, setDownloadingId] = useState('');
+  const downloadAborters = useRef(new Map<string, AbortController>());
+  const [memoryDownloadFile, setMemoryDownloadFile] = useState<FileEntry | null>(null);
+  const [pickerRetry, setPickerRetry] = useState<{ file: FileEntry; key: string } | null>(null);
   // The row whose Download or Preview asked for the key; it continues once the key loads.
   const [pendingAction, setPendingAction] = useState<
     | { driveId: string; file: FileEntry; kind: 'download' | 'preview' | 'share' }
@@ -1554,36 +1570,117 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
   }
 
-  async function download(file: FileEntry, key?: string) {
+  async function download(file: FileEntry, key?: string, allowMemory = false) {
     key ??= await keyFor(file, 'download');
     if (!key) return;
-    setDownloadingId(file.id);
-    try {
-      await decryptAndSave(file, key);
-    } finally {
-      setDownloadingId('');
+    const active = downloadAborters.current.get(file.id);
+    if (active) {
+      active.abort();
+      return;
     }
-    idleLock.current?.touch();
+    const controller = new AbortController();
+    downloadAborters.current.set(file.id, controller);
+    setDownloadingId(file.id);
+    let sink: Awaited<ReturnType<typeof createDownloadSink>> | undefined;
+    try {
+      const listedCiphertextBytes = Number(file.ciphertext_size);
+      if (!Number.isSafeInteger(listedCiphertextBytes) || listedCiphertextBytes < 1)
+        throw new Error('The listed file size is invalid. Reload the file list and try again.');
+      const expectedPlaintextBytes = plaintextSize(listedCiphertextBytes);
+      const name = file.path.split('/').at(-1) || 'download';
+      sink = await createDownloadSink(name, expectedPlaintextBytes, {
+        allowLargeBlob: allowMemory,
+      });
+      const versionQuery = file.version_id
+        ? `&versionId=${encodeURIComponent(file.version_id)}`
+        : '';
+      const metadata = await api<{
+        wrappedKey: string;
+        downloadUrl: string;
+        ciphertextSize: number;
+      }>(`drives/${selected}/get?path=${encodeURIComponent(file.path)}${versionQuery}`);
+      if (Number(metadata.ciphertextSize) !== listedCiphertextBytes)
+        throw new Error(
+          'This file changed since the list loaded. Refresh the file list and try again.',
+        );
+      let bytesWritten = 0;
+      for await (const bytes of openVersionStream(
+        api,
+        selected,
+        metadata,
+        key,
+        inboxCache.current,
+        controller.signal,
+      )) {
+        if (controller.signal.aborted) {
+          bytes.fill(0);
+          throw new DOMException('The download was canceled.', 'AbortError');
+        }
+        bytesWritten += bytes.byteLength;
+        await sink.write(bytes);
+      }
+      if (bytesWritten !== expectedPlaintextBytes)
+        throw new Error('The decrypted file did not match its expected size.');
+      await sink.finish();
+      sink = undefined;
+      setMemoryDownloadFile(null);
+      setPickerRetry(null);
+      showToast(`Download started: ${name}. Check your downloads.`);
+      idleLock.current?.touch();
+    } catch (reason) {
+      await sink?.abort(reason).catch(() => {
+        reason = new Error(
+          'The download failed, and the temporary plaintext file could not be removed.',
+        );
+      });
+      if (
+        (reason instanceof DownloadSaveError && reason.code === 'unsupported-large-download') ||
+        (reason instanceof DOMException && reason.name === 'QuotaExceededError')
+      ) {
+        setMemoryDownloadFile(file);
+        setNotice(
+          'The browser could not stage this large download to disk. Continuing may use memory equal to the file size.',
+        );
+      } else if (reason instanceof DownloadSaveError && reason.code === 'save-gesture-required') {
+        setPickerRetry({ file, key });
+        setNotice(
+          'Your browser needs a fresh save click. Choose Save file again to select a destination.',
+        );
+      } else if (
+        controller.signal.aborted ||
+        (reason instanceof DOMException && reason.name === 'AbortError')
+      ) {
+        showToast('Download canceled.');
+      } else {
+        showToast(reason instanceof Error ? reason.message : 'The file could not be downloaded.');
+      }
+    } finally {
+      if (downloadAborters.current.get(file.id) === controller)
+        downloadAborters.current.delete(file.id);
+      setDownloadingId((current) => (current === file.id ? '' : current));
+    }
   }
 
-  async function decryptAndSave(file: FileEntry, key: string) {
-    const bytes = await fetchPlaintext(selected, file.path, key);
-    const name = file.path.split('/').at(-1) || 'download';
-    save(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }), name);
-    showToast(`Download started: ${name}. Check your downloads.`);
-  }
-
-  // Fetch the ciphertext and decrypt it in memory. Used by Download and by Preview.
+  // Preview keeps at most the preview limit in memory; downloads use a disk-backed sink.
   async function fetchPlaintext(
     driveId: string,
     path: string,
     key: string,
+    expectedCiphertextBytes: number,
     versionId?: string,
   ): Promise<Uint8Array> {
-    const metadata = await api<{ wrappedKey: string; downloadUrl: string }>(
+    const metadata = await api<{
+      wrappedKey: string;
+      downloadUrl: string;
+      ciphertextSize: number;
+    }>(
       `drives/${driveId}/get?path=${encodeURIComponent(path)}${versionId ? `&versionId=${versionId}` : ''}`,
     );
-    return openVersion(api, driveId, metadata, key, inboxCache.current);
+    if (Number(metadata.ciphertextSize) !== expectedCiphertextBytes)
+      throw new Error(
+        'This file changed since the list loaded. Refresh the file list and try again.',
+      );
+    return openVersion(api, driveId, metadata, key, inboxCache.current, PREVIEW_MAX_BYTES);
   }
 
   function closePreview() {
@@ -1607,7 +1704,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       key ??= await keyFor(file, 'preview');
       if (mine !== previewRequest.current || !key) return;
       // Pin the listed version, so the size checked above is the size fetched.
-      const bytes = await fetchPlaintext(selected, file.path, key, file.version_id);
+      const bytes = await fetchPlaintext(selected, file.path, key, listed, file.version_id);
       if (bytes.length > PREVIEW_MAX_BYTES)
         return show({ status: 'too-large', sizeLabel: size(bytes.length) });
       show({ status: 'ready', kind, bytes });
@@ -2925,13 +3022,39 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                     <div className="row-actions">
                                       <button
                                         className="row-primary"
-                                        disabled={busy}
+                                        disabled={busy && downloadingId !== file.id}
                                         title="Decrypt and download"
                                         aria-busy={downloadingId === file.id || undefined}
-                                        onClick={() => void act(() => download(file))}
+                                        onClick={() => {
+                                          if (downloadAborters.current.has(file.id))
+                                            downloadAborters.current.get(file.id)?.abort();
+                                          else void act(() => download(file));
+                                        }}
                                       >
-                                        {downloadingId === file.id ? 'Downloading…' : 'Download'}
+                                        {downloadingId === file.id ? 'Cancel download' : 'Download'}
                                       </button>
+                                      {memoryDownloadFile?.id === file.id ? (
+                                        <button
+                                          className="row-secondary"
+                                          disabled={busy}
+                                          onClick={() =>
+                                            void act(() => download(file, undefined, true))
+                                          }
+                                        >
+                                          Use browser memory for this download
+                                        </button>
+                                      ) : null}
+                                      {pickerRetry?.file.id === file.id ? (
+                                        <button
+                                          className="row-secondary"
+                                          disabled={busy}
+                                          onClick={() =>
+                                            void act(() => download(file, pickerRetry.key))
+                                          }
+                                        >
+                                          Save file again
+                                        </button>
+                                      ) : null}
                                       <MenuButton
                                         className="more-button"
                                         ariaLabel={`More actions for ${row.name}`}
