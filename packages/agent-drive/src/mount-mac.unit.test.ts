@@ -62,8 +62,8 @@ input.close();
 JSON.parse(line);
 await new Promise((resolve) => setTimeout(resolve, 30));
 if (process.stdin.readableEnded) process.exit(41);
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -99,8 +99,8 @@ const invalid = await fetch(endpoint, { method: 'POST', headers, body: JSON.stri
 if (invalid.status !== 400) process.exit(42);
 const complete = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ id: 'complete-copy', op: 'completeWrite', handleId: 'copy-handle' }) });
 if (complete.status !== 200 || (await complete.json()).id !== 'complete-copy') process.exit(43);
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -210,8 +210,8 @@ const maxRead = await fetch(endpoint + '/rpc', { method: 'POST', headers, body: 
 if (maxRead.status !== 200 || (await maxRead.json()).data.length !== 1398104) process.exit(36);
 const maxReadStaged = await fetch(endpoint + '/rpc', { method: 'POST', headers, body: JSON.stringify({ id: 'max-read-staged', op: 'readStaged', handleId: 'h', offset: 0, size: 1048576 }) });
 if (maxReadStaged.status !== 200 || (await maxReadStaged.json()).data.length !== 1398104) process.exit(37);
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -276,8 +276,8 @@ await new Promise((resolve) => process.stdin.once('data', (chunk) => {
   input += chunk.toString();
   resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
 }));
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -314,8 +314,8 @@ await new Promise((resolve) => process.stdin.once('data', (chunk) => {
   input += chunk.toString();
   resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
 }));
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -354,13 +354,13 @@ const startup = await new Promise((resolve, reject) => {
   process.stdin.on('data', onData);
   process.stdin.on('error', reject);
 });
+${waitForSignal}
 process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 setTimeout(() => {
   const request = helperRequest({ host: '127.0.0.1', port: startup.port, method: 'POST', path: '/rpc', headers: { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' } });
   request.end(JSON.stringify({ id: 'cancel-me', op: 'stat', path: '/note.txt' }));
   setTimeout(() => request.destroy(), 30);
 }, 50);
-${waitForSignal}
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);

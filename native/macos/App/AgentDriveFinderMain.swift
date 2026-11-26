@@ -33,9 +33,10 @@ enum AgentDriveFinder {
                 let root = try await userVisibleURL(manager: registered.manager)
                 guard root.path.utf8.count <= 4_096 else { throw BootstrapError.invalidMountPath }
                 let output = try JSONEncoder().encode(ConnectOutput(path: root.path))
-                FileHandle.standardOutput.write(output)
-                FileHandle.standardOutput.write(Data([0x0a]))
-                await waitForTermination()
+                await waitForTermination {
+                    FileHandle.standardOutput.write(output)
+                    FileHandle.standardOutput.write(Data([0x0a]))
+                }
                 try await finishDomain(registered, temporaryDomain: request.temporaryDomain, session: session)
                 registration = nil
                 try? session.close()
@@ -172,12 +173,12 @@ enum AgentDriveFinder {
         throw BootstrapError.invalidInput
     }
 
-    private static func waitForTermination() async {
+    private static func waitForTermination(reportReady: () -> Void) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let waiter = SignalWaiter(continuation)
             // The signal sources retain their handler for the lifetime of the
             // wait; the handler retains the waiter until it resumes this task.
-            waiter.start()
+            waiter.start(reportReady: reportReady)
         }
     }
 }
@@ -256,15 +257,23 @@ private enum BootstrapError: Error {
 
 private final class SignalWaiter: @unchecked Sendable {
     private let continuation: CheckedContinuation<Void, Never>
+    private let lock = NSLock()
     private var sources: [DispatchSourceSignal] = []
     private var inputSource: DispatchSourceRead?
+    private var didStart = false
     private var didFinish = false
 
     init(_ continuation: CheckedContinuation<Void, Never>) {
         self.continuation = continuation
     }
 
-    func start() {
+    func start(reportReady: () -> Void) {
+        lock.lock()
+        guard !didStart, !didFinish else {
+            lock.unlock()
+            return
+        }
+        didStart = true
         for signalNumber in [SIGTERM, SIGINT] {
             Darwin.signal(signalNumber, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
@@ -276,13 +285,24 @@ private final class SignalWaiter: @unchecked Sendable {
         inputSource.setEventHandler { [self] in finish() }
         self.inputSource = inputSource
         inputSource.resume()
+        reportReady()
+        lock.unlock()
     }
 
     private func finish() {
-        guard !didFinish else { return }
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
         didFinish = true
-        for source in sources { source.cancel() }
-        inputSource?.cancel()
+        let signalSources = sources
+        let stdinSource = inputSource
+        sources.removeAll()
+        inputSource = nil
+        lock.unlock()
+        for source in signalSources { source.cancel() }
+        stdinSource?.cancel()
         continuation.resume()
     }
 }
