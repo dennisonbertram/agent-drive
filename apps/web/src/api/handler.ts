@@ -75,6 +75,7 @@ type Auth = {
   userId?: string;
   accountName?: string;
 };
+type ConsoleDriveSelection = 'all' | 'none' | { driveId: string };
 type RequestContext = {
   auth?: Auth;
   accountId?: string | null;
@@ -148,11 +149,24 @@ async function authenticate(request: Request): Promise<Auth> {
   };
 }
 
-async function authenticateConsole(userId: string): Promise<Auth> {
+async function authenticateConsole(
+  userId: string,
+  driveSelection: ConsoleDriveSelection = 'all',
+): Promise<Auth> {
   if (!userId || userId.length > 256 || /[\u0000-\u001f\u007f]/u.test(userId)) {
     throw new ApiError('unauthorized', 'The console session is invalid.');
   }
   const userHash = hashToken(userId);
+  const driveIdsSql =
+    driveSelection === 'none'
+      ? 'ARRAY[]::uuid[]'
+      : typeof driveSelection === 'object'
+        ? `ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id AND d.id = $3::uuid)`
+        : 'ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id ORDER BY d.id)';
+  const resolveParams =
+    typeof driveSelection === 'object'
+      ? [userId, userHash, driveSelection.driveId]
+      : [userId, userHash];
   const resolved = await getPool().query<{
     account_id: string;
     account_name: string;
@@ -161,14 +175,14 @@ async function authenticateConsole(userId: string): Promise<Auth> {
     drive_ids: string[] | null;
   }>(
     `SELECT a.id AS account_id, a.name AS account_name, a.deleting_at, g.id AS agent_id,
-            ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id ORDER BY d.id) AS drive_ids
+            ${driveIdsSql} AS drive_ids
        FROM accounts a
        JOIN agents g ON g.account_id = a.id AND g.name = '__console__'
       WHERE a.external_clerk_user_id = $1
         AND NOT EXISTS (
           SELECT 1 FROM console_user_tombstones t WHERE t.external_user_hash = $2
         )`,
-    [userId, userHash],
+    resolveParams,
   );
   const resolvedRow = resolved.rows[0];
   if (resolvedRow) {
@@ -230,9 +244,13 @@ async function authenticateConsole(userId: string): Promise<Auth> {
        RETURNING id`,
       [accountId],
     );
-    const drives = await client.query('SELECT id FROM drives WHERE account_id = $1 ORDER BY id', [
-      accountId,
-    ]);
+    const drives =
+      driveSelection === 'none'
+        ? { rows: [] }
+        : await client.query(
+            `SELECT id FROM drives WHERE account_id = $1${typeof driveSelection === 'object' ? ' AND id = $2::uuid' : ''} ORDER BY id`,
+            typeof driveSelection === 'object' ? [accountId, driveSelection.driveId] : [accountId],
+          );
     return {
       keyId: null,
       accountId,
@@ -2734,7 +2752,24 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     if (mode.kind === 'console') {
       if (!mode.userId) throw new ApiError('unauthorized', 'A console session is required.');
-      context.auth = await authenticateConsole(mode.userId);
+      const accountBrowse =
+        request.method === 'GET' &&
+        relative.length === 1 &&
+        ['session', 'drives'].includes(relative[0]!);
+      const driveListBrowse =
+        request.method === 'GET' &&
+        relative.length === 3 &&
+        relative[0] === 'drives' &&
+        relative[2] === 'list' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          relative[1] ?? '',
+        );
+      const driveSelection: ConsoleDriveSelection | undefined = accountBrowse
+        ? 'none'
+        : driveListBrowse
+          ? { driveId: relative[1]! }
+          : undefined;
+      context.auth = await authenticateConsole(mode.userId, driveSelection);
       requireConsoleOrigin(request, url);
     }
     if (!validBase || url.search.length > MAX_QUERY_LENGTH) {
