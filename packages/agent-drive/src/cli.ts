@@ -53,8 +53,6 @@ import { syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
 import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
-import { runMcp } from './mcp.js';
-import { runCapture } from './capture.js';
 import { getFile, putFile } from './node-transfer.js';
 import { getPipe, parsePipeSize, putPipe } from './cli-pipes.js';
 
@@ -292,6 +290,7 @@ async function run(command: string, raw: string[]) {
     if (flags.values.size !== undefined) throw new Error('--size is only supported by `put -`.');
     if (flags.positionals.length || !wrapped.length)
       throw new Error('Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]');
+    const { runCapture } = await import('./capture.js');
     process.exitCode = await runCapture({
       command: wrapped,
       ...(flags.values.agent ? { agent: flags.values.agent } : {}),
@@ -1026,10 +1025,12 @@ if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help'))
   process.stdout.write(`${cliVersion}\n`);
   done = Promise.resolve();
 } else if (name === 'mcp') {
-  done = runMcp().catch(() => {
-    process.stderr.write('MCP server failed to start.\n');
-    process.exitCode = 1;
-  });
+  done = import('./mcp.js')
+    .then(({ runMcp }) => runMcp())
+    .catch(() => {
+      process.stderr.write('MCP server failed to start.\n');
+      process.exitCode = 1;
+    });
 } else {
   done = run(name, raw)
     .catch((error: unknown) => {

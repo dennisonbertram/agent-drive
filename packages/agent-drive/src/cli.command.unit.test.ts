@@ -772,3 +772,41 @@ describe('version', () => {
     expect(command.err).toBe('');
   });
 });
+
+describe('CLI startup import isolation', () => {
+  it('loads the MCP module only for mcp, not version or get commands', async () => {
+    const loadMcp = vi.fn();
+    const runMcp = vi.fn(async () => {});
+    vi.doMock('./mcp.js', () => {
+      loadMcp();
+      return { runMcp };
+    });
+    vi.doMock('./capture.js', () => {
+      throw new Error('capture module was loaded outside the capture command');
+    });
+
+    try {
+      const version = await cli(['--version'], one);
+      const { version: expectedVersion } = createRequire(import.meta.url)('../package.json') as {
+        version: string;
+      };
+      expect(version.out.trim()).toBe(expectedVersion);
+      expect(version.exitCode).toBeUndefined();
+      expect(loadMcp).not.toHaveBeenCalled();
+
+      const get = await cli(['get', '/x', '--drive', A, '--output', '-'], one);
+      expect(get.exitCode).toBe(1);
+      expect(get.err).not.toContain('capture module was loaded');
+      expect(loadMcp).not.toHaveBeenCalled();
+
+      process.exitCode = undefined;
+      await cli(['mcp'], one);
+      expect(loadMcp).toHaveBeenCalledTimes(1);
+      expect(runMcp).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.doUnmock('./mcp.js');
+      vi.doUnmock('./capture.js');
+      vi.resetModules();
+    }
+  });
+});
