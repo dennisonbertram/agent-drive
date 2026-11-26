@@ -165,7 +165,8 @@ describe('local service startup', () => {
       dotenvRegistry: hub,
       failRegistry: hub,
       failCommand: 'compose build minio',
-      error: 'toomanyrequests: GET https://docker.io/library/postgres:17.11-bookworm: Data limit exceeded',
+      error:
+        'toomanyrequests: GET https://docker.io/library/postgres:17.11-bookworm: Data limit exceeded',
     });
 
     expect(result.status, result.stderr).toBe(0);
