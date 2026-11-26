@@ -682,14 +682,31 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     const { limit, cursor } = page(new URL(request.url));
     const decoded = decodeCursor(cursor, 'name');
     const params: unknown[] = [auth.accountId];
-    let where = 'account_id = $1';
+    let where = 'a.account_id = $1';
     if (decoded) {
       params.push(decoded.value, decoded.id);
-      where += ' AND (name, id) > ($2, $3::uuid)';
+      where += ' AND (a.name, a.id) > ($2, $3::uuid)';
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, name, created_at FROM agents WHERE ${where} ORDER BY name, id LIMIT $${params.length}`,
+      `WITH agent_page AS (
+         SELECT a.id, a.name, a.created_at
+           FROM agents a
+          WHERE ${where}
+          ORDER BY a.name, a.id
+          LIMIT $${params.length}
+       ), key_counts AS (
+         SELECT k.agent_id, count(*)::int AS total_key_count,
+                count(*) FILTER (WHERE k.revoked_at IS NULL)::int AS active_key_count
+           FROM api_keys k JOIN agent_page p ON p.id = k.agent_id
+          WHERE k.account_id = $1
+          GROUP BY k.agent_id
+       )
+       SELECT p.id, p.name, p.created_at,
+              COALESCE(key_counts.total_key_count, 0)::int AS total_key_count,
+              COALESCE(key_counts.active_key_count, 0)::int AS active_key_count
+         FROM agent_page p LEFT JOIN key_counts ON key_counts.agent_id = p.id
+        ORDER BY p.name, p.id`,
       params,
     );
     return response(collection(rows.rows as Row[], limit, (row) => row.name));
@@ -1832,10 +1849,30 @@ async function shareEndpoint(
     );
   }
   if (operation === 'shares' && request.method === 'GET') {
+    const pathValue = queryValue(url, 'path', 1024);
+    const filePath = pathValue === null ? null : canonicalPath(pathValue);
+    const countOnly = queryValue(url, 'countOnly', 1);
+    if (countOnly !== null && countOnly !== '1')
+      throw new ApiError('validation_error', 'countOnly must be 1.');
+    if (countOnly === '1') {
+      if (!filePath) throw new ApiError('validation_error', 'path is required for countOnly.');
+      const count = await getPool().query(
+        `SELECT count(*)::int AS count
+           FROM shares s JOIN files f ON f.id = s.file_id
+          WHERE s.drive_id = $1 AND f.drive_id = $1 AND f.path = $2
+            AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        [driveId, filePath],
+      );
+      return response({ count: count.rows[0]?.count ?? 0 });
+    }
     const { limit, cursor } = page(url);
     const decoded = decodeCursor(cursor, 'share');
     const params: unknown[] = [driveId];
-    let where = 's.drive_id = $1';
+    let where = 's.drive_id = $1 AND f.drive_id = $1';
+    if (filePath !== null) {
+      params.push(filePath);
+      where += ` AND f.path = $${params.length}`;
+    }
     if (decoded) {
       params.push(decoded.value, decoded.id);
       where += ` AND (s.created_at, s.id) > ($${params.length - 1}::timestamptz, $${params.length})`;
