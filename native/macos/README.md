@@ -4,6 +4,8 @@ The CLI registers a drive in Finder through Apple's File Provider framework. Fin
 
 The CLI holds the drive key. The extension connects to it over an authenticated loopback connection and discovers which operations the configured key permits.
 
+Agent Drive does not yet publish a signed macOS companion app. The npm release includes native Linux mount helpers for x64 and arm64. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it. Until a notarized zip is available from GitHub Releases, use the build and signing instructions below to prepare the companion app from source.
+
 ## Supported operations
 
 - Files can be read, created, edited, renamed, and deleted when the authenticated capability response grants each operation and the path is within the reported write scope.
@@ -55,9 +57,10 @@ node native/macos/native-finder-probe.mjs \
 ```
 
 The probe uses a random synthetic drive ID and a loopback-only fixture. It
-registers a disconnected synthetic File Provider domain after the helper exits;
-use a dedicated test macOS user and record the reported domain ID for later
-cleanup. Do not point it at a real drive or real files.
+registers a temporary synthetic File Provider domain, which the helper removes
+with an ownership check while it still owns the drive connection. Run it from a
+dedicated, signed-in test macOS account. Do not point it at a real drive or real
+files.
 
 ## Signing and public distribution
 

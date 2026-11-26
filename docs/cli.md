@@ -17,7 +17,7 @@ Run it without installing by putting `npx -y @dennisonbertram/agent-drive@latest
 npx -y @dennisonbertram/agent-drive@latest whoami
 ```
 
-The Linux npm package ships a native mount helper for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS requires the separate signed Agent Drive app; the CLI does not install it.
+The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS requires the separate signed Agent Drive app, which is not yet available as a public binary. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it. Until a notarized zip is available from GitHub Releases, use the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare it from source; the CLI does not install it.
 
 The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on `login`, or with `AGENT_DRIVE_API_URL`.
 
