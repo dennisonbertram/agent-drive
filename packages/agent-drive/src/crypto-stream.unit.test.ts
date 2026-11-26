@@ -210,6 +210,27 @@ describe('decryptWithFileKeyStream', () => {
     ).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 
+  it('preserves an upstream abort while reading ciphertext', async () => {
+    const plaintext = sequence(CHUNK_SIZE + 10);
+    const ciphertext = await seal(plaintext, RAW_KEY, sequence(8));
+    const sourceFailure = new DOMException('synthetic reader abort', 'AbortError');
+    async function* failingSource() {
+      yield ciphertext.subarray(0, HEADER_SIZE + CHUNK_SIZE + 16);
+      throw sourceFailure;
+    }
+
+    const chunks: Uint8Array[] = [];
+    let error: unknown;
+    try {
+      for await (const chunk of decryptWithFileKeyStream(failingSource(), RAW_KEY_B64))
+        chunks.push(chunk);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBe(sourceFailure);
+    expect(concat(chunks)).toEqual(plaintext.subarray(0, CHUNK_SIZE));
+  });
+
   it.each([
     ['empty', 0],
     ['a partial header', HEADER_SIZE - 1],

@@ -4,6 +4,13 @@ const TAG_SIZE = 16;
 const MAGIC = new Uint8Array([65, 68, 82, 86, 1]);
 const MAX_CHUNKS = 0x1_0000_0000;
 
+export class CryptoStreamSourceError extends Error {
+  constructor(readonly sourceError: unknown) {
+    super('The ciphertext source failed.');
+    this.name = 'CryptoStreamSourceError';
+  }
+}
+
 export function owned(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(bytes);
 }
@@ -44,8 +51,29 @@ class FragmentReader {
   private offset = 0;
   private finished = false;
 
-  constructor(source: AsyncIterable<Uint8Array>) {
-    this.iterator = source[Symbol.asyncIterator]();
+  constructor(
+    source: AsyncIterable<Uint8Array>,
+    private readonly markSourceErrors = false,
+  ) {
+    try {
+      this.iterator = source[Symbol.asyncIterator]();
+    } catch (error) {
+      throw this.sourceError(error);
+    }
+  }
+
+  private sourceError(error: unknown) {
+    return this.markSourceErrors && !(error instanceof CryptoStreamSourceError)
+      ? new CryptoStreamSourceError(error)
+      : error;
+  }
+
+  private async nextFragment() {
+    try {
+      return await this.iterator.next();
+    } catch (error) {
+      throw this.sourceError(error);
+    }
   }
 
   async read(length: number) {
@@ -54,7 +82,7 @@ class FragmentReader {
     while (written < length) {
       while (this.offset === this.fragment.length) {
         if (this.finished) throw new Error('Truncated stream.');
-        const next = await this.iterator.next();
+        const next = await this.nextFragment();
         if (next.done) {
           this.finished = true;
           throw new Error('Truncated stream.');
@@ -75,7 +103,7 @@ class FragmentReader {
   async expectEnd() {
     if (this.offset < this.fragment.length) throw new Error('Trailing stream bytes.');
     while (!this.finished) {
-      const next = await this.iterator.next();
+      const next = await this.nextFragment();
       if (next.done) {
         this.finished = true;
         return;
@@ -88,7 +116,11 @@ class FragmentReader {
   async cancel() {
     if (!this.finished) {
       this.finished = true;
-      await this.iterator.return?.();
+      try {
+        await this.iterator.return?.();
+      } catch (error) {
+        throw this.sourceError(error);
+      }
     }
   }
 }
@@ -180,7 +212,8 @@ export async function* openStream(
   key: CryptoKey,
   expectedCiphertextBytes?: number,
 ): AsyncGenerator<Uint8Array> {
-  const reader = new FragmentReader(source);
+  const reader = new FragmentReader(source, true);
+  let failed = false;
   try {
     const header = await reader.read(HEADER_SIZE);
     const { size, ciphertextBytes } = parseHeader(header);
@@ -208,8 +241,12 @@ export async function* openStream(
     }
     if (consumed !== ciphertextBytes) throw new Error('Incorrect ciphertext length.');
     await reader.expectEnd();
+  } catch (error) {
+    failed = true;
+    throw error;
   } finally {
-    await reader.cancel();
+    if (failed) await reader.cancel().catch(() => undefined);
+    else await reader.cancel();
   }
 }
 

@@ -1,4 +1,12 @@
-import { encryptedSize, open, openStream, owned, seal, sealStream } from './crypto-format.ts';
+import {
+  CryptoStreamSourceError,
+  encryptedSize,
+  open,
+  openStream,
+  owned,
+  seal,
+  sealStream,
+} from './crypto-format.ts';
 import { unsealFileKeyFromInbox, unwrapInboxPrivateKey, type TraceInbox } from './trace-inbox.ts';
 
 export { CHUNK_SIZE, encryptedSize, plaintextSize } from './crypto-format.ts';
@@ -204,7 +212,8 @@ export function decryptWithFileKeyStream(
         keyBytes.fill(0);
       }
       yield* openStream(source, key, expectedCiphertextBytes);
-    } catch {
+    } catch (error) {
+      if (error instanceof CryptoStreamSourceError) throw error.sourceError;
       throw failedDecryption();
     }
   })();
