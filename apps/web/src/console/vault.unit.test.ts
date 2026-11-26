@@ -1188,6 +1188,61 @@ describe('Vault passkey', () => {
     ...extra,
   });
 
+  it('refreshes a cached slot when another tab may have repaired it', async () => {
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => {
+        reads += 1;
+        return { items: [reads === 1 ? badSlot : goodSlot], nextCursor: null };
+      },
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(await vault.ensureSlot(DRIVE)).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(otherKey);
+    expect(await vault.ensureSlot(DRIVE, true)).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(driveKey);
+    expect(reads).toBe(2);
+  }, 30_000);
+
+  it('preserves a locally repaired slot when an older refresh finishes late', async () => {
+    const refresh = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => {
+        reads += 1;
+        return reads === 1 ? { items: [badSlot], nextCursor: null } : refresh.promise;
+      },
+      [`drives/${DRIVE}/account-key`]: () => ({ revision: 5 }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    const refreshing = vault.ensureSlot(DRIVE, true);
+    await vi.waitFor(() => expect(reads).toBe(2));
+    expect(await vault.addKey(DRIVE, driveKey)).toBe('added');
+    refresh.resolve({ items: [badSlot], nextCursor: null });
+    expect(await refreshing).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(driveKey);
+  }, 30_000);
+
+  it('clears only a cached slot confirmed absent by a refresh', async () => {
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(badSlot),
+      'account-key/slots': () => ({
+        items: reads++ === 0 ? [badSlot] : [],
+        nextCursor: null,
+      }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(true);
+    expect(await vault.ensureSlot(DRIVE, true)).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+
   it('unlocks with the passkey assertion and installs slots plus the browser key', async () => {
     const privateKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
     passkeyUnlock.mockResolvedValue(privateKey);
@@ -1401,6 +1456,16 @@ describe('vaultRequest', () => {
 
     it('verifyKey checks a v1 file', async () => {
       const { vault } = makeVault();
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
+      expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
+    });
+
+    it('verifyKey checks a retained file path when it is supplied from Trash', async () => {
+      const { vault } = makeVault(
+        {},
+        async () => envelope,
+        async () => '/deleted.txt',
+      );
       expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
       expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
     });

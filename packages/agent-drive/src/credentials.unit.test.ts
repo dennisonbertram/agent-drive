@@ -235,6 +235,78 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
     expect(await resolveDriveKey(E1, 'https://other.test/api', undefined, config)).toBeUndefined();
     expect(unbackedUp(config, [E1])).toEqual([]);
   });
+
+  it.each([
+    ['explicit bundle origin', 'https://bundle.test'],
+    ['legacy bundle origin', undefined],
+  ])('does not bind a different saved key to a %s', async (_label, bundleKeyOrigin) => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://bundle.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'bundle-token');
+    const bundleKey = generateDriveKey();
+    const savedKey = generateDriveKey();
+    await writeConfig({ driveKeys: { [E1]: savedKey } });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://bundle.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [E1]: bundleKey },
+        driveKeyOrigins: bundleKeyOrigin ? { [E1]: bundleKeyOrigin } : {},
+      }),
+    );
+    const merged = await loadConfig();
+    expect(merged.driveKeys?.[E1]).toBe(savedKey);
+    expect(merged.driveKeyOrigins?.[E1]).toBeUndefined();
+    expect(await resolveDriveKey(E1, 'https://bundle.test/api', undefined, merged)).toBeUndefined();
+  });
+
+  it('backfills a legacy bundle origin for the same saved key bytes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://bundle.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'bundle-token');
+    const key = generateDriveKey();
+    await writeConfig({ driveKeys: { [E1]: key } });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://bundle.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    const merged = await loadConfig();
+    expect(merged.driveKeyOrigins?.[E1]).toBe('https://bundle.test');
+    expect(await resolveDriveKey(E1, 'https://bundle.test/api', undefined, merged)).toBe(key);
+  });
+
+  it('issues an explicit environment drive key for the selected origin', async () => {
+    const { key } = await setup();
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://other.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'other-token');
+    vi.stubEnv('AGENT_DRIVE_KEY', key);
+    const output = io(false);
+    await issueCredentials({ name: 'agent', drive: D1, stdout: true }, output, async () => ({
+      id: 'issued',
+      agent_id: 'agent-under-test',
+      label: 'issued key',
+      drive_ids: [D1],
+      scopes: ['read'],
+      created_at: '2026-01-01T00:00:00Z',
+      token: 'issued-token',
+    }));
+    const bundle = decodeBundle(output.out.join('').trim().replace('AGENT_DRIVE_CREDENTIALS=', ''));
+    expect(bundle.apiUrl).toBe('https://other.test/api');
+    expect(bundle.driveKeyOrigins[D1]).toBe('https://other.test');
+    expect(bundle.driveKeys[D1]).toBe(key);
+  });
 });
 
 describe('login replacing the API key', () => {
@@ -280,6 +352,36 @@ describe('env bundle reporting', () => {
     });
     const urls = fetcher.mock.calls.map((call) => (call as unknown as [string])[0]);
     expect(urls).toEqual([`https://x.test/api/v1/drives/${IA}/key-backup`]);
+  });
+
+  it('reports a legacy bundle key after its own origin is safely backfilled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    await writeConfig({ apiUrl: 'https://saved.test/api' });
+    const key = generateDriveKey();
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://legacy.test/api',
+        apiKey: 'legacy-token',
+        driveKeys: { [IA]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    vi.resetModules();
+    const fresh = await import('./credentials.js');
+    const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
+    await fresh.reportEnvBackups('https://legacy.test/api', 'legacy-token', {
+      fetch: fetcher as unknown as typeof fetch,
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      `https://legacy.test/api/v1/drives/${IA}/key-backup`,
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });
 

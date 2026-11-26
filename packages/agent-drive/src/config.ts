@@ -398,5 +398,10 @@ export async function resolveDriveKey(
   // A saved drive key goes only to the origin it was recorded for; explicit env and
   // --key-file keys keep their precedence at any origin.
   const origin = originOf(apiUrl);
-  return origin === undefined ? undefined : keysForOrigin(config ?? {}, origin)[driveId];
+  if (origin === undefined) return undefined;
+  const saved = config ?? {};
+  const key = saved.driveKeys?.[driveId];
+  return key !== undefined && saved.driveKeyOrigins?.[driveId] === origin && isValidDriveKey(key)
+    ? key
+    : undefined;
 }

@@ -495,10 +495,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           return wrapped;
         },
         anyPath: async (driveId) => {
-          const result = await api<{ items: { path: string; kind?: string }[] }>(
-            `drives/${driveId}/list?limit=1`,
+          const result = await api<{ items: { path: string }[] }>(
+            `drives/${driveId}/search?limit=1`,
           );
-          return result.items.find((item) => item.kind !== 'folder')?.path;
+          const live = result.items[0]?.path;
+          if (live) return live;
+          // Trash retains versions too. Check one retained path so a key can still be proven
+          // when every file has been deleted.
+          const trash = await api<{ items: { path: string }[] }>(`drives/${driveId}/trash?limit=1`);
+          return trash.items[0]?.path;
         },
         inbox: async (driveId) =>
           (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
@@ -1159,7 +1164,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal(name);
   }
   function close() {
-    if (!busy) {
+    if (modal === 'preview' || !busy) {
       setPendingAction(null);
       actionEpoch.current += 1;
       vault.cancelUnlock();
@@ -1418,20 +1423,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   async function openPreview(file: FileEntry, key?: string) {
-    key ??= await keyFor(file, 'preview');
-    if (!key) return;
-    const name = file.path.split('/').at(-1) || file.path;
     const mine = ++previewRequest.current;
+    const name = file.path.split('/').at(-1) || file.path;
     const show = (view: PreviewView) => {
       if (mine === previewRequest.current) setPreview({ file, view });
     };
     open('preview');
+    show({ status: 'loading' });
     const kind = previewKind(name);
     const listed = Number(file.ciphertext_size ?? 0);
     if (kind === 'none') return show({ status: 'unsupported' });
     if (listed > PREVIEW_MAX_BYTES) return show({ status: 'too-large', sizeLabel: size(listed) });
-    show({ status: 'loading' });
     try {
+      key ??= await keyFor(file, 'preview');
+      if (mine !== previewRequest.current || !key) return;
       // Pin the listed version, so the size checked above is the size fetched.
       const bytes = await fetchPlaintext(selected, file.path, key, file.version_id);
       if (bytes.length > PREVIEW_MAX_BYTES)
@@ -1718,6 +1723,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (pending.driveId === selected) openTraces({ key, source });
       return;
     }
+    // Recovery keys must not enter the cache or account until the recovery export verifies them.
+    if (pending?.kind === 'recovery') {
+      if (pending.driveId === selected) void act(() => downloadRecovery(key, source));
+      return;
+    }
     setDriveKeys((current) => ({ ...current, [selected]: key }));
     keySources.current.set(selected, source);
     // A key the user supplied also goes into the account, once it opens a real file.
@@ -1734,14 +1744,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
     else if (pending.kind === 'share') void openShare(pending.file, key);
-    else if (pending.kind === 'recovery') void act(() => downloadRecovery(key));
     else void act(() => download(pending.file, key));
   }
 
   function resume(pending: NonNullable<typeof pendingAction>) {
     if (pending.kind === 'webhook') void act(resumeWebhook);
     else if (pending.kind === 'recovery') void act(() => downloadRecovery());
-    else if (pending.kind === 'preview') void act(() => openPreview(pending.file));
+    else if (pending.kind === 'preview') void openPreview(pending.file);
     else if (pending.kind === 'share') void act(() => openShare(pending.file));
     else void act(() => download(pending.file));
   }
@@ -1847,20 +1856,43 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     );
   }
 
-  async function downloadRecovery(suppliedKey?: string) {
+  async function downloadRecovery(
+    suppliedKey?: string,
+    suppliedSource?: Exclude<Source, 'trusted'>,
+  ) {
     const driveId = selected;
     const mark = actionEpoch.current;
     const epoch = vault.epochNow;
     const current = () => mark === actionEpoch.current && epoch === vault.epochNow;
     let key = suppliedKey ?? driveKeys[driveId];
+    const rejectKey = (rejectedKey: string, message: string): never => {
+      setDriveKeys((current) => {
+        if (current[driveId] !== rejectedKey) return current;
+        const next = { ...current };
+        delete next[driveId];
+        return next;
+      });
+      if (driveKeys[driveId] === rejectedKey) keySources.current.delete(driveId);
+      setPendingAction({ driveId, kind: 'recovery' });
+      setRecoveryNote(message);
+      setUnlockMode('recovery');
+      open('unlock');
+      throw new Error(message);
+    };
     let fromAccount = false;
+    let invalidAccountSlot = false;
     if (!key && vault.status === 'unlocked' && !drive?.agentOnly) {
       const enrolled = await vault.ensureSlot(driveId);
       if (!current()) return;
       if (enrolled) {
         key = (await vault.slotKey(driveId)) ?? undefined;
         if (!current()) return;
-        if (!key) throw new Error(MISMATCH);
+        if (!key) {
+          invalidAccountSlot = true;
+          if (await vault.ensureSlot(driveId, true))
+            key = (await vault.slotKey(driveId)) ?? undefined;
+          if (!current()) return;
+        }
         fromAccount = true;
       }
     }
@@ -1868,27 +1900,47 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       actionEpoch.current += 1;
       setPendingAction({ driveId, kind: 'recovery' });
       setRecoveryNote(
-        drive?.agentOnly ? AGENT_ONLY : 'No usable copy of this key is in your account.',
+        drive?.agentOnly
+          ? AGENT_ONLY
+          : invalidAccountSlot
+            ? MISMATCH
+            : 'No usable copy of this key is in your account.',
       );
       setUnlockMode(vault.status === 'locked' && !drive?.agentOnly ? unlockEntry() : 'recovery');
       open('unlock');
       return;
     }
-    const source = fromAccount
+    let source: Source = fromAccount
       ? 'vault'
-      : keySourceFor(trustedDrives.current.get(driveId), keySources.current.get(driveId), key);
+      : (suppliedSource ??
+        keySourceFor(trustedDrives.current.get(driveId), keySources.current.get(driveId), key));
     if (source !== 'trusted') {
-      const verdict = await vault.verifyKey(driveId, key);
+      let verdict = await vault.verifyKey(driveId, key);
       if (!current()) return;
-      if (verdict === 'mismatch') throw new Error(MISMATCH);
-      if (verdict === 'unverifiable' && source === 'pasted')
-        throw new Error(
-          'This empty drive needs a recovery file or credentials bundle to confirm the key belongs to it.',
+      // Another tab may have repaired this account slot while the current tab was unlocked.
+      if (fromAccount && (verdict === 'mismatch' || verdict === 'unverifiable')) {
+        if (await vault.ensureSlot(driveId, true)) {
+          const refreshed = await vault.slotKey(driveId);
+          if (!current()) return;
+          if (refreshed) {
+            key = refreshed;
+            verdict = await vault.verifyKey(driveId, key);
+            if (!current()) return;
+          }
+        }
+      }
+      if (verdict === 'mismatch') rejectKey(key, MISMATCH);
+      if (verdict === 'unverifiable' && source !== 'recovery-file')
+        rejectKey(
+          key,
+          'This drive has no file or trace inbox to confirm the key. Use a recovery file for an empty drive.',
         );
     }
-    if (fromAccount) {
+    if (fromAccount || suppliedKey) {
       setDriveKeys((keys) => ({ ...keys, [driveId]: key }));
-      keySources.current.set(driveId, 'vault');
+      keySources.current.set(driveId, source);
+      if (suppliedKey && vault.status === 'unlocked' && !drive?.agentOnly)
+        void addToAccount(driveId, key, undefined, true);
     }
     saveRecoveryFile(driveId, key);
     setKeylineConfirm(driveId);
@@ -2628,7 +2680,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       title={`Preview ${row.name}`}
                                       data-path={file.path}
                                       onClick={() => {
-                                        if (!busy) void act(() => openPreview(file));
+                                        if (!busy) void openPreview(file);
                                       }}
                                     >
                                       <FileIcon kind={fileKind(row.name)} />
@@ -3300,10 +3352,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           className={modal === 'preview' ? 'preview' : undefined}
           onClose={close}
           closable={
-            !busy &&
-            !(modal === 'traces' && tracesBusy) &&
-            modal !== 'driveReceipt' &&
-            modal !== 'keyReceipt'
+            modal === 'preview' ||
+            (!busy &&
+              !(modal === 'traces' && tracesBusy) &&
+              modal !== 'driveReceipt' &&
+              modal !== 'keyReceipt')
           }
         >
           {modal !== 'unlock' && errorBanner}

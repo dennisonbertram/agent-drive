@@ -47,13 +47,9 @@ function wrapAad(record: AccountKeyRecord, credentialId: Uint8Array): Uint8Array
   );
 }
 
-/** The credential's user handle: the account UUID sanitized to its 16-byte form. */
-function userHandle(accountId: string): Uint8Array<ArrayBuffer> {
-  const hex = accountId.replaceAll('-', '');
-  if (!/^[0-9a-fA-F]{32}$/u.test(hex)) throw new Error(RECORD_INVALID);
-  const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i += 1) bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-  return bytes;
+/** A random, per-enrollment WebAuthn handle; the cryptographic wrap remains bound by wrapAad. */
+function userHandle(): Uint8Array<ArrayBuffer> {
+  return globalThis.crypto.getRandomValues(new Uint8Array(32));
 }
 
 const freshChallenge = () => globalThis.crypto.getRandomValues(new Uint8Array(32));
@@ -116,7 +112,7 @@ export async function enrollAccountPasskey(
     publicKey: {
       challenge: freshChallenge(),
       rp: { name: 'Agent Drive' },
-      user: { id: userHandle(record.accountId), name: userName, displayName: userName },
+      user: { id: userHandle(), name: userName, displayName: userName },
       pubKeyCredParams: [
         { type: 'public-key', alg: -7 }, // ES256
         { type: 'public-key', alg: -8 }, // EdDSA

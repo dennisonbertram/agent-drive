@@ -454,15 +454,19 @@ describe('account key passkey: enrollment', () => {
     const f = await fixture();
     const body = await setup(f);
     const hold = await held(keyLock, [f.accountId], noop);
-    const enroll = () =>
-      call(f.userId, 'account-key/passkey', 'POST', enrollBody(body.id, 1, passkey()));
-    const both = Promise.all([enroll(), enroll()]);
+    const first = enrollBody(body.id, 1, passkey());
+    const second = enrollBody(body.id, 1, passkey());
+    const both = Promise.all([
+      call(f.userId, 'account-key/passkey', 'POST', first),
+      call(f.userId, 'account-key/passkey', 'POST', second),
+    ]);
     await hold.waitForBlocked(1, 1);
     await hold.waitForBlocked(1, 2);
     await hold.finish();
-    expect((await both).map((r) => r.status).sort()).toEqual([200, 409]);
+    const results = await both;
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
     const wrap = await storedWrap(f.accountId);
-    expect(wrap).not.toBeNull();
+    expect([first.passkey, second.passkey]).toContainEqual(wrap);
   });
 });
 

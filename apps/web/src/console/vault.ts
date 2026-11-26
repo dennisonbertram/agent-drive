@@ -496,23 +496,46 @@ export class Vault {
   }
 
   /** An agent may have enrolled this drive since the browser unlocked. Retry misses on demand. */
-  async ensureSlot(driveId: string): Promise<boolean> {
-    if (this.hasSlot(driveId)) return true;
+  async ensureSlot(driveId: string, refreshCached = false): Promise<boolean> {
+    if (this.hasSlot(driveId) && !refreshCached) return true;
     const record = this.record;
     if (!record || !this.privateKey) return false;
     const seq = this.unlockSeq;
     const epoch = this.epoch;
-    const pendingKey = `${epoch}/${seq}/${driveId}`;
+    const originalSlot = this.slots.get(driveId);
+    const originalRevision = this.slotRevisions.get(driveId);
+    const pendingKey = `${epoch}/${seq}/${driveId}/${refreshCached ? 'refresh' : 'cached'}`;
     const pending = this.ensuring.get(pendingKey);
     if (pending) return pending;
     const request = this.fetchSlots(record.id, driveId).then(({ slots, revisions }) => {
       if (record !== this.record || epoch !== this.epoch || seq !== this.unlockSeq) return false;
-      // A key loaded or repaired in this tab while the request was in flight wins.
-      if (this.hasSlot(driveId)) return true;
+      // A key loaded or repaired in this tab while a refresh was in flight wins over its older
+      // response. Compare both the slot object and revision so the request cannot restore stale
+      // data after a local repair.
+      const currentSlot = this.slots.get(driveId);
+      const currentRevision = this.slotRevisions.get(driveId);
+      if (refreshCached) {
+        if (currentSlot !== originalSlot || currentRevision !== originalRevision)
+          return Boolean(currentSlot);
+      } else if (currentSlot) {
+        return true;
+      }
       const revision = revisions.get(driveId);
-      if (revision !== undefined) this.slotRevisions.set(driveId, revision);
       const slot = slots.get(driveId);
-      if (!slot) return false;
+      if (!slot) {
+        if (
+          refreshCached &&
+          this.slots.get(driveId) === originalSlot &&
+          this.slotRevisions.get(driveId) === originalRevision
+        ) {
+          this.slots.delete(driveId);
+          if (this.slotRevisions.get(driveId) === originalRevision)
+            this.slotRevisions.delete(driveId);
+          this.emit();
+        }
+        return false;
+      }
+      if (revision !== undefined) this.slotRevisions.set(driveId, revision);
       this.slots.set(driveId, slot);
       this.emit();
       return true;
