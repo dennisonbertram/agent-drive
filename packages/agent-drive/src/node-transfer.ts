@@ -70,6 +70,42 @@ function abortError(signal: AbortSignal) {
   return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
 
+type DestinationSnapshot = { dev: number; ino: number; mode: number };
+
+function destinationChangedError(message = 'Output path changed during download.') {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = 'OUTPUT_PATH_CHANGED';
+  return error;
+}
+
+async function destinationStat(outputPath: string) {
+  try {
+    return await lstat(outputPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function assertDestinationUnchanged(
+  outputPath: string,
+  expected: DestinationSnapshot | undefined,
+) {
+  const existing = await destinationStat(outputPath);
+  if (!existing && !expected) return;
+  if (!existing || !expected) throw destinationChangedError();
+  if (existing.isSymbolicLink())
+    throw destinationChangedError('Refusing to write through a symlink.');
+  if (!existing.isFile()) throw destinationChangedError('Output path must be a regular file.');
+  if (
+    existing.dev !== expected.dev ||
+    existing.ino !== expected.ino ||
+    (existing.mode & 0o777) !== expected.mode
+  ) {
+    throw destinationChangedError();
+  }
+}
+
 /** Download to a private temporary file, then atomically publish only a fully verified result. */
 export async function getFile(
   client: GetClient,
@@ -84,6 +120,23 @@ export async function getFile(
   const overwrite = options.overwrite ?? false;
   const outputDirectory = dirname(outputPath);
   let versionId = options.versionId;
+  const initialDestinationStat = await destinationStat(outputPath);
+  if (initialDestinationStat?.isSymbolicLink())
+    throw new Error('Refusing to write through a symlink.');
+  if (initialDestinationStat && !initialDestinationStat.isFile())
+    throw new Error('Output path must be a regular file.');
+  if (initialDestinationStat && !overwrite) {
+    const error = new Error(`Output already exists: ${outputPath}`) as NodeJS.ErrnoException;
+    error.code = 'EEXIST';
+    throw error;
+  }
+  const existingDestination = initialDestinationStat
+    ? {
+        dev: initialDestinationStat.dev,
+        ino: initialDestinationStat.ino,
+        mode: initialDestinationStat.mode & 0o777,
+      }
+    : undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (options.signal?.aborted) throw abortError(options.signal);
@@ -93,24 +146,7 @@ export async function getFile(
     let stream: Awaited<ReturnType<GetClient['getStream']>> | undefined;
     let abortListener: (() => void) | undefined;
     try {
-      let existingDestination: { dev: number; ino: number; mode: number } | undefined;
-      try {
-        const existing = await lstat(outputPath);
-        if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
-        if (!existing.isFile()) throw new Error('Output path must be a regular file.');
-        if (!overwrite) {
-          const error = new Error(`Output already exists: ${outputPath}`) as NodeJS.ErrnoException;
-          error.code = 'EEXIST';
-          throw error;
-        }
-        existingDestination = {
-          dev: existing.dev,
-          ino: existing.ino,
-          mode: existing.mode & 0o777,
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+      await assertDestinationUnchanged(outputPath, existingDestination);
 
       stream = await client.getStream(driveId, remotePath, {
         ...(versionId ? { versionId } : {}),
@@ -151,31 +187,10 @@ export async function getFile(
       await handle.sync();
       if (options.signal?.aborted) throw abortError(options.signal);
 
-      const assertDestinationUnchanged = async () => {
-        if (!existingDestination) throw new Error('Output path changed during download.');
-        let existing;
-        try {
-          existing = await lstat(outputPath);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-            throw new Error('Output path changed during download.');
-          throw error;
-        }
-        if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
-        if (!existing.isFile()) throw new Error('Output path must be a regular file.');
-        if (
-          existing.dev !== existingDestination.dev ||
-          existing.ino !== existingDestination.ino ||
-          (existing.mode & 0o777) !== existingDestination.mode
-        ) {
-          throw new Error('Output path changed during download.');
-        }
-      };
-
       if (overwrite && existingDestination) {
         // Keep the temporary plaintext owner-only through the stream, and don't restore stale
         // permissions if the destination was replaced or chmodded while downloading.
-        await assertDestinationUnchanged();
+        await assertDestinationUnchanged(outputPath, existingDestination);
         await handle.chmod(existingDestination.mode);
         await handle.sync();
       }
@@ -186,7 +201,7 @@ export async function getFile(
 
       if (overwrite && existingDestination) {
         // Recheck immediately before the atomic replacement.
-        await assertDestinationUnchanged();
+        await assertDestinationUnchanged(outputPath, existingDestination);
         await rename(temporaryPath, outputPath);
       } else {
         // A hard link publishes a new file without replacing a path created during the download.
@@ -202,12 +217,14 @@ export async function getFile(
       const code = (error as NodeJS.ErrnoException)?.code;
       const terminalApiFailure =
         error instanceof AgentDriveApiError && error.status >= 400 && error.status < 500;
+      const terminalDestinationChange = code === 'OUTPUT_PATH_CHANGED';
       // getStream has not exposed a selected version yet; retrying "latest" could switch versions.
       const unpinnedLatestFailedBeforeSelection = !versionId && !stream;
       if (
         attempt === retries ||
         code === 'EEXIST' ||
         terminalApiFailure ||
+        terminalDestinationChange ||
         unpinnedLatestFailedBeforeSelection ||
         options.signal?.aborted ||
         (error instanceof Error && error.name === 'AbortError')

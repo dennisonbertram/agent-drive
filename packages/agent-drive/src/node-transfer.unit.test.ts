@@ -148,21 +148,26 @@ describe('Node file transfer helpers', () => {
     const destination = join(directory, 'output');
     await writeFile(destination, 'old contents');
     await chmod(destination, 0o644);
+    let attempts = 0;
     const client = {
-      getStream: async () => ({
-        plaintext: (async function* () {
-          await chmod(destination, 0o600);
-          yield new TextEncoder().encode('new contents');
-        })(),
-        plaintextBytes: 12,
-        version,
-        cancel: async () => {},
-      }),
+      getStream: async () => {
+        attempts++;
+        return {
+          plaintext: (async function* () {
+            if (attempts === 1) await chmod(destination, 0o600);
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version,
+          cancel: async () => {},
+        };
+      },
     } as unknown as Pick<AgentDriveClient, 'getStream'>;
 
     await expect(
-      getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 }),
+      getFile(client, 'drive', '/remote', destination, { overwrite: true }),
     ).rejects.toThrow('Output path changed during download.');
+    expect(attempts).toBe(1);
     expect(await readFile(destination, 'utf8')).toBe('old contents');
     expect((await stat(destination)).mode & 0o777).toBe(0o600);
     expect((await readdir(directory)).sort()).toEqual(['output']);
@@ -173,24 +178,139 @@ describe('Node file transfer helpers', () => {
     const destination = join(directory, 'output');
     const movedOriginal = join(directory, 'original-output');
     await writeFile(destination, 'old contents');
+    let attempts = 0;
     const client = {
-      getStream: async () => ({
-        plaintext: (async function* () {
-          await rename(destination, movedOriginal);
-          await writeFile(destination, 'replacement created during download');
-          yield new TextEncoder().encode('new contents');
-        })(),
-        plaintextBytes: 12,
-        version,
-        cancel: async () => {},
-      }),
+      getStream: async () => {
+        attempts++;
+        return {
+          plaintext: (async function* () {
+            if (attempts === 1) {
+              await rename(destination, movedOriginal);
+              await writeFile(destination, 'replacement created during download');
+            }
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version,
+          cancel: async () => {},
+        };
+      },
     } as unknown as Pick<AgentDriveClient, 'getStream'>;
 
     await expect(
-      getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 }),
+      getFile(client, 'drive', '/remote', destination, { overwrite: true }),
     ).rejects.toThrow('Output path changed during download.');
+    expect(attempts).toBe(1);
     expect(await readFile(destination, 'utf8')).toBe('replacement created during download');
     expect(await readFile(movedOriginal, 'utf8')).toBe('old contents');
+  });
+
+  it('does not retry or overwrite a replacement made after a transient network failure', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    const movedOriginal = join(directory, 'original-output');
+    await writeFile(destination, 'old contents');
+    let attempts = 0;
+    const client = {
+      getStream: async () => {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            plaintext: (async function* () {
+              yield new TextEncoder().encode('partial');
+              await rename(destination, movedOriginal);
+              await writeFile(destination, 'replacement during retry');
+              throw new Error('temporary network failure');
+            })(),
+            plaintextBytes: 20,
+            version,
+            cancel: async () => {},
+          };
+        }
+        return {
+          plaintext: (async function* () {
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version,
+          cancel: async () => {},
+        };
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true }),
+    ).rejects.toThrow('Output path changed during download.');
+    expect(attempts).toBe(1);
+    expect(await readFile(destination, 'utf8')).toBe('replacement during retry');
+    expect(await readFile(movedOriginal, 'utf8')).toBe('old contents');
+    expect((await readdir(directory)).sort()).toEqual(['original-output', 'output']);
+  });
+
+  it('does not republish when an existing destination is removed during download', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    await writeFile(destination, 'old contents');
+    let attempts = 0;
+    const client = {
+      getStream: async () => {
+        attempts++;
+        return {
+          plaintext: (async function* () {
+            if (attempts === 1) await rm(destination);
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version,
+          cancel: async () => {},
+        };
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true }),
+    ).rejects.toThrow('Output path changed during download.');
+    expect(attempts).toBe(1);
+    await expect(readFile(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(directory)).sort()).toEqual([]);
+  });
+
+  it('does not overwrite a destination created between network attempts', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    let attempts = 0;
+    const client = {
+      getStream: async () => {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            plaintext: (async function* () {
+              yield new TextEncoder().encode('partial');
+              await writeFile(destination, 'appeared during retry');
+              throw new Error('temporary network failure');
+            })(),
+            plaintextBytes: 20,
+            version,
+            cancel: async () => {},
+          };
+        }
+        return {
+          plaintext: (async function* () {
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version,
+          cancel: async () => {},
+        };
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true }),
+    ).rejects.toThrow('Output path changed during download.');
+    expect(attempts).toBe(1);
+    expect(await readFile(destination, 'utf8')).toBe('appeared during retry');
+    expect((await readdir(directory)).sort()).toEqual(['output']);
   });
 
   it('forwards the plaintext cap to getStream before downloading', async () => {
