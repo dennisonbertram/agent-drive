@@ -38,7 +38,9 @@ export function egressMeteringConfigured() {
 
 export function meterDeliveryConfigured() {
   return (
-    configured(process.env.STRIPE_SECRET_KEY) && configured(process.env.STRIPE_METER_EVENT_NAME)
+    configured(process.env.STRIPE_SECRET_KEY) &&
+    stripeKeyMode() !== null &&
+    configured(process.env.STRIPE_METER_EVENT_NAME)
   );
 }
 
@@ -568,7 +570,8 @@ export async function sendMeterReportWithResponse(input: {
   cents: string;
   timestamp: number;
 }): Promise<Stripe.Response<Stripe.Billing.MeterEvent>> {
-  if (!meterDeliveryConfigured()) throw new Error('Stripe metering is not configured.');
+  if (!configured(process.env.STRIPE_METER_EVENT_NAME))
+    throw new Error('Stripe metering is not configured.');
   const client = stripe();
   return client.billing.meterEvents.create(
     {

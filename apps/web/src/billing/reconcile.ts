@@ -1,6 +1,10 @@
 import type Stripe from 'stripe';
 import { getPool, withTransaction } from '../db/client';
-import { findCheckoutRecoverySession, sendMeterReportWithResponse } from './providers';
+import {
+  findCheckoutRecoverySession,
+  meterDeliveryConfigured,
+  sendMeterReportWithResponse,
+} from './providers';
 import {
   checkoutReservationFromKey,
   classifyMeterDelivery,
@@ -183,6 +187,8 @@ export async function replayMeterReport(reportId: string, operatorId: string) {
       throw new Error(
         'This report is outside the 23-hour retry window. Verify the Stripe request log and use the operator attestation path if it proves acceptance.',
       );
+    if (!meterDeliveryConfigured())
+      throw new Error('Stripe metering is not configured; the report remains unchanged.');
     const lease = await client.query<{ lease_until: string }>(
       `UPDATE billing_meter_reports
           SET first_attempt_at=COALESCE(first_attempt_at,clock_timestamp()),

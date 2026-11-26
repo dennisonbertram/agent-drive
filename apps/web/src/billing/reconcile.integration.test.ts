@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 
 const providerMocks = vi.hoisted(() => ({
   findCheckoutRecoverySession: vi.fn(),
+  meterDeliveryConfigured: vi.fn(() => true),
   sendMeterReportWithResponse: vi.fn(),
 }));
 
@@ -257,6 +258,57 @@ it('replays a report with its original UUID and commits provider success plus au
   expect(audit.rows).toEqual([
     { action: 'meter_report_replayed', external_reference: 'req_providerfixture' },
   ]);
+});
+
+it('does not claim a report until local Stripe metering configuration is usable', async () => {
+  const accountId = await createDeletingAccount();
+  const reportId = await createBlockedReport(accountId);
+  providerMocks.meterDeliveryConfigured.mockReturnValueOnce(false);
+
+  await expect(replayMeterReport(reportId, 'operator-fixture')).rejects.toThrow();
+  const untouched = await pool.query<{
+    first_attempt_at: Date | null;
+    lease_until: Date | null;
+  }>('SELECT first_attempt_at,lease_until FROM billing_meter_reports WHERE id=$1', [reportId]);
+  expect(untouched.rows[0]).toEqual({ first_attempt_at: null, lease_until: null });
+  expect(providerMocks.sendMeterReportWithResponse).not.toHaveBeenCalled();
+
+  providerMocks.sendMeterReportWithResponse.mockResolvedValueOnce({
+    lastResponse: { requestId: 'req_configuredfixture' },
+  });
+  await expect(replayMeterReport(reportId, 'operator-fixture')).resolves.toMatchObject({
+    status: 'replayed',
+    reportId,
+  });
+
+  providerMocks.meterDeliveryConfigured.mockReturnValueOnce(false);
+  await expect(replayMeterReport(reportId, 'operator-fixture')).resolves.toMatchObject({
+    status: 'already-reported',
+  });
+
+  const priorAttemptReportId = await createBlockedReport(accountId);
+  await pool.query(
+    "UPDATE billing_meter_reports SET first_attempt_at=clock_timestamp()-interval '1 hour' WHERE id=$1",
+    [priorAttemptReportId],
+  );
+  const beforeRetry = await pool.query<{ first_attempt_at: Date }>(
+    'SELECT first_attempt_at FROM billing_meter_reports WHERE id=$1',
+    [priorAttemptReportId],
+  );
+  providerMocks.meterDeliveryConfigured.mockReturnValueOnce(false);
+  await expect(replayMeterReport(priorAttemptReportId, 'operator-fixture')).rejects.toThrow(
+    'Stripe metering is not configured',
+  );
+  const afterRetry = await pool.query<{
+    first_attempt_at: Date | null;
+    lease_until: Date | null;
+  }>('SELECT first_attempt_at,lease_until FROM billing_meter_reports WHERE id=$1', [
+    priorAttemptReportId,
+  ]);
+  expect(afterRetry.rows[0]).toEqual({
+    first_attempt_at: beforeRetry.rows[0]!.first_attempt_at,
+    lease_until: null,
+  });
 });
 
 it('recovers only a provider matched checkout and serializes racing operators', async () => {

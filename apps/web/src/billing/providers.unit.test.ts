@@ -21,6 +21,7 @@ import {
   checkoutConfigured,
   configured,
   egressMeteringConfigured,
+  meterDeliveryConfigured,
   processStripeWebhook,
   sendBillingEmail,
   sendMeterReport,
@@ -33,6 +34,20 @@ afterEach(() => {
 });
 
 describe('billing provider adapters', () => {
+  it('requires locally usable Stripe secret-key mode for meter delivery', () => {
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_meter_fixture');
+    vi.stubEnv('STRIPE_METER_EVENT_NAME', 'agent_drive_usage');
+    expect(meterDeliveryConfigured()).toBe(true);
+
+    vi.stubEnv('STRIPE_SECRET_KEY', 'pk_test_publishable_fixture');
+    expect(meterDeliveryConfigured()).toBe(false);
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_replace_me');
+    expect(meterDeliveryConfigured()).toBe(false);
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_meter_fixture');
+    vi.stubEnv('STRIPE_METER_EVENT_NAME', 'replace-me');
+    expect(meterDeliveryConfigured()).toBe(false);
+  });
+
   it('requires a real webhook configuration before enabling checkout', () => {
     for (const [key, value] of Object.entries({
       STRIPE_SECRET_KEY: 'sk_test_configuration_fixture',
