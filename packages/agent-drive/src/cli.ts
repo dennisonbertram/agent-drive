@@ -1020,7 +1020,8 @@ Commands:
   key create --agent ID --drive ID --label LABEL --scope read --scope write [--write-path P]...
   key revoke ID
   put LOCAL|- REMOTE --drive ID [--size N] [--if-version ID | --overwrite]
-                                        put - reads binary stdin; --size streams directly, otherwise stdin is privately spooled first
+                                        --size starts the 10-minute upload intent before stdin; input, upload and commit must fit.
+                                        Without it, stdin is spooled first; upload and commit then have 10 minutes.
   get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
   ls --drive ID [--prefix PATH | --folder PATH] [--sort path|modified] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   mv SOURCE DESTINATION --drive ID

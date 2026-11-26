@@ -94,7 +94,7 @@ agent add other agents" ticked.
 All take `--drive ID` unless noted. With one drive key saved for the current API, `--drive` can be left out.
 
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
-- `put - REMOTE [--size N] [--overwrite | --if-version ID]` reads bytes from stdin; `--size` enables direct streaming, while omitting it uses a private temporary spool with bounded memory
+- `put - REMOTE [--size N] [--overwrite | --if-version ID]` reads bytes from stdin; `--size` enables direct streaming but starts the 10-minute upload-intent window before stdin, while omitting it uses a private temporary spool before that window
 - `get REMOTE [--version ID] [--output FILE|-]`; use `--output FILE` for an atomic, fully verified result. `--output -` writes raw bytes to stdout without JSON or a newline, but can send partial bytes before a later verification error
 - `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO] [--cursor C] [--wait S]`
 - `versions PATH`, `restore PATH [--version ID]`, `mv`, `cp`, `rm`

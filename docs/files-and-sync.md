@@ -50,6 +50,8 @@ producer-command > "$tmp" && agent-drive put "$tmp" /work/generated.bin
 
 `--size` is optional and is checked before stdin is read. When supplied, stdin must contain exactly that many bytes; `--size 0` is valid. Existing `--overwrite` and `--if-version` guards work the same way as for a local file. The unknown-size path uses temporary disk space for the input.
 
+With `--size`, the CLI creates the upload intent before it reads stdin. The intent expires 10 minutes after creation, so producing the input, uploading it, and committing it must all finish within that window. Without `--size`, stdin is fully spooled before the intent is created; a slow producer does not use the 10-minute window, but the storage upload and commit still must finish before it expires.
+
 To replace a file, choose one of two flags. They cannot be combined.
 
 ```sh
