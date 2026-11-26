@@ -34,6 +34,7 @@ const errorHeadings: Record<string, string> = {
   share_unavailable: 'Shared file unavailable',
   'decryption-failed': "This link's key doesn't match this file",
   unavailable: 'Share unavailable',
+  'download-canceled': 'Download canceled',
 };
 
 const errorBodies: Record<string, string> = {
@@ -41,6 +42,7 @@ const errorBodies: Record<string, string> = {
   'decryption-failed':
     'The link is complete, but its key does not open this file. Ask the sender to copy the link again, or paste it below.',
   unavailable: 'The file could not be downloaded. Check your connection and try again.',
+  'download-canceled': 'No file was saved. You can try again when ready.',
   not_found:
     'This link does not match any shared file. Check the address, or ask the sender for a new link.',
   share_revoked:
@@ -251,9 +253,14 @@ export default function ShareClient({ id }: { id: string }) {
           'The download failed, and the temporary plaintext file could not be removed.',
         );
       });
-      if (reason instanceof DriveCryptoError && reason.code === 'decryption_failed') {
-        setErrorCode('decryption-failed');
-        setError("This link's key doesn't match this file");
+      if (
+        cancelRequested.current ||
+        controller.signal.aborted ||
+        (reason instanceof DOMException && reason.name === 'AbortError') ||
+        (reason instanceof DownloadSaveError && reason.code === 'aborted')
+      ) {
+        setErrorCode('unavailable');
+        setError('The download was canceled.');
       } else if (
         (reason instanceof DownloadSaveError && reason.code === 'unsupported-large-download') ||
         (reason instanceof DOMException && reason.name === 'QuotaExceededError')
@@ -265,14 +272,9 @@ export default function ShareClient({ id }: { id: string }) {
       } else if (reason instanceof DownloadSaveError && reason.code === 'save-gesture-required') {
         setErrorCode('save-picker-gesture');
         setError('Choose Save file again to open the browser file picker.');
-      } else if (
-        cancelRequested.current ||
-        controller.signal.aborted ||
-        (reason instanceof DOMException && reason.name === 'AbortError') ||
-        (reason instanceof DownloadSaveError && reason.code === 'aborted')
-      ) {
-        setErrorCode('unavailable');
-        setError('The download was canceled.');
+      } else if (reason instanceof DriveCryptoError && reason.code === 'decryption_failed') {
+        setErrorCode('decryption-failed');
+        setError("This link's key doesn't match this file");
       } else {
         setErrorCode(reason instanceof ShareError ? reason.code : 'unavailable');
         setError(reason instanceof Error ? reason.message : 'The file could not be decrypted.');
@@ -378,9 +380,9 @@ export default function ShareClient({ id }: { id: string }) {
                     ) : null}
                   </form>
                 ) : null}
-                {displayErrorCode === 'unavailable' ? (
+                {displayErrorCode === 'unavailable' || displayErrorCode === 'download-canceled' ? (
                   <button className="button share-retry" disabled={busy} onClick={retry}>
-                    Try again
+                    {displayErrorCode === 'download-canceled' ? 'Download again' : 'Try again'}
                   </button>
                 ) : null}
                 {displayErrorCode === 'large-download-memory' ? (
@@ -450,8 +452,8 @@ export default function ShareClient({ id }: { id: string }) {
                   onClick={() => {
                     cancelRequested.current = true;
                     activeDownload.current?.abort();
-                    setError('The download was canceled.');
-                    setErrorCode('unavailable');
+                    setError('No file was saved. You can try again when ready.');
+                    setErrorCode('download-canceled');
                   }}
                 >
                   Cancel download

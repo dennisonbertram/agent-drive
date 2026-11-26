@@ -565,7 +565,7 @@ test('share page: streams and verifies a 34 MiB download through OPFS', async ({
     await page.route(`${s3Origin}/**`, async (route) => {
       resolveRequest();
       try {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
         await route.abort().catch(() => undefined);
       } finally {
         resolveRoute();
@@ -578,6 +578,10 @@ test('share page: streams and verifies a 34 MiB download through OPFS', async ({
     await requestSeen;
     await page.getByRole('button', { name: 'Cancel download' }).click();
     await expect(page.getByTestId('share-error')).toBeVisible();
+    await expect(page.getByTestId('share-error-download-canceled')).toBeVisible();
+    await expect(page.getByTestId('share-error')).toContainText('No file was saved');
+    await expect(page.getByTestId('share-error-decryption-failed')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Download again' })).toBeVisible();
     await expect.poll(scratchCount).toBe(0);
     await routeFinished;
     await page.unroute(`${s3Origin}/**`);

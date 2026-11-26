@@ -1,5 +1,6 @@
 const DOWNLOAD_PREFIX = 'agent-drive-download-';
 const SCRATCH_MARKER = 'agent-drive-download-scratch';
+const SCRATCH_MARKER_LOCK = 'agent-drive-scratch-marker';
 const SMALL_DOWNLOAD_LIMIT = 32 * 1024 * 1024;
 const OPFS_DOWNLOAD_RETENTION_MS = 15 * 60 * 1000;
 
@@ -9,7 +10,7 @@ type SaveWritable = {
   abort(reason?: unknown): Promise<void>;
 };
 
-type SaveFileHandle = { createWritable(): Promise<SaveWritable> };
+type SaveFileHandle = { createWritable?: () => Promise<SaveWritable> };
 type SavePicker = (options: { suggestedName: string }) => Promise<SaveFileHandle>;
 type DownloadDirectory = {
   getFileHandle(
@@ -21,7 +22,7 @@ type DownloadDirectory = {
 };
 
 type NavigatorWithFiles = Omit<Navigator, 'storage'> & {
-  storage: { getDirectory?: () => Promise<DownloadDirectory> };
+  storage?: { getDirectory?: () => Promise<DownloadDirectory> };
   locks?: {
     request<T>(
       name: string,
@@ -74,6 +75,31 @@ function withLock<T>(
     : locks.request(name, callback);
 }
 
+function isWritable(value: unknown): value is SaveWritable {
+  if (!value || typeof value !== 'object') return false;
+  const writable = value as Partial<SaveWritable>;
+  return (
+    typeof writable.write === 'function' &&
+    typeof writable.close === 'function' &&
+    typeof writable.abort === 'function'
+  );
+}
+
+function isDownloadDirectory(value: unknown): value is DownloadDirectory {
+  if (!value || typeof value !== 'object') return false;
+  const directory = value as Partial<DownloadDirectory>;
+  return (
+    typeof directory.getFileHandle === 'function' &&
+    typeof directory.removeEntry === 'function' &&
+    typeof directory.entries === 'function'
+  );
+}
+
+function scratchDirectory() {
+  const nav = navigator as unknown as NavigatorWithFiles;
+  return nav.storage?.getDirectory;
+}
+
 async function removeScratch(directory: DownloadDirectory, name: string) {
   try {
     await directory.removeEntry(name);
@@ -86,43 +112,51 @@ async function removeScratch(directory: DownloadDirectory, name: string) {
 /** Delete abandoned scratch files without touching files another tab is writing. */
 export async function cleanupDownloadScratch() {
   const nav = navigator as unknown as NavigatorWithFiles;
-  const storage = nav.storage;
-  if (typeof storage.getDirectory !== 'function' || !nav.locks) return;
-  try {
-    if (localStorage.getItem(SCRATCH_MARKER) !== '1') return;
-  } catch {
-    // Private browsing can block localStorage; continue the cleanup without the hint.
-  }
-  let directory: DownloadDirectory;
-  try {
-    directory = await storage.getDirectory();
-  } catch {
-    return;
-  }
-  let scratchMayRemain = false;
-  for await (const [name] of directory.entries()) {
-    if (!name.startsWith(DOWNLOAD_PREFIX)) continue;
-    const removed = await withLock(
-      `agent-drive-scratch:${name}`,
-      async (lock) => {
-        if (!lock) return false;
-        try {
-          await removeScratch(directory, name);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      true,
-    ).catch(() => false);
-    if (!removed) scratchMayRemain = true;
-  }
-  try {
-    if (scratchMayRemain) localStorage.setItem(SCRATCH_MARKER, '1');
-    else localStorage.removeItem(SCRATCH_MARKER);
-  } catch {
-    // Cleanup remains safe if the browser disallows storage for the marker.
-  }
+  const getDirectory = scratchDirectory();
+  if (typeof getDirectory !== 'function' || typeof nav.locks?.request !== 'function') return;
+  await withLock(SCRATCH_MARKER_LOCK, async () => {
+    try {
+      if (localStorage.getItem(SCRATCH_MARKER) !== '1') return;
+    } catch {
+      // Private browsing can block localStorage; continue the cleanup without the hint.
+    }
+    let directory: DownloadDirectory;
+    try {
+      const candidate = await getDirectory.call(nav.storage);
+      if (!isDownloadDirectory(candidate)) return;
+      directory = candidate;
+    } catch {
+      return;
+    }
+    let scratchMayRemain = false;
+    try {
+      for await (const [name] of directory.entries()) {
+        if (!name.startsWith(DOWNLOAD_PREFIX)) continue;
+        const removed = await withLock(
+          `agent-drive-scratch:${name}`,
+          async (lock) => {
+            if (!lock) return false;
+            try {
+              await removeScratch(directory, name);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          true,
+        ).catch(() => false);
+        if (!removed) scratchMayRemain = true;
+      }
+    } catch {
+      scratchMayRemain = true;
+    }
+    try {
+      if (scratchMayRemain) localStorage.setItem(SCRATCH_MARKER, '1');
+      else localStorage.removeItem(SCRATCH_MARKER);
+    } catch {
+      // Cleanup remains safe if the browser disallows storage for the marker.
+    }
+  }).catch(() => undefined);
 }
 
 /**
@@ -142,15 +176,20 @@ export async function createDownloadSink(
   const small = expectedBytes <= SMALL_DOWNLOAD_LIMIT;
   const browser = window as WindowWithSavePicker;
   const nav = navigator as unknown as NavigatorWithFiles;
-  const canUseOpfs = Boolean(typeof nav.storage.getDirectory === 'function' && nav.locks);
+  const getDirectory = scratchDirectory();
+  const canUseOpfs = Boolean(typeof getDirectory === 'function' && nav.locks?.request);
   const useMemory = !small && options.allowLargeBlob === true;
 
-  if (!small && !useMemory && browser.showSaveFilePicker) {
+  if (!small && !useMemory && typeof browser.showSaveFilePicker === 'function') {
     try {
       const handle = await browser.showSaveFilePicker({ suggestedName: name });
-      const writable = await handle.createWritable();
-      return fileSink(writable, expectedBytes);
+      if (typeof handle?.createWritable === 'function') {
+        const writable = await handle.createWritable();
+        if (isWritable(writable)) return fileSink(writable, expectedBytes);
+      }
+      if (!canUseOpfs) throw new DownloadSaveError('unsupported-large-download');
     } catch (error) {
+      if (error instanceof DownloadSaveError) throw error;
       if (error instanceof DOMException && error.name === 'AbortError')
         throw new DownloadSaveError('aborted');
       // A picker can lose transient activation after an account-key unlock. Continue with
@@ -171,43 +210,50 @@ export async function createDownloadSink(
     await cleanupDownloadScratch();
     let directory: DownloadDirectory;
     try {
-      directory = await nav.storage.getDirectory!();
+      const candidate = await getDirectory!.call(nav.storage);
+      if (!isDownloadDirectory(candidate))
+        throw new DownloadSaveError('unsupported-large-download');
+      directory = candidate;
     } catch {
       throw new DownloadSaveError('unsupported-large-download');
     }
     const fileName = `${DOWNLOAD_PREFIX}${Date.now()}-${crypto.randomUUID()}.tmp`;
-    try {
-      localStorage.setItem(SCRATCH_MARKER, '1');
-    } catch {
-      // The scheduled cleanup and scratch-prefix sweep still run without the hint.
-    }
     let release!: () => void;
     let acquired!: () => void;
     const acquiredLock = new Promise<void>((resolve) => (acquired = resolve));
     const held = new Promise<void>((resolve) => (release = resolve));
     let lockFailure: unknown;
-    const lockRequest = withLock(`agent-drive-scratch:${fileName}`, async (lock) => {
-      if (!lock) throw new Error('A temporary download file could not be reserved.');
-      acquired();
-      await held;
-    }).catch((error: unknown) => {
-      lockFailure = error;
-      acquired();
-    });
-    await acquiredLock;
-    if (lockFailure) {
-      release();
-      throw lockFailure;
-    }
     let handle: Awaited<ReturnType<DownloadDirectory['getFileHandle']>> | undefined;
     let writable: SaveWritable | undefined;
+    let lockRequest!: Promise<unknown>;
     try {
-      handle = await directory.getFileHandle(fileName, { create: true });
-      writable = await handle.createWritable();
+      await withLock(SCRATCH_MARKER_LOCK, async () => {
+        try {
+          localStorage.setItem(SCRATCH_MARKER, '1');
+        } catch {
+          // The scheduled cleanup and scratch-prefix sweep still run without the hint.
+        }
+        lockRequest = withLock(`agent-drive-scratch:${fileName}`, async (lock) => {
+          if (!lock) throw new Error('A temporary download file could not be reserved.');
+          acquired();
+          await held;
+        }).catch((error: unknown) => {
+          lockFailure = error;
+          acquired();
+        });
+        await acquiredLock;
+        if (lockFailure) throw lockFailure;
+        handle = await directory.getFileHandle(fileName, { create: true });
+        if (typeof handle?.createWritable !== 'function')
+          throw new DownloadSaveError('unsupported-large-download');
+        const candidate = await handle.createWritable();
+        if (!isWritable(candidate)) throw new DownloadSaveError('unsupported-large-download');
+        writable = candidate;
+      });
     } catch (error) {
       await removeScratch(directory, fileName).catch(() => undefined);
       release();
-      await lockRequest.catch(() => undefined);
+      await lockRequest?.catch(() => undefined);
       throw error;
     }
 
@@ -282,12 +328,7 @@ export async function createDownloadSink(
     },
     async finish() {
       if (written !== expectedBytes) throw new Error('The downloaded file was incomplete.');
-      const blob = new Blob(
-        chunks.map((chunk) => new Uint8Array(chunk) as BlobPart),
-        {
-          type: 'application/octet-stream',
-        },
-      );
+      const blob = new Blob(chunks as BlobPart[], { type: 'application/octet-stream' });
       for (const chunk of chunks) chunk.fill(0);
       chunks.length = 0;
       settled = true;

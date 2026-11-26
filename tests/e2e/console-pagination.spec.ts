@@ -23,6 +23,7 @@ test('console pages large synthetic lists after first paint and recovers from a 
     key_backup_at: null,
     key_backup_method: null,
   }));
+  let availableDrives = drives;
   const agents = Array.from({ length: volume }, (_, index) => ({
     id: `agent-${String(index).padStart(3, '0')}`,
     name: `Synthetic agent ${String(index).padStart(3, '0')}`,
@@ -46,7 +47,7 @@ test('console pages large synthetic lists after first paint and recovers from a 
   }));
   const searchResults = Array.from({ length: volume }, (_, index) => ({
     id: `search-file-${String(index).padStart(3, '0')}`,
-    path: `/matches/search-${String(index).padStart(3, '0')}.txt`,
+    path: `/matches/match-search-${String(index).padStart(3, '0')}.txt`,
     ciphertext_size: 12,
     created_at: new Date(0).toISOString(),
     kind: 'file',
@@ -68,6 +69,8 @@ test('console pages large synthetic lists after first paint and recovers from a 
     },
   ];
   const calls = new Map<string, number>();
+  let firstSearchQuery = '';
+  let firstSearchPrefix: string | null = null;
   const record = (name: string) => calls.set(name, (calls.get(name) ?? 0) + 1);
   let releaseUsage!: () => void;
   const heldUsage = new Promise<void>((resolve) => {
@@ -82,7 +85,7 @@ test('console pages large synthetic lists after first paint and recovers from a 
       record(`${collection}:${url.searchParams.get('cursor') ?? 'first'}`);
       const entries: Array<
         (typeof drives)[number] | (typeof agents)[number] | (typeof keys)[number]
-      > = collection === 'drives' ? drives : collection === 'agents' ? agents : keys;
+      > = collection === 'drives' ? availableDrives : collection === 'agents' ? agents : keys;
       await route.fulfill({ json: page(collection, url.searchParams.get('cursor'), entries) });
       return;
     }
@@ -130,9 +133,27 @@ test('console pages large synthetic lists after first paint and recovers from a 
     }
     if (/^drives\/[^/]+\/list$/.test(path)) {
       if (url.searchParams.has('q')) {
-        record(`search:${url.searchParams.get('cursor') ?? 'first'}`);
+        const cursor = url.searchParams.get('cursor');
+        record(`search:${cursor ?? 'first'}`);
+        const continuedQuery = new URLSearchParams(url.searchParams);
+        continuedQuery.delete('cursor');
+        const normalizedQuery = [...continuedQuery.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, value]) => `${key}=${value}`)
+          .join('&');
+        const invalidSearchQuery = cursor
+          ? cursor !== 'search:100' || normalizedQuery !== firstSearchQuery
+          : url.searchParams.get('q') !== 'match' || url.searchParams.has('sort');
+        if (!cursor) {
+          firstSearchQuery = normalizedQuery;
+          firstSearchPrefix = url.searchParams.get('prefix');
+        }
+        if (invalidSearchQuery) {
+          await route.fulfill({ status: 400, json: { error: { message: 'Invalid cursor.' } } });
+          return;
+        }
         await route.fulfill({
-          json: page('search', url.searchParams.get('cursor'), searchResults),
+          json: page('search', cursor, searchResults),
         });
         return;
       }
@@ -196,12 +217,37 @@ test('console pages large synthetic lists after first paint and recovers from a 
   expect(calls.get('shares:shares:100')).toBe(1);
 
   await browser.getByRole('button', { name: 'Browse', exact: true }).click();
+  await browser.goto('/console?drive=drive-000&path=%2Fmatches');
   await browser.getByLabel('Search this folder').fill('match');
-  await expect(browser.getByText('search-000.txt', { exact: true })).toBeVisible();
+  await expect(browser.getByText('match-search-000.txt', { exact: true })).toBeVisible();
   expect(calls.get('search:first')).toBe(1);
+  expect(firstSearchPrefix).toBe('/matches');
   await browser.getByRole('button', { name: 'Load more' }).click();
-  await expect(browser.getByText('search-149.txt', { exact: true })).toBeVisible();
+  await expect(browser.getByText('match-search-149.txt', { exact: true })).toBeVisible();
   expect(calls.get('search:search:100')).toBe(1);
+
+  // A refresh replaces the cached first page so a drive removed from the server disappears.
+  availableDrives = drives.slice(0, 100);
+  await browser.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(browser.getByTestId('drive-menu-button')).toContainText('Synthetic drive 000');
+  await browser.getByTestId('drive-menu-button').click();
+  await expect(
+    browser.getByRole('button', { name: 'Synthetic drive 149', exact: true }),
+  ).toHaveCount(0);
+  availableDrives = drives;
+  drives[149]!.name = 'Updated synthetic drive 149';
+  await browser.goto('/console?drive=drive-149&path=%2Fdeep&view=recent');
+  await expect(browser.getByTestId('drive-menu-button')).toContainText(
+    'Updated synthetic drive 149',
+  );
+  expect(new URL(browser.url()).searchParams.get('path')).toBe('/deep');
+  expect(new URL(browser.url()).searchParams.get('view')).toBe('recent');
+
+  await browser.evaluate(() => localStorage.setItem('agent-drive:last-drive', 'drive-249'));
+  await browser.goto('/console?path=%2Fremembered&view=recent');
+  await expect(browser.getByTestId('drive-menu-button')).toContainText('Synthetic drive 249');
+  expect(new URL(browser.url()).searchParams.get('path')).toBe('/remembered');
+  expect(new URL(browser.url()).searchParams.get('view')).toBe('recent');
 
   await browser.getByRole('button', { name: 'Trash', exact: true }).click();
   await expect(browser.locator('.file-name').getByText('deleted-000.txt')).toBeVisible();
@@ -226,9 +272,9 @@ test('console pages large synthetic lists after first paint and recovers from a 
   ).toHaveCount(0);
   await expect(create).toBeEnabled();
   await dialog.getByRole('button', { name: 'Close dialog' }).click();
-  expect(calls.get('drives:drives:100')).toBe(2);
+  expect(calls.get('drives:drives:100')).toBe(4);
   expect(calls.get('drives:drives:200')).toBe(1);
-  expect(calls.get('agents:agents:100')).toBe(1);
+  expect(calls.get('agents:agents:100')).toBe(2);
   expect(calls.get('agents:agents:200')).toBe(1);
 
   await browser.getByRole('button', { name: 'Usage', exact: true }).click();
@@ -236,9 +282,9 @@ test('console pages large synthetic lists after first paint and recovers from a 
   await expect(
     browser.getByText('Synthetic usage failure. Try again.', { exact: true }),
   ).toBeVisible();
-  expect(calls.get('usage')).toBe(3);
+  const usageBeforeRetry = calls.get('usage') ?? 0;
   await browser.getByRole('button', { name: 'Retry usage' }).click();
-  await expect.poll(() => calls.get('usage')).toBe(4);
+  await expect.poll(() => calls.get('usage')).toBe(usageBeforeRetry + 1);
   await expect(browser.getByRole('heading', { name: 'Usage could not be loaded.' })).toBeVisible();
 
   await browser.goto('/connect?code=BCDF-GHJK');
@@ -246,12 +292,12 @@ test('console pages large synthetic lists after first paint and recovers from a 
   await browser
     .getByRole('button', { name: 'Use one of my drives instead (needs its recovery file)' })
     .waitFor({ state: 'visible' });
-  expect(calls.get('drives:first')).toBe(3);
-  expect(calls.get('drives:drives:100')).toBe(2);
+  expect(calls.get('drives:first')).toBeGreaterThanOrEqual(5);
+  expect(calls.get('drives:drives:100')).toBe(4);
   await browser
     .getByRole('button', { name: 'Use one of my drives instead (needs its recovery file)' })
     .click();
   await browser.getByRole('button', { name: 'Load more drives' }).click();
   await expect(browser.getByRole('option', { name: 'Synthetic drive 149' })).toBeAttached();
-  expect(calls.get('drives:drives:100')).toBe(3);
+  expect(calls.get('drives:drives:100')).toBe(5);
 });

@@ -78,7 +78,12 @@ type Drive = {
   key_backup_method?: string | null;
   agentOnly?: boolean;
 };
-type Agent = { id: string; name: string };
+type Agent = {
+  id: string;
+  name: string;
+  active_key_count: number;
+  total_key_count: number;
+};
 type ApiKey = {
   id: string;
   label: string;
@@ -589,6 +594,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [folderUsage, setFolderUsage] = useState<{ key: string; data: FolderUsage } | null>(null);
   const [folderFailure, setFolderFailure] = useState<{ key: string; message: string } | null>(null);
   const [chosenDrive, setSelected] = useState('');
+  const preferredDrive = useRef('');
   const [driveKeys, setDriveKeys] = useState<Record<string, string>>({});
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -626,7 +632,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [downloadingId, setDownloadingId] = useState('');
   const downloadAborters = useRef(new Map<string, AbortController>());
   const [memoryDownloadFile, setMemoryDownloadFile] = useState<FileEntry | null>(null);
-  const [pickerRetry, setPickerRetry] = useState<{ file: FileEntry; key: string } | null>(null);
+  const [pickerRetry, setPickerRetry] = useState<FileEntry | null>(null);
   // The row whose Download or Preview asked for the key; it continues once the key loads.
   const [pendingAction, setPendingAction] = useState<
     | { driveId: string; file: FileEntry; kind: 'download' | 'preview' | 'share' }
@@ -694,10 +700,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const sharedView = tab === 'Files' && view === 'shared';
   const urlDrive = params.get('drive');
   // Back and Forward change the drive in the URL; that wins over the last one chosen here.
-  const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
+  const requestedDrive = urlDrive || preferredDrive.current;
+  const selected =
+    (requestedDrive && drives.some((item) => item.id === requestedDrive) ? requestedDrive : '') ||
+    chosenDrive;
   const deepLinkPending = Boolean(
-    urlDrive &&
-      !drives.some((item) => item.id === urlDrive) &&
+    requestedDrive &&
+      !drives.some((item) => item.id === requestedDrive) &&
       (collectionPages.drives.cursor || collectionPages.drives.loading),
   );
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
@@ -714,7 +723,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   );
   const loadedFiles = fileItems.filter((file) => file.kind !== 'folder');
   const countKeys = (agentId: string) =>
-    apiKeys.filter((key) => key.agent_id === agentId && !key.revoked_at).length;
+    agents.find((agent) => agent.id === agentId)?.active_key_count ?? 0;
   const issuedBy = (id?: string | null) =>
     id ? `issued by ${agents.find((agent) => agent.id === id)?.name ?? 'another agent'}` : '';
   const activeKeyCount = apiKeys.filter((key) => !key.revoked_at).length;
@@ -777,7 +786,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The backend's current version, not the newest timestamp: concurrent writes can commit out of order.
   const newestVersionId = loadedFiles.find((file) => file.path === selectedPath)?.version_id;
   const hasKey = Boolean(driveKeys[selected]);
-  const sharedNow = shares?.driveId === selected ? shares : null;
+  const sharedNow = shares?.driveId === selected && !shares.path ? shares : null;
   const sharedShown = (sharedNow?.items ?? [])
     .filter((row) => row.path.toLowerCase().includes(query))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -830,6 +839,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }, []);
   const refresh = useCallback(async () => {
     const owner = ++refreshOwner.current;
+    preferredDrive.current =
+      new URLSearchParams(window.location.search).get('drive') || rememberedDrive() || '';
     collectionEpoch.current = {
       drives: collectionEpoch.current.drives + 1,
       agents: collectionEpoch.current.agents + 1,
@@ -842,8 +853,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         firstPage<ApiKey>('keys'),
       ]);
       if (owner !== refreshOwner.current) return;
-      // Keep previously loaded drives so Refresh cannot strand a selection from a later page.
-      const nextDrives = mergePage(drivePage.items, drivesNow.current).map((item) => {
+      // The first page is authoritative; stale cached rows must not survive a refresh.
+      const nextDrives = drivePage.items.map((item) => {
         const recorded = recordedBackups.current[item.id];
         return recorded && !item.key_backup_at
           ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
@@ -863,9 +874,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         agents: { cursor: agentPage.nextCursor, loading: false, error: '' },
         keys: { cursor: keyPage.nextCursor, loading: false, error: '' },
       });
-      setSelected((current) =>
-        nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives),
-      );
+      setSelected((current) => {
+        const requested = preferredDrive.current;
+        if (requested && drivePage.nextCursor) return current || pickDrive(nextDrives);
+        return nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives);
+      });
       setReady(true);
       setFileRefresh((value) => value + 1);
     } catch (reason) {
@@ -935,13 +948,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   useEffect(() => {
     // Preserve direct links to drives beyond the first page without delaying the first render.
     if (
-      urlDrive &&
-      !drives.some((item) => item.id === urlDrive) &&
+      requestedDrive &&
+      !drives.some((item) => item.id === requestedDrive) &&
       collectionCursors.current.drives
     )
       void loadCollectionPages('drives');
     // The loader is stable in behavior and reads the current cursor from a ref.
-  }, [urlDrive, drives]);
+  }, [requestedDrive, drives]);
 
   useEffect(() => {
     let active = true;
@@ -1034,7 +1047,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setMore({ key, loading: true, error: '', changed: false, done: '' });
     try {
       const searched = page.searched;
-      const browse = tab === 'Files' && view === 'browse' && !searched;
+      const browse = tab === 'Files' && view === 'browse';
       const recent = tab === 'Files' && view === 'recent';
       const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
       const query = new URLSearchParams({ limit: '100', cursor: page.next });
@@ -1185,9 +1198,19 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }, [restoredWatch, toasts, tab, listStatus, selected, filePage, hiddenRows]);
   // A drive in the URL that does not exist is replaced by the one that opened.
   useEffect(() => {
-    if (!ready || !selected || !urlDrive || drives.some((item) => item.id === urlDrive)) return;
-    window.history.replaceState(null, '', `?${new URLSearchParams({ drive: selected })}`);
-  }, [ready, selected, urlDrive, drives]);
+    if (
+      !ready ||
+      !selected ||
+      !urlDrive ||
+      !requestedDrive ||
+      drives.some((item) => item.id === requestedDrive)
+    )
+      return;
+    if (deepLinkPending) return;
+    const next = new URLSearchParams(window.location.search);
+    next.set('drive', selected);
+    window.history.replaceState(null, '', `${window.location.pathname}?${next}`);
+  }, [ready, selected, urlDrive, requestedDrive, drives, deepLinkPending]);
   useEffect(() => {
     if (!selected) return;
     try {
@@ -1357,6 +1380,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       closePreview();
       setShareFile(null);
       setModal(null);
+      if (modal === 'share' && sharedView && selected) void loadShares(selected);
       setError('');
     }
   }
@@ -1642,7 +1666,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           'The browser could not stage this large download to disk. Continuing may use memory equal to the file size.',
         );
       } else if (reason instanceof DownloadSaveError && reason.code === 'save-gesture-required') {
-        setPickerRetry({ file, key });
+        setPickerRetry(file);
         setNotice(
           'Your browser needs a fresh save click. Choose Save file again to select a destination.',
         );
@@ -1864,18 +1888,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     // Never delays the toast: once the delete is done, mention links that just stopped working.
     void moved.then(async (ok) => {
       if (!ok) return;
-      const held = sharesNow.current?.driveId === driveId ? sharesNow.current : null;
-      const items =
-        held?.status === 'ready' && !held.nextCursor
-          ? held.items
-          : await fetchAllShares(driveId).then(
-              (rows) => rows,
-              () => [],
-            );
-      const n = items.filter(
-        (row) =>
-          row.path === file.path && (row.status === 'active' || row.status === 'unavailable'),
-      ).length;
+      const n = await fetchShareCount(driveId, file.path).catch(() => 0);
       if (!n) return;
       const message = `${movedText} Its ${n} share ${n === 1 ? 'link stops' : 'links stop'} working until you restore it.`;
       // Only the still-unchanged toast: not one that was dismissed, or already replaced by Undo.
@@ -1897,22 +1910,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     open('confirm');
   }
 
-  async function fetchAllShares(driveId: string) {
-    const items: ShareRow[] = [];
-    let cursor: string | null = null;
-    do {
-      const result = await fetchSharePage(driveId, cursor);
-      items.push(...result.items);
-      cursor = result.nextCursor;
-    } while (cursor);
-    return items;
+  async function fetchShareCount(driveId: string, path: string) {
+    const query = new URLSearchParams({ path, countOnly: '1' });
+    const result = await api<{ count: number }>(`drives/${driveId}/shares?${query}`);
+    return result.count;
   }
-  async function fetchSharePage(driveId: string, cursor?: string | null) {
+  async function fetchSharePage(driveId: string, cursor?: string | null, path?: string) {
     const query = new URLSearchParams({ limit: '100' });
+    if (path) query.set('path', path);
     if (cursor) query.set('cursor', cursor);
     return api<Page<ShareRow>>(`drives/${driveId}/shares?${query}`);
   }
-  async function loadShares(driveId: string) {
+  async function loadShares(driveId: string, path?: string) {
     const mine = ++sharesSeq.current;
     const put = (next: (current: SharesState | null) => SharesState) => {
       if (mine !== sharesSeq.current) return;
@@ -1920,16 +1929,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       sharesNow.current = value;
       setShares(value);
     };
-    const same = (current: SharesState | null) => (current?.driveId === driveId ? current : null);
+    const same = (current: SharesState | null) =>
+      current?.driveId === driveId && current.path === path ? current : null;
     put((current) => ({
       driveId,
+      ...(path ? { path } : {}),
       items: same(current)?.items ?? [],
       capped: same(current)?.capped ?? false,
       nextCursor: same(current)?.nextCursor ?? null,
       status: 'loading',
     }));
     try {
-      const result = await fetchSharePage(driveId);
+      const result = await fetchSharePage(driveId, null, path);
       // A link created while this load was running is not in its answer yet (it has no versionId here).
       put((current) => {
         const known = new Set(result.items.map((row) => row.id));
@@ -1938,6 +1949,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         );
         return {
           driveId,
+          ...(path ? { path } : {}),
           items: [...fresh, ...result.items],
           capped: false,
           nextCursor: result.nextCursor,
@@ -1947,6 +1959,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     } catch (reason) {
       put((current) => ({
         driveId,
+        ...(path ? { path } : {}),
         items: same(current)?.items ?? [],
         capped: false,
         nextCursor: same(current)?.nextCursor ?? null,
@@ -1968,7 +1981,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     };
     put((state) => ({ ...state, loadingMore: true, message: '' }));
     try {
-      const result = await fetchSharePage(driveId, cursor);
+      const result = await fetchSharePage(driveId, cursor, current.path);
       put((state) => ({
         ...state,
         items: mergePage(state.items, result.items),
@@ -2004,7 +2017,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     key ??= await keyFor(file, 'share');
     if (!key) return;
     setShareFile(file);
-    void loadShares(selected);
+    void loadShares(selected, file.path);
     open('share');
   }
 
@@ -3044,13 +3057,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                           Use browser memory for this download
                                         </button>
                                       ) : null}
-                                      {pickerRetry?.file.id === file.id ? (
+                                      {pickerRetry?.id === file.id ? (
                                         <button
                                           className="row-secondary"
                                           disabled={busy}
-                                          onClick={() =>
-                                            void act(() => download(file, pickerRetry.key))
-                                          }
+                                          onClick={() => void act(() => download(file))}
                                         >
                                           Save file again
                                         </button>
@@ -3290,7 +3301,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <span className="badge">
                         {countKeys(agent.id) > 0
                           ? `${countKeys(agent.id)} active ${countKeys(agent.id) === 1 ? 'key' : 'keys'}`
-                          : apiKeys.some((key) => key.agent_id === agent.id)
+                          : agent.total_key_count > 0
                             ? 'Access revoked'
                             : 'No API keys'}
                       </span>
@@ -3952,7 +3963,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               origin={origin}
               request={api}
               shares={shares}
-              onReload={() => void loadShares(selected)}
+              onReload={() => void loadShares(selected, shareFile.path)}
+              onLoadMore={() => void loadMoreShares(selected)}
               onCreated={(forDrive, row) =>
                 updateShares(forDrive, (items) => addShareRow(items, row))
               }

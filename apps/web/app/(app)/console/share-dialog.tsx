@@ -15,6 +15,7 @@ import { versionWhen } from '@/src/console/when';
 
 export type SharesState = {
   driveId: string;
+  path?: string;
   items: ShareRow[];
   capped: boolean;
   nextCursor?: string | null;
@@ -124,6 +125,7 @@ export function ShareDialog({
   inbox,
   shares,
   onReload,
+  onLoadMore,
   onCreated,
   onRevoke,
 }: {
@@ -135,6 +137,7 @@ export function ShareDialog({
   inbox: (driveId: string) => Promise<TraceInboxRecord | null>;
   shares: SharesState | null;
   onReload: () => void;
+  onLoadMore: () => void;
   onCreated: (driveId: string, row: ShareRow) => void;
   onRevoke: (id: string) => Promise<void>;
 }) {
@@ -256,7 +259,7 @@ export function ShareDialog({
   }
 
   const mine =
-    shares?.driveId === driveId
+    shares?.driveId === driveId && (!shares.path || shares.path === path)
       ? shares.items
           .filter((row) => row.path === path)
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -333,6 +336,23 @@ export function ShareDialog({
             </li>
           ))}
         </ul>
+      )}
+      {shares?.driveId === driveId && shares.path === path && shares.nextCursor && (
+        <div className="panel-toolbar">
+          {shares.message && <span role="alert">{shares.message}</span>}
+          <button
+            type="button"
+            className="button secondary"
+            disabled={shares.loadingMore}
+            onClick={onLoadMore}
+          >
+            {shares.loadingMore
+              ? 'Loading links…'
+              : shares.message
+                ? 'Retry loading links'
+                : 'Load more links'}
+          </button>
+        </div>
       )}
     </div>
   );
