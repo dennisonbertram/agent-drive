@@ -14,6 +14,7 @@ const rootPackage = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as
 async function runServices(
   options: {
     registry?: string;
+    dotenvRegistry?: string;
     failRegistry?: string;
     failCommand?: string;
     error?: string;
@@ -28,8 +29,15 @@ async function runServices(
   await writeFile(
     fakeDocker,
     `#!/bin/sh
-printf '%s\\t%s\\n' "$DOCKER_OFFICIAL_REGISTRY" "$*" >> "$DOCKER_CALL_LOG"
-if [ "\${DOCKER_FAIL_REGISTRY:-}" = "$DOCKER_OFFICIAL_REGISTRY" ] && [ "\${DOCKER_FAIL_COMMAND:-}" = "$*" ]; then
+if [ -n "\${DOCKER_OFFICIAL_REGISTRY:-}" ]; then
+  effective_registry="$DOCKER_OFFICIAL_REGISTRY"
+elif [ -f .env ]; then
+  effective_registry="$(sed -n 's/^DOCKER_OFFICIAL_REGISTRY=//p' .env | head -n 1)"
+else
+  effective_registry='public.ecr.aws/docker/library'
+fi
+printf '%s\\t%s\\t%s\\n' "\${DOCKER_OFFICIAL_REGISTRY-<unset>}" "$effective_registry" "$*" >> "$DOCKER_CALL_LOG"
+if [ "\${DOCKER_FAIL_REGISTRY:-}" = "$effective_registry" ] && [ "\${DOCKER_FAIL_COMMAND:-}" = "$*" ]; then
   printf '%s\\n' "\${DOCKER_ERROR:-simulated failure}" >&2
   exit 17
 fi
@@ -47,10 +55,13 @@ exit 0
     DOCKER_FAIL_REGISTRY: options.failRegistry ?? '',
     DOCKER_FAIL_COMMAND: options.failCommand ?? '',
     DOCKER_ERROR: options.error ?? '',
-    ...(options.registry ? { DOCKER_OFFICIAL_REGISTRY: options.registry } : {}),
   };
+  delete env.DOCKER_OFFICIAL_REGISTRY;
+  if (options.registry) env.DOCKER_OFFICIAL_REGISTRY = options.registry;
+  if (options.dotenvRegistry)
+    await writeFile(join(dir, '.env'), `DOCKER_OFFICIAL_REGISTRY=${options.dotenvRegistry}\n`);
   const result = spawnSync(process.execPath, [serviceScript], {
-    cwd: process.cwd(),
+    cwd: dir,
     env,
     encoding: 'utf8',
     timeout: 10_000,
@@ -77,9 +88,9 @@ describe('local service startup', () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(calls).toEqual([
-      `${registry}\tcompose build minio`,
-      `${registry}\tcompose up -d --wait postgres minio`,
-      `${registry}\tcompose run --rm minio-init`,
+      `${registry}\t${registry}\tcompose build minio`,
+      `${registry}\t${registry}\tcompose up -d --wait postgres minio`,
+      `${registry}\t${registry}\tcompose run --rm minio-init`,
     ]);
   });
 
@@ -95,8 +106,8 @@ describe('local service startup', () => {
     expect(result.status).toBe(17);
     expect(result.stderr).toContain('service failed');
     expect(calls).toEqual([
-      `${registry}\tcompose build minio`,
-      `${registry}\tcompose up -d --wait postgres minio`,
+      `${registry}\t${registry}\tcompose build minio`,
+      `${registry}\t${registry}\tcompose up -d --wait postgres minio`,
     ]);
   });
 
@@ -111,12 +122,31 @@ describe('local service startup', () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stderr).toContain(`Registry ${registry} was throttled`);
+    expect(result.stderr).toContain(`${registry} was throttled`);
     expect(calls).toEqual([
-      `${registry}\tcompose build minio`,
-      `${hub}\tcompose build minio`,
-      `${hub}\tcompose up -d --wait postgres minio`,
-      `${hub}\tcompose run --rm minio-init`,
+      `${registry}\t${registry}\tcompose build minio`,
+      `${hub}\t${hub}\tcompose build minio`,
+      `${hub}\t${hub}\tcompose up -d --wait postgres minio`,
+      `${hub}\t${hub}\tcompose run --rm minio-init`,
+    ]);
+  });
+
+  it('preserves a Compose .env mirror initially and overrides it on fallback', async () => {
+    const mirror = 'mirror.example/docker/library';
+    const hub = 'docker.io/library';
+    const { result, calls } = await runServices({
+      dotenvRegistry: mirror,
+      failRegistry: mirror,
+      failCommand: 'compose build minio',
+      error: 'Data limit exceeded',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(calls).toEqual([
+      `<unset>\t${mirror}\tcompose build minio`,
+      `${hub}\t${hub}\tcompose build minio`,
+      `${hub}\t${hub}\tcompose up -d --wait postgres minio`,
+      `${hub}\t${hub}\tcompose run --rm minio-init`,
     ]);
   });
 });

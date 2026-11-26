@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 
-const registries = [
-  process.env.DOCKER_OFFICIAL_REGISTRY || 'public.ecr.aws/docker/library',
-  'docker.io/library',
-  'public.ecr.aws/docker/library',
-].filter((registry, index, all) => all.indexOf(registry) === index);
+const initialRegistry = process.env.DOCKER_OFFICIAL_REGISTRY || undefined;
+const fallbackRegistries = ['docker.io/library', 'public.ecr.aws/docker/library'].filter(
+  (registry, index, all) => all.indexOf(registry) === index && registry !== initialRegistry,
+);
 const validRegistry = /^[a-z0-9.-]+(?::\d+)?(?:\/[a-z0-9._-]+)*$/iu;
 
-for (const registry of registries) {
+for (const registry of [initialRegistry, ...fallbackRegistries]) {
+  if (!registry) continue;
   if (!validRegistry.test(registry)) {
     process.stderr.write(
       'DOCKER_OFFICIAL_REGISTRY must be a registry and optional namespace path.\n',
@@ -28,8 +28,12 @@ const throttled =
 function run(args, registry) {
   return new Promise((resolve) => {
     const output = [];
+    const env = { ...process.env };
+    // Preserve Compose's normal shell/.env/default precedence on the first attempt. Only
+    // retries need an explicit registry to get past a throttled source.
+    if (registry !== undefined) env.DOCKER_OFFICIAL_REGISTRY = registry;
     const child = spawn('docker', args, {
-      env: { ...process.env, DOCKER_OFFICIAL_REGISTRY: registry },
+      env,
       stdio: ['inherit', 'pipe', 'pipe'],
     });
     for (const stream of [child.stdout, child.stderr]) {
@@ -48,18 +52,19 @@ function run(args, registry) {
   });
 }
 
-for (let registryIndex = 0; registryIndex < registries.length; registryIndex += 1) {
-  const registry = registries[registryIndex];
+const attempts = [undefined, ...fallbackRegistries];
+for (let registryIndex = 0; registryIndex < attempts.length; registryIndex += 1) {
+  const registry = attempts[registryIndex];
   let retry = false;
   for (const args of steps) {
     const result = await run(args, registry);
     if (result.code === 0) continue;
-    if (!throttled.test(result.output) || registryIndex === registries.length - 1) {
+    if (!throttled.test(result.output) || registryIndex === attempts.length - 1) {
       process.exitCode = result.code;
       process.exit();
     }
     process.stderr.write(
-      `\nRegistry ${registry} was throttled. Retrying local services with ${registries[registryIndex + 1]}.\n`,
+      `\n${registry ?? initialRegistry ?? 'Configured Compose registry'} was throttled. Retrying local services with ${attempts[registryIndex + 1]}.\n`,
     );
     retry = true;
     break;
