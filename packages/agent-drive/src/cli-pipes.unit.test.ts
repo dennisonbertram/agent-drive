@@ -1,4 +1,4 @@
-import { Writable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { getPipe, parsePipeSize, putPipe } from './cli-pipes.js';
@@ -28,7 +28,7 @@ const VERSION = {
 
 describe('CLI binary pipes', () => {
   it('passes a known-size stdin source directly to putStream, including an empty source', async () => {
-    const source = (async function* () {})();
+    const source = Readable.from((async function* () {})());
     const putStream = vi.fn(async () => VERSION);
     await putPipe({ putStream } as never, 'd', '/x', source, 0);
 
@@ -36,12 +36,13 @@ describe('CLI binary pipes', () => {
   });
 
   it('rejects an invalid known size before asking stdin for an iterator', async () => {
-    const source = { [Symbol.asyncIterator]: vi.fn() };
+    const read = vi.fn();
+    const source = new Readable({ read });
     const putStream = vi.fn();
     await expect(putPipe({ putStream } as never, 'd', '/x', source, -1)).rejects.toThrow(
       'non-negative safe integer',
     );
-    expect(source[Symbol.asyncIterator]).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
     expect(putStream).not.toHaveBeenCalled();
   });
 
@@ -65,7 +66,7 @@ describe('CLI binary pipes', () => {
       return VERSION;
     });
 
-    await putPipe({ putStream } as never, 'd', '/x', input());
+    await putPipe({ putStream } as never, 'd', '/x', Readable.from(input()));
 
     expect(inputReads).toHaveBeenCalledTimes(2);
     expect(received).toEqual([0, 255, 1, 2, 3]);
@@ -80,7 +81,7 @@ describe('CLI binary pipes', () => {
       return VERSION;
     });
 
-    await putPipe({ putStream } as never, 'd', '/x', (async function* () {})());
+    await putPipe({ putStream } as never, 'd', '/x', Readable.from([]));
 
     expect(received).toBe(0);
     expect(putStream).toHaveBeenCalledTimes(1);
@@ -118,9 +119,11 @@ describe('CLI binary pipes', () => {
         { putStream } as never,
         'd',
         '/x',
-        (async function* () {
-          yield payload;
-        })(),
+        Readable.from(
+          (async function* () {
+            yield payload;
+          })(),
+        ),
       ),
     ).rejects.toThrow();
 
@@ -173,6 +176,7 @@ describe('CLI binary pipes', () => {
     );
     expect(read).toHaveBeenCalledTimes(10);
     expect(stdout.writableEnded).toBe(false);
+    expect(stdout.destroyed).toBe(false);
     expect(getStream).toHaveBeenCalledWith('d', '/x', {});
   });
 
@@ -198,5 +202,90 @@ describe('CLI binary pipes', () => {
       code: 'EPIPE',
     });
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for a delayed final stdout callback and rejects its EPIPE', async () => {
+    let releaseWrite!: (error?: Error | null) => void;
+    let writeStarted!: () => void;
+    const started = new Promise<void>((resolve) => (writeStarted = resolve));
+    const pendingWrite = new Promise<void>((resolve, reject) => {
+      releaseWrite = (error) => (error ? reject(error) : resolve());
+    });
+    let settled = false;
+    const stdout = new Writable({
+      highWaterMark: 1024,
+      write(_chunk, _encoding, callback) {
+        writeStarted();
+        void pendingWrite.then(
+          () => callback(),
+          (error: Error) => callback(error),
+        );
+      },
+    });
+    // Keep the test process safe if an implementation reports success before this late error.
+    stdout.on('error', () => {});
+    const cancel = vi.fn(async () => {});
+    const getStream = vi.fn(async () => ({
+      plaintext: (async function* () {
+        yield Buffer.from([1]);
+      })(),
+      plaintextBytes: 1,
+      version: VERSION,
+      cancel,
+    }));
+    const transfer = getPipe({ getStream } as never, 'd', '/x', stdout).then(
+      () => {
+        settled = true;
+        return undefined;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+
+    await started;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const settledBeforeCallback = settled;
+    releaseWrite(Object.assign(new Error('closed pipe after source EOF'), { code: 'EPIPE' }));
+    const error = await transfer;
+
+    expect(settledBeforeCallback).toBe(false);
+    expect(error).toMatchObject({ code: 'EPIPE' });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts a pending stdin read and does not call putStream', async () => {
+    const alreadyAborted = new AbortController();
+    alreadyAborted.abort(new Error('cancelled before read'));
+    const untouchedRead = vi.fn();
+    const untouched = new Readable({ read: untouchedRead });
+    const putStream = vi.fn();
+    await expect(
+      putPipe({ putStream } as never, 'd', '/x', untouched, undefined, {
+        signal: alreadyAborted.signal,
+      }),
+    ).rejects.toThrow('cancelled before read');
+    expect(untouchedRead).not.toHaveBeenCalled();
+    expect(untouched.destroyed).toBe(false);
+
+    const read = vi.fn();
+    const input = new Readable({ read });
+    const controller = new AbortController();
+    const transfer = putPipe({ putStream } as never, 'd', '/x', input, undefined, {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(read).toHaveBeenCalled());
+    controller.abort(new Error('cancelled while waiting'));
+    const outcome = await Promise.race([
+      transfer.then(
+        () => 'fulfilled',
+        () => 'rejected',
+      ),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 100)),
+    ]);
+    expect(outcome).toBe('rejected');
+    expect(input.destroyed).toBe(true);
+    expect(putStream).not.toHaveBeenCalled();
   });
 });

@@ -3,8 +3,7 @@ import { open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, randomUUID, createCipheriv, createDecipheriv } from 'node:crypto';
-import type { Writable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { addAbortSignal, type Readable, type Writable } from 'node:stream';
 import type { AgentDriveClient, GetOptions, PutOptions, Version } from './client.js';
 import { encryptedSize, plaintextSize } from './crypto-format.js';
 
@@ -14,6 +13,14 @@ const MAX_PLAINTEXT_BYTES = plaintextSize(MAX_CIPHERTEXT_BYTES);
 
 type PutClient = Pick<AgentDriveClient, 'putStream'>;
 type GetClient = Pick<AgentDriveClient, 'getStream'>;
+
+function abortError(signal: AbortSignal) {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw abortError(signal);
+}
 
 /** Parse a CLI byte count, allowing whitespace from commands such as `wc -c`. */
 export function parsePipeSize(value: string): number {
@@ -99,13 +106,15 @@ export async function putPipe(
   client: PutClient,
   driveId: string,
   remotePath: string,
-  input: AsyncIterable<Uint8Array>,
+  input: Readable,
   knownSize?: number,
   options: PutOptions = {},
 ): Promise<Version> {
+  throwIfAborted(options.signal);
   if (knownSize !== undefined) {
     // Validate before even requesting stdin's iterator so malformed flags never consume input.
     validatePipeSize(knownSize);
+    if (options.signal) addAbortSignal(options.signal, input);
     return await client.putStream(driveId, remotePath, input, knownSize, options);
   }
 
@@ -157,21 +166,26 @@ export async function putPipe(
   }
 
   try {
+    if (options.signal) addAbortSignal(options.signal, input);
+    throwIfAborted(options.signal);
     for await (const chunk of input) {
       if (!(chunk instanceof Uint8Array)) throw new Error('stdin produced a non-binary chunk.');
       if (size + chunk.byteLength > MAX_PLAINTEXT_BYTES)
         throw new Error('The file exceeds the 5 GiB encrypted upload limit.');
       for (let offset = 0; offset < chunk.byteLength; offset += TRANSFER_CHUNK_BYTES) {
+        throwIfAborted(options.signal);
         const part = chunk.subarray(
           offset,
           Math.min(offset + TRANSFER_CHUNK_BYTES, chunk.byteLength),
         );
         const bytes = cipher ? cipher.update(part) : part;
         await writeAll(handle, bytes, spoolPosition);
+        throwIfAborted(options.signal);
         spoolPosition += bytes.byteLength;
       }
       size += chunk.byteLength;
     }
+    throwIfAborted(options.signal);
     validatePipeSize(size);
     if (cipher) {
       const final = cipher.final();
@@ -207,6 +221,42 @@ async function* validatedPlaintext(source: AsyncIterable<Uint8Array>, expectedBy
     throw new Error('Downloaded file did not match its declared plaintext size.');
 }
 
+function writeChunk(output: Writable, chunk: Uint8Array) {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const onError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      output.off('error', onError);
+      reject(error);
+    };
+    output.once('error', onError);
+    try {
+      output.write(chunk, (error?: Error | null) => {
+        if (error) {
+          if (!settled) {
+            settled = true;
+            reject(error);
+          }
+          // Writable callbacks run before the matching `error` event; keep the listener until then.
+          return;
+        }
+        if (!settled) {
+          settled = true;
+          output.off('error', onError);
+          resolve();
+        }
+      });
+    } catch (error) {
+      output.off('error', onError);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    }
+  });
+}
+
 /** Write a pinned download to a binary writable with callback backpressure and no text framing. */
 export async function getPipe(
   client: GetClient,
@@ -217,9 +267,8 @@ export async function getPipe(
 ): Promise<void> {
   const result = await client.getStream(driveId, remotePath, options);
   try {
-    await pipeline(validatedPlaintext(result.plaintext, result.plaintextBytes), output, {
-      end: false,
-    });
+    for await (const chunk of validatedPlaintext(result.plaintext, result.plaintextBytes))
+      await writeChunk(output, chunk);
   } catch (error) {
     await result.cancel(error).catch(() => {});
     throw error;
