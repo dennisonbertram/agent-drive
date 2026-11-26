@@ -738,6 +738,8 @@ async function makeDirectory(request: Request, auth: Auth, driveId: string) {
     if (childrenAtPath.rows[0]!.has_children)
       throw new ApiError('conflict', 'A directory already exists at this path.');
 
+    await assertNoLiveFileNamespaceCollision(client, driveId, path, null);
+
     if (parent !== '/') {
       const parentDirectoryPrefix = `${parent.replace(/[\\%_]/g, '\\$&')}/%`;
       const parentState = await client.query(
@@ -2815,7 +2817,10 @@ async function fileEndpoint(
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
     const ifVersionId = guarded
-      ? uuid(typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined, 'ifVersionId')
+      ? uuid(
+          typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined,
+          'ifVersionId',
+        ).toLowerCase()
       : undefined;
     needWritePath(auth, path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;

@@ -65,7 +65,7 @@ async function parseInput(request: Request, auth: RenameAuth, driveId: string) {
   const ifSourceVersionId = uuid(
     typeof body.ifSourceVersionId === 'string' ? body.ifSourceVersionId : undefined,
     'ifSourceVersionId',
-  );
+  ).toLowerCase();
   if (!Object.hasOwn(body, 'ifDestinationVersionId'))
     throw new ApiError('validation_error', 'ifDestinationVersionId is required.');
   const ifDestinationVersionId =
@@ -74,11 +74,11 @@ async function parseInput(request: Request, auth: RenameAuth, driveId: string) {
       : uuid(
           typeof body.ifDestinationVersionId === 'string' ? body.ifDestinationVersionId : undefined,
           'ifDestinationVersionId',
-        );
+        ).toLowerCase();
   const operationId = uuid(
     typeof body.operationId === 'string' ? body.operationId : undefined,
     'operationId',
-  );
+  ).toLowerCase();
   if (path === destinationPath)
     throw new ApiError('validation_error', 'The source and destination paths must differ.');
   if (

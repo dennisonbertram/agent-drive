@@ -203,6 +203,26 @@ describe('persistent drive directories', () => {
     expect(directories.rows).toEqual([]);
   });
 
+  it('rejects explicit directories beneath live file ancestors even when descendants imply the parent', async () => {
+    const f = await fixture();
+    const write = await f.issue(['read', 'write']);
+    await seedFile(f.driveId, f.agentId, '/notes');
+    await seedFile(f.driveId, f.agentId, '/notes/old.txt');
+    await seedFile(f.driveId, f.agentId, '/top');
+    await seedFile(f.driveId, f.agentId, '/top/notes/old.txt');
+    await seedFile(f.driveId, f.agentId, '/plain/old.txt');
+
+    expect((await mkdir(f.driveId, write, '/notes/drafts')).status).toBe(409);
+    expect((await mkdir(f.driveId, write, '/top/notes/drafts')).status).toBe(409);
+    expect((await mkdir(f.driveId, write, '/plain/drafts')).status).toBe(201);
+
+    const directories = await pool.query<{ path: string }>(
+      'SELECT path FROM drive_directories WHERE drive_id=$1 ORDER BY path',
+      [f.driveId],
+    );
+    expect(directories.rows).toEqual([{ path: '/plain/drafts' }]);
+  });
+
   it('prevents new put, move and copy destinations from shadowing explicit directories', async () => {
     const f = await fixture({ quotaBytes: 100 });
     const write = await f.issue(['read', 'write', 'delete']);
