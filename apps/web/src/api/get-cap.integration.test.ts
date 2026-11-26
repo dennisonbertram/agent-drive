@@ -170,66 +170,89 @@ describe('server-side bounded GET', () => {
   it.each([
     [
       'requires metadata-only opt-in',
-      `versionId=${smallVersionId}&authorizeRange=1&range=bytes%3D0-19`,
+      () => `versionId=${smallVersionId}&authorizeRange=1&range=bytes%3D0-19`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'requires range authorization opt-in',
-      `versionId=${smallVersionId}&metadataOnly=1&range=bytes%3D0-19`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&range=bytes%3D0-19`,
+      'Range authorization requires metadataOnly=1',
     ],
-    ['requires a range value', `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1`],
-    ['requires an explicit version', 'metadataOnly=1&authorizeRange=1&range=bytes%3D0-19'],
+    [
+      'requires a range value',
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1`,
+      'Range authorization requires metadataOnly=1',
+    ],
+    [
+      'requires an explicit version',
+      () => 'metadataOnly=1&authorizeRange=1&range=bytes%3D0-19',
+      'Range authorization requires metadataOnly=1',
+    ],
     [
       'requires a closed range',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-`,
+      'range must be one closed byte range',
     ],
     [
       'rejects suffix ranges',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D-10`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D-10`,
+      'range must be one closed byte range',
     ],
     [
       'rejects multiple ranges',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9%2C20-29`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9%2C20-29`,
+      'range must be one closed byte range',
     ],
     [
       'rejects reversed ranges',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D20-19`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D20-19`,
+      'range end must be greater than or equal to start',
     ],
     [
       'rejects ranges beyond the selected version',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-47`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-47`,
+      'range must fit within the selected version',
     ],
     [
       'rejects duplicate range parameters',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9&range=bytes%3D10-19`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9&range=bytes%3D10-19`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate range opt-ins',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeRange=1&range=bytes%3D0-9`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeRange=1&range=bytes%3D0-9`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate version pins',
-      `versionId=${smallVersionId}&versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      () => `versionId=${smallVersionId}&versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate metadata-only flags',
-      `versionId=${smallVersionId}&metadataOnly=1&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects plaintext caps on range authorization',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects whole-download authorization on range requests',
-      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeIfWithinLimit=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeIfWithinLimit=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      'Range authorization requires metadataOnly=1',
     ],
-  ])('%s', async (_label, query) => {
+  ])('%s', async (_label, makeQuery, expectedMessage) => {
     const before = await pool.query<{ authorized_egress_bytes: string }>(
       'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
       [accountId],
     );
-    const result = await request(query);
+    const result = await request(makeQuery());
     expect(result.status).toBe(400);
-    expect((await result.json()).error.code).toBe('validation_error');
+    const error = (await result.json()).error;
+    expect(error.code).toBe('validation_error');
+    expect(error.message).toContain(expectedMessage);
     const after = await pool.query<{ authorized_egress_bytes: string }>(
       'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
       [accountId],

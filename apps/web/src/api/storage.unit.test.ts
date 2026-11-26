@@ -35,15 +35,28 @@ describe('presigned range downloads', () => {
   });
 
   it('signs the exact Range header into the short-lived download URL', async () => {
-    const storage = (await import('./storage')) as typeof import('./storage') & {
-      presignedRangeDownload?: (key: string, range: string) => Promise<string>;
-    };
-    expect(storage.presignedRangeDownload).toBeTypeOf('function');
-    if (!storage.presignedRangeDownload) return;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-26T12:00:00.000Z'));
+    try {
+      const storage = (await import('./storage')) as typeof import('./storage') & {
+        presignedRangeDownload?: (key: string, range: string) => Promise<string>;
+      };
+      expect(storage.presignedRangeDownload).toBeTypeOf('function');
+      if (!storage.presignedRangeDownload) return;
 
-    const url = new URL(await storage.presignedRangeDownload('fixture/object', 'bytes=25-104'));
+      const firstRange = 'bytes=25-104';
+      const secondRange = 'bytes=125-204';
+      const first = new URL(await storage.presignedRangeDownload('fixture/object', firstRange));
+      const second = new URL(await storage.presignedRangeDownload('fixture/object', secondRange));
 
-    expect(url.searchParams.get('X-Amz-Expires')).toBe('60');
-    expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('range');
+      expect(first.searchParams.get('X-Amz-Expires')).toBe('60');
+      expect(first.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('range');
+      expect(second.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('range');
+      expect(first.searchParams.get('X-Amz-Signature')).not.toBe(
+        second.searchParams.get('X-Amz-Signature'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
