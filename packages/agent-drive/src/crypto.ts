@@ -115,13 +115,9 @@ export async function encryptFileStream(
     envelope[0] = 1;
     envelope.set(nonce, 1);
     envelope.set(wrapped, 13);
-    const fileCryptoKey = await crypto.subtle.importKey(
-      'raw',
-      owned(fileKey),
-      'AES-GCM',
-      false,
-      ['encrypt'],
-    );
+    const fileCryptoKey = await crypto.subtle.importKey('raw', owned(fileKey), 'AES-GCM', false, [
+      'encrypt',
+    ]);
     const ciphertext = sealStream(
       source,
       plaintextBytes,

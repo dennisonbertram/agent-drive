@@ -532,10 +532,14 @@ describe('AgentDriveClient streaming transfers', () => {
           wrappedKey,
         };
         return new Response(
-          JSON.stringify(url.includes('metadataOnly=1') ? metadata : {
-            ...metadata,
-            downloadUrl: 'http://localhost:9000/d',
-          }),
+          JSON.stringify(
+            url.includes('metadataOnly=1')
+              ? metadata
+              : {
+                  ...metadata,
+                  downloadUrl: 'http://localhost:9000/d',
+                },
+          ),
           { status: 200 },
         );
       }

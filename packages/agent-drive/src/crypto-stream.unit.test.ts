@@ -101,7 +101,9 @@ describe('encryptFileStream', () => {
         nonce,
       ),
     );
-    expect(Buffer.compare(Buffer.from(streamed), Buffer.from(await seal(plaintext, RAW_KEY, nonce)))).toBe(0);
+    expect(
+      Buffer.compare(Buffer.from(streamed), Buffer.from(await seal(plaintext, RAW_KEY, nonce))),
+    ).toBe(0);
   });
 
   it('yields the header before pulling any plaintext', async () => {
@@ -270,9 +272,7 @@ describe('decryptWithFileKeyStream', () => {
       const tampered = ciphertext.slice();
       tampered[offset] = tampered[offset]! ^ 1;
       await expect(
-        collect(
-          decryptWithFileKeyStream(fragmentsOf(tampered, [tampered.length]), RAW_KEY_B64),
-        ),
+        collect(decryptWithFileKeyStream(fragmentsOf(tampered, [tampered.length]), RAW_KEY_B64)),
       ).rejects.toMatchObject({ code: 'decryption_failed' });
     },
   );

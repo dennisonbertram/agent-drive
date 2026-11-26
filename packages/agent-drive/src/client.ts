@@ -900,8 +900,8 @@ export class AgentDriveClient {
     if (!metadata.downloadUrl)
       throw new AgentDriveApiError('internal_error', 502, 'The download URL is missing.');
     const plaintextBytes = plaintextSize(metadata.ciphertextSize);
-    const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey, options.signal).then((inbox) =>
-      unwrapFileKey(metadata.wrappedKey, this.keyFor(driveId), inbox),
+    const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey, options.signal).then(
+      (inbox) => unwrapFileKey(metadata.wrappedKey, this.keyFor(driveId), inbox),
     );
     fileKeyPromise.catch(() => {});
     const response = await this.storage(
