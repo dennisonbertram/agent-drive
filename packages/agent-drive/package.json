@@ -53,6 +53,7 @@
   },
   "files": [
     "dist",
+    "scripts/check-native-mount.mjs",
     "native/linux-x64/agent-drive-mount",
     "native/linux-arm64/agent-drive-mount",
     "README.md",

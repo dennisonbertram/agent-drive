@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -14,6 +14,13 @@ afterEach(() =>
     directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
   ),
 );
+
+it('includes the native helper verifier in the published package allowlist', async () => {
+  const metadata = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { files?: string[] };
+  expect(metadata.files).toContain('scripts/check-native-mount.mjs');
+});
 
 async function packageRoot() {
   const directory = await mkdtemp(join(tmpdir(), 'agent-drive-native-package-'));
