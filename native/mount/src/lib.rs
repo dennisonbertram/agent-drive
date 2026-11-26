@@ -594,6 +594,20 @@ struct State {
     lookup_refs: HashMap<u64, u64>,
     next_handle: u64,
 }
+#[derive(Clone)]
+pub struct MountActivity {
+    state: Arc<RwLock<State>>,
+}
+impl MountActivity {
+    pub fn is_idle(&self) -> bool {
+        let (files, directories) = self.open_handle_counts();
+        files == 0 && directories == 0
+    }
+    pub fn open_handle_counts(&self) -> (usize, usize) {
+        let state = self.state.read().unwrap();
+        (state.handles.len(), state.directory_handles.len())
+    }
+}
 pub struct DriveFs<R: BufRead + Send, W: Write + Send> {
     bridge: Arc<Mutex<Bridge<R, W>>>,
     state: Arc<RwLock<State>>,
@@ -604,6 +618,11 @@ pub struct DriveFs<R: BufRead + Send, W: Write + Send> {
     gid: u32,
 }
 impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
+    pub fn mount_activity(&self) -> MountActivity {
+        MountActivity {
+            state: self.state.clone(),
+        }
+    }
     pub fn new(bridge: Bridge<R, W>, uid: u32, gid: u32) -> Self {
         Self::with_capabilities(bridge, uid, gid, MountCapabilities::read_only(), false)
     }
@@ -1245,6 +1264,37 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
         self.refresh_parent(path);
         if let Some(ino) = ino {
             self.prune_nodes([ino]);
+        }
+    }
+    fn retarget_open_handles(
+        state: &mut State,
+        source_ino: u64,
+        moved: &Node,
+        source_stage_id: Option<&str>,
+    ) {
+        for handle in state
+            .handles
+            .values_mut()
+            .filter(|handle| handle.node.ino == source_ino)
+        {
+            let staged_handle = handle.staged.as_mut();
+            if staged_handle
+                .as_ref()
+                .is_some_and(|stage| source_stage_id != Some(stage.handle_id.as_str()))
+            {
+                continue;
+            }
+            handle.node.path = moved.path.clone();
+            handle.node.name = moved.name.clone();
+            handle.node.observed_at = moved.observed_at;
+            handle.node.mode = moved.mode;
+            if let Some(stage) = staged_handle {
+                handle.node.version_id = moved.version_id.clone();
+                handle.node.size = moved.size;
+                handle.node.mtime_ms = moved.mtime_ms;
+                stage.dirty = false;
+                stage.current_version_id = moved.version_id.clone();
+            }
         }
     }
     fn next_operation_id(&self) -> Result<String, i32> {
@@ -2272,20 +2322,8 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
             }
             state.paths.insert(destination_path.clone(), source.ino);
             state.nodes.insert(source.ino, moved.clone());
+            Self::retarget_open_handles(&mut state, source.ino, &moved, source_stage_id.as_deref());
             for handle in state.handles.values_mut() {
-                if handle.node.ino == source.ino {
-                    handle.node.path = moved.path.clone();
-                    handle.node.name = moved.name.clone();
-                    handle.node.version_id = moved.version_id.clone();
-                    handle.node.size = moved.size;
-                    handle.node.mtime_ms = moved.mtime_ms;
-                    if let Some(stage) = handle.staged.as_mut().filter(|stage| {
-                        source_stage_id.as_deref() == Some(stage.handle_id.as_str())
-                    }) {
-                        stage.dirty = false;
-                        stage.current_version_id = moved.version_id.clone();
-                    }
-                }
                 if destination_ino == Some(handle.node.ino) {
                     if let Some(stage) = handle.staged.as_mut().filter(|stage| {
                         destination_stage_id.as_deref() == Some(stage.handle_id.as_str())
@@ -2479,6 +2517,162 @@ fn mountinfo_escape_path(path: &str) -> String {
 mod tests {
     use super::*;
     use std::io::BufReader;
+    #[test]
+    fn rename_keeps_open_readers_pinned_to_their_original_version() {
+        let bridge = Bridge::new(
+            BufReader::new(std::io::Cursor::new(Vec::<u8>::new())),
+            Vec::new(),
+        );
+        let fs = DriveFs::new(bridge, unsafe { libc::geteuid() }, unsafe {
+            libc::getegid()
+        });
+        let now = Instant::now();
+        let source_v1 = Node {
+            ino: 2,
+            path: "/.edit.tmp".into(),
+            name: ".edit.tmp".into(),
+            kind: FileType::RegularFile,
+            size: 4,
+            mtime_ms: 100,
+            version_id: Some("v1".into()),
+            observed_at: now,
+            mode: 0o600,
+            uid: 1000,
+            gid: 1000,
+        };
+        let source_v2 = Node {
+            size: 8,
+            mtime_ms: 200,
+            version_id: Some("v2".into()),
+            ..source_v1.clone()
+        };
+        let destination_v1 = Node {
+            ino: 3,
+            path: "/document.txt".into(),
+            name: "document.txt".into(),
+            size: 3,
+            version_id: Some("destination-v1".into()),
+            ..source_v1.clone()
+        };
+        let moved_source = Node {
+            path: "/document.txt".into(),
+            name: "document.txt".into(),
+            observed_at: Instant::now(),
+            ..source_v2.clone()
+        };
+        {
+            let mut state = fs.state.write().unwrap();
+            state.nodes.insert(source_v2.ino, source_v2.clone());
+            state
+                .nodes
+                .insert(destination_v1.ino, destination_v1.clone());
+            state.handles.insert(
+                10,
+                FileHandleState {
+                    node: source_v1,
+                    writable: false,
+                    readable: true,
+                    staged: None,
+                },
+            );
+            state.handles.insert(
+                11,
+                FileHandleState {
+                    node: destination_v1,
+                    writable: false,
+                    readable: true,
+                    staged: None,
+                },
+            );
+            DriveFs::<std::io::Cursor<Vec<u8>>, Vec<u8>>::retarget_open_handles(
+                &mut state,
+                source_v2.ino,
+                &moved_source,
+                None,
+            );
+        }
+
+        let state = fs.state.read().unwrap();
+        let source_handle = &state.handles[&10].node;
+        assert_eq!(source_handle.path, "/document.txt");
+        assert_eq!(source_handle.version_id.as_deref(), Some("v1"));
+        assert_eq!(source_handle.size, 4);
+        assert_eq!(source_handle.mtime_ms, 100);
+        let destination_handle = &state.handles[&11].node;
+        assert_eq!(
+            destination_handle.version_id.as_deref(),
+            Some("destination-v1")
+        );
+        assert_eq!(destination_handle.size, 3);
+        drop(state);
+
+        let mut bridge = Bridge::new(
+            BufReader::new(std::io::Cursor::new(
+                b"{\"id\":1,\"ok\":true,\"data\":\"djEhIQ==\"}\n",
+            )),
+            Vec::new(),
+        );
+        assert_eq!(bridge.read("/document.txt", "v1", 0, 4).unwrap(), b"v1!!");
+        let request: serde_json::Value =
+            serde_json::from_str(String::from_utf8(bridge.writer).unwrap().trim()).unwrap();
+        assert_eq!(request["path"], "/document.txt");
+        assert_eq!(request["versionId"], "v1");
+    }
+    #[test]
+    fn mount_activity_is_busy_until_all_file_and_directory_handles_close() {
+        let bridge = Bridge::new(
+            BufReader::new(std::io::Cursor::new(Vec::<u8>::new())),
+            Vec::new(),
+        );
+        let fs = DriveFs::new(bridge, unsafe { libc::geteuid() }, unsafe {
+            libc::getegid()
+        });
+        let activity = fs.mount_activity();
+        assert!(activity.is_idle());
+        {
+            let mut state = fs.state.write().unwrap();
+            let root = state.nodes[&ROOT_INO].clone();
+            state.handles.insert(
+                10,
+                FileHandleState {
+                    node: root.clone(),
+                    writable: false,
+                    readable: true,
+                    staged: None,
+                },
+            );
+        }
+        assert_eq!(activity.open_handle_counts(), (1, 0));
+        {
+            let mut state = fs.state.write().unwrap();
+            state.handles.remove(&10);
+        }
+        assert!(activity.is_idle());
+        {
+            let mut state = fs.state.write().unwrap();
+            let root = state.nodes[&ROOT_INO].clone();
+            state.directory_handles.insert(
+                11,
+                DirectoryHandleState {
+                    ino: root.ino,
+                    path: root.path,
+                    page_start: 0,
+                    page: Vec::new(),
+                    next_cursor: None,
+                    seen_cursors: HashSet::new(),
+                    used_cursors: HashSet::new(),
+                    exhausted: false,
+                    started: false,
+                },
+            );
+        }
+        assert_eq!(activity.open_handle_counts(), (0, 1));
+        {
+            let mut state = fs.state.write().unwrap();
+            state.directory_handles.remove(&11);
+        }
+        assert!(activity.is_idle());
+    }
     #[test]
     fn operation_ids_are_unique_uuid_v4_values() {
         let bridge = Bridge::new(
