@@ -95,7 +95,7 @@ Every command that works on a drive takes `--drive ID`. If you leave it out, the
 
 ## Output and exit codes
 
-Most commands print one line of JSON on stdout. These commands print plain text instead: `login` (device flow), `check`, `get` (without `--output`), `backup`, `grant`, `capture`, `skill install`, `credentials import`, and the credentials bundle commands. Notes, warnings and errors go to stderr. The CLI never prints the download URL or the wrapped file key.
+Most commands print one line of JSON on stdout. These commands print plain text instead: `login` (device flow), `check`, `get` (without `--output`), `backup`, `grant`, `capture`, `skill install`, `credentials import`, and the credentials bundle commands. `get --output -` writes raw file bytes to stdout. Notes, warnings and errors go to stderr. The CLI never prints the download URL or the wrapped file key.
 
 Exit code 0 means success. Any error prints a message to stderr and exits with code 1. API errors also print a hint where one applies (for example a conflict or a missing scope). `capture` exits with the wrapped command's exit code. See [Errors and limits](errors.md) for API error codes.
 
@@ -171,7 +171,8 @@ Scopes are `read`, `write`, `delete`, `share`, `manage` and `delegate`.
 
 ```sh
 agent-drive put LOCAL REMOTE [--drive ID] [--overwrite | --if-version ID] [--tag T]... [--description D] [--user ID]
-agent-drive get REMOTE [--drive ID] [--version ID] [--output FILE]
+agent-drive put - REMOTE [--drive ID] [--size N] [--overwrite | --if-version ID]
+agent-drive get REMOTE [--drive ID] [--version ID] [--output FILE|-]
 agent-drive ls [--drive ID] [--prefix PATH | --folder PATH] [--sort path|modified] [--tag T] [--agent ID] [--machine NAME] [--user ID] [--limit N] [--cursor C]
 agent-drive mv SOURCE DESTINATION [--drive ID] [--user ID]
 agent-drive cp SOURCE DESTINATION [--drive ID] [--version ID] [--user ID]
@@ -190,6 +191,8 @@ agent-drive restore PATH [--drive ID] [--version ID] [--user ID]
 | `rm`       | Moves the file to the trash.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | The file id, path and `deleted_at`.                        |
 | `versions` | Lists versions: id, path, size, author and timestamps.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | A page.                                                    |
 | `restore`  | Without `--version`, undeletes a trashed file (no new version). With another version, creates a new current version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | The version.                                               |
+
+For `put - REMOTE`, `--size N` is optional and validated before stdin is read; when supplied, it streams exactly N bytes directly to the upload (`--size 0` is valid). Without `--size`, stdin is spooled to a private temporary file using bounded memory. Existing overwrite and version guards apply. For `get ... --output -`, stdout contains raw file bytes with no JSON or newline. A transfer failure can follow bytes already sent, so check its exit status before treating them as a complete file; use `--output FILE` for an atomic verified result. The full pipe examples and shell guidance are in [Files, versions and sync](files-and-sync.md).
 
 Details and conflict recovery are in [Files, versions and sync](files-and-sync.md). The MCP tool names for these commands are in the table in [MCP server and tools](mcp-tools.md).
 

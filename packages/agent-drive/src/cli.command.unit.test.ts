@@ -349,6 +349,20 @@ describe('sync flag validation', () => {
   });
 });
 
+describe('binary stdin size validation', () => {
+  it('rejects invalid or misplaced --size before loading a drive key or making a request', async () => {
+    for (const [args, expected] of [
+      [['put', '-', '/x', '--size=-1'], 'non-negative safe integer'],
+      [['put', 'file.bin', '/x', '--size', '4'], 'only supported by `put -`'],
+      [['whoami', '--size', '4'], 'only supported by `put -`'],
+    ] as const) {
+      const result = await cli([...args], one);
+      expect(result.err).toContain(expected);
+      expect(result.paths).toEqual([]);
+    }
+  });
+});
+
 describe('credential origin binding at the command level', () => {
   const whoami = { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read', 'write'] };
 

@@ -94,7 +94,8 @@ agent add other agents" ticked.
 All take `--drive ID` unless noted. With one drive key saved for the current API, `--drive` can be left out.
 
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
-- `get REMOTE [--version ID] [--output FILE]` (use `--output` for binary or large files)
+- `put - REMOTE [--size N] [--overwrite | --if-version ID]` reads bytes from stdin; `--size` enables direct streaming, while omitting it uses a private temporary spool with bounded memory
+- `get REMOTE [--version ID] [--output FILE|-]`; use `--output FILE` for an atomic, fully verified result. `--output -` writes raw bytes to stdout without JSON or a newline, but can send partial bytes before a later verification error
 - `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO] [--cursor C] [--wait S]`
 - `versions PATH`, `restore PATH [--version ID]`, `mv`, `cp`, `rm`
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
@@ -109,6 +110,8 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
 
 `whoami` shows `writePaths`. If your writes are limited, write only under those folders (pass `--prefix` to `backup`).
+
+For shell pipelines in Bash or zsh, use `set -o pipefail` so a failed transfer is reflected in the pipeline status. Treat `get --output -` output as complete only after the command exits successfully; prefer `--output FILE` when the next step must receive only a complete verified file.
 
 ## MCP tools
 

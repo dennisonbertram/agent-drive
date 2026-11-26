@@ -28,6 +28,20 @@ agent-drive put ./notes.md /work/report/notes.md --tag report --description "Dra
 
 `--tag` can be repeated. `--description` and `--user ID` are optional. The command prints the new version as JSON, including its `id`.
 
+For a producer that writes to standard input, use `-` in place of the local path:
+
+```sh
+# Bash and zsh. Supplying --size lets the CLI upload stdin directly as it arrives.
+set -o pipefail
+cat ./archive.bin | agent-drive put - /work/archive.bin --size "$(wc -c < ./archive.bin)"
+
+# If the byte count is not known, omit --size. The CLI spools stdin to a private
+# temporary file with bounded memory use, then uploads it.
+producer-command | agent-drive put - /work/generated.bin
+```
+
+`--size` is optional and is checked before stdin is read. When supplied, stdin must contain exactly that many bytes; `--size 0` is valid. Existing `--overwrite` and `--if-version` guards work the same way as for a local file. The unknown-size path uses temporary disk space for the input.
+
 To replace a file, choose one of two flags. They cannot be combined.
 
 ```sh
@@ -73,6 +87,16 @@ agent-drive get /work/report/notes.md --version <version id> --output ./notes.ol
 ```
 
 With `--output`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key.
+
+To send the decrypted bytes to another command, pass `--output -`:
+
+```sh
+# Bash and zsh: pipefail preserves a failed download's exit status.
+set -o pipefail
+agent-drive get /work/archive.bin --output - | consumer-command
+```
+
+This mode writes raw bytes to stdout with no JSON, text conversion, or added newline. Diagnostics stay on stderr. Bytes can reach the consumer before the entire file has been verified, so check that `agent-drive get` exits successfully before treating the stream as a complete file. If the destination needs a complete verified file, use `--output ./archive.bin`; that path publishes atomically after verification. If the downstream command fails, the pipeline should fail as well when run in Bash or zsh with `set -o pipefail`.
 
 The client library also exposes `getStream`. It yields each authenticated 1 MiB plaintext frame as it is verified; if a later frame fails, earlier frames have already been yielded. A caller that writes those frames directly to stdout can produce partial output. Use `getFile` when a complete verified file must appear atomically.
 

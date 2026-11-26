@@ -56,6 +56,7 @@ import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './
 import { runMcp } from './mcp.js';
 import { runCapture } from './capture.js';
 import { getFile, putFile } from './node-transfer.js';
+import { getPipe, parsePipeSize, putPipe } from './cli-pipes.js';
 
 // Resolves to the package root from both src/ and dist/.
 const { version: cliVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -78,6 +79,7 @@ function parse(raw: string[]) {
       quota: { type: 'string' },
       'key-file': { type: 'string' },
       output: { type: 'string' },
+      size: { type: 'string' },
       'if-version': { type: 'string' },
       overwrite: { type: 'boolean' },
       'overwrite-existing': { type: 'boolean' },
@@ -287,6 +289,7 @@ async function run(command: string, raw: string[]) {
     const split = raw.indexOf('--');
     const flags = parse(split < 0 ? raw : raw.slice(0, split));
     const wrapped = split < 0 ? [] : raw.slice(split + 1);
+    if (flags.values.size !== undefined) throw new Error('--size is only supported by `put -`.');
     if (flags.positionals.length || !wrapped.length)
       throw new Error('Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]');
     process.exitCode = await runCapture({
@@ -298,6 +301,12 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const args = parse(raw);
+  let stdinSize: number | undefined;
+  if (args.values.size !== undefined) {
+    if (command !== 'put' || args.positionals[0] !== '-')
+      throw new Error('--size is only supported by `put -`.');
+    stdinSize = parsePipeSize(args.values.size);
+  }
   // One flag set is parsed for every command, so backup-only flags parse for sync
   // too — and would be silently ignored, turning `sync --dry-run` into a real
   // upload. Reject them before connect() performs any key or network lookup.
@@ -840,19 +849,29 @@ async function run(command: string, raw: string[]) {
     if (!local || !remote) throw new Error('put requires LOCAL and REMOTE.');
     if (args.values.overwrite && args.values['if-version'])
       throw new Error('--overwrite and --if-version are mutually exclusive.');
-    const version = await putFile(client, requiredDrive(args), local, remote, {
+    const options = {
       ...(args.values.overwrite ? { mode: 'overwrite' as const } : {}),
       ...(args.values['if-version'] ? { ifVersionId: args.values['if-version'] } : {}),
       ...(args.values.description ? { description: args.values.description } : {}),
       ...(args.values.user ? { userId: args.values.user } : {}),
       ...(args.values.tag ? { tags: args.values.tag } : {}),
-    });
+    };
+    const version =
+      local === '-'
+        ? await putPipe(client, requiredDrive(args), remote, process.stdin, stdinSize, options)
+        : await putFile(client, requiredDrive(args), local, remote, options);
     return output(version);
   }
   if (command === 'get') {
     const remote = args.positionals[0];
     if (!remote) throw new Error('get requires REMOTE.');
     if (args.values.output) {
+      if (args.values.output === '-') {
+        await getPipe(client, requiredDrive(args), remote, process.stdout, {
+          ...(args.values.version ? { versionId: args.values.version } : {}),
+        });
+        return;
+      }
       return output(
         await getFile(client, requiredDrive(args), remote, args.values.output, {
           ...(args.values.version ? { versionId: args.values.version } : {}),
@@ -954,8 +973,9 @@ Commands:
   drive create --name NAME [--agent-only]
   key create --agent ID --drive ID --label LABEL --scope read --scope write [--write-path P]...
   key revoke ID
-  put LOCAL REMOTE --drive ID [--if-version ID | --overwrite]
-  get REMOTE --drive ID [--output FILE]
+  put LOCAL|- REMOTE --drive ID [--size N] [--if-version ID | --overwrite]
+                                        put - reads binary stdin; --size streams directly, otherwise stdin is privately spooled first
+  get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
   ls --drive ID [--prefix PATH | --folder PATH] [--sort path|modified] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   mv SOURCE DESTINATION --drive ID
   cp SOURCE DESTINATION --drive ID
