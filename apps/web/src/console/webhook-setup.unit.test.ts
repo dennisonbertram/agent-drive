@@ -123,9 +123,12 @@ describe('keySourceFor', () => {
 });
 
 describe('isDriveBoundSource', () => {
-  it.each(['trusted', 'recovery-file', 'bundle'] as const)('%s identifies an empty drive', (source) => {
-    expect(isDriveBoundSource(source)).toBe(true);
-  });
+  it.each(['trusted', 'recovery-file', 'bundle'] as const)(
+    '%s identifies an empty drive',
+    (source) => {
+      expect(isDriveBoundSource(source)).toBe(true);
+    },
+  );
 
   it.each(['pasted', 'vault'] as const)('%s cannot identify an empty drive', (source) => {
     expect(isDriveBoundSource(source)).toBe(false);
