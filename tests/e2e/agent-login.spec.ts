@@ -256,7 +256,11 @@ test.describe('agent device login', () => {
     };
   }
 
-  type Config = { apiKey: string; driveKeys: Record<string, string> };
+  type Config = {
+    apiKey: string;
+    driveKeys: Record<string, string>;
+    driveKeyOrigins?: Record<string, string>;
+  };
   const readConfig = async (env: NodeJS.ProcessEnv) =>
     JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as Config;
 
@@ -368,6 +372,7 @@ test.describe('agent device login', () => {
     expect((await login.done).status).toBe(0);
     const configA = await readConfig(envA);
     const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    expect(configA.driveKeyOrigins?.[driveId]).toBe(new URL(baseURL!).origin);
     const secret = `FIRST-${randomUUID()}`;
     const local = join(root, 'x.txt');
     await writeFile(local, secret);
@@ -932,6 +937,7 @@ test.describe('agent device login', () => {
     expect((await a.login.done).status).toBe(0);
     const configA = await readConfig(envA);
     const [driveId, driveKey] = Object.entries(configA.driveKeys)[0]!;
+    expect(configA.driveKeyOrigins?.[driveId]).toBe(new URL(baseURL!).origin);
     const secret = `FIRST-${randomUUID()}`;
     const local = join(root, 'x.txt');
     await writeFile(local, secret);
@@ -963,7 +969,7 @@ test.describe('agent device login', () => {
         ...configA,
         apiUrl: proxyApiUrl,
         driveKeyOrigins: {
-          ...configA.driveKeyOrigins,
+          ...(configA.driveKeyOrigins ?? {}),
           [driveId]: new URL(proxyApiUrl).origin,
         },
       }),
