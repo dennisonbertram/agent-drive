@@ -46,6 +46,7 @@ import {
   presignedUpload,
 } from './storage';
 import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
+import { assertNoExplicitDirectoryAtFilePath } from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
@@ -98,6 +99,8 @@ const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
   'drive.commit',
+  'drive.mkdir',
+  'drive.rmdir',
   'drive.get',
   'drive.trace_inbox.read',
   'drive.list',
@@ -434,6 +437,8 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     'POST:unlink': 'drive.delete',
     'POST:copy': 'drive.copy',
     'POST:delete': 'drive.delete',
+    'POST:mkdir': 'drive.mkdir',
+    'POST:rmdir': 'drive.rmdir',
     'POST:restore': 'drive.restore',
     'GET:versions': 'drive.versions',
     'GET:recent': 'drive.recent',
@@ -545,9 +550,8 @@ function decodeModifiedCursor(cursor: string | undefined) {
 }
 
 // Immediate children of `base` (files and folders). Filters apply to files before grouping.
-// ponytail: each page re-aggregates every live file under the prefix (O(files in the subtree));
-// add a (drive_id, path text_pattern_ops) WHERE deleted_at IS NULL index if EXPLAIN shows root
-// listings over ~300 ms. Migration 0020 adds it; this query does not depend on it.
+// The path grouping also uses explicit directory paths, so empty descendants keep their virtual
+// ancestors visible after the files that first created those ancestors have been deleted.
 async function listChildren(
   url: URL,
   driveId: string,
@@ -584,19 +588,54 @@ async function listChildren(
               v.ciphertext_size, v.agent_id, v.machine_id, v.user_id, v.tags, v.description, v.created_at
          FROM files f JOIN versions v ON v.id = f.current_version_id
         WHERE f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2 ESCAPE '\\'${filters}
-     ), kids AS (
+     ), explicit_dirs AS (
+       SELECT d.id, d.path, d.created_at,
+              substr(d.path, length($3::text) + 1) AS rest
+         FROM drive_directories d
+        WHERE d.drive_id = $1 AND d.path LIKE $2 ESCAPE '\\'
+     ), folder_members AS (
+       SELECT split_part(rest, '/', 1) AS parent_name,
+              split_part(rest, '/', 2) ||
+                CASE WHEN split_part(rest, '/', 3) <> '' THEN '/' ELSE '' END AS child_key,
+              ciphertext_size, created_at
+         FROM live WHERE strpos(rest, '/') > 0
+       UNION ALL
+       SELECT split_part(rest, '/', 1), split_part(rest, '/', 2) || '/',
+              0::bigint, created_at
+         FROM explicit_dirs WHERE strpos(rest, '/') > 0
+     ), folder_stats AS (
+       SELECT parent_name, count(DISTINCT child_key)::bigint AS items,
+              sum(ciphertext_size)::bigint AS ciphertext_size, max(created_at) AS created_at
+         FROM folder_members GROUP BY parent_name
+     ), folder_candidates AS (
+       SELECT NULL::uuid AS id, $3 || s.parent_name AS path, s.items, s.ciphertext_size,
+              s.created_at
+         FROM folder_stats s
+       UNION ALL
+       SELECT d.id, d.path, COALESCE(s.items, 0::bigint),
+              COALESCE(s.ciphertext_size, 0::bigint), GREATEST(d.created_at, s.created_at)
+         FROM explicit_dirs d
+         LEFT JOIN folder_stats s ON s.parent_name = d.rest
+        WHERE strpos(d.rest, '/') = 0
+     ), folders AS (
+       SELECT 'folder' AS kind,
+              (array_agg(id) FILTER (WHERE id IS NOT NULL))[1] AS id,
+              path, NULL::uuid AS version_id,
+              max(ciphertext_size)::bigint AS ciphertext_size,
+              NULL::uuid AS agent_id, NULL::uuid AS machine_id, NULL::text AS user_id,
+              NULL::text[] AS tags, NULL::text AS description, max(created_at) AS created_at,
+              max(items)::bigint AS items, path || '/' AS key
+         FROM folder_candidates GROUP BY path
+     ), direct_files AS (
        SELECT 'file' AS kind, id, path, version_id, ciphertext_size, agent_id, machine_id, user_id,
               tags, description, created_at, NULL::bigint AS items, path AS key
          FROM live WHERE strpos(rest, '/') = 0
+     ), children AS (
+       SELECT * FROM direct_files
        UNION ALL
-       SELECT 'folder', NULL, $3 || split_part(rest, '/', 1), NULL, sum(ciphertext_size)::bigint,
-              NULL, NULL, NULL, NULL, NULL, max(created_at),
-              count(DISTINCT split_part(rest, '/', 2) ||
-                CASE WHEN split_part(rest, '/', 3) <> '' THEN '/' ELSE '' END),
-              $3 || split_part(rest, '/', 1) || '/'
-         FROM live WHERE strpos(rest, '/') > 0 GROUP BY split_part(rest, '/', 1)
+       SELECT * FROM folders
      )
-     SELECT *, ${isoText('created_at')} AS cursor_created_at FROM kids ${outer}
+     SELECT *, ${isoText('created_at')} AS cursor_created_at FROM children ${outer}
       ORDER BY ${sort === 'modified' ? 'created_at DESC, ' : ''}key COLLATE "C" LIMIT $${params.length}`,
     params,
   );
@@ -608,6 +647,7 @@ async function listChildren(
         ? {
             kind: r.kind,
             path: r.path,
+            ...(r.id ? { directory_id: r.id } : {}),
             items: Number(r.items),
             ciphertext_size: r.ciphertext_size,
             created_at: r.created_at,
@@ -635,6 +675,118 @@ async function listChildren(
           )
         : null,
   };
+}
+
+async function makeDirectory(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'write', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['path']);
+  const path = canonicalPath(body.path);
+  needWritePath(auth, path);
+  const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+  const created = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+
+    const fileAtPath = await client.query(
+      'SELECT id FROM files WHERE drive_id = $1 AND path = $2',
+      [driveId, path],
+    );
+    if (fileAtPath.rowCount)
+      throw new ApiError('conflict', 'A file already exists at this directory path.');
+    const directoryAtPath = await client.query(
+      'SELECT id FROM drive_directories WHERE drive_id = $1 AND path = $2',
+      [driveId, path],
+    );
+    if (directoryAtPath.rowCount) throw new ApiError('conflict', 'The directory already exists.');
+
+    const childrenAtPath = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM files
+          WHERE drive_id = $1 AND deleted_at IS NULL AND strpos(path, $2 || '/') = 1
+       ) OR EXISTS (
+         SELECT 1 FROM drive_directories
+          WHERE drive_id = $1 AND strpos(path, $2 || '/') = 1
+       ) AS has_children`,
+      [driveId, path],
+    );
+    if (childrenAtPath.rows[0]!.has_children)
+      throw new ApiError('conflict', 'A directory already exists at this path.');
+
+    if (parent !== '/') {
+      const parentDirectoryPrefix = `${parent.replace(/[\\%_]/g, '\\$&')}/%`;
+      const parentState = await client.query(
+        `SELECT
+           EXISTS (SELECT 1 FROM drive_directories WHERE drive_id = $1 AND path = $2) AS has_explicit_directory,
+           (EXISTS (SELECT 1 FROM files WHERE drive_id = $1 AND deleted_at IS NULL AND strpos(path, $2 || '/') = 1)
+             OR EXISTS (SELECT 1 FROM drive_directories WHERE drive_id = $1 AND path LIKE $3 ESCAPE '\\')) AS has_implicit_directory,
+           EXISTS (SELECT 1 FROM files WHERE drive_id = $1 AND path = $2) AS has_file_at_path`,
+        [driveId, parent, parentDirectoryPrefix],
+      );
+      const state = parentState.rows[0] as {
+        has_explicit_directory: boolean;
+        has_implicit_directory: boolean;
+        has_file_at_path: boolean;
+      };
+      if (!state.has_explicit_directory && !state.has_implicit_directory) {
+        if (state.has_file_at_path) throw new ApiError('conflict', 'The parent path is a file.');
+        throw new ApiError('not_found', 'The parent directory does not exist.');
+      }
+    }
+
+    const result = await client.query(
+      `INSERT INTO drive_directories (drive_id, path)
+       VALUES ($1, $2)
+       RETURNING id, path, created_at`,
+      [driveId, path],
+    );
+    return result.rows[0] as Row;
+  });
+  return response(
+    { path: created.path, directory_id: created.id, created_at: created.created_at },
+    201,
+  );
+}
+
+async function removeDirectory(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'delete', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['path']);
+  const path = canonicalPath(body.path);
+  needWritePath(auth, path);
+  const removed = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+    const directory = await client.query(
+      'SELECT id FROM drive_directories WHERE drive_id = $1 AND path = $2 FOR UPDATE',
+      [driveId, path],
+    );
+    if (!directory.rowCount) throw new ApiError('not_found', 'Directory not found.');
+    const children = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM files
+          WHERE drive_id = $1 AND deleted_at IS NULL
+            AND (path = $2 OR strpos(path, $2 || '/') = 1)
+       ) OR EXISTS (
+         SELECT 1 FROM drive_directories
+          WHERE drive_id = $1 AND path <> $2 AND strpos(path, $2 || '/') = 1
+       ) AS has_children`,
+      [driveId, path],
+    );
+    if (children.rows[0]!.has_children)
+      throw new ApiError('conflict', 'The directory is not empty.');
+    await client.query('DELETE FROM drive_directories WHERE id = $1', [directory.rows[0]!.id]);
+    return { path };
+  });
+  return response(removed);
 }
 
 export function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
@@ -1960,6 +2112,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
     await enforceWriteBudget(client, auth.accountId, {
       bytes: BigInt(ciphertextSize),
       reserveOnly: true,
@@ -2305,6 +2458,10 @@ async function fileEndpoint(
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
+  if (operation === 'mkdir' && request.method === 'POST')
+    return makeDirectory(request, auth, drive.id);
+  if (operation === 'rmdir' && request.method === 'POST')
+    return removeDirectory(request, auth, drive.id);
   if (operation === 'get' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
@@ -2568,6 +2725,7 @@ async function fileEndpoint(
         [driveId, auth.accountId],
       );
       if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      await assertNoExplicitDirectoryAtFilePath(client, driveId, to);
       const machine = await machineId(client, auth, request);
       const result = await client.query(
         `UPDATE files SET path = $1 WHERE drive_id = $2 AND path = $3 AND deleted_at IS NULL
@@ -2692,6 +2850,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, destinationPath);
     const machine = await machineId(client, auth, request);
     const source = await client.query(
       `SELECT f.*, v.* FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)

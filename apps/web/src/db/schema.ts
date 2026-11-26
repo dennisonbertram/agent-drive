@@ -274,6 +274,34 @@ export const files = pgTable(
   ],
 );
 
+export const driveDirectories = pgTable(
+  'drive_directories',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('drive_directories_drive_path_unique').on(table.driveId, table.path),
+    index('drive_directories_drive_path_prefix_idx').on(
+      table.driveId,
+      sql`${table.path} text_pattern_ops`,
+    ),
+    check(
+      'drive_directories_canonical_path_check',
+      sql`char_length(${table.path}) BETWEEN 2 AND 1024
+        AND ${table.path} LIKE '/%'
+        AND right(${table.path}, 1) <> '/'
+        AND position('//' IN ${table.path}) = 0
+        AND position(chr(92) IN ${table.path}) = 0
+        AND ${table.path} !~ '(^|/)([.]|[.][.])(/|$)'`,
+    ),
+  ],
+);
+
 export const versions = pgTable(
   'versions',
   {

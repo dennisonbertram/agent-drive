@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { ApiError } from './errors';
+import { assertNoExplicitDirectoryAtFilePath } from './directories';
 
 // Database rows are intentionally untyped at this boundary, like in handler.ts.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +41,7 @@ export async function putConflict(
   path: string,
   mode: PutMode,
 ): Promise<Row | undefined> {
+  await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
   const fileResult = await client.query(
     'SELECT id, current_version_id, deleted_at FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE',
     [driveId, path],
