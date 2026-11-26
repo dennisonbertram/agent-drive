@@ -16,7 +16,11 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
-import { generateDriveKey, plaintextSize } from '../../../../../packages/agent-drive/src/crypto.ts';
+import {
+  DriveCryptoError,
+  generateDriveKey,
+  plaintextSize,
+} from '../../../../../packages/agent-drive/src/crypto.ts';
 import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   loadInbox,
@@ -1676,7 +1680,34 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       ) {
         showToast('Download canceled.');
       } else {
-        showToast(reason instanceof Error ? reason.message : 'The file could not be downloaded.');
+        const message =
+          reason instanceof Error ? reason.message : 'The file could not be downloaded.';
+        if (reason instanceof DriveCryptoError && reason.code === 'decryption_failed') {
+          const driveId = selected;
+          showToast(`${message} You can try another recovery key if you have one.`, {
+            tone: 'error',
+            action: {
+              label: 'Try another key',
+              run: (toastId) => {
+                dismissToast(toastId);
+                if (!driveId || selectedNow.current !== driveId) return;
+                setDriveKeys((current) => {
+                  const next = { ...current };
+                  delete next[driveId];
+                  return next;
+                });
+                keySources.current.delete(driveId);
+                trustedDrives.current.delete(driveId);
+                setPendingAction({ driveId, file, kind: 'download' });
+                setRecoveryNote('');
+                setUnlockMode('recovery');
+                open('unlock');
+              },
+            },
+          });
+        } else {
+          showToast(message, { tone: 'error' });
+        }
       }
     } finally {
       if (downloadAborters.current.get(file.id) === controller)
