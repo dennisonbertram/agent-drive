@@ -297,7 +297,11 @@ new synthetic account; the maintenance worker must finish that asynchronous purg
 Account deletion retains only aggregate billing receipts (plan, periods, numeric usage and amounts,
 and rate snapshots), opaque deletion-control IDs, and hashed identity tombstones locally. Receipts
 exclude agent/file names, paths, credentials, email addresses, and external identity/customer IDs.
-Payment-provider records and private access logs follow their separately configured retention.
+To attribute delayed access logs after a drive purge, the database temporarily retains a one-way
+hash of each retained object key linked to its account. It contains no raw path and is deleted when
+the account is erased. A late transfer after account erasure is ignored. Egress events keep their
+accounting bytes after a drive purge but replace the object path with `deleted`. Payment-provider
+records and private access logs follow their separately configured retention.
 
 Store the sanitized reports under `test-results/release-*/` with the release record. A candidate
 failure prevents promotion. A post-promotion failure exits nonzero but cannot undo the already

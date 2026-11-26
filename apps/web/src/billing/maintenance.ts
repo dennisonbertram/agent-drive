@@ -1,4 +1,5 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { billingSummary, recordTransfer } from './ledger';
 import { parseS3Transfer } from './s3-log';
@@ -13,6 +14,12 @@ import { billingOrigin } from './policy';
 
 const limit = 100;
 const maxLogLineBytes = 1024 * 1024;
+const logListPageSize = 250;
+const logPagesPerCursor = 2;
+const logObjectsPerRun = 100;
+const maxObjectBytesPerRun = 4 * 1024 * 1024;
+const maxLogBytesPerRun = 24 * 1024 * 1024;
+const maxLogRunMs = 210_000;
 
 type MeterClaim = {
   id: string;
@@ -79,49 +86,463 @@ export async function ingestLogs() {
     return;
   }
   const client = logsClient();
-  let token: string | undefined;
-  do {
-    const page = await client.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
+  const sourceHash = createHash('sha256').update(`${bucket}\0${prefix}`).digest('hex');
+  const leaseOwner = randomUUID();
+  const lease = await getPool().query(
+    `INSERT INTO billing_log_ingest_leases (source_hash,owner_token,lease_until)
+     VALUES ($1,$2,clock_timestamp()+interval '5 minutes')
+     ON CONFLICT (source_hash) DO UPDATE
+       SET owner_token=EXCLUDED.owner_token, lease_until=EXCLUDED.lease_until
+       WHERE billing_log_ingest_leases.lease_until IS NULL
+          OR billing_log_ingest_leases.lease_until <= clock_timestamp()
+     RETURNING source_hash`,
+    [sourceHash, leaseOwner],
+  );
+  if (!lease.rowCount) {
+    client.destroy();
+    return;
+  }
+  const startedAt = Date.now();
+  let bytesRead = 0;
+  let objectsRead = 0;
+  const attemptedObjects = new Set<string>();
+  try {
+    const budget = () =>
+      bytesRead < maxLogBytesPerRun &&
+      objectsRead < logObjectsPerRun &&
+      Date.now() - startedAt < maxLogRunMs;
+
+    // Resume a partially consumed object before advancing either list cursor.
+    const pending = await getPool().query<{ object_key: string; etag: string }>(
+      `SELECT p.object_key, p.etag FROM billing_log_object_progress p
+        WHERE NOT EXISTS (
+          SELECT 1 FROM billing_log_processed_objects o
+           WHERE o.source_hash=p.source_hash AND o.object_key=p.object_key AND o.etag=p.etag
+        )
+          AND NOT EXISTS (
+            SELECT 1 FROM billing_log_objects o
+             WHERE o.object_key=p.object_key AND o.etag=p.etag
+          )
+          AND p.source_hash=$1
+        ORDER BY p.updated_at, p.object_key LIMIT 2`,
+      [sourceHash],
     );
-    for (const object of page.Contents ?? []) {
-      if (!object.Key || !object.ETag) continue;
-      const known = await getPool().query(
-        'SELECT 1 FROM billing_log_objects WHERE object_key = $1 AND etag = $2',
-        [object.Key, object.ETag],
+    for (const object of pending.rows) {
+      if (!budget()) break;
+      attemptedObjects.add(`${object.object_key}\0${object.etag}`);
+      const result = await ingestLogObject(
+        client,
+        bucket,
+        sourceHash,
+        leaseOwner,
+        object.object_key,
+        object.etag,
+        budget,
+        (count) => {
+          bytesRead += count;
+        },
       );
-      if (known.rowCount) continue;
-      const data = await client.send(new GetObjectCommand({ Bucket: bucket, Key: object.Key }));
-      if (!data.Body) throw new Error('S3 log object body is unavailable.');
-      const decoder = new TextDecoder();
-      let pending = '';
-      for await (const chunk of data.Body as AsyncIterable<Uint8Array>) {
-        pending += decoder.decode(chunk, { stream: true });
-        let newline = pending.indexOf('\n');
-        while (newline >= 0) {
-          const line = pending.slice(0, newline).replace(/\r$/u, '');
-          const transfer = parseS3Transfer(line);
-          if (transfer) await recordTransfer(transfer);
-          pending = pending.slice(newline + 1);
-          newline = pending.indexOf('\n');
-        }
-        if (Buffer.byteLength(pending, 'utf8') > maxLogLineBytes)
-          throw new Error(`S3 log object ${object.Key} contains an oversized line.`);
+      objectsRead += 1;
+      if (result === 'missing') {
+        await deleteLogProgress(sourceHash, leaseOwner, object.object_key, object.etag);
       }
-      pending += decoder.decode();
-      if (pending) {
-        if (Buffer.byteLength(pending, 'utf8') > maxLogLineBytes)
-          throw new Error(`S3 log object ${object.Key} contains an oversized line.`);
-        const transfer = parseS3Transfer(pending.replace(/\r$/u, ''));
-        if (transfer) await recordTransfer(transfer);
-      }
-      await getPool().query(
-        'INSERT INTO billing_log_objects (object_key, etag) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [object.Key, object.ETag],
-      );
     }
-    token = page.NextContinuationToken;
-  } while (token);
+
+    // The deployed bucket uses SimplePrefix keys, so today's date prefix gets
+    // a bounded pass before historical cursors. The rolling sweep catches late
+    // delivery and older key layouts that sort before this day's high-water.
+    const todayPrefix = `${prefix}${new Date().toISOString().slice(0, 10)}`;
+    let tailPages = 0;
+    while (tailPages < logPagesPerCursor && budget()) {
+      const cursor = await getPool().query<{ last_key: string | null }>(
+        `SELECT last_key FROM billing_log_scan_state
+          WHERE source_hash=$1 AND cursor_kind='tail'`,
+        [sourceHash],
+      );
+      const startAfter = cursor.rows[0]?.last_key ?? undefined;
+      const page = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: todayPrefix,
+          StartAfter: startAfter,
+          MaxKeys: logListPageSize,
+        }),
+      );
+      tailPages += 1;
+      const scanned = await processLogPage(
+        client,
+        bucket,
+        sourceHash,
+        leaseOwner,
+        page.Contents ?? [],
+        attemptedObjects,
+        budget,
+        (count) => {
+          bytesRead += count;
+        },
+        () => {
+          objectsRead += 1;
+        },
+      );
+      if (scanned.lastKey !== null && scanned.lastKey !== startAfter)
+        await saveLogCursor(sourceHash, leaseOwner, 'tail', scanned.lastKey);
+      if (scanned.lastKey === null || scanned.lastKey === startAfter) break;
+    }
+
+    for (const cursorKind of ['forward', 'sweep'] as const) {
+      let pages = 0;
+      while (pages < logPagesPerCursor && budget()) {
+        const cursor = await getPool().query<{ last_key: string | null }>(
+          'SELECT last_key FROM billing_log_scan_state WHERE source_hash=$1 AND cursor_kind=$2',
+          [sourceHash, cursorKind],
+        );
+        const startAfter = cursor.rows[0]?.last_key ?? undefined;
+        const page = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            StartAfter: startAfter,
+            MaxKeys: logListPageSize,
+          }),
+        );
+        pages += 1;
+        const scanned = await processLogPage(
+          client,
+          bucket,
+          sourceHash,
+          leaseOwner,
+          page.Contents ?? [],
+          attemptedObjects,
+          budget,
+          (count) => {
+            bytesRead += count;
+          },
+          () => {
+            objectsRead += 1;
+          },
+          startAfter ?? null,
+        );
+        if (scanned.lastKey !== null && scanned.lastKey !== startAfter)
+          await saveLogCursor(sourceHash, leaseOwner, cursorKind, scanned.lastKey);
+        if (!scanned.hasObjects) {
+          if (cursorKind === 'sweep') await saveLogCursor(sourceHash, leaseOwner, cursorKind, null);
+          break;
+        }
+        // An incomplete object is independently resumable; listing can continue.
+        if (objectsRead >= logObjectsPerRun) break;
+      }
+    }
+  } finally {
+    try {
+      await getPool().query(
+        `UPDATE billing_log_ingest_leases SET owner_token=NULL, lease_until=NULL
+          WHERE source_hash=$1 AND owner_token=$2`,
+        [sourceHash, leaseOwner],
+      );
+    } finally {
+      client.destroy();
+    }
+  }
+}
+
+async function processLogPage(
+  client: S3Client,
+  bucket: string,
+  sourceHash: string,
+  leaseOwner: string,
+  listed: Array<{ Key?: string | undefined; ETag?: string | undefined }>,
+  attemptedObjects: Set<string>,
+  canRead: () => boolean,
+  accountBytes: (count: number) => void,
+  accountObject: () => void,
+  initialLastKey: string | null = null,
+) {
+  const candidates = listed.filter(
+    (object): object is typeof object & { Key: string; ETag: string } =>
+      !!object.Key && !!object.ETag,
+  );
+  const keys = candidates.map(({ Key }) => Key);
+  const markers = keys.length
+    ? await getPool().query<{ object_key: string; etag: string }>(
+        `SELECT object_key, etag FROM billing_log_processed_objects
+          WHERE source_hash=$1 AND object_key=ANY($2::text[])
+         UNION
+         SELECT object_key, etag FROM billing_log_objects WHERE object_key=ANY($2::text[])`,
+        [sourceHash, keys],
+      )
+    : { rows: [] as Array<{ object_key: string; etag: string }> };
+  const processed = new Map(markers.rows.map((marker) => [marker.object_key, marker.etag]));
+  let lastKey = initialLastKey;
+  for (const object of candidates) {
+    if (!canRead()) break;
+    lastKey = object.Key;
+    if (
+      processed.get(object.Key) !== object.ETag &&
+      !attemptedObjects.has(`${object.Key}\0${object.ETag}`)
+    ) {
+      attemptedObjects.add(`${object.Key}\0${object.ETag}`);
+      const result = await ingestLogObject(
+        client,
+        bucket,
+        sourceHash,
+        leaseOwner,
+        object.Key,
+        object.ETag,
+        canRead,
+        accountBytes,
+      );
+      if (result === 'missing') {
+        await deleteLogProgress(sourceHash, leaseOwner, object.Key, object.ETag);
+      }
+      accountObject();
+    }
+  }
+  return { lastKey, hasObjects: candidates.length > 0 };
+}
+
+async function saveLogCursor(
+  sourceHash: string,
+  leaseOwner: string,
+  cursorKind: 'tail' | 'forward' | 'sweep',
+  lastKey: string | null,
+) {
+  const updated = await getPool().query(
+    `WITH owned AS (
+       SELECT source_hash FROM billing_log_ingest_leases
+        WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+        FOR UPDATE
+     )
+     INSERT INTO billing_log_scan_state (source_hash,cursor_kind,last_key)
+     SELECT source_hash,$2,$3 FROM owned
+     ON CONFLICT (source_hash,cursor_kind) DO UPDATE
+       SET last_key=EXCLUDED.last_key, updated_at=clock_timestamp()
+     RETURNING source_hash`,
+    [sourceHash, cursorKind, lastKey, leaseOwner],
+  );
+  if (!updated.rowCount) throw new Error('S3 log ingest lease expired.');
+}
+
+async function ownsLogIngestLease(sourceHash: string, leaseOwner: string) {
+  const owned = await getPool().query(
+    `SELECT 1 FROM billing_log_ingest_leases
+      WHERE source_hash=$1 AND owner_token=$2 AND lease_until > clock_timestamp()`,
+    [sourceHash, leaseOwner],
+  );
+  return !!owned.rowCount;
+}
+
+async function deleteLogProgress(
+  sourceHash: string,
+  leaseOwner: string,
+  objectKey: string,
+  etag: string,
+) {
+  await getPool().query(
+    `WITH owned AS (
+       SELECT source_hash FROM billing_log_ingest_leases
+        WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+        FOR UPDATE
+     )
+     DELETE FROM billing_log_object_progress p USING owned
+      WHERE p.source_hash=owned.source_hash AND p.object_key=$2 AND p.etag=$3`,
+    [sourceHash, objectKey, etag, leaseOwner],
+  );
+}
+
+async function ingestLogObject(
+  client: S3Client,
+  bucket: string,
+  sourceHash: string,
+  leaseOwner: string,
+  objectKey: string,
+  etag: string,
+  canRead: () => boolean,
+  accountBytes: (count: number) => void,
+): Promise<'complete' | 'partial' | 'missing'> {
+  await getPool().query(
+    `WITH owned AS (
+       SELECT source_hash FROM billing_log_ingest_leases
+        WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+        FOR UPDATE
+     )
+     INSERT INTO billing_log_object_progress (source_hash,object_key,etag,byte_offset)
+     SELECT source_hash,$2,$3,0 FROM owned
+     ON CONFLICT (source_hash,object_key,etag) DO NOTHING`,
+    [sourceHash, objectKey, etag, leaseOwner],
+  );
+  const progress = await getPool().query<{ byte_offset: string; discarding_line: boolean }>(
+    'SELECT byte_offset::text, discarding_line FROM billing_log_object_progress WHERE source_hash=$1 AND object_key=$2 AND etag=$3',
+    [sourceHash, objectKey, etag],
+  );
+  if (!progress.rows[0] || !(await ownsLogIngestLease(sourceHash, leaseOwner)))
+    throw new Error('S3 log ingest lease expired.');
+  let safeOffset = BigInt(progress.rows[0]?.byte_offset ?? '0');
+  const startingOffset = safeOffset;
+  let discardingLine = progress.rows[0].discarding_line;
+  const startingDiscardingLine = discardingLine;
+  let request;
+  try {
+    request = await client.send(
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: objectKey,
+        IfMatch: etag,
+        Range: `bytes=${safeOffset}-${safeOffset + BigInt(maxObjectBytesPerRun) - 1n}`,
+      }),
+    );
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status === 404 || status === 412) return 'missing';
+    throw error;
+  }
+  if (!request.Body) throw new Error('S3 log object body is unavailable.');
+  const contentRangeTotal = /\/(\d+)$/u.exec(request.ContentRange ?? '')?.[1];
+  const totalBytes = BigInt(
+    contentRangeTotal ?? String(Number(request.ContentLength ?? 0) + Number(safeOffset)),
+  );
+
+  let pending = '';
+  let pendingBytes = 0;
+  let discardCheckpointBytes = 0;
+  let discardedLine = false;
+  const decoder = new TextDecoder();
+  let linesSinceCheckpoint = 0;
+  let objectBytesRead = 0;
+  const checkpoint = async () => {
+    const updated = await getPool().query(
+      `WITH owned AS (
+         SELECT source_hash FROM billing_log_ingest_leases
+          WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+          FOR UPDATE
+       )
+       UPDATE billing_log_object_progress p
+          SET byte_offset=$5, discarding_line=$6, updated_at=clock_timestamp()
+        FROM owned
+        WHERE p.source_hash=owned.source_hash AND p.object_key=$2 AND p.etag=$3
+        RETURNING p.object_key`,
+      [sourceHash, objectKey, etag, leaseOwner, safeOffset.toString(), discardingLine],
+    );
+    if (!updated.rowCount) throw new Error('S3 log ingest lease expired.');
+    linesSinceCheckpoint = 0;
+    discardCheckpointBytes = 0;
+  };
+  const processLine = async (line: string, lineBytes: number) => {
+    if (lineBytes <= maxLogLineBytes) {
+      const transfer = parseS3Transfer(line.replace(/\r$/u, ''));
+      if (transfer) await recordTransfer(transfer);
+    }
+    safeOffset += BigInt(lineBytes + 1);
+    linesSinceCheckpoint += 1;
+    if (linesSinceCheckpoint >= 100) await checkpoint();
+  };
+
+  let stoppedEarly = false;
+  const cancelBody = async () => {
+    const body = request.Body as { cancel?: () => Promise<void>; destroy?: () => void };
+    try {
+      if (body.cancel) await body.cancel();
+      else body.destroy?.();
+    } catch {
+      body.destroy?.();
+    }
+  };
+  try {
+    for await (const chunk of request.Body as AsyncIterable<Uint8Array>) {
+      objectBytesRead += chunk.byteLength;
+      accountBytes(chunk.byteLength);
+      const decoded = decoder.decode(chunk, { stream: true });
+      let rest = pending + decoded;
+      pending = '';
+      let newline = rest.indexOf('\n');
+      while (newline >= 0) {
+        const segment = rest.slice(0, newline);
+        const segmentBytes = Buffer.byteLength(segment, 'utf8');
+        if (discardingLine || segmentBytes > maxLogLineBytes) {
+          safeOffset += BigInt(segmentBytes + 1);
+          discardingLine = false;
+          discardedLine = true;
+          linesSinceCheckpoint += 1;
+          if (linesSinceCheckpoint >= 100) await checkpoint();
+        } else {
+          await processLine(segment, segmentBytes);
+        }
+        rest = rest.slice(newline + 1);
+        newline = rest.indexOf('\n');
+        if (!canRead() || objectBytesRead >= maxObjectBytesPerRun) {
+          stoppedEarly = true;
+          break;
+        }
+      }
+      if (newline >= 0) {
+        pending = rest.slice(newline + 1);
+        pendingBytes = Buffer.byteLength(pending, 'utf8');
+      } else if (discardingLine || Buffer.byteLength(rest, 'utf8') > maxLogLineBytes) {
+        const discardedBytes = Buffer.byteLength(rest, 'utf8');
+        safeOffset += BigInt(discardedBytes);
+        discardCheckpointBytes += discardedBytes;
+        discardingLine = true;
+        if (discardCheckpointBytes >= 512 * 1024) {
+          await checkpoint();
+          discardCheckpointBytes = 0;
+        }
+        pendingBytes = 0;
+      } else {
+        pending = rest;
+        pendingBytes = Buffer.byteLength(pending, 'utf8');
+      }
+      if (!canRead() || objectBytesRead >= maxObjectBytesPerRun) {
+        stoppedEarly = true;
+        break;
+      }
+    }
+  } catch (error) {
+    await cancelBody();
+    throw error;
+  }
+  if (stoppedEarly) await cancelBody();
+
+  const decoderTail = decoder.decode();
+  if (decoderTail && discardingLine) {
+    const discardedBytes = Buffer.byteLength(decoderTail, 'utf8');
+    safeOffset += BigInt(discardedBytes);
+    discardCheckpointBytes += discardedBytes;
+  } else if (decoderTail) {
+    pending += decoderTail;
+    pendingBytes += Buffer.byteLength(decoderTail, 'utf8');
+  }
+  if (
+    (objectBytesRead < maxObjectBytesPerRun && canRead()) ||
+    (totalBytes > 0n && safeOffset >= totalBytes)
+  ) {
+    if (discardingLine) {
+      discardedLine = true;
+    } else if (pendingBytes > 0) {
+      const transfer = parseS3Transfer(pending.replace(/\r$/u, ''));
+      if (transfer) await recordTransfer(transfer);
+      safeOffset += BigInt(pendingBytes);
+      linesSinceCheckpoint += 1;
+    }
+    await checkpoint();
+    const marked = await getPool().query(
+      `WITH owned AS (
+         SELECT source_hash FROM billing_log_ingest_leases
+          WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+          FOR UPDATE
+       )
+       INSERT INTO billing_log_processed_objects (source_hash,object_key,etag)
+       SELECT source_hash,$2,$3 FROM owned ON CONFLICT DO NOTHING RETURNING object_key`,
+      [sourceHash, objectKey, etag, leaseOwner],
+    );
+    if (!marked.rowCount) {
+      const stillOwns = await ownsLogIngestLease(sourceHash, leaseOwner);
+      if (!stillOwns) throw new Error('S3 log ingest lease expired.');
+    }
+    await deleteLogProgress(sourceHash, leaseOwner, objectKey, etag);
+    if (discardedLine) console.warn('Skipped an oversized line in an S3 access log object.');
+    return 'complete';
+  }
+  if (safeOffset > startingOffset || discardingLine !== startingDiscardingLine) await checkpoint();
+  return 'partial';
 }
 
 export async function refreshPeriods() {

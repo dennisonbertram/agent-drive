@@ -661,6 +661,129 @@ export const billingLogObjects = pgTable(
   ],
 );
 
+// Two bounded S3 listing cursors per source: a forward high-water mark for newly
+// named objects and a rolling sweep for late objects with older key names.
+export const billingLogScanState = pgTable(
+  'billing_log_scan_state',
+  {
+    sourceHash: text('source_hash').notNull(),
+    cursorKind: text('cursor_kind').notNull(),
+    lastKey: text('last_key'),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.sourceHash, table.cursorKind],
+      name: 'billing_log_scan_state_pk',
+    }),
+    check(
+      'billing_log_scan_cursor_kind_check',
+      sql`${table.cursorKind} IN ('tail', 'forward', 'sweep')`,
+    ),
+  ],
+);
+
+// Progress is committed only at complete line boundaries. Replayed lines are
+// safe because billing_egress_events.id is the stable bucket/request ID.
+export const billingLogObjectProgress = pgTable(
+  'billing_log_object_progress',
+  {
+    sourceHash: text('source_hash').notNull(),
+    objectKey: text('object_key').notNull(),
+    etag: text('etag').notNull(),
+    byteOffset: bigint('byte_offset', { mode: 'bigint' }).notNull(),
+    discardingLine: boolean('discarding_line').notNull().default(false),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.sourceHash, table.objectKey, table.etag],
+      name: 'billing_log_object_progress_pk',
+    }),
+    check('billing_log_object_progress_offset_nonnegative', sql`${table.byteOffset} >= 0`),
+  ],
+);
+
+export const billingLogProcessedObjects = pgTable(
+  'billing_log_processed_objects',
+  {
+    sourceHash: text('source_hash').notNull(),
+    objectKey: text('object_key').notNull(),
+    etag: text('etag').notNull(),
+    processedAt: timestamp('processed_at', { withTimezone: true, mode: 'date' })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.sourceHash, table.objectKey, table.etag],
+      name: 'billing_log_processed_objects_pk',
+    }),
+  ],
+);
+
+export const billingLogIngestLeases = pgTable(
+  'billing_log_ingest_leases',
+  {
+    sourceHash: text('source_hash').primaryKey(),
+    ownerToken: uuid('owner_token'),
+    leaseUntil: timestamp('lease_until', { withTimezone: true, mode: 'date' }),
+  },
+  (table) => [
+    check(
+      'billing_log_ingest_lease_pair_check',
+      sql`(${table.ownerToken} IS NULL AND ${table.leaseUntil} IS NULL) OR (${table.ownerToken} IS NOT NULL AND ${table.leaseUntil} IS NOT NULL)`,
+    ),
+  ],
+);
+
+// A one-way hash lets late access logs resolve ownership after a drive purge
+// without retaining the customer's raw object path. Account erasure cascades.
+export const billingEgressAttributions = pgTable(
+  'billing_egress_attributions',
+  {
+    objectKeyHash: text('object_key_hash').primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [index('billing_egress_attributions_account_id_idx').on(table.accountId)],
+);
+
+export const billingReconciliationEvents = pgTable(
+  'billing_reconciliation_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    meterReportId: uuid('meter_report_id').references(() => billingMeterReports.id, {
+      onDelete: 'cascade',
+    }),
+    checkoutIdempotencyKey: text('checkout_idempotency_key'),
+    action: text('action').notNull(),
+    operatorId: text('operator_id').notNull(),
+    externalReference: text('external_reference').notNull(),
+    evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'billing_reconciliation_target_check',
+      sql`(${table.meterReportId} IS NOT NULL AND ${table.checkoutIdempotencyKey} IS NULL) OR (${table.meterReportId} IS NULL AND ${table.checkoutIdempotencyKey} IS NOT NULL)`,
+    ),
+    check(
+      'billing_reconciliation_action_target_check',
+      sql`(${table.action} IN ('meter_operator_confirmed_accepted', 'meter_report_replayed') AND ${table.meterReportId} IS NOT NULL) OR (${table.action} = 'checkout_session_recovered' AND ${table.checkoutIdempotencyKey} IS NOT NULL)`,
+    ),
+    uniqueIndex('billing_reconciliation_events_external_reference_unique').on(
+      table.externalReference,
+    ),
+  ],
+);
+
 export const deletionJobs = pgTable(
   'deletion_jobs',
   {
