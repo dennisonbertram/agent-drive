@@ -695,7 +695,7 @@ test('change passphrase: the old one stops working, the new one works; reset rem
   });
 });
 
-test('Lock while a file key is being verified: no key, no preview', async ({
+test('Escape and lock while a file key is being verified: no key, no preview', async ({
   page,
   context,
   baseURL,
@@ -703,32 +703,59 @@ test('Lock while a file key is being verified: no key, no preview', async ({
   test.setTimeout(240_000);
   await withSeed(context, baseURL!, async (seeded) => {
     await setUpPassphrase(page, seeded);
-    // Hold the verification request (the file's wrapped key) once the slot is unsealed.
+    await page.reload();
+    // The browser key restores the vault; install the hold only after reload is complete.
+    await expect(chip(page)).toContainText('Unlocked');
+    // The vault checks the drive key against one bounded file-version result before preview.
     let release!: () => void;
     const gate = new Promise<void>((resolveGate) => (release = resolveGate));
-    let held!: () => void;
-    const reached = new Promise<void>((resolveReached) => (held = resolveReached));
-    await page.route('**/api/console/drives/*/versions?*', async (route) => {
-      held();
+    let verificationHeld = false;
+    let finishVerification!: (result: { items: { id: string; path: string }[] }) => void;
+    const verifiedVersion = new Promise<{ items: { id: string; path: string }[] }>(
+      (resolve) => (finishVerification = resolve),
+    );
+    const verificationRoute = `**/api/console/drives/${seeded.a.id}/versions?*`;
+    await page.route(verificationRoute, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (
+        request.method() !== 'GET' ||
+        url.searchParams.get('path') !== '/note.txt' ||
+        url.searchParams.get('limit') !== '1'
+      ) {
+        await route.continue();
+        return;
+      }
+      const pinnedResponse = await route.fetch();
+      const pinnedResult = (await pinnedResponse.json()) as {
+        items: { id: string; path: string }[];
+      };
+      verificationHeld = true;
       await gate;
-      await route.continue();
+      await route.fulfill({ response: pinnedResponse });
+      finishVerification(pinnedResult);
     });
-    await page.reload();
-    // The browser key restores the vault; the click itself reaches the held request.
-    await expect(chip(page)).toContainText('Unlocked');
-    await nameButton(page, 'note.txt').click();
-    await reached;
-    await expect(chip(page)).toContainText('Unlocked');
-    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
-    await expect(chip(page)).toContainText('Locked');
-    const stale = page.waitForResponse((r) => /\/versions\?/.test(r.url()));
-    release();
-    await stale;
-    await settle(page);
-    await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
-    await expect(chip(page)).toContainText('Locked');
+    try {
+      await nameButton(page, 'note.txt').click();
+      await expect.poll(() => verificationHeld).toBe(true);
+      await expect(chip(page)).toContainText('Unlocked');
+      // The preview dialog owns focus, so close it before opening the key menu. Verification
+      // remains paused in the route while the vault is locked.
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
+      await lockBrowser(page);
+      release();
+      const pageOfVersions = await verifiedVersion;
+      expect(pageOfVersions.items).toHaveLength(1);
+      expect(pageOfVersions.items[0]).toMatchObject({ path: '/note.txt' });
+      expect(pageOfVersions.items[0]?.id).toBeTruthy();
+      await expect(page.getByRole('dialog', { name: 'note.txt' })).toHaveCount(0);
+      await expect(chip(page)).toContainText('Locked');
+    } finally {
+      release();
+      await page.unroute(verificationRoute);
+    }
     // Nothing was cached: the next action asks for the passphrase again.
-    await page.unroute('**/api/console/drives/*/versions?*');
     await nameButton(page, 'note.txt').click();
     await expect(page.getByRole('dialog', { name: 'Unlock with your passphrase' })).toBeVisible();
   });
