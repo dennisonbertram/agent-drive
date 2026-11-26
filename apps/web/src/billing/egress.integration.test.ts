@@ -119,7 +119,8 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
       return {
         Contents: [...logObjects.entries()]
           .filter(([key]) => key.startsWith(Prefix ?? '') && (!StartAfter || key > StartAfter))
-          .sort(([left], [right]) => left.localeCompare(right))
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .slice(0, command.input.MaxKeys ?? 1000)
           .map(([Key, value]) => ({ Key, ETag: value.etag, Size: Buffer.byteLength(value.body) })),
       } as never;
     }
@@ -134,15 +135,19 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
       if (!item) throw new Error('Synthetic log object was not found.');
       downloadedKeys.push(command.input.Key ?? '');
       if (command.input.Range) ranges.push(command.input.Range);
-      const offset = Number(/^bytes=(\d+)-/u.exec(command.input.Range ?? '')?.[1] ?? 0);
+      const [, start, end] = /^bytes=(\d+)-(\d+)$/u.exec(command.input.Range ?? '') ?? [];
+      const offset = Number(start ?? 0);
+      const rangeEnd = Number(end ?? Buffer.byteLength(item.body) - 1);
       if (offset >= Buffer.byteLength(item.body)) {
         const error = new Error('Synthetic range starts at or beyond end of object.');
         Object.assign(error, { $metadata: { httpStatusCode: 416 } });
         throw error;
       }
+      const body = Buffer.from(item.body).subarray(offset, rangeEnd + 1);
       return {
-        Body: Readable.from([Buffer.from(item.body).subarray(offset)]),
-        ContentLength: Buffer.byteLength(item.body) - offset,
+        Body: Readable.from([body]),
+        ContentLength: body.byteLength,
+        ContentRange: `bytes ${offset}-${offset + body.byteLength - 1}/${Buffer.byteLength(item.body)}`,
       } as never;
     }
     if (command instanceof HeadObjectCommand) {
@@ -261,6 +266,137 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
     await getPool().query('DELETE FROM billing_log_objects WHERE object_key=$1 AND etag=$2', [
       legacyObjectKey,
       'legacy-etag',
+    ]);
+    send.mockRestore();
+    vi.stubEnv('S3_LOGS_BUCKET', previousLogsBucket ?? '');
+    vi.stubEnv('S3_LOGS_PREFIX', previousLogsPrefix ?? '');
+  }
+});
+
+it('advances the late-log sweep during sustained current-day traffic', async () => {
+  const previousLogsBucket = process.env.S3_LOGS_BUCKET;
+  const previousLogsPrefix = process.env.S3_LOGS_PREFIX;
+  const logsBucket = `synthetic-egress-fairness-${randomUUID()}`;
+  const logPrefix = 'access/';
+  const todayPrefix = `${logPrefix}${new Date().toISOString().slice(0, 10)}`;
+  const sourceHash = createHash('sha256').update(`${logsBucket}\0${logPrefix}`).digest('hex');
+  const oldKey = `${logPrefix}!late-old-name.log`;
+  const largeKey = `${todayPrefix}-000-large.log`;
+  const logObjects = new Map<string, { etag: string; body: string }>();
+  const makeLog = (requestId: string, bytesSent: number) =>
+    `owner ${process.env.S3_BUCKET} [30/Oct/2026:10:03:00 +0000] 192.0.2.3 requester ${requestId} REST.GET.OBJECT ${encodeURIComponent(objectKey)} "GET /${objectKey} HTTP/1.1" 200 - ${bytesSent} 2048 17 4 "-" "fixture" -`;
+
+  vi.stubEnv('S3_LOGS_BUCKET', logsBucket);
+  vi.stubEnv('S3_LOGS_PREFIX', logPrefix);
+  for (let index = 0; index < 120; index += 1) {
+    const suffix = String(index).padStart(3, '0');
+    logObjects.set(`${todayPrefix}-${suffix}.log`, {
+      etag: `hot-${suffix}`,
+      body: `${makeLog(`FAIR-HOT-${suffix}`, 1)}\n`,
+    });
+  }
+  logObjects.set(largeKey, {
+    etag: 'large-current-etag',
+    body: `${'x'.repeat(4_500_000)}\n`,
+  });
+  logObjects.set(oldKey, {
+    etag: 'late-old-etag',
+    body: `${makeLog('FAIR-LATE-OLD', 29)}\n`,
+  });
+
+  const send = vi.spyOn(S3Client.prototype, 'send').mockImplementation(async (command) => {
+    if (command instanceof ListObjectsV2Command) {
+      const { Prefix, StartAfter, MaxKeys } = command.input;
+      return {
+        Contents: [...logObjects.entries()]
+          .filter(([key]) => key.startsWith(Prefix ?? '') && (!StartAfter || key > StartAfter))
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .slice(0, MaxKeys ?? 1000)
+          .map(([Key, value]) => ({ Key, ETag: value.etag, Size: Buffer.byteLength(value.body) })),
+      } as never;
+    }
+    if (command instanceof GetObjectCommand) {
+      const item = logObjects.get(command.input.Key ?? '');
+      if (!item) throw new Error('Synthetic log object was not found.');
+      const [, start, end] = /^bytes=(\d+)-(\d+)$/u.exec(command.input.Range ?? '') ?? [];
+      const offset = Number(start ?? 0);
+      const rangeEnd = Number(end ?? Buffer.byteLength(item.body) - 1);
+      if (offset >= Buffer.byteLength(item.body)) {
+        const error = new Error('Synthetic range starts at or beyond end of object.');
+        Object.assign(error, { $metadata: { httpStatusCode: 416 } });
+        throw error;
+      }
+      const body = Buffer.from(item.body).subarray(offset, rangeEnd + 1);
+      return {
+        Body: Readable.from([body]),
+        ContentLength: body.byteLength,
+        ContentRange: `bytes ${offset}-${offset + body.byteLength - 1}/${Buffer.byteLength(item.body)}`,
+      } as never;
+    }
+    if (command instanceof HeadObjectCommand) {
+      const item = logObjects.get(command.input.Key ?? '');
+      if (!item) throw new Error('Synthetic log object was not found.');
+      return { ContentLength: Buffer.byteLength(item.body), ETag: item.etag } as never;
+    }
+    throw new Error('Unexpected S3 command in egress fairness fixture.');
+  });
+
+  try {
+    await getPool().query(
+      `INSERT INTO billing_log_scan_state (source_hash,cursor_kind,last_key)
+       VALUES ($1,'forward',$2)`,
+      [sourceHash, `${logPrefix}z-forward-highwater`],
+    );
+    await ingestLogs();
+
+    const lateEvent = await getPool().query(
+      'SELECT bytes_sent::text AS bytes FROM billing_egress_events WHERE id=$1',
+      [`${process.env.S3_BUCKET}:FAIR-LATE-OLD`],
+    );
+    expect(lateEvent.rows[0]).toEqual({ bytes: '29' });
+
+    const firstSweep = await getPool().query<{ last_key: string | null }>(
+      `SELECT last_key FROM billing_log_scan_state WHERE source_hash=$1 AND cursor_kind='sweep'`,
+      [sourceHash],
+    );
+    expect(firstSweep.rowCount).toBe(1);
+    const firstSweepKey = firstSweep.rows[0]?.last_key;
+    expect(firstSweepKey).not.toBeNull();
+    if (!firstSweepKey) throw new Error('Expected the late-log sweep to save its cursor.');
+    const processedCount = await getPool().query<{ count: number }>(
+      'SELECT count(*)::int AS count FROM billing_log_processed_objects WHERE source_hash=$1',
+      [sourceHash],
+    );
+    expect(processedCount.rows[0]?.count).toBeGreaterThanOrEqual(99);
+
+    for (let index = 120; index < 160; index += 1) {
+      const suffix = String(index).padStart(3, '0');
+      logObjects.set(`${todayPrefix}-${suffix}.log`, {
+        etag: `hot-${suffix}`,
+        body: `${makeLog(`FAIR-HOT-${suffix}`, 1)}\n`,
+      });
+    }
+    await ingestLogs();
+
+    const nextSweep = await getPool().query<{ last_key: string | null }>(
+      `SELECT last_key FROM billing_log_scan_state WHERE source_hash=$1 AND cursor_kind='sweep'`,
+      [sourceHash],
+    );
+    expect(nextSweep.rowCount).toBe(1);
+    const nextSweepKey = nextSweep.rows[0]?.last_key;
+    expect(
+      nextSweepKey === null || (typeof nextSweepKey === 'string' && nextSweepKey > firstSweepKey),
+    ).toBe(true);
+  } finally {
+    await getPool().query('DELETE FROM billing_log_object_progress WHERE source_hash=$1', [
+      sourceHash,
+    ]);
+    await getPool().query('DELETE FROM billing_log_processed_objects WHERE source_hash=$1', [
+      sourceHash,
+    ]);
+    await getPool().query('DELETE FROM billing_log_scan_state WHERE source_hash=$1', [sourceHash]);
+    await getPool().query('DELETE FROM billing_log_ingest_leases WHERE source_hash=$1', [
+      sourceHash,
     ]);
     send.mockRestore();
     vi.stubEnv('S3_LOGS_BUCKET', previousLogsBucket ?? '');

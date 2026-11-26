@@ -25,6 +25,49 @@ const logObjectsPerRun = 100;
 const maxObjectBytesPerRun = 4 * 1024 * 1024;
 const maxLogBytesPerRun = 24 * 1024 * 1024;
 const maxLogRunMs = 210_000;
+const logLaneLimits = {
+  pending: { bytes: 4 * 1024 * 1024, objects: 2, milliseconds: 15_000 },
+  tail: { bytes: 6 * 1024 * 1024, objects: 16, milliseconds: 50_000 },
+  forward: { bytes: 6 * 1024 * 1024, objects: 16, milliseconds: 50_000 },
+  // Sweep uses the remaining global budget after pending, tail, and forward
+  // each receive their own cap. This preserves their reservations while letting
+  // a quiet lane leave more capacity for historical catch-up.
+  sweep: { bytes: maxLogBytesPerRun, objects: logObjectsPerRun, milliseconds: maxLogRunMs },
+} as const;
+
+type LogBudget = {
+  canRead: () => boolean;
+  remainingBytes: () => number;
+  accountBytes: (count: number) => void;
+  accountObject: () => void;
+};
+
+function createLogBudget(
+  limits: { bytes: number; objects: number; milliseconds: number },
+  parent?: LogBudget,
+): LogBudget {
+  const startedAt = Date.now();
+  let bytesRead = 0;
+  let objectsRead = 0;
+  const remainingBytes = () =>
+    Math.max(0, Math.min(limits.bytes - bytesRead, parent?.remainingBytes() ?? Infinity));
+  return {
+    canRead: () =>
+      remainingBytes() > 0 &&
+      objectsRead < limits.objects &&
+      Date.now() - startedAt < limits.milliseconds &&
+      (parent?.canRead() ?? true),
+    remainingBytes,
+    accountBytes: (count) => {
+      bytesRead += count;
+      parent?.accountBytes(count);
+    },
+    accountObject: () => {
+      objectsRead += 1;
+      parent?.accountObject();
+    },
+  };
+}
 
 type MeterClaim = {
   id: string;
@@ -107,15 +150,14 @@ export async function ingestLogs() {
     client.destroy();
     return;
   }
-  const startedAt = Date.now();
-  let bytesRead = 0;
-  let objectsRead = 0;
+  const runBudget = createLogBudget({
+    bytes: maxLogBytesPerRun,
+    objects: logObjectsPerRun,
+    milliseconds: maxLogRunMs,
+  });
   const attemptedObjects = new Set<string>();
   try {
-    const budget = () =>
-      bytesRead < maxLogBytesPerRun &&
-      objectsRead < logObjectsPerRun &&
-      Date.now() - startedAt < maxLogRunMs;
+    const pendingBudget = createLogBudget(logLaneLimits.pending, runBudget);
 
     // Resume a partially consumed object before advancing either list cursor.
     const pending = await getPool().query<{ object_key: string; etag: string }>(
@@ -133,7 +175,7 @@ export async function ingestLogs() {
       [sourceHash],
     );
     for (const object of pending.rows) {
-      if (!budget()) break;
+      if (!pendingBudget.canRead()) break;
       attemptedObjects.add(`${object.object_key}\0${object.etag}`);
       const result = await ingestLogObject(
         client,
@@ -142,12 +184,9 @@ export async function ingestLogs() {
         leaseOwner,
         object.object_key,
         object.etag,
-        budget,
-        (count) => {
-          bytesRead += count;
-        },
+        pendingBudget,
       );
-      objectsRead += 1;
+      pendingBudget.accountObject();
       if (result === 'missing') {
         await deleteLogProgress(sourceHash, leaseOwner, object.object_key, object.etag);
       }
@@ -157,8 +196,9 @@ export async function ingestLogs() {
     // a bounded pass before historical cursors. The rolling sweep catches late
     // delivery and older key layouts that sort before this day's high-water.
     const todayPrefix = `${prefix}${new Date().toISOString().slice(0, 10)}`;
+    const tailBudget = createLogBudget(logLaneLimits.tail, runBudget);
     let tailPages = 0;
-    while (tailPages < logPagesPerCursor && budget()) {
+    while (tailPages < logPagesPerCursor && tailBudget.canRead()) {
       const cursor = await getPool().query<{ last_key: string | null }>(
         `SELECT last_key FROM billing_log_scan_state
           WHERE source_hash=$1 AND cursor_kind='tail'`,
@@ -181,13 +221,7 @@ export async function ingestLogs() {
         leaseOwner,
         page.Contents ?? [],
         attemptedObjects,
-        budget,
-        (count) => {
-          bytesRead += count;
-        },
-        () => {
-          objectsRead += 1;
-        },
+        tailBudget,
       );
       if (scanned.lastKey !== null && scanned.lastKey !== startAfter)
         await saveLogCursor(sourceHash, leaseOwner, 'tail', scanned.lastKey);
@@ -195,8 +229,9 @@ export async function ingestLogs() {
     }
 
     for (const cursorKind of ['forward', 'sweep'] as const) {
+      const laneBudget = createLogBudget(logLaneLimits[cursorKind], runBudget);
       let pages = 0;
-      while (pages < logPagesPerCursor && budget()) {
+      while (pages < logPagesPerCursor && laneBudget.canRead()) {
         const cursor = await getPool().query<{ last_key: string | null }>(
           'SELECT last_key FROM billing_log_scan_state WHERE source_hash=$1 AND cursor_kind=$2',
           [sourceHash, cursorKind],
@@ -218,13 +253,7 @@ export async function ingestLogs() {
           leaseOwner,
           page.Contents ?? [],
           attemptedObjects,
-          budget,
-          (count) => {
-            bytesRead += count;
-          },
-          () => {
-            objectsRead += 1;
-          },
+          laneBudget,
           startAfter ?? null,
         );
         if (scanned.lastKey !== null && scanned.lastKey !== startAfter)
@@ -234,7 +263,6 @@ export async function ingestLogs() {
           break;
         }
         // An incomplete object is independently resumable; listing can continue.
-        if (objectsRead >= logObjectsPerRun) break;
       }
     }
   } finally {
@@ -261,9 +289,7 @@ async function processLogPage(
     Size?: number | undefined;
   }>,
   attemptedObjects: Set<string>,
-  canRead: () => boolean,
-  accountBytes: (count: number) => void,
-  accountObject: () => void,
+  budget: LogBudget,
   initialLastKey: string | null = null,
 ) {
   const candidates = listed.filter(
@@ -283,7 +309,7 @@ async function processLogPage(
   const processed = new Map(markers.rows.map((marker) => [marker.object_key, marker.etag]));
   let lastKey = initialLastKey;
   for (const object of candidates) {
-    if (!canRead()) break;
+    if (!budget.canRead()) break;
     lastKey = object.Key;
     if (
       processed.get(object.Key) !== object.ETag &&
@@ -300,14 +326,13 @@ async function processLogPage(
           leaseOwner,
           object.Key,
           object.ETag,
-          canRead,
-          accountBytes,
+          budget,
         );
         if (result === 'missing') {
           await deleteLogProgress(sourceHash, leaseOwner, object.Key, object.ETag);
         }
       }
-      accountObject();
+      budget.accountObject();
     }
   }
   return { lastKey, hasObjects: candidates.length > 0 };
@@ -390,8 +415,7 @@ async function ingestLogObject(
   leaseOwner: string,
   objectKey: string,
   etag: string,
-  canRead: () => boolean,
-  accountBytes: (count: number) => void,
+  budget: LogBudget,
   recoveredStaleOffset = false,
 ): Promise<'complete' | 'partial' | 'missing'> {
   await getPool().query(
@@ -415,6 +439,8 @@ async function ingestLogObject(
   const startingOffset = safeOffset;
   let discardingLine = progress.rows[0].discarding_line;
   const startingDiscardingLine = discardingLine;
+  const objectReadLimit = Math.min(maxObjectBytesPerRun, budget.remainingBytes());
+  if (objectReadLimit <= 0) return 'partial';
   let request;
   try {
     request = await client.send(
@@ -422,7 +448,7 @@ async function ingestLogObject(
         Bucket: bucket,
         Key: objectKey,
         IfMatch: etag,
-        Range: `bytes=${safeOffset}-${safeOffset + BigInt(maxObjectBytesPerRun) - 1n}`,
+        Range: `bytes=${safeOffset}-${safeOffset + BigInt(objectReadLimit) - 1n}`,
       }),
     );
   } catch (error) {
@@ -467,8 +493,7 @@ async function ingestLogObject(
           leaseOwner,
           objectKey,
           etag,
-          canRead,
-          accountBytes,
+          budget,
           true,
         );
       }
@@ -529,7 +554,7 @@ async function ingestLogObject(
   try {
     for await (const chunk of request.Body as AsyncIterable<Uint8Array>) {
       objectBytesRead += chunk.byteLength;
-      accountBytes(chunk.byteLength);
+      budget.accountBytes(chunk.byteLength);
       const decoded = decoder.decode(chunk, { stream: true });
       let rest = pending + decoded;
       pending = '';
@@ -548,7 +573,7 @@ async function ingestLogObject(
         }
         rest = rest.slice(newline + 1);
         newline = rest.indexOf('\n');
-        if (!canRead() || objectBytesRead >= maxObjectBytesPerRun) {
+        if (!budget.canRead() || objectBytesRead >= objectReadLimit) {
           stoppedEarly = true;
           break;
         }
@@ -570,7 +595,7 @@ async function ingestLogObject(
         pending = rest;
         pendingBytes = Buffer.byteLength(pending, 'utf8');
       }
-      if (!canRead() || objectBytesRead >= maxObjectBytesPerRun) {
+      if (!budget.canRead() || objectBytesRead >= objectReadLimit) {
         stoppedEarly = true;
         break;
       }
@@ -591,7 +616,7 @@ async function ingestLogObject(
     pendingBytes += Buffer.byteLength(decoderTail, 'utf8');
   }
   if (
-    (objectBytesRead < maxObjectBytesPerRun && canRead()) ||
+    (objectBytesRead < objectReadLimit && budget.canRead()) ||
     (totalBytes > 0n && safeOffset >= totalBytes)
   ) {
     if (discardingLine) {
