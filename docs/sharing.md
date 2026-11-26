@@ -59,7 +59,9 @@ The recipient opens the URL in a browser. The page at `/s/<share id>`:
 1. Reads the key from the URL fragment.
 2. Asks the service for the file name, size and expiry. When the recipient downloads, the service returns a short-lived download URL for the encrypted file.
 3. Downloads the encrypted bytes and decrypts them in the browser.
-4. Saves the decrypted file under its original file name.
+4. Saves the decrypted file under its original file name. Files up to 32 MiB use a one-click download. Larger files use the browser file picker when available, or a temporary origin-private file before the browser starts the download.
+
+The temporary origin-private file contains plaintext. Agent Drive removes it after 15 minutes and sweeps abandoned files on a later console or share visit. If the browser cannot stage the file to disk or storage is full, the recipient can explicitly continue with a browser-memory download; that may use memory equal to the file size.
 
 If something is wrong, the page says so. The cases are: a missing key, a link that was not found, a revoked link, an expired link, a file that is no longer available, and a key that does not match the file. A link with less than one second left cannot start a download.
 
@@ -70,4 +72,5 @@ If something is wrong, the page says so. The cases are: a missing key, a link th
 - Anyone with the complete URL can open the file. The service does not ask who they are.
 - Moving a file to the trash makes its links `unavailable`. Restoring the file makes them work again, because a link points to a fixed version of the file and the restore only clears the trash mark. A link that has expired or been revoked stays that way.
 - Each request to the public share endpoint (the metadata lookup and the download) counts as one API operation, and a download also counts toward the account owner's monthly download allowance. Past an allowance the link returns 402 `payment_required` on the Free plan; see [Errors and limits](errors.md).
+- The audit log records attempts against active share links, including failures after the link is validated (for example, an operation-budget failure). Requests for malformed, unknown, revoked, expired or unavailable links keep their normal error response but do not create per-request audit rows. This prevents anonymous requests from growing the audit table without limit. Operators can use the hosting platform's request and status metrics to review that traffic; the application does not store share IDs or client addresses as abuse telemetry.
 - The service sees the file name, the size and who created the link. It does not see the contents. See the [Threat model](threat-model.md) and [Encryption format](crypto.md).

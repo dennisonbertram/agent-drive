@@ -5,6 +5,7 @@ import { ApiError } from '../api/errors';
 import { getPool, withTransaction } from '../db/client';
 import { billingOrigin, billingRates } from './policy';
 import { billingState, lockBillingAccount } from './ledger';
+import { uniqueCheckoutSession, type CheckoutCandidate } from './reconcile-policy';
 
 const placeholder = /replace[-_]me/iu;
 
@@ -37,7 +38,9 @@ export function egressMeteringConfigured() {
 
 export function meterDeliveryConfigured() {
   return (
-    configured(process.env.STRIPE_SECRET_KEY) && configured(process.env.STRIPE_METER_EVENT_NAME)
+    configured(process.env.STRIPE_SECRET_KEY) &&
+    stripeKeyMode() !== null &&
+    configured(process.env.STRIPE_METER_EVENT_NAME)
   );
 }
 
@@ -237,7 +240,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
   const client = stripe();
   await validatePrices(client);
   const customer = await customerForAccount(accountId, client);
-  const idempotencyKey = `checkout/v3/${accountId}/${plan}/${randomUUID()}`;
+  const idempotencyKey = `checkout/v4/${accountId}/${plan}/${randomUUID()}`;
   const reserved = await withTransaction(async (db) => {
     const billing = await lockBillingAccount(db, accountId);
     const checkout = await db.query<{
@@ -446,6 +449,16 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
       mode: 'subscription',
       customer,
       client_reference_id: accountId,
+      ...(reserved.idempotencyKey!.startsWith('checkout/v4/')
+        ? {
+            metadata: {
+              accountId,
+              checkoutIdempotencyKey: reserved.idempotencyKey!,
+              plan,
+              app: 'agent-drive',
+            },
+          }
+        : {}),
       line_items: [{ price, quantity: 1 }, { price: usage }],
       subscription_data: {
         billing_cycle_anchor: nextMonthStart(reserved.createdAt ?? new Date()),
@@ -548,9 +561,19 @@ export async function sendMeterReport(input: {
   cents: string;
   timestamp: number;
 }) {
-  if (!meterDeliveryConfigured()) throw new Error('Stripe metering is not configured.');
+  await sendMeterReportWithResponse(input);
+}
+
+export async function sendMeterReportWithResponse(input: {
+  id: string;
+  customer: string;
+  cents: string;
+  timestamp: number;
+}): Promise<Stripe.Response<Stripe.Billing.MeterEvent>> {
+  if (!configured(process.env.STRIPE_METER_EVENT_NAME))
+    throw new Error('Stripe metering is not configured.');
   const client = stripe();
-  await client.billing.meterEvents.create(
+  return client.billing.meterEvents.create(
     {
       event_name: process.env.STRIPE_METER_EVENT_NAME!,
       payload: { value: input.cents, stripe_customer_id: input.customer },
@@ -559,6 +582,80 @@ export async function sendMeterReport(input: {
     },
     { idempotencyKey: input.id },
   );
+}
+
+export async function findCheckoutRecoverySession(input: {
+  accountId: string;
+  customerId: string;
+  plan: string;
+  reservedAt: Date;
+  idempotencyKey: string;
+}) {
+  const client = stripe();
+  const customer = await client.customers.retrieve(input.customerId);
+  if (
+    customer.deleted ||
+    customer.livemode !== stripeLiveMode() ||
+    customer.metadata.accountId !== input.accountId
+  )
+    throw new ApiError('internal_error', 'The billing customer could not be verified.');
+
+  const planPriceId =
+    input.plan === 'developer'
+      ? process.env.STRIPE_DEVELOPER_PRICE_ID
+      : input.plan === 'team'
+        ? process.env.STRIPE_TEAM_PRICE_ID
+        : undefined;
+  const usagePriceId = process.env.STRIPE_USAGE_PRICE_ID;
+  if (!configured(planPriceId) || !configured(usagePriceId))
+    throw new ApiError('internal_error', 'Stripe checkout prices are not configured.');
+
+  const candidates: CheckoutCandidate[] = [];
+  const lowerBound = Math.max(0, Math.floor(input.reservedAt.getTime() / 1000) - 60);
+  const upperBound = Math.floor(input.reservedAt.getTime() / 1000) + 23 * 60 * 60;
+  for await (const session of client.checkout.sessions.list({
+    customer: input.customerId,
+    created: { gte: lowerBound, lte: upperBound },
+    limit: 100,
+  })) {
+    const sessionCustomer =
+      typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    if (
+      !sessionCustomer ||
+      sessionCustomer !== input.customerId ||
+      session.client_reference_id !== input.accountId ||
+      session.mode !== 'subscription' ||
+      session.livemode !== stripeLiveMode() ||
+      (session.status !== 'open' && session.status !== 'complete' && session.status !== 'expired')
+    )
+      continue;
+    const listedItems = await client.checkout.sessions.listLineItems(session.id, { limit: 100 });
+    const lineItems = listedItems.data.map((item) => ({
+      price: typeof item.price === 'string' ? item.price : (item.price?.id ?? ''),
+      quantity: item.quantity,
+    }));
+    candidates.push({
+      id: session.id,
+      customer: sessionCustomer,
+      client_reference_id: session.client_reference_id,
+      mode: session.mode,
+      livemode: session.livemode,
+      created: session.created,
+      status: session.status,
+      lineItems,
+      checkoutIdempotencyKey: session.metadata?.checkoutIdempotencyKey ?? null,
+    });
+  }
+
+  return uniqueCheckoutSession(candidates, {
+    accountId: input.accountId,
+    customerId: input.customerId,
+    liveMode: stripeLiveMode(),
+    planPriceId: planPriceId!,
+    usagePriceId: usagePriceId!,
+    reservedAt: input.reservedAt,
+    idempotencyKey: input.idempotencyKey,
+  });
 }
 
 export async function processStripeWebhook(rawBody: string, signature: string | null) {

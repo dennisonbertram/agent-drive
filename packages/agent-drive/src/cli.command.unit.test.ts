@@ -62,14 +62,22 @@ async function cli(
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: URL | string, init?: RequestInit) => {
-      const requestUrl = new URL(String(url));
-      const path = requestUrl.pathname.replace('/api/v1/', '');
+      const parsed = new URL(String(url));
+      const api = parsed.pathname.startsWith('/api/v1/');
+      const path = api ? parsed.pathname.replace('/api/v1/', '') : `storage${parsed.pathname}`;
       paths.push(path);
-      queries.push(requestUrl.search);
-      origins.push(requestUrl.origin);
+      queries.push(parsed.search);
+      origins.push(parsed.origin);
+      if (init?.body instanceof ReadableStream) {
+        const reader = init.body.getReader();
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+        }
+      }
       calls.push({
         path,
-        origin: requestUrl.origin,
+        origin: parsed.origin,
         method: init?.method ?? 'GET',
         authorization: new Headers(init?.headers).get('authorization'),
         ...(typeof init?.body === 'string' ? { body: init.body } : {}),
@@ -315,7 +323,7 @@ describe('sync flag validation', () => {
     const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncok-'));
     dirs.push(dir);
     await writeFile(join(dir, 'f.txt'), 'x');
-    const r = await cli(['sync', dir], one, (path) => {
+    const r = await cli(['sync', dir], one, (path, init) => {
       if (path === 'whoami')
         return {
           accountId: 'a',
@@ -326,7 +334,12 @@ describe('sync flag validation', () => {
         };
       if (path === 'drives' || path.endsWith('/list')) return { items: [], nextCursor: null };
       if (path.endsWith('/put'))
-        return { intentId: 'i1', uploadUrl: 'https://s3.test/x', ciphertextSize: 1 };
+        return {
+          intentId: 'i1',
+          uploadUrl: 'https://s3.test/x',
+          ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+            .ciphertextSize,
+        };
       if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/f.txt' } };
       return {};
     });

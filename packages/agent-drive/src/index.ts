@@ -1,5 +1,5 @@
 export const foundationStatus = 'scaffold';
-export { AgentDriveClient, AgentDriveApiError } from './client.js';
+export { AgentDriveClient, AgentDriveApiError, StreamSizeLimitError } from './client.js';
 export type {
   Agent,
   ApiKey,
@@ -14,13 +14,17 @@ export type {
   Version,
   Whoami,
 } from './client.js';
+export { getFile, putFile } from './node-transfer.js';
+export type { GetFileOptions } from './node-transfer.js';
 export {
   DriveCryptoError,
   decryptFile,
   decryptWithFileKey,
+  decryptWithFileKeyStream,
   decodeDriveKey,
   encodeBase64Url,
   encryptFile,
+  encryptFileStream,
   envelopeVersion,
   generateDriveKey,
   unwrapFileKey,

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import {
   chmod,
   lstat,
@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentDriveApiError } from './client.js';
 import type { AgentDriveClient } from './client.js';
-import { backupDirectory, readFileInside } from './backup.js';
+import { backupDirectory } from './backup.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -38,12 +38,22 @@ async function fixture() {
   return { dir, root };
 }
 
-function mock(failOn?: string) {
+function mock(failOn?: string, beforeUpload?: (path: string) => Promise<void>) {
   const puts: { path: string; options: unknown }[] = [];
   const client = {
     apiOrigin: 'https://x.test',
-    put: async (_d: string, path: string, _b: Uint8Array, options: unknown) => {
+    putStream: async (
+      _d: string,
+      path: string,
+      source: AsyncIterable<Uint8Array>,
+      size: number,
+      options: unknown,
+    ) => {
       if (failOn && path.endsWith(failOn)) throw new Error('boom');
+      await beforeUpload?.(path);
+      let uploadedBytes = 0;
+      for await (const chunk of source) uploadedBytes += chunk.byteLength;
+      if (uploadedBytes !== size) throw new Error('stream size mismatch');
       puts.push({ path, options });
       return { id: 'v' };
     },
@@ -115,6 +125,10 @@ describe('backupDirectory', () => {
     await mkdir(join(real, 'cfg'), { recursive: true });
     await writeFile(join(real, 'a.txt'), 'A');
     await writeFile(join(real, 'cfg', 'config.json'), '{"apiKey":"x"}');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite'), 'lock metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-journal'), 'journal metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-wal'), 'WAL metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-shm'), 'shared memory metadata');
     await mkdir(join(real, 'cfg', 'config.json.state'), { mode: 0o700 });
     await writeFile(join(real, 'cfg', 'config.json.state', 'm.json'), '{}');
     const link = join(dir, 'link');
@@ -144,22 +158,45 @@ describe('backupDirectory', () => {
   it('refuses a file swapped for a symlink after listing', async () => {
     const { dir, root } = await fixture();
     const file = join(root, 'a.txt');
-    const info = await lstat(file);
     await writeFile(join(dir, 'outside.txt'), 'secret');
-    await rm(file);
-    await symlink(join(dir, 'outside.txt'), file);
-    await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
+    let swapped = false;
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => {
+        lines.push(line);
+        if (!swapped && line.startsWith('backup found')) {
+          swapped = true;
+          rmSync(file);
+          symlinkSync(join(dir, 'outside.txt'), file);
+        }
+      },
+    });
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(puts.map((put) => put.path)).toEqual(['/p/sub/b.txt']);
+    expect(lines.join('\n')).toContain('failed /p/a.txt');
   });
 
   it('refuses a file whose directory was swapped for a symlink', async () => {
     const { dir, root } = await fixture();
-    const file = join(root, 'sub', 'b.txt');
-    const info = await lstat(file);
     await mkdir(join(dir, 'evil'));
     await writeFile(join(dir, 'evil', 'b.txt'), 'secret');
-    await rename(join(root, 'sub'), join(dir, 'moved'));
-    await symlink(join(dir, 'evil'), join(root, 'sub'));
-    await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
+    let swapped = false;
+    const { client, puts } = mock();
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => {
+        lines.push(line);
+        if (!swapped && line.startsWith('backup found')) {
+          swapped = true;
+          renameSync(join(root, 'sub'), join(dir, 'moved'));
+          symlinkSync(join(dir, 'evil'), join(root, 'sub'));
+        }
+      },
+    });
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(puts.map((put) => put.path)).toEqual(['/p/a.txt']);
+    expect(lines.join('\n')).toContain('failed /p/sub/b.txt');
   });
 
   it('with gitignore, skips ignored entries and .git control metadata', async () => {
@@ -341,7 +378,7 @@ describe('backupDirectory', () => {
     let calls = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      put: async (_d: string, path: string) => {
+      putStream: async (_d: string, path: string) => {
         if (path.endsWith('a.txt')) {
           calls++;
           throw new AgentDriveApiError('rate_limited', 429, 'slow down', { retryAfter: 0 });
@@ -358,7 +395,7 @@ describe('backupDirectory', () => {
     const { root } = await fixture();
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         await new Promise((r) => setTimeout(r, 30));
         return { id: 'v' };
       },
@@ -382,7 +419,7 @@ describe('backupDirectory', () => {
     let max = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         inflight++;
         max = Math.max(max, inflight);
         await new Promise((r) => setTimeout(r, 10));
@@ -431,7 +468,7 @@ describe('backupDirectory', () => {
     const seen: string[] = [];
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         seen.push((await readFile(lock, 'utf8')).trim());
         return { id: 'v' };
       },
@@ -524,6 +561,29 @@ describe('backupDirectory', () => {
     expect(lines.join('\n')).toContain('file changed since the scan');
   });
 
+  it('does not publish or record a file changed between hashing and upload', async () => {
+    const { dir, root } = await fixture();
+    const file = join(root, 'a.txt');
+    const { client, puts } = mock(undefined, async (path) => {
+      if (path === '/p/a.txt') await writeFile(file, 'B');
+    });
+    const lines: string[] = [];
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => lines.push(line),
+    });
+
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(puts.map((put) => put.path)).toEqual(['/p/sub/b.txt']);
+    expect(lines.join('\n')).toContain('file changed since the scan');
+
+    const state = join(await realpath(dir), 'cfg', 'config.json.state');
+    const key = createHash('sha256').update('https://x.test|d|/p').digest('hex');
+    const manifest = JSON.parse(await readFile(join(state, `backup-${key}.json`), 'utf8')) as {
+      files: Record<string, string>;
+    };
+    expect(Object.keys(manifest.files)).toEqual(['sub/b.txt']);
+  });
+
   it('counts a file it cannot stat during the scan as one failure', async () => {
     const { dir, root } = await fixture();
     // A path longer than PATH_MAX (1024 on macOS, 4096 on Linux) is listed by readdir but cannot
@@ -592,7 +652,7 @@ describe('backupDirectory', () => {
       await chmod(join(root, 'sub'), 0);
       const client = {
         apiOrigin: 'https://x.test',
-        put: async () => {
+        putStream: async () => {
           await new Promise((r) => setTimeout(r, 30));
           return { id: 'v' };
         },

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
 import { generateDriveKey } from './crypto.js';
 import {
@@ -55,6 +55,7 @@ import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
 import { runMcp } from './mcp.js';
 import { runCapture } from './capture.js';
+import { getFile, putFile } from './node-transfer.js';
 
 // Resolves to the package root from both src/ and dist/.
 const { version: cliVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -839,7 +840,7 @@ async function run(command: string, raw: string[]) {
     if (!local || !remote) throw new Error('put requires LOCAL and REMOTE.');
     if (args.values.overwrite && args.values['if-version'])
       throw new Error('--overwrite and --if-version are mutually exclusive.');
-    const version = await client.put(requiredDrive(args), remote, await readFile(local), {
+    const version = await putFile(client, requiredDrive(args), local, remote, {
       ...(args.values.overwrite ? { mode: 'overwrite' as const } : {}),
       ...(args.values['if-version'] ? { ifVersionId: args.values['if-version'] } : {}),
       ...(args.values.description ? { description: args.values.description } : {}),
@@ -851,24 +852,49 @@ async function run(command: string, raw: string[]) {
   if (command === 'get') {
     const remote = args.positionals[0];
     if (!remote) throw new Error('get requires REMOTE.');
-    const result = await client.get(
-      requiredDrive(args),
-      remote,
-      args.values.version ? { versionId: args.values.version } : {},
-    );
     if (args.values.output) {
-      await writeFile(args.values.output, result.bytes, { mode: 0o600 });
-      return output(result.version);
+      return output(
+        await getFile(client, requiredDrive(args), remote, args.values.output, {
+          ...(args.values.version ? { versionId: args.values.version } : {}),
+          overwrite: true,
+        }),
+      );
     }
-    if (result.bytes.byteLength > 1024 * 1024)
+    const result = await client.getStream(requiredDrive(args), remote, {
+      ...(args.values.version ? { versionId: args.values.version } : {}),
+      maxPlaintextBytes: 1024 * 1024,
+    });
+    if (result.plaintextBytes > 1024 * 1024) {
+      await result.cancel();
       throw new Error('Binary or large output requires --output.');
+    }
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    try {
+      for await (const chunk of result.plaintext) {
+        length += chunk.byteLength;
+        if (length > 1024 * 1024) throw new Error('Binary or large output requires --output.');
+        chunks.push(chunk);
+      }
+    } catch (error) {
+      await result.cancel(error);
+      throw error;
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     let text: string;
     try {
-      text = new TextDecoder('utf-8', { fatal: true }).decode(result.bytes);
+      text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     } catch {
+      await result.cancel();
       throw new Error('Binary output requires --output.');
     }
     if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
+      await result.cancel();
       throw new Error('Binary output requires --output.');
     }
     process.stdout.write(`${text}${text.endsWith('\n') ? '' : '\n'}`);

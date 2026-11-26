@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { getPool, withTransaction } from '../db/client';
 import { ApiError } from '../api/errors';
@@ -406,13 +406,31 @@ export async function recordTransfer(transfer: Transfer) {
     throw new Error('Invalid transfer.');
   if (transfer.bucket !== process.env.S3_BUCKET) return;
   await withTransaction(async (client) => {
-    const object = await client.query<{ account_id: string; agent_id: string; drive_id: string }>(
-      'SELECT d.account_id, v.agent_id, v.drive_id FROM versions v JOIN drives d ON d.id = v.drive_id WHERE v.object_key = $1',
-      [transfer.objectKey],
-    );
-    const owner = object.rows[0];
-    if (!owner) return;
-    await lockBillingAccount(client, owner.account_id, { allowDeleting: true });
+    const objectKeyHash = createHash('sha256').update(transfer.objectKey).digest('hex');
+    const findOwner = async () => {
+      const live = await client.query<{
+        account_id: string;
+        agent_id: string | null;
+        drive_id: string | null;
+      }>(
+        'SELECT d.account_id, v.agent_id, v.drive_id FROM versions v JOIN drives d ON d.id = v.drive_id WHERE v.object_key = $1',
+        [transfer.objectKey],
+      );
+      if (live.rows[0]) return { ...live.rows[0], retained: false };
+      const retained = await client.query<{ account_id: string; agent_id: string | null }>(
+        'SELECT account_id, agent_id FROM billing_egress_attributions WHERE object_key_hash=$1',
+        [objectKeyHash],
+      );
+      return retained.rows[0] ? { ...retained.rows[0], drive_id: null, retained: true } : undefined;
+    };
+    const candidate = await findOwner();
+    if (!candidate) return;
+    await lockBillingAccount(client, candidate.account_id, { allowDeleting: true });
+    // Re-read after the account lock. A drive purge may have committed between
+    // the first lookup and lock acquisition; it commits the hash mapping and
+    // version deletion together, so this resolves to the retained attribution.
+    const owner = await findOwner();
+    if (!owner || owner.account_id !== candidate.account_id) return;
     await client.query(
       `INSERT INTO billing_egress_events (id,account_id,agent_id,drive_id,object_key,bytes_sent,occurred_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
@@ -421,7 +439,7 @@ export async function recordTransfer(transfer: Transfer) {
         owner.account_id,
         owner.agent_id,
         owner.drive_id,
-        transfer.objectKey,
+        owner.retained ? 'deleted' : transfer.objectKey,
         transfer.bytes.toString(),
         transfer.occurredAt,
       ],

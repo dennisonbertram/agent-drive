@@ -1,4 +1,12 @@
-import { open, owned, seal } from './crypto-format.ts';
+import {
+  CryptoStreamSourceError,
+  encryptedSize,
+  open,
+  openStream,
+  owned,
+  seal,
+  sealStream,
+} from './crypto-format.ts';
 import { unsealFileKeyFromInbox, unwrapInboxPrivateKey, type TraceInbox } from './trace-inbox.ts';
 
 export { CHUNK_SIZE, encryptedSize, plaintextSize } from './crypto-format.ts';
@@ -94,6 +102,42 @@ export async function encryptFile(plaintext: Uint8Array, driveKey: string | unde
   }
 }
 
+export async function encryptFileStream(
+  source: AsyncIterable<Uint8Array>,
+  plaintextBytes: number,
+  driveKey: string | undefined,
+) {
+  const ciphertextSize = encryptedSize(plaintextBytes);
+  const drive = await importDriveKey(decodeDriveKey(driveKey));
+  const fileKey = crypto.getRandomValues(new Uint8Array(32));
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  try {
+    const wrapped = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: nonce, additionalData: WRAP_AAD, tagLength: 128 },
+        drive,
+        fileKey,
+      ),
+    );
+    const envelope = new Uint8Array(61);
+    envelope[0] = 1;
+    envelope.set(nonce, 1);
+    envelope.set(wrapped, 13);
+    const fileCryptoKey = await crypto.subtle.importKey('raw', owned(fileKey), 'AES-GCM', false, [
+      'encrypt',
+    ]);
+    const ciphertext = sealStream(
+      source,
+      plaintextBytes,
+      fileCryptoKey,
+      crypto.getRandomValues(new Uint8Array(8)),
+    );
+    return { wrappedKey: encodeBase64Url(envelope), ciphertext, ciphertextSize };
+  } finally {
+    fileKey.fill(0);
+  }
+}
+
 /** 1 for a drive-key-wrapped envelope (82 characters), 2 for a trace-inbox envelope (183). */
 export function envelopeVersion(wrappedKey: string): 1 | 2 {
   try {
@@ -151,6 +195,28 @@ export async function decryptWithFileKey(ciphertext: Uint8Array, fileKey: string
   } catch {
     throw failedDecryption();
   }
+}
+
+export function decryptWithFileKeyStream(
+  source: AsyncIterable<Uint8Array>,
+  fileKey: string,
+  expectedCiphertextBytes?: number,
+): AsyncIterable<Uint8Array> {
+  return (async function* () {
+    try {
+      const keyBytes = decodeDriveKey(fileKey);
+      let key: CryptoKey;
+      try {
+        key = await importDriveKey(keyBytes);
+      } finally {
+        keyBytes.fill(0);
+      }
+      yield* openStream(source, key, expectedCiphertextBytes);
+    } catch (error) {
+      if (error instanceof CryptoStreamSourceError) throw error.sourceError;
+      throw failedDecryption();
+    }
+  })();
 }
 
 export async function decryptFile(

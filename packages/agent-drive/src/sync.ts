@@ -12,8 +12,11 @@ type FileSelection = {
   realPath: string;
   dev: number;
   ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
 };
-type SyncClient = Pick<AgentDriveClient, 'apiOrigin' | 'whoami' | 'list' | 'put'>;
+type SyncClient = Pick<AgentDriveClient, 'apiOrigin' | 'whoami' | 'list' | 'putStream'>;
 
 function canonicalPrefix(value: string) {
   const prefix = value || '/';
@@ -108,6 +111,9 @@ async function localFiles(root: string, rootRealPath: string, excluded: string[]
           realPath: actualPath,
           dev: confirmed.dev,
           ino: confirmed.ino,
+          size: confirmed.size,
+          mtimeMs: confirmed.mtimeMs,
+          ctimeMs: confirmed.ctimeMs,
         });
       }
     }
@@ -131,9 +137,14 @@ async function localFiles(root: string, rootRealPath: string, excluded: string[]
   return result.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-async function readSelectedFile(rootRealPath: string, selected: FileSelection) {
+async function* streamSelectedFile(
+  rootRealPath: string,
+  selected: FileSelection,
+  expectedHash?: string,
+): AsyncGenerator<Uint8Array> {
   const changed = () =>
     new Error(`Sync file ${selected.path} changed after enumeration; refusing to read it.`);
+  const hash = createHash('sha256');
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     const before = await lstat(selected.path);
@@ -151,7 +162,14 @@ async function readSelectedFile(rootRealPath: string, selected: FileSelection) {
       fsConstants.O_RDONLY | (process.platform === 'linux' ? (fsConstants.O_NOFOLLOW ?? 0) : 0);
     handle = await open(selected.path, flags);
     const opened = await handle.stat();
-    if (!opened.isFile() || !sameIdentity(opened, selected)) throw changed();
+    if (
+      !opened.isFile() ||
+      !sameIdentity(opened, selected) ||
+      opened.size !== selected.size ||
+      opened.mtimeMs !== selected.mtimeMs ||
+      opened.ctimeMs !== selected.ctimeMs
+    )
+      throw changed();
 
     if (process.platform === 'linux') {
       let descriptorPath: string | undefined;
@@ -163,17 +181,36 @@ async function readSelectedFile(rootRealPath: string, selected: FileSelection) {
       if (descriptorPath && !isWithin(rootRealPath, descriptorPath)) throw changed();
     }
 
+    let position = 0;
+    while (position < selected.size) {
+      const bytes = Buffer.allocUnsafe(Math.min(1024 * 1024, selected.size - position));
+      const { bytesRead } = await handle.read(bytes, 0, bytes.byteLength, position);
+      if (bytesRead === 0) throw changed();
+      position += bytesRead;
+      const chunk = bytesRead === bytes.byteLength ? bytes : bytes.subarray(0, bytesRead);
+      hash.update(chunk);
+      yield chunk;
+    }
+    const extra = Buffer.allocUnsafe(1);
+    if ((await handle.read(extra, 0, 1, position)).bytesRead !== 0) throw changed();
+    const finalStat = await handle.stat();
     const afterRealPath = await realPathWithin(rootRealPath, selected.path);
     const after = await lstat(selected.path);
     if (
+      !sameIdentity(finalStat, selected) ||
+      finalStat.size !== selected.size ||
+      finalStat.mtimeMs !== selected.mtimeMs ||
+      finalStat.ctimeMs !== selected.ctimeMs ||
       after.isSymbolicLink() ||
       !after.isFile() ||
       !sameIdentity(after, selected) ||
+      after.size !== selected.size ||
+      after.mtimeMs !== selected.mtimeMs ||
+      after.ctimeMs !== selected.ctimeMs ||
       afterRealPath !== selected.realPath
-    ) {
+    )
       throw changed();
-    }
-    return new Uint8Array(await handle.readFile());
+    if (expectedHash !== undefined && hash.digest('hex') !== expectedHash) throw changed();
   } catch (error) {
     if (error instanceof Error && error.message.includes('refusing to read it')) throw error;
     throw new Error(changed().message, { cause: error });
@@ -182,8 +219,10 @@ async function readSelectedFile(rootRealPath: string, selected: FileSelection) {
   }
 }
 
-function digest(bytes: Uint8Array) {
-  return createHash('sha256').update(bytes).digest('hex');
+async function digestFile(rootRealPath: string, selected: FileSelection) {
+  const hash = createHash('sha256');
+  for await (const chunk of streamSelectedFile(rootRealPath, selected)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -341,8 +380,7 @@ export async function syncDirectory(
         `Remote file ${relativePath} has no local sync history; use --overwrite-existing to replace it.`,
       );
     }
-    const bytes = await readSelectedFile(rootRealPath, file);
-    const hash = digest(bytes);
+    const hash = await digestFile(rootRealPath, file);
     if (prior && (!remoteFile || remoteFile.versionId !== prior.versionId)) {
       stats.conflicts++;
       throw new Error(`Remote conflict for ${relativePath}; refusing to overwrite.`);
@@ -351,10 +389,11 @@ export async function syncDirectory(
       stats.skipped++;
       continue;
     }
-    const version = await client.put(
+    const version = await client.putStream(
       driveId,
       remotePath(remotePrefix, relativePath),
-      bytes,
+      streamSelectedFile(rootRealPath, file, hash),
+      file.size,
       remoteFile ? { mode: 'overwrite', ifVersionId: remoteFile.versionId } : { mode: 'create' },
     );
     manifest.files[relativePath] = { hash, versionId: version.id };

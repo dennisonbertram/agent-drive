@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
+import { plaintextSize } from '../../../../packages/agent-drive/src/crypto-format.ts';
 import { ApiError, errorFromDatabase, responseForError } from './errors';
 import {
   boundedSize,
@@ -75,6 +76,7 @@ type Auth = {
   userId?: string;
   accountName?: string;
 };
+type ConsoleDriveSelection = 'all' | 'none' | { driveId: string };
 type RequestContext = {
   auth?: Auth;
   accountId?: string | null;
@@ -148,11 +150,24 @@ async function authenticate(request: Request): Promise<Auth> {
   };
 }
 
-async function authenticateConsole(userId: string): Promise<Auth> {
+async function authenticateConsole(
+  userId: string,
+  driveSelection: ConsoleDriveSelection = 'all',
+): Promise<Auth> {
   if (!userId || userId.length > 256 || /[\u0000-\u001f\u007f]/u.test(userId)) {
     throw new ApiError('unauthorized', 'The console session is invalid.');
   }
   const userHash = hashToken(userId);
+  const driveIdsSql =
+    driveSelection === 'none'
+      ? 'ARRAY[]::uuid[]'
+      : typeof driveSelection === 'object'
+        ? `ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id AND d.id = $3::uuid)`
+        : 'ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id ORDER BY d.id)';
+  const resolveParams =
+    typeof driveSelection === 'object'
+      ? [userId, userHash, driveSelection.driveId]
+      : [userId, userHash];
   const resolved = await getPool().query<{
     account_id: string;
     account_name: string;
@@ -161,14 +176,14 @@ async function authenticateConsole(userId: string): Promise<Auth> {
     drive_ids: string[] | null;
   }>(
     `SELECT a.id AS account_id, a.name AS account_name, a.deleting_at, g.id AS agent_id,
-            ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id ORDER BY d.id) AS drive_ids
+            ${driveIdsSql} AS drive_ids
        FROM accounts a
        JOIN agents g ON g.account_id = a.id AND g.name = '__console__'
       WHERE a.external_clerk_user_id = $1
         AND NOT EXISTS (
           SELECT 1 FROM console_user_tombstones t WHERE t.external_user_hash = $2
         )`,
-    [userId, userHash],
+    resolveParams,
   );
   const resolvedRow = resolved.rows[0];
   if (resolvedRow) {
@@ -230,9 +245,13 @@ async function authenticateConsole(userId: string): Promise<Auth> {
        RETURNING id`,
       [accountId],
     );
-    const drives = await client.query('SELECT id FROM drives WHERE account_id = $1 ORDER BY id', [
-      accountId,
-    ]);
+    const drives =
+      driveSelection === 'none'
+        ? { rows: [] }
+        : await client.query(
+            `SELECT id FROM drives WHERE account_id = $1${typeof driveSelection === 'object' ? ' AND id = $2::uuid' : ''} ORDER BY id`,
+            typeof driveSelection === 'object' ? [accountId, driveSelection.driveId] : [accountId],
+          );
     return {
       keyId: null,
       accountId,
@@ -664,14 +683,31 @@ async function controlPlane(request: Request, auth: Auth, parts: string[]) {
     const { limit, cursor } = page(new URL(request.url));
     const decoded = decodeCursor(cursor, 'name');
     const params: unknown[] = [auth.accountId];
-    let where = 'account_id = $1';
+    let where = 'a.account_id = $1';
     if (decoded) {
       params.push(decoded.value, decoded.id);
-      where += ' AND (name, id) > ($2, $3::uuid)';
+      where += ' AND (a.name, a.id) > ($2, $3::uuid)';
     }
     params.push(limit + 1);
     const rows = await getPool().query(
-      `SELECT id, name, created_at FROM agents WHERE ${where} ORDER BY name, id LIMIT $${params.length}`,
+      `WITH agent_page AS (
+         SELECT a.id, a.name, a.created_at
+           FROM agents a
+          WHERE ${where}
+          ORDER BY a.name, a.id
+          LIMIT $${params.length}
+       ), key_counts AS (
+         SELECT k.agent_id, count(*)::int AS total_key_count,
+                count(*) FILTER (WHERE k.revoked_at IS NULL)::int AS active_key_count
+           FROM api_keys k JOIN agent_page p ON p.id = k.agent_id
+          WHERE k.account_id = $1
+          GROUP BY k.agent_id
+       )
+       SELECT p.id, p.name, p.created_at,
+              COALESCE(key_counts.total_key_count, 0)::int AS total_key_count,
+              COALESCE(key_counts.active_key_count, 0)::int AS active_key_count
+         FROM agent_page p LEFT JOIN key_counts ON key_counts.agent_id = p.id
+        ORDER BY p.name, p.id`,
       params,
     );
     return response(collection(rows.rows as Row[], limit, (row) => row.name));
@@ -1814,10 +1850,30 @@ async function shareEndpoint(
     );
   }
   if (operation === 'shares' && request.method === 'GET') {
+    const pathValue = queryValue(url, 'path', 1024);
+    const filePath = pathValue === null ? null : canonicalPath(pathValue);
+    const countOnly = queryValue(url, 'countOnly', 1);
+    if (countOnly !== null && countOnly !== '1')
+      throw new ApiError('validation_error', 'countOnly must be 1.');
+    if (countOnly === '1') {
+      if (!filePath) throw new ApiError('validation_error', 'path is required for countOnly.');
+      const count = await getPool().query(
+        `SELECT count(*)::int AS count
+           FROM shares s JOIN files f ON f.id = s.file_id
+          WHERE s.drive_id = $1 AND f.drive_id = $1 AND f.path = $2
+            AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        [driveId, filePath],
+      );
+      return response({ count: count.rows[0]?.count ?? 0 });
+    }
     const { limit, cursor } = page(url);
     const decoded = decodeCursor(cursor, 'share');
     const params: unknown[] = [driveId];
-    let where = 's.drive_id = $1';
+    let where = 's.drive_id = $1 AND f.drive_id = $1';
+    if (filePath !== null) {
+      params.push(filePath);
+      where += ` AND f.path = $${params.length}`;
+    }
     if (decoded) {
       params.push(decoded.value, decoded.id);
       where += ` AND (s.created_at, s.id) > ($${params.length - 1}::timestamptz, $${params.length})`;
@@ -2251,6 +2307,24 @@ async function fileEndpoint(
     const path = canonicalPath(url.searchParams.get('path'));
     const versionParam = url.searchParams.get('versionId');
     const versionId = versionParam ? uuid(versionParam, 'versionId') : undefined;
+    const authorizeIfWithinLimit = queryValue(url, 'authorizeIfWithinLimit', 1);
+    if (authorizeIfWithinLimit !== null && authorizeIfWithinLimit !== '1')
+      throw new ApiError('validation_error', 'authorizeIfWithinLimit must be 1.');
+    const capParam = queryValue(url, 'maxPlaintextBytes', 16);
+    let maxPlaintextBytes: number | undefined;
+    if (capParam !== null) {
+      if (!/^\d+$/u.test(capParam))
+        throw new ApiError(
+          'validation_error',
+          'maxPlaintextBytes must be a non-negative safe integer.',
+        );
+      maxPlaintextBytes = Number(capParam);
+      if (!Number.isSafeInteger(maxPlaintextBytes))
+        throw new ApiError(
+          'validation_error',
+          'maxPlaintextBytes must be a non-negative safe integer.',
+        );
+    }
     const result = await getPool().query(
       `SELECT v.*, f.path FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
        WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL AND v.file_id = f.id`,
@@ -2258,7 +2332,20 @@ async function fileEndpoint(
     );
     const row = result.rows[0] as Row | undefined;
     if (!row) throw new ApiError('not_found', 'File not found.');
-    if (url.searchParams.get('metadataOnly') === '1') return response(rowVersion(row));
+    const metadataOnly = url.searchParams.get('metadataOnly') === '1';
+    const conditionalAuthorization =
+      authorizeIfWithinLimit === '1' && metadataOnly && maxPlaintextBytes !== undefined;
+    if (authorizeIfWithinLimit === '1' && !conditionalAuthorization)
+      throw new ApiError(
+        'validation_error',
+        'authorizeIfWithinLimit requires metadataOnly=1 and maxPlaintextBytes.',
+      );
+    if (metadataOnly && !conditionalAuthorization) return response(rowVersion(row));
+    if (
+      maxPlaintextBytes !== undefined &&
+      plaintextSize(Number(row.ciphertext_size)) > maxPlaintextBytes
+    )
+      return response(rowVersion(row));
     const downloadUrl = await authorizeDownload(auth.accountId, BigInt(row.ciphertext_size), () =>
       presignedDownload(row.object_key),
     );
@@ -2734,7 +2821,24 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     if (mode.kind === 'console') {
       if (!mode.userId) throw new ApiError('unauthorized', 'A console session is required.');
-      context.auth = await authenticateConsole(mode.userId);
+      const accountBrowse =
+        request.method === 'GET' &&
+        relative.length === 1 &&
+        ['session', 'drives'].includes(relative[0]!);
+      const driveListBrowse =
+        request.method === 'GET' &&
+        relative.length === 3 &&
+        relative[0] === 'drives' &&
+        relative[2] === 'list' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          relative[1] ?? '',
+        );
+      const driveSelection: ConsoleDriveSelection | undefined = accountBrowse
+        ? 'none'
+        : driveListBrowse
+          ? { driveId: relative[1]! }
+          : undefined;
+      context.auth = await authenticateConsole(mode.userId, driveSelection);
       requireConsoleOrigin(request, url);
     }
     if (!validBase || url.search.length > MAX_QUERY_LENGTH) {
@@ -2843,6 +2947,7 @@ const shareIdPattern = /^[A-Za-z0-9_-]{22}$/u;
 
 export async function handlePublicShareRequest(shareId: string, metadataOnly = false) {
   const context: RequestContext = { action: 'share.access', status: 500 };
+  let auditEligible = false;
   let output: Response;
   try {
     if (!shareIdPattern.test(shareId))
@@ -2866,6 +2971,10 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
+    // Record attempts against an active share, including operation-budget failures. Unknown,
+    // revoked, expired and unavailable links are public failures and must not create unbounded
+    // per-request audit rows.
+    auditEligible = true;
     await reserveOperation(context);
     if (metadataOnly) {
       output = response({
@@ -2898,12 +3007,14 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
     context.status = mapped.status;
     context.errorCode = mapped.code;
   }
-  try {
-    await audit(context);
-  } catch {
-    return responseForError(
-      new ApiError('internal_error', 'The audit record could not be written.'),
-    );
+  if (auditEligible) {
+    try {
+      await audit(context);
+    } catch {
+      return responseForError(
+        new ApiError('internal_error', 'The audit record could not be written.'),
+      );
+    }
   }
   return output;
 }

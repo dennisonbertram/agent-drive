@@ -1,9 +1,13 @@
 import { createRequire } from 'node:module';
-import { open, readFile, rm } from 'node:fs/promises';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { AgentDriveApiError, AgentDriveClient, publicOutput } from './client.js';
+import {
+  AgentDriveApiError,
+  AgentDriveClient,
+  publicOutput,
+  StreamSizeLimitError,
+} from './client.js';
 import { conflictHint } from './check.js';
 import {
   resolveConnection,
@@ -15,6 +19,7 @@ import {
 import { reportEnvBackups } from './credentials.js';
 import { autoSealHeldKeys, sealClientWithDeadline } from './account-seal.js';
 import { DriveCryptoError } from './crypto.js';
+import { getFile, putFile } from './node-transfer.js';
 
 // Resolves to the package root from both src/ and dist/.
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
@@ -135,6 +140,44 @@ function printableText(bytes: Uint8Array) {
   return text;
 }
 
+const INLINE_READ_LIMIT = 64 * 1024;
+
+async function readInline(
+  client: AgentDriveClient,
+  driveId: string,
+  path: string,
+  versionId?: string,
+) {
+  const stream = await client.getStream(driveId, path, {
+    ...(versionId ? { versionId } : {}),
+    maxPlaintextBytes: INLINE_READ_LIMIT,
+  });
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    for await (const chunk of stream.plaintext) {
+      byteLength += chunk.byteLength;
+      if (byteLength > INLINE_READ_LIMIT) {
+        throw new McpInputError('Large or binary files require the download tool.');
+      }
+      chunks.push(chunk);
+    }
+    if (byteLength !== stream.plaintextBytes) {
+      throw new Error('The decrypted file size did not match its metadata.');
+    }
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { version: stream.version, text: printableText(bytes) };
+  } catch (error) {
+    await stream.cancel(error).catch(() => {});
+    throw error;
+  }
+}
+
 /** Maps an optional driveId argument to a drive ID, or throws a message for the agent. */
 type DriveResolver = (driveId: string | undefined) => string;
 
@@ -167,7 +210,7 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
     'put',
     {
       description:
-        'Encrypt and upload a text or local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.',
+        'Encrypt and upload text or stream a local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.',
       inputSchema: {
         driveId: id.optional(),
         path,
@@ -187,11 +230,8 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
           throw new McpInputError('Provide exactly one of text or localPath.');
         if (args.overwrite && args.ifVersionId)
           throw new McpInputError('overwrite and ifVersionId are mutually exclusive.');
-        const bytes =
-          args.text !== undefined
-            ? new TextEncoder().encode(args.text)
-            : await readFile(args.localPath!);
-        const version = await client.put(drive(args.driveId), args.path, bytes, {
+        const driveId = drive(args.driveId);
+        const options = {
           ...(args.overwrite ? { mode: 'overwrite' as const } : {}),
           ...(args.ifVersionId
             ? { mode: 'overwrite' as const, ifVersionId: args.ifVersionId }
@@ -199,7 +239,11 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
           ...(args.tags ? { tags: args.tags } : {}),
           ...(args.description !== undefined ? { description: args.description } : {}),
           ...(args.userId ? { userId: args.userId } : {}),
-        });
+        };
+        const version =
+          args.text !== undefined
+            ? await client.put(driveId, args.path, new TextEncoder().encode(args.text), options)
+            : await putFile(client, driveId, args.localPath!, args.path, options);
         return version;
       }),
   );
@@ -207,25 +251,27 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
     'get',
     {
       description:
-        'Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.',
+        'Decrypt and return printable UTF-8 text up to 64 KiB inline. Use the download tool for larger or binary files.',
       inputSchema: { driveId: id.optional(), path, versionId: z.string().optional() },
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (args) =>
       safely(async () => {
-        const result = await client.get(
-          drive(args.driveId),
-          args.path,
-          args.versionId ? { versionId: args.versionId } : {},
-        );
-        return { version: result.version, text: printableText(result.bytes) };
+        try {
+          return await readInline(client, drive(args.driveId), args.path, args.versionId);
+        } catch (error) {
+          if (error instanceof StreamSizeLimitError) {
+            throw new McpInputError('Large or binary files require the download tool.');
+          }
+          throw error;
+        }
       }),
   );
   server.registerTool(
     'download',
     {
       description:
-        'Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.',
+        'Stream and decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.',
       inputSchema: {
         driveId: id.optional(),
         path,
@@ -236,22 +282,10 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
     },
     async (args) =>
       safely(async () => {
-        const result = await client.get(
-          drive(args.driveId),
-          args.path,
-          args.versionId ? { versionId: args.versionId } : {},
-        );
-        const handle = await open(args.outputPath, 'wx', 0o600);
-        try {
-          await handle.chmod(0o600);
-          await handle.writeFile(result.bytes);
-        } catch (error) {
-          await handle.close();
-          await rm(args.outputPath, { force: true });
-          throw error;
-        }
-        await handle.close();
-        return { version: result.version, outputPath: args.outputPath };
+        const version = await getFile(client, drive(args.driveId), args.path, args.outputPath, {
+          ...(args.versionId ? { versionId: args.versionId } : {}),
+        });
+        return { version, outputPath: args.outputPath };
       }),
   );
   server.registerTool(

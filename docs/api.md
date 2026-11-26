@@ -246,7 +246,10 @@ A version object:
 `GET /drives/:id/get?path=/notes/plan.md` returns the current version plus `downloadUrl`, a presigned storage URL valid for 10 minutes. Download the ciphertext from it with a plain `GET` (no API key), then decrypt.
 
 - `versionId=<uuid>` selects an older version.
-- `metadataOnly=1` returns the version object without `downloadUrl`, and does not count as a download.
+- `metadataOnly=1` returns the version object without `downloadUrl`, and does not count against the download allowance. Adding `maxPlaintextBytes` to this request still returns metadata only.
+- `maxPlaintextBytes=<integer>` optionally caps the selected version's plaintext size (a non-negative safe integer). Without `metadataOnly`, an in-limit request returns a signed URL as usual; if the file exceeds the cap, the API returns that version's metadata without a URL, before signing a storage request.
+- `metadataOnly=1&maxPlaintextBytes=<integer>&authorizeIfWithinLimit=1` explicitly negotiates a bounded download. New servers return a signed URL when the selected version fits the cap, and metadata without a URL when it exceeds the cap. `authorizeIfWithinLimit=1` is valid only with `metadataOnly=1` and a valid cap. Older servers ignore this opt-in and return metadata only; clients check its size locally and make one additional GET pinned to that version if it fits. The fallback costs one extra `drive.get` operation on older servers. Clients must still check the returned size before fetching ciphertext because older servers ignore `maxPlaintextBytes`.
+- Each bounded GET request uses one `drive.get` operation. The plan's download allowance is charged only when a signed URL is authorized.
 - A path that does not exist or is in the trash returns 404 `not_found`.
 - The plan's download allowance can return 402 `payment_required`.
 

@@ -40,6 +40,7 @@ function setup(inbox: TraceInboxRecord | null) {
 const meta = (wrappedKey: string) => ({
   wrappedKey,
   downloadUrl: 'https://example.r2.cloudflarestorage.com/x',
+  ciphertextSize: ciphertext.byteLength,
 });
 
 describe('openVersion', () => {
@@ -63,9 +64,30 @@ describe('openVersion', () => {
   });
   it('decrypts a v1 version without asking for the inbox', async () => {
     const { api, calls } = setup(null);
-    const out = await openVersion(api, DRIVE, meta(v1), driveKey, new Map() as InboxCache);
+    const out = await openVersion(api, DRIVE, meta(v1), driveKey, new Map() as InboxCache, 1024);
     expect(new TextDecoder().decode(out)).toBe('trace body');
     expect(calls).not.toHaveBeenCalled();
+  });
+
+  it('stops collecting plaintext when the preview cap is exceeded', async () => {
+    const { api } = setup(null);
+    await expect(openVersion(api, DRIVE, meta(v1), driveKey, new Map(), 3)).rejects.toThrow(
+      'This file is too large to preview.',
+    );
+  });
+
+  it('rejects a ciphertext stream whose actual length differs from pinned metadata', async () => {
+    const { api } = setup(null);
+    await expect(
+      openVersion(
+        api,
+        DRIVE,
+        { ...meta(v1), ciphertextSize: ciphertext.byteLength + 1 },
+        driveKey,
+        new Map(),
+        1024,
+      ),
+    ).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 
   it('starts the inbox lookup while the ciphertext is still downloading', async () => {
@@ -78,7 +100,7 @@ describe('openVersion', () => {
     );
     vi.stubGlobal('fetch', fetching);
     const api = vi.fn(async () => ({ inbox: record })) as never;
-    const pending = openVersion(api, DRIVE, meta(v2), driveKey, new Map());
+    const pending = openVersion(api, DRIVE, meta(v2), driveKey, new Map(), 1024);
     // Both transfers were issued and neither has settled.
     expect(api).toHaveBeenCalledTimes(1);
     expect(fetching).toHaveBeenCalledTimes(1);
@@ -93,7 +115,7 @@ describe('openVersion', () => {
       new Promise((_, fail) => {
         rejectInbox = fail;
       })) as never;
-    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map())).rejects.toThrow(
+    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map(), 1024)).rejects.toThrow(
       'The encrypted file could not be downloaded.',
     );
     // The abandoned lookup settles later; its rejection must not escape unhandled.
@@ -109,8 +131,10 @@ describe('openVersion', () => {
       return { inbox: record };
     }) as never;
     const cache: InboxCache = new Map();
-    await expect(openVersion(api, DRIVE, meta(v2), driveKey, cache)).rejects.toThrow('lookup down');
-    const out = await openVersion(api, DRIVE, meta(v2), driveKey, cache);
+    await expect(openVersion(api, DRIVE, meta(v2), driveKey, cache, 1024)).rejects.toThrow(
+      'lookup down',
+    );
+    const out = await openVersion(api, DRIVE, meta(v2), driveKey, cache, 1024);
     expect(new TextDecoder().decode(out)).toBe('trace body');
     expect(attempts).toBe(2);
   });
@@ -119,7 +143,7 @@ describe('openVersion', () => {
     const { api, calls } = setup(record);
     const cache: InboxCache = new Map();
     for (let i = 0; i < 2; i += 1) {
-      const out = await openVersion(api, DRIVE, meta(v2), driveKey, cache);
+      const out = await openVersion(api, DRIVE, meta(v2), driveKey, cache, 1024);
       expect(new TextDecoder().decode(out)).toBe('trace body');
     }
     expect(calls).toHaveBeenCalledTimes(1);
@@ -128,14 +152,16 @@ describe('openVersion', () => {
 
   it('says the inbox is gone when the drive has none', async () => {
     const { api } = setup(null);
-    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map())).rejects.toThrow(
+    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map(), 1024)).rejects.toThrow(
       'This trace was sealed to a trace inbox this drive no longer has.',
     );
   });
 
   it("rejects another drive's inbox record", async () => {
     const { api } = setup(otherRecord);
-    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map())).rejects.toMatchObject({
+    await expect(
+      openVersion(api, DRIVE, meta(v2), driveKey, new Map(), 1024),
+    ).rejects.toMatchObject({
       code: 'decryption_failed',
     });
   });
@@ -147,7 +173,7 @@ describe('openVersion', () => {
     });
     const { api } = setup({ ...otherRecord, driveId: OTHER } as TraceInboxRecord);
     await expect(
-      openVersion(api, DRIVE, meta(sealedToOther), driveKey, new Map()),
+      openVersion(api, DRIVE, meta(sealedToOther), driveKey, new Map(), 1024),
     ).rejects.toMatchObject({ code: 'decryption_failed' });
   });
 });

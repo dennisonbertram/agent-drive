@@ -70,12 +70,16 @@ function mockClient(
       })),
       nextCursor: null,
     }),
-    put: async (
+    putStream: async (
       _driveId: string,
       path: string,
-      bytes: Uint8Array,
+      input: AsyncIterable<Uint8Array>,
+      _size: number,
       options: { ifVersionId?: string } = {},
     ) => {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of input) chunks.push(new Uint8Array(chunk));
+      const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
       uploaded.push({ path, bytes: new Uint8Array(bytes), ...options });
       await onPut?.(path, bytes);
       return {

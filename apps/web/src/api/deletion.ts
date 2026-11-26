@@ -182,6 +182,13 @@ async function purgeDrive(store: S3Client, job: DeletionJob) {
       [job.id, job.lease_until],
     );
     if (!claim.rowCount) throw new Error('Deletion claim expired.');
+    await client.query(
+      `INSERT INTO billing_egress_attributions (object_key_hash,account_id,agent_id)
+       SELECT encode(sha256(convert_to(v.object_key,'UTF8')),'hex'),$2,v.agent_id
+         FROM versions v WHERE v.drive_id=$1
+       ON CONFLICT (object_key_hash) DO NOTHING`,
+      [job.target_id, job.account_id],
+    );
     const state = await billingState(client, job.account_id);
     await queueBillingDeliveries(client, state);
     await client.query(
@@ -374,6 +381,7 @@ async function purgeAccount(store: S3Client, job: DeletionJob, adapters: Adapter
     );
     await client.query('DELETE FROM shares WHERE account_id=$1', [targetId]);
     await client.query('DELETE FROM audit_events WHERE account_id = $1', [targetId]);
+    await client.query('DELETE FROM billing_egress_attributions WHERE account_id=$1', [targetId]);
     await client.query('DELETE FROM drives WHERE account_id = $1', [targetId]);
     await client.query('DELETE FROM accounts WHERE id = $1', [targetId]);
     return true;

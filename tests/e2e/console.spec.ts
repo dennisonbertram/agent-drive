@@ -246,14 +246,15 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
     await page.getByText('Paste a key instead').click();
-    await page
-      .getByLabel(/^Drive key or credentials bundle/)
-      .fill(randomBytes(32).toString('base64url'));
+    const wrongDriveKey = randomBytes(32).toString('base64url');
+    await page.getByLabel(/^Drive key or credentials bundle/).fill(wrongDriveKey);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     await expect(page.getByRole('alert').filter({ hasText: /decrypt/i })).toBeVisible();
-    await page.getByTestId('key-chip').click();
-    await page.getByRole('button', { name: 'Forget key' }).click();
-    await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Try another key', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Try another key', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText(
+      'After the key loads, artifact.bin downloads.',
+    );
     await page.getByText('Paste a key instead').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(driveKey);
     const pendingDownload = page.waitForEvent('download');
@@ -382,7 +383,10 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     // Do not print secrets even when this assertion fails.
     expect(
       networkBodies.some(
-        (body) => body.includes(driveKey) || body.includes(original.toString('base64')),
+        (body) =>
+          body.includes(driveKey) ||
+          body.includes(wrongDriveKey) ||
+          body.includes(original.toString('base64')),
       ),
     ).toBe(false);
   } finally {

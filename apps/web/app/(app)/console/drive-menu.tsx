@@ -15,6 +15,11 @@ export function DriveMenu({
   onNewDrive,
   onTraces,
   onCapture,
+  onOpen,
+  hasMore,
+  loadingMore,
+  loadMoreError,
+  onLoadMore,
   disabled,
   formatSize,
 }: {
@@ -26,6 +31,11 @@ export function DriveMenu({
   /** Phone only: the header buttons are hidden there, so the menu offers the same two actions. */
   onTraces?: () => void;
   onCapture?: () => void;
+  onOpen?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  loadMoreError?: string;
+  onLoadMore?: () => void;
   disabled?: boolean;
   formatSize: (bytes: number) => string;
 }) {
@@ -36,6 +46,8 @@ export function DriveMenu({
     <span className={`drive-menu ${disabled ? 'disabled' : ''}`}>
       <MenuButton
         align="start"
+        {...(onOpen ? { onOpen } : {})}
+        menuClassName="drive-list-menu"
         className="drive-menu-button"
         testId="drive-menu-button"
         ariaLabel={`Drive: ${current?.name ?? 'none'}`}
@@ -64,6 +76,23 @@ export function DriveMenu({
           >
             Capture traces…
           </button>
+        )}
+        {hasMore && onLoadMore && (
+          <div className="drive-option drive-more">
+            {loadMoreError && <span role="alert">{loadMoreError}</span>}
+            <button
+              type="button"
+              className="button secondary"
+              disabled={disabled || loadingMore}
+              onClick={onLoadMore}
+            >
+              {loadingMore
+                ? 'Loading drives…'
+                : loadMoreError
+                  ? 'Retry loading drives'
+                  : 'Load more drives'}
+            </button>
+          </div>
         )}
         {drives.map((item) => {
           const stats = usage?.drives.find((entry) => entry.id === item.id);

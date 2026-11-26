@@ -20,7 +20,7 @@ Pass `--drive <drive id>` in that case. The examples below omit it.
 
 ## Write a file
 
-`put` encrypts a local file and uploads it. By default it only creates: it fails if the path already exists.
+`put` encrypts a local file in 1 MiB authenticated chunks and streams the ciphertext to storage. It does not load the whole local file into memory. By default it only creates: it fails if the remote path already exists. The byte API remains available for callers that already hold a `Uint8Array`.
 
 ```sh
 agent-drive put ./notes.md /work/report/notes.md --tag report --description "Draft notes"
@@ -65,14 +65,18 @@ agent-drive put ./notes.latest.md /work/report/notes.md --if-version <current ve
 agent-drive get /work/report/notes.md
 ```
 
-Without `--output`, `get` prints the file only when it is valid UTF-8 text of at most 1 MiB with no binary control bytes (tabs and line breaks are fine). Otherwise it fails with `Binary or large output requires --output.`
+Without `--output`, `get` prints the file only when it is valid UTF-8 text of at most 1 MiB with no binary control bytes (tabs and line breaks are fine). It checks the size from metadata before downloading the ciphertext, then buffers and validates the complete small file before writing anything to stdout. Otherwise it fails with `Binary or large output requires --output.`
 
 ```sh
 agent-drive get /work/report/notes.md --output ./notes.md
 agent-drive get /work/report/notes.md --version <version id> --output ./notes.old.md
 ```
 
-With `--output`, the file is written (mode `0600`) only after the content has been decrypted and authenticated. The command then prints the version metadata. It never prints the download URL or the wrapped file key.
+With `--output`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key.
+
+The client library also exposes `getStream`. It yields each authenticated 1 MiB plaintext frame as it is verified; if a later frame fails, earlier frames have already been yielded. A caller that writes those frames directly to stdout can produce partial output. Use `getFile` when a complete verified file must appear atomically.
+
+The MCP file tools use separate inline and disk paths. `get` returns printable UTF-8 text up to 64 KiB and checks the metadata size before downloading the body. Larger files and binary files must use `download`, which writes to a new local file without the inline-size cap, subject to the service's file-size limit. It refuses to overwrite an existing path. `put` accepts either text or a local file path; the local-file form streams the file. See [MCP server and tools](mcp-tools.md).
 
 ## List and find
 
@@ -162,7 +166,7 @@ Rules:
 - The default prefix is `/`.
 - Symlinks are skipped. The local root must be a real directory, not a symlink.
 - It never deletes remote files.
-- Unchanged files are skipped, using a SHA-256 hash and the version id recorded in a private manifest.
+- Unchanged files are skipped, using a SHA-256 hash and the version id recorded in a private manifest. Hashing and upload read files in bounded chunks, and the upload pass verifies it is sending the content that was hashed.
 - Manifests live in `<config path>.state` (by default `~/.config/agent-drive/config.json.state`), outside the uploaded folder. The directory must be private to your user; an unsafe directory is rejected.
 - A corrupt manifest stops the sync with an error. It does not reset the history.
 - If a remote file changed since your last sync, the command stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1. Files uploaded before that point stay uploaded.
@@ -195,7 +199,7 @@ agent-drive backup ./workdir --gitignore --exclude 'build/**'
 - `--gitignore` skips the paths the folder's git rules ignore. Git never traverses its own control metadata, so `.git` is skipped too — a `.git` directory or the `.git` file of a linked worktree or submodule, at any depth.
 - `--exclude GLOB` skips paths matching the root-relative path: `build/**` skips everything under `build/`, `**/node_modules` skips `node_modules` at any depth, a bare `node_modules` only the top-level one. Repeat it for more patterns.
 - More than 5000 files or 1 GiB is refused unless `--yes` is passed.
-- Unchanged files are skipped (SHA-256 manifest in `<config path>.state`).
+- Unchanged files are skipped (SHA-256 manifest in `<config path>.state`). Hashing and upload read files in bounded chunks; a file that changes between those passes is rejected before it is committed.
 - Symlinks are skipped. The CLI config file, its lock and state, and the `--key-file` file are never uploaded.
 - A file over 5 GiB fails. One failing file does not stop the rest; each failure prints `failed <path>: <reason>` on stderr.
 - `--dry-run` prints `would upload <remote path>` for each file that would be sent and uploads nothing.
