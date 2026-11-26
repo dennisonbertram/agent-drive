@@ -1185,6 +1185,35 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
             }
         }
     }
+    fn finish_release(&self, fh: u64) -> Result<(), i32> {
+        let handle = self.state.read().unwrap().handles.get(&fh).cloned();
+        let mut release_error = None;
+        if let Some(stage) = handle.as_ref().and_then(|handle| handle.staged.as_ref()) {
+            if stage.dirty {
+                if let Err(error) = self.flush_stage(fh) {
+                    release_error = Some(error);
+                }
+            }
+            if let Err(error) = self.bridge.lock().unwrap().release(&stage.handle_id) {
+                self.update_recovery_path(fh, &error);
+                release_error.get_or_insert_with(|| Self::errno(error));
+            }
+        }
+        let released = self
+            .state
+            .write()
+            .unwrap()
+            .handles
+            .remove(&fh)
+            .map(|handle| handle.node.ino);
+        if let Some(ino) = released {
+            self.prune_nodes([ino]);
+        }
+        match release_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
     fn truncate_stage(&self, fh: u64, size: u64) -> Result<Node, i32> {
         if size > MAX_SAFE_INTEGER {
             return Err(libc::EINVAL);
@@ -2414,34 +2443,10 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
         _flush: bool,
         reply: fuser::ReplyEmpty,
     ) {
-        let handle = self.state.read().unwrap().handles.get(&fh.0).cloned();
-        if let Some(handle) = handle.as_ref() {
-            if let Some(stage) = handle.staged.as_ref() {
-                if stage.dirty {
-                    if let Err(error) = self.flush_stage(fh.0) {
-                        reply.error(Errno::from_i32(error));
-                        return;
-                    }
-                }
-                let result = self.bridge.lock().unwrap().release(&stage.handle_id);
-                if let Err(error) = result {
-                    self.update_recovery_path(fh.0, &error);
-                    reply.error(Errno::from_i32(Self::errno(error)));
-                    return;
-                }
-            }
+        match self.finish_release(fh.0) {
+            Ok(()) => reply.ok(),
+            Err(error) => reply.error(Errno::from_i32(error)),
         }
-        let released = self
-            .state
-            .write()
-            .unwrap()
-            .handles
-            .remove(&fh.0)
-            .map(|handle| handle.node.ino);
-        if let Some(ino) = released {
-            self.prune_nodes([ino]);
-        }
-        reply.ok();
     }
     fn forget(&self, _req: &Request, ino: INodeNo, nlookup: u64) {
         if ino.0 == ROOT_INO {
@@ -2672,6 +2677,76 @@ mod tests {
             state.directory_handles.remove(&11);
         }
         assert!(activity.is_idle());
+    }
+
+    #[test]
+    fn final_release_after_conflict_retires_handle_and_requests_bridge_release() {
+        let input = concat!(
+            "{\"id\":1,\"ok\":false,\"errno\":\"ESTALE\",\"recoveryPath\":\"/tmp/agent-drive-stage-1\",\"currentVersionId\":\"remote-v2\"}\n",
+            "{\"id\":2,\"ok\":false,\"errno\":\"ESTALE\",\"recoveryPath\":\"/tmp/agent-drive-stage-1\",\"currentVersionId\":\"remote-v2\"}\n"
+        );
+        let bridge = Bridge::new(BufReader::new(input.as_bytes()), Vec::new());
+        let capabilities = MountCapabilities {
+            read_only: false,
+            write: true,
+            delete: false,
+            write_paths: vec!["/docs".into()],
+            max_read_bytes: MAX_READ,
+            max_write_bytes: MAX_WRITE,
+            ops: vec!["flush".into(), "release".into()],
+        };
+        let fs = DriveFs::with_capabilities(bridge, 1000, 1000, capabilities, true);
+        let node = Node {
+            ino: 2,
+            path: "/docs/report.txt".into(),
+            name: "report.txt".into(),
+            kind: FileType::RegularFile,
+            size: 8,
+            mtime_ms: 10,
+            version_id: Some("remote-v1".into()),
+            observed_at: Instant::now(),
+            mode: 0o600,
+            uid: 1000,
+            gid: 1000,
+        };
+        fs.state
+            .write()
+            .unwrap()
+            .nodes
+            .insert(node.ino, node.clone());
+        fs.state
+            .write()
+            .unwrap()
+            .paths
+            .insert(node.path.clone(), node.ino);
+        fs.state.write().unwrap().handles.insert(
+            77,
+            FileHandleState {
+                node,
+                writable: true,
+                readable: true,
+                staged: Some(StagedFile {
+                    handle_id: "stage-1".into(),
+                    recovery_path: Some("/tmp/agent-drive-stage-1".into()),
+                    current_version_id: None,
+                    dirty: true,
+                }),
+            },
+        );
+
+        assert_eq!(fs.finish_release(77), Err(libc::ESTALE));
+        assert!(fs.state.read().unwrap().handles.get(&77).is_none());
+        assert!(fs.mount_activity().is_idle());
+        let requests: Vec<serde_json::Value> =
+            String::from_utf8(fs.bridge.lock().unwrap().writer.clone())
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["op"], "flush");
+        assert_eq!(requests[1]["op"], "release");
+        assert_eq!(requests[1]["handleId"], "stage-1");
     }
     #[test]
     fn operation_ids_are_unique_uuid_v4_values() {
