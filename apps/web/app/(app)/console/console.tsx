@@ -28,7 +28,7 @@ import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
-import { keySourceFor, type Source } from '@/src/console/webhook-setup';
+import { isDriveBoundSource, keySourceFor, type Source } from '@/src/console/webhook-setup';
 import {
   BROWSER_KEY_DELETE_FAILED,
   Vault,
@@ -781,7 +781,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     } catch (reason) {
       if (owner === refreshOwner.current) throw reason;
     }
-  }, [identity.userId]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1121,7 +1121,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (lastUser.current === identity.userId) return;
     const hadUser = lastUser.current !== null;
     lastUser.current = identity.userId;
-    if (!hadUser) return;
+    if (!hadUser) {
+      void refresh();
+      return;
+    }
     vault.clearBrowser();
     inboxCache.current.clear();
     recordedBackups.current = {};
@@ -1137,7 +1140,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setReady(false);
     lockAll('');
     void vault.load();
-  }, [identity.userId, vault]);
+    void refresh();
+  }, [identity.userId, refresh, vault]);
   // A key prompt or resume belongs to one drive.
   useEffect(() => {
     actionEpoch.current += 1;
@@ -1910,7 +1914,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       open('unlock');
       return;
     }
-    let source: Source = fromAccount
+    const source: Source = fromAccount
       ? 'vault'
       : (suppliedSource ??
         keySourceFor(trustedDrives.current.get(driveId), keySources.current.get(driveId), key));
@@ -1930,10 +1934,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         }
       }
       if (verdict === 'mismatch') rejectKey(key, MISMATCH);
-      if (verdict === 'unverifiable' && source !== 'recovery-file')
+      if (verdict === 'unverifiable' && !isDriveBoundSource(source))
         rejectKey(
           key,
-          'This drive has no file or trace inbox to confirm the key. Use a recovery file for an empty drive.',
+          'This drive has no file or trace inbox to confirm the key. Use a recovery file or credentials bundle for an empty drive.',
         );
     }
     if (fromAccount || suppliedKey) {

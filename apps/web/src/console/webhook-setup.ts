@@ -9,6 +9,10 @@ export type Source = 'trusted' | 'recovery-file' | 'bundle' | 'pasted' | 'vault'
 export type Verdict = 'file' | 'inbox' | 'mismatch' | 'unverifiable';
 export type WebhookToken = { id: string; token: string; url: string; createdAt: string };
 
+/** A local generated key or selected-drive recovery material can identify a truly empty drive. */
+export const isDriveBoundSource = (source: Source) =>
+  source === 'trusted' || source === 'recovery-file' || source === 'bundle';
+
 export const MISMATCH = 'This key does not open this drive’s files.';
 export const EMPTY_DRIVE =
   'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.';
@@ -38,8 +42,7 @@ export async function setUpWebhook(args: {
   if (verdict === 'mismatch') throw new Error(MISMATCH);
   // Only a key bound to this drive may create the inbox when there is nothing to check it against.
   // A vault slot is only unsealed, never matched to the drive.
-  if (verdict === 'unverifiable' && (source === 'pasted' || source === 'vault'))
-    throw new Error(EMPTY_DRIVE);
+  if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
 
   async function ensureInbox() {
     const { inbox } = await request<{ inbox: TraceInboxRecord | null }>(

@@ -30,6 +30,7 @@ import {
   driveKeyEnvironmentName,
   keysForOrigin,
   machineName,
+  readConfig,
   resolveLoginApiUrl,
   resolveDriveId,
   resolveConnection,
@@ -220,21 +221,24 @@ let missingDrive: string | undefined;
 let defaultDrive: string | undefined;
 
 /** Forced account-key seal after login/grant/import put drive keys on this machine. */
-function sealAfterKeyChange(connection?: Awaited<ReturnType<typeof resolveConnection>>) {
+function sealAfterKeyChange(connection: Awaited<ReturnType<typeof resolveConnection>>) {
   scheduledSeals.push(async () => {
-    const resolved = connection ?? (await resolveConnection());
-    const { config } = resolved;
-    if (!resolved.apiUrl || !resolved.apiKey) return;
-    const seal = sealClientWithDeadline(resolved.apiUrl, resolved.apiKey, machineName());
+    const seal = sealClientWithDeadline(connection.apiUrl, connection.apiKey, machineName());
     await autoSealHeldKeys({
       client: seal.client,
-      config,
+      config: connection.config,
       force: true,
       deadline: seal.deadline,
       deadlineAt: seal.deadlineAt,
       warn: (line) => process.stderr.write(`${line}\n`),
     });
   });
+}
+
+async function sealSavedConnectionAfterKeyChange() {
+  const config = await readConfig();
+  if (!config.apiUrl || !config.apiKey) return;
+  sealAfterKeyChange({ apiUrl: config.apiUrl, apiKey: config.apiKey, config });
 }
 
 function requiredDrive(args: ReturnType<typeof parse>) {
@@ -306,7 +310,7 @@ async function run(command: string, raw: string[]) {
         log: (line) => process.stdout.write(`${line}\n`),
         openBrowser: shouldOpenBrowser(args.values['no-browser']),
       });
-      sealAfterKeyChange();
+      await sealSavedConnectionAfterKeyChange();
       return;
     }
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
@@ -458,7 +462,7 @@ async function run(command: string, raw: string[]) {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
       const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
       process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
-      sealAfterKeyChange();
+      await sealSavedConnectionAfterKeyChange();
       return;
     }
     if (sub === 'status') {

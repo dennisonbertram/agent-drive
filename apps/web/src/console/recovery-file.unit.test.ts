@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { driveKeyFromPastedText, driveKeyFromRecoveryText, keySource } from './recovery-file';
+import { isDriveBoundSource } from './webhook-setup';
 
 const key = randomBytes(32).toString('base64url');
 const file = (driveId: string, k = key) =>
@@ -58,5 +59,18 @@ describe('keySource', () => {
     expect(keySource(bundle({ v: 1, driveKeys: { d1: key } }))).toBe('bundle');
     expect(keySource(`  ${bundle({ v: 1, driveKeys: {} })}\n`)).toBe('bundle');
     expect(keySource(key)).toBe('pasted');
+  });
+});
+
+describe('empty-drive recovery proof', () => {
+  it('accepts a validated bundle only when it contains the selected drive key', () => {
+    const text = bundle({ v: 1, driveKeys: { d1: key } });
+    expect(driveKeyFromPastedText(text, 'd1')).toBe(key);
+    expect(keySource(text)).toBe('bundle');
+    expect(isDriveBoundSource(keySource(text))).toBe(true);
+    expect(isDriveBoundSource(keySource(key))).toBe(false);
+    expect(() => driveKeyFromPastedText(bundle({ v: 1, driveKeys: { d2: key } }), 'd1')).toThrow(
+      'That credentials bundle has no key for this drive.',
+    );
   });
 });
