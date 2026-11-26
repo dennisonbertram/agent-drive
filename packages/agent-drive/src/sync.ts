@@ -18,6 +18,7 @@ type FileSelection = {
 };
 type SyncClient = Pick<AgentDriveClient, 'apiOrigin' | 'whoami' | 'list' | 'putStream'>;
 const SYNC_WORKERS = 4;
+const STREAM_PRIME_BYTES = 1024 * 1024;
 
 function canonicalPrefix(value: string) {
   const prefix = value || '/';
@@ -220,6 +221,34 @@ async function* streamSelectedFile(
     throw new Error(changed().message, { cause: error });
   } finally {
     await handle?.close();
+  }
+}
+
+export async function putStreamAfterPriming<T>(
+  source: AsyncGenerator<Uint8Array>,
+  expectedBytes: number,
+  put: (source: AsyncIterable<Uint8Array>) => Promise<T>,
+) {
+  const buffered: Uint8Array[] = [];
+  let bufferedBytes = 0;
+  const primeToEof = expectedBytes <= STREAM_PRIME_BYTES;
+  try {
+    do {
+      const next = await source.next();
+      if (next.done) break;
+      bufferedBytes += next.value.byteLength;
+      if (bufferedBytes > STREAM_PRIME_BYTES) {
+        throw new Error('A file stream exceeded its bounded priming buffer.');
+      }
+      buffered.push(next.value);
+    } while (primeToEof);
+    const replay = (async function* () {
+      yield* buffered;
+      yield* source;
+    })();
+    return await put(replay);
+  } finally {
+    await source.return(undefined);
   }
 }
 
@@ -431,14 +460,21 @@ export async function syncDirectory(
       return;
     }
     let uploadedHash: string | undefined;
-    const version = await client.putStream(
-      driveId,
-      remotePath(remotePrefix, relativePath),
+    const version = await putStreamAfterPriming(
       streamSelectedFile(rootRealPath, file, hash, (value) => {
         uploadedHash = value;
       }),
       file.size,
-      remoteFile ? { mode: 'overwrite', ifVersionId: remoteFile.versionId } : { mode: 'create' },
+      (source) =>
+        client.putStream(
+          driveId,
+          remotePath(remotePrefix, relativePath),
+          source,
+          file.size,
+          remoteFile
+            ? { mode: 'overwrite', ifVersionId: remoteFile.versionId }
+            : { mode: 'create' },
+        ),
     );
     if (uploadedHash === undefined) {
       throw new Error(`Sync upload for ${relativePath} did not consume the local file stream.`);

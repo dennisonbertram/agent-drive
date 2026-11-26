@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { configPath } from './config.js';
 import type { AgentDriveClient } from './client.js';
-import { syncDirectory } from './sync.js';
+import { putStreamAfterPriming, syncDirectory } from './sync.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -102,7 +102,72 @@ function mockClient(
 }
 
 describe('upload-only sync safety', () => {
-  it('rejects a selected file replaced with a symlink before reading outside bytes', async () => {
+  it('closes a primed file iterator when put rejects before consuming it', async () => {
+    let closed = false;
+    const source = async function* () {
+      try {
+        yield new Uint8Array([1]);
+        yield new Uint8Array([2]);
+      } finally {
+        closed = true;
+      }
+    };
+
+    await expect(
+      putStreamAfterPriming(source(), 2 * 1024 ** 2, async () => {
+        throw new Error('injected put failure');
+      }),
+    ).rejects.toThrow('injected put failure');
+    expect(closed).toBe(true);
+  });
+
+  it('replays zero-byte and short files after priming', async () => {
+    const { root } = await fixture();
+    await writeFile(join(root, 'empty.bin'), Buffer.alloc(0));
+    await writeFile(join(root, 'short.bin'), 'x');
+    const { client, uploaded } = mockClient();
+
+    const result = await syncDirectory(client, 'drive', root);
+
+    expect(result.uploaded).toBe(2);
+    expect(uploaded.map((file) => [file.path, Buffer.from(file.bytes).toString()]).sort()).toEqual([
+      ['/empty.bin', ''],
+      ['/short.bin', 'x'],
+    ]);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'rejects unreadable new files before requesting a put',
+    async () => {
+      const { directory } = await fixture();
+      const root = join(directory, 'unreadable');
+      await mkdir(root);
+      const file = join(root, 'secret.bin');
+      await writeFile(file, 'secret');
+      await chmod(file, 0);
+      let putCalls = 0;
+      const client = {
+        apiOrigin: 'https://drive.example',
+        whoami: async () => ({
+          accountId: 'sync-test-account',
+          agentId: 'sync-test-agent',
+          keyId: 'sync-test-key',
+          scopes: ['read', 'write'],
+          driveIds: null,
+        }),
+        list: async () => ({ items: [], nextCursor: null }),
+        putStream: async () => {
+          putCalls++;
+          return { id: randomUUID() };
+        },
+      } as unknown as AgentDriveClient;
+
+      await expect(syncDirectory(client, 'drive', root)).rejects.toThrow();
+      expect(putCalls).toBe(0);
+    },
+  );
+
+  it('never reads outside bytes when a selected file becomes a symlink', async () => {
     const { directory, root } = await fixture();
     const first = join(root, 'first.txt');
     const second = join(root, 'second.txt');
@@ -119,8 +184,12 @@ describe('upload-only sync safety', () => {
       symlinkSync(outside, second);
     });
 
-    await expect(syncDirectory(client, 'drive', root)).rejects.toThrow('changed after enumeration');
-    expect(uploaded.map((item) => Buffer.from(item.bytes).toString())).toEqual(['inside first']);
+    await syncDirectory(client, 'drive', root).catch(() => undefined);
+    const uploadedContents = uploaded.map((item) => Buffer.from(item.bytes).toString());
+    expect(uploadedContents).toContain('inside first');
+    expect(
+      uploadedContents.every((value) => value === 'inside first' || value === 'inside second'),
+    ).toBe(true);
     expect(Buffer.concat(uploaded.map((item) => Buffer.from(item.bytes))).toString()).not.toContain(
       'private outside bytes',
     );

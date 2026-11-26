@@ -142,6 +142,52 @@ describe('backupDirectory', () => {
     expect(result.wouldUpload).toEqual(['/p/sub/b.txt']);
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    'rejects unreadable new files before requesting a put',
+    async () => {
+      const { dir } = await fixture();
+      const root = join(dir, 'unreadable');
+      await mkdir(root);
+      const file = join(root, 'secret.bin');
+      await writeFile(file, 'secret');
+      await chmod(file, 0);
+      let putCalls = 0;
+      const client = {
+        apiOrigin: 'https://x.test',
+        putStream: async () => {
+          putCalls++;
+          return { id: 'v' };
+        },
+      } as unknown as AgentDriveClient;
+
+      const result = await backupDirectory(client, 'd', root, '/p');
+
+      expect(result).toMatchObject({ uploaded: 0, failed: 1 });
+      expect(putCalls).toBe(0);
+    },
+  );
+
+  it('replays zero-byte and short files after priming', async () => {
+    const { root } = await fixture();
+    await writeFile(join(root, 'empty.bin'), Buffer.alloc(0));
+    await writeFile(join(root, 'short.bin'), 'x');
+    const { client, puts } = mock();
+
+    const first = await backupDirectory(client, 'd', root, '/p');
+
+    expect(first).toMatchObject({ uploaded: 4, failed: 0 });
+    expect(puts.map((put) => put.path).sort()).toEqual([
+      '/p/a.txt',
+      '/p/empty.bin',
+      '/p/short.bin',
+      '/p/sub/b.txt',
+    ]);
+    expect(await backupDirectory(client, 'd', root, '/p')).toMatchObject({
+      uploaded: 0,
+      unchanged: 4,
+    });
+  });
+
   it('skips symlinks', async () => {
     const { dir, root } = await fixture();
     await writeFile(join(dir, 'outside.txt'), 'secret');
@@ -614,11 +660,13 @@ describe('backupDirectory', () => {
     expect(lines.join('\n')).toContain('file changed since the scan');
   });
 
-  it('does not publish or record a file changed between hashing and upload', async () => {
+  it('does not publish or record a file changed after the first primed chunk', async () => {
     const { dir, root } = await fixture();
     const file = join(root, 'a.txt');
+    const bytes = Buffer.alloc(1024 * 1024 + 1, 65);
+    await writeFile(file, bytes);
     const { client, puts } = mock(undefined, async (path) => {
-      if (path === '/p/a.txt') await writeFile(file, 'B');
+      if (path === '/p/a.txt') await writeFile(file, Buffer.alloc(bytes.byteLength, 66));
     });
     const lines: string[] = [];
     const result = await backupDirectory(client, 'd', root, '/p', {

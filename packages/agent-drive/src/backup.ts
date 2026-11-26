@@ -17,7 +17,7 @@ import { basename, dirname, join, matchesGlob, relative, resolve, sep } from 'no
 import { promisify } from 'node:util';
 import { configPath } from './config.js';
 import type { AgentDriveClient } from './client.js';
-import { ensurePrivateStateDirectory } from './sync.js';
+import { ensurePrivateStateDirectory, putStreamAfterPriming } from './sync.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -422,14 +422,13 @@ export async function backupDirectory(
           return;
         }
         let uploadedHash: string | undefined;
-        await client.putStream(
-          driveId,
-          remote,
+        await putStreamAfterPriming(
           streamFileInside(file.path, root, file.info, expectedHash, (value) => {
             uploadedHash = value;
           }),
           file.info.size,
-          { mode: 'overwrite' },
+          (source) =>
+            client.putStream(driveId, remote, source, file.info.size, { mode: 'overwrite' }),
         );
         if (uploadedHash === undefined) {
           throw new Error(`backup upload for ${remote} did not consume the local file stream`);
