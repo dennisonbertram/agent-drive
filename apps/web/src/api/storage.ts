@@ -73,6 +73,20 @@ export async function presignedDownload(key: string, expiresIn = 600) {
   );
 }
 
+export async function presignedRangeDownload(key: string, range: string) {
+  if (!/^bytes=(?:0|[1-9]\d*)-(?:0|[1-9]\d*)$/u.test(range))
+    throw new TypeError('A single closed byte range is required.');
+  const settings = config();
+  return getSignedUrl(
+    storageClient(),
+    new GetObjectCommand({ Bucket: settings.bucket, Key: key, Range: range }),
+    {
+      expiresIn: 60,
+      signableHeaders: new Set(['range']),
+    },
+  );
+}
+
 export async function objectInfo(key: string) {
   const settings = config();
   const response = await storageClient().send(
