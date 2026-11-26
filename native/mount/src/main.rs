@@ -117,6 +117,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if watcher_finished.load(Ordering::Acquire) {
                         return;
                     }
+                    let mut next_attempt = std::time::Instant::now();
                     let mut next_status = std::time::Instant::now();
                     loop {
                         if watcher_finished.load(Ordering::Acquire) {
@@ -125,20 +126,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         if bridge_parent_exited(watcher_parent_pid) {
                             exit_after_parent_exit(&watcher_mountpoint, mount_id);
                         }
+                        if std::time::Instant::now() < next_attempt {
+                            thread::sleep(Duration::from_millis(250));
+                            continue;
+                        }
                         match unmount_owned_mount(&watcher_mountpoint, mount_id) {
                             Ok(()) => {
                                 OWNED_MOUNT_UNMOUNTED.store(true, Ordering::Release);
                                 return;
                             }
                             Err(error) => {
-                                if std::time::Instant::now() >= next_status {
+                                let now = std::time::Instant::now();
+                                if now >= next_status {
                                     eprintln!(
                                         "agent-drive-mount: eager unmount is blocked ({error}); close open files and directories and leave the mountpoint to stop; retrying every 5 seconds"
                                     );
-                                    next_status = std::time::Instant::now()
-                                        + Duration::from_secs(5);
+                                    next_status = now + Duration::from_secs(60);
                                 }
-                                thread::sleep(Duration::from_millis(250));
+                                next_attempt = now + Duration::from_secs(5);
                             }
                         }
                     }
