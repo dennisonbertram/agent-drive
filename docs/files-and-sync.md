@@ -86,7 +86,7 @@ agent-drive get /work/report/notes.md --output ./notes.md
 agent-drive get /work/report/notes.md --version <version id> --output ./notes.old.md
 ```
 
-With `--output`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key.
+With `--output FILE`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key. `--output -` writes to stdout as bytes are verified; a later failure can leave earlier bytes with the consumer, as described above.
 
 To send the decrypted bytes to another command, pass `--output -`:
 
@@ -190,15 +190,15 @@ Rules:
 - The default prefix is `/`.
 - Symlinks are skipped. The local root must be a real directory, not a symlink.
 - It never deletes remote files.
-- Unchanged files are skipped, using a SHA-256 hash and the version id recorded in a private manifest. Hashing and upload read files in bounded chunks, and the upload pass verifies it is sending the content that was hashed.
+- Files with sync history are hashed before upload to determine whether they are unchanged; unchanged files are skipped when the SHA-256 hash and remote version id still match the private manifest. If a file with sync history changes and must be uploaded, the upload stream is checked against that hash. New files are hashed as they upload. File reads use bounded chunks, and a bounded number of transfers can run at once.
 - Manifests live in `<config path>.state` (by default `~/.config/agent-drive/config.json.state`), outside the uploaded folder. The directory must be private to your user; an unsafe directory is rejected.
 - A corrupt manifest stops the sync with an error. It does not reset the history.
-- If a remote file changed since your last sync, the command stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1. Files uploaded before that point stay uploaded.
+- Before starting transfers, sync lists remote versions and checks all local paths for known conflicts. If a file with sync history is missing remotely or has a different version, sync stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1 without uploading files. Writes use conditional version guards, so a remote change that races after this check still fails safely; other independent uploads may already have completed.
 - `sync` takes no filter or preview flags. `--dry-run`, `--exclude` and `--gitignore` belong to `backup`; `sync` rejects them with a suggestion to use `backup` before it touches keys or the network, rather than ignoring them and uploading the whole folder.
 
 ### First adoption of a non-empty prefix
 
-If the prefix already holds files that this machine never synced, sync stops with `Remote file <path> has no local sync history; use --overwrite-existing to replace it.` Use the flag once, on purpose:
+If the prefix already holds files that this machine never synced, the preflight stops before any uploads with `Remote file <path> has no local sync history; use --overwrite-existing to replace it.` Use the flag once, on purpose:
 
 ```sh
 agent-drive sync ./project --prefix /work/project --overwrite-existing

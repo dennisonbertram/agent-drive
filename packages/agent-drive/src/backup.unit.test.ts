@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { appendFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import {
   chmod,
   lstat,
@@ -61,6 +61,12 @@ function mock(failOn?: string, beforeUpload?: (path: string) => Promise<void>) {
   return { client, puts };
 }
 
+async function consume(source: AsyncIterable<Uint8Array>) {
+  let byteCount = 0;
+  for await (const chunk of source) byteCount += chunk.byteLength;
+  return byteCount;
+}
+
 describe('backupDirectory', () => {
   it('uploads all, skips unchanged, re-uploads changed', async () => {
     const { root } = await fixture();
@@ -81,6 +87,22 @@ describe('backupDirectory', () => {
     const third = await backupDirectory(client, 'd', root, '/backups/box');
     expect(third).toMatchObject({ uploaded: 1, unchanged: 1 });
     expect(puts.map((p) => p.path)).toEqual(['/backups/box/a.txt']);
+  });
+
+  it('handles filenames that overlap inherited object properties in the manifest', async () => {
+    const { root } = await fixture();
+    await writeFile(join(root, 'constructor'), 'constructor bytes');
+    await writeFile(join(root, '__proto__'), 'prototype bytes');
+    const { client } = mock();
+
+    expect(await backupDirectory(client, 'd', root, '/p')).toMatchObject({
+      uploaded: 4,
+      unchanged: 0,
+    });
+    expect(await backupDirectory(client, 'd', root, '/p')).toMatchObject({
+      uploaded: 0,
+      unchanged: 4,
+    });
   });
 
   it('keys the manifest by prefix, not only the local path', async () => {
@@ -108,6 +130,16 @@ describe('backupDirectory', () => {
     expect(puts).toEqual([]);
     expect(result.wouldUpload.sort()).toEqual(['/p/a.txt', '/p/sub/b.txt']);
     expect(await backupDirectory(client, 'd', root, '/p')).toMatchObject({ uploaded: 2 });
+  });
+
+  it.skipIf(process.getuid?.() === 0)('reports unreadable new files in a dry run', async () => {
+    const { root } = await fixture();
+    await chmod(join(root, 'a.txt'), 0);
+
+    const result = await backupDirectory(mock().client, 'd', root, '/p', { dryRun: true });
+
+    expect(result.failed).toBe(1);
+    expect(result.wouldUpload).toEqual(['/p/sub/b.txt']);
   });
 
   it('skips symlinks', async () => {
@@ -175,6 +207,23 @@ describe('backupDirectory', () => {
     expect(result).toMatchObject({ uploaded: 1, failed: 1 });
     expect(puts.map((put) => put.path)).toEqual(['/p/sub/b.txt']);
     expect(lines.join('\n')).toContain('failed /p/a.txt');
+  });
+
+  it('refuses a same-size file changed after the scan before its first upload', async () => {
+    const { root } = await fixture();
+    const file = join(root, 'a.txt');
+    const { client, puts } = mock();
+    let changed = false;
+    const result = await backupDirectory(client, 'd', root, '/p', {
+      log: (line) => {
+        if (changed || !line.startsWith('backup found')) return;
+        changed = true;
+        writeFileSync(file, 'Z');
+      },
+    });
+
+    expect(result).toMatchObject({ uploaded: 1, failed: 1 });
+    expect(puts.map((put) => put.path)).toEqual(['/p/sub/b.txt']);
   });
 
   it('refuses a file whose directory was swapped for a symlink', async () => {
@@ -378,11 +427,12 @@ describe('backupDirectory', () => {
     let calls = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      putStream: async (_d: string, path: string) => {
+      putStream: async (_d: string, path: string, source: AsyncIterable<Uint8Array>) => {
         if (path.endsWith('a.txt')) {
           calls++;
           throw new AgentDriveApiError('rate_limited', 429, 'slow down', { retryAfter: 0 });
         }
+        await consume(source);
         return { id: 'v' };
       },
     } as unknown as AgentDriveClient;
@@ -395,8 +445,9 @@ describe('backupDirectory', () => {
     const { root } = await fixture();
     const client = {
       apiOrigin: 'https://x.test',
-      putStream: async () => {
+      putStream: async (_d: string, _path: string, source: AsyncIterable<Uint8Array>) => {
         await new Promise((r) => setTimeout(r, 30));
+        await consume(source);
         return { id: 'v' };
       },
     } as unknown as AgentDriveClient;
@@ -419,10 +470,11 @@ describe('backupDirectory', () => {
     let max = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      putStream: async () => {
+      putStream: async (_d: string, _path: string, source: AsyncIterable<Uint8Array>) => {
         inflight++;
         max = Math.max(max, inflight);
         await new Promise((r) => setTimeout(r, 10));
+        await consume(source);
         inflight--;
         return { id: 'v' };
       },
@@ -468,8 +520,9 @@ describe('backupDirectory', () => {
     const seen: string[] = [];
     const client = {
       apiOrigin: 'https://x.test',
-      putStream: async () => {
+      putStream: async (_d: string, _path: string, source: AsyncIterable<Uint8Array>) => {
         seen.push((await readFile(lock, 'utf8')).trim());
+        await consume(source);
         return { id: 'v' };
       },
     } as unknown as AgentDriveClient;
@@ -652,8 +705,9 @@ describe('backupDirectory', () => {
       await chmod(join(root, 'sub'), 0);
       const client = {
         apiOrigin: 'https://x.test',
-        putStream: async () => {
+        putStream: async (_d: string, _path: string, source: AsyncIterable<Uint8Array>) => {
           await new Promise((r) => setTimeout(r, 30));
+          await consume(source);
           return { id: 'v' };
         },
       } as unknown as AgentDriveClient;

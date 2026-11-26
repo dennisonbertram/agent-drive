@@ -177,7 +177,12 @@ async function* streamFileInside(
 ): AsyncGenerator<Uint8Array> {
   const changed = () => new Error('file changed since the scan; refusing to read it');
   const same = (a: Stats) =>
-    a.isFile() && a.dev === expected.dev && a.ino === expected.ino && a.size === expected.size;
+    a.isFile() &&
+    a.dev === expected.dev &&
+    a.ino === expected.ino &&
+    a.size === expected.size &&
+    a.mtimeMs === expected.mtimeMs &&
+    a.ctimeMs === expected.ctimeMs;
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   const hash = createHash('sha256');
   try {
@@ -224,11 +229,14 @@ async function hashFileInside(path: string, root: string, expected: Stats) {
 async function loadManifest(path: string): Promise<Manifest> {
   try {
     const value = JSON.parse(await readFile(path, 'utf8')) as Manifest;
-    if (value && typeof value.files === 'object') return value;
+    if (value && typeof value.files === 'object' && !Array.isArray(value.files)) {
+      const files = Object.assign(Object.create(null) as Record<string, string>, value.files);
+      return { files };
+    }
   } catch {
     // Missing or unreadable: every file is uploaded once, which is safe.
   }
-  return { files: {} };
+  return { files: Object.create(null) as Record<string, string> };
 }
 
 async function saveManifest(path: string, manifest: Manifest) {
@@ -397,23 +405,36 @@ export async function backupDirectory(
       const remote = `${remotePrefix}/${file.relativePath}`;
       try {
         if (file.info.size > MAX_BYTES) throw new Error('file exceeds the 5 GiB limit');
-        const hash = await hashFileInside(file.path, root, file.info);
-        if (loaded.files[file.relativePath] === hash) {
-          result.unchanged++;
-          return;
+        const previousHash = Object.hasOwn(loaded.files, file.relativePath)
+          ? loaded.files[file.relativePath]
+          : undefined;
+        let expectedHash = previousHash;
+        if (previousHash !== undefined || !upload) {
+          const currentHash = await hashFileInside(file.path, root, file.info);
+          if (previousHash === currentHash) {
+            result.unchanged++;
+            return;
+          }
+          expectedHash = currentHash;
         }
         if (!upload) {
           result.wouldUpload.push(remote);
           return;
         }
+        let uploadedHash: string | undefined;
         await client.putStream(
           driveId,
           remote,
-          streamFileInside(file.path, root, file.info, hash),
+          streamFileInside(file.path, root, file.info, expectedHash, (value) => {
+            uploadedHash = value;
+          }),
           file.info.size,
           { mode: 'overwrite' },
         );
-        loaded.files[file.relativePath] = hash;
+        if (uploadedHash === undefined) {
+          throw new Error(`backup upload for ${remote} did not consume the local file stream`);
+        }
+        loaded.files[file.relativePath] = uploadedHash;
         result.uploaded++;
         saveSoon();
       } catch (error) {

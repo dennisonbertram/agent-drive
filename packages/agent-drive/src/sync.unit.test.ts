@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { symlinkSync, unlinkSync } from 'node:fs';
 import {
   chmod,
   lstat,
@@ -9,7 +10,6 @@ import {
   rm,
   stat,
   symlink,
-  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -44,6 +44,7 @@ async function fixture() {
 function mockClient(
   onPut?: (path: string, bytes: Uint8Array) => Promise<void>,
   existing: { path: string; versionId: string }[] = [],
+  beforePut?: (path: string) => void | Promise<void>,
 ) {
   const uploaded: { path: string; bytes: Uint8Array; ifVersionId?: string }[] = [];
   const client = {
@@ -77,6 +78,7 @@ function mockClient(
       _size: number,
       options: { ifVersionId?: string } = {},
     ) => {
+      await beforePut?.(path);
       const chunks: Uint8Array[] = [];
       for await (const chunk of input) chunks.push(new Uint8Array(chunk));
       const bytes = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
@@ -109,10 +111,12 @@ describe('upload-only sync safety', () => {
     await writeFile(second, 'inside second');
     await writeFile(outside, 'private outside bytes');
 
-    const { client, uploaded } = mockClient(async (path) => {
+    const { client, uploaded } = mockClient(undefined, [], (path) => {
       if (path !== '/first.txt') return;
-      await unlink(second);
-      await symlink(outside, second);
+      // The first worker runs this before consuming its stream, so the second
+      // worker observes the replacement before it opens the selected path.
+      unlinkSync(second);
+      symlinkSync(outside, second);
     });
 
     await expect(syncDirectory(client, 'drive', root)).rejects.toThrow('changed after enumeration');
@@ -209,5 +213,164 @@ describe('upload-only sync safety', () => {
     ).rejects.toThrow('Remote conflict');
     expect(changed.uploaded).toHaveLength(0);
     expect(manifest.files['known.txt']!.versionId).toBe(knownVersion);
+  });
+
+  it('checks known conflicts before starting uploads for sibling files', async () => {
+    const { root } = await fixture();
+    await writeFile(join(root, 'a-safe.txt'), 'safe');
+    await writeFile(join(root, 'z-conflict.txt'), 'changed');
+    const first = mockClient();
+    await syncDirectory(first.client, 'drive', root);
+
+    const stateDirectory = `${configPath()}.state`;
+    const [manifestName] = await readdir(stateDirectory);
+    const manifest = JSON.parse(await readFile(join(stateDirectory, manifestName!), 'utf8')) as {
+      files: Record<string, { hash: string; versionId: string }>;
+    };
+    const changed = mockClient(undefined, [
+      { path: '/a-safe.txt', versionId: manifest.files['a-safe.txt']!.versionId },
+      { path: '/z-conflict.txt', versionId: randomUUID() },
+    ]);
+
+    await expect(
+      syncDirectory(changed.client, 'drive', root, '/', { overwriteExisting: true }),
+    ).rejects.toThrow('Remote conflict for z-conflict.txt');
+    expect(changed.uploaded).toHaveLength(0);
+  });
+
+  it('checkpoints successful in-flight files after a sibling failure and resumes safely', async () => {
+    const { root } = await fixture();
+    for (let index = 0; index < 5; index++) {
+      await writeFile(join(root, `file-${index}.txt`), `contents ${index}`);
+    }
+
+    const remoteVersions = new Map<string, string>();
+    let entered = 0;
+    let markFourEntered!: () => void;
+    const fourEntered = new Promise<void>((resolve) => {
+      markFourEntered = resolve;
+    });
+    let releaseSiblings!: () => void;
+    const siblingsReleased = new Promise<void>((resolve) => {
+      releaseSiblings = resolve;
+    });
+    const makeClient = (failFirst: boolean) =>
+      ({
+        apiOrigin: 'https://drive.example',
+        whoami: async () => ({
+          accountId: 'sync-test-account',
+          agentId: 'sync-test-agent',
+          keyId: 'sync-test-key',
+          scopes: ['read', 'write'],
+          driveIds: null,
+        }),
+        list: async () => ({
+          items: Array.from(remoteVersions, ([path, versionId]) => ({
+            fileId: randomUUID(),
+            versionId,
+            path,
+            ciphertextSize: 1,
+            agentId: randomUUID(),
+            machineId: null,
+            userId: null,
+            tags: [],
+            description: null,
+            createdAt: new Date().toISOString(),
+          })),
+          nextCursor: null,
+        }),
+        putStream: async (
+          _driveId: string,
+          path: string,
+          source: AsyncIterable<Uint8Array>,
+          size: number,
+        ) => {
+          if (failFirst) {
+            entered++;
+            if (entered === 4) markFourEntered();
+            if (path === '/file-0.txt') {
+              await fourEntered;
+              throw new Error('injected upload failure');
+            }
+            await siblingsReleased;
+          }
+          let bytesRead = 0;
+          for await (const chunk of source) bytesRead += chunk.byteLength;
+          if (bytesRead !== size) throw new Error('stream size mismatch');
+          const id = randomUUID();
+          remoteVersions.set(path, id);
+          return {
+            id,
+            path,
+            ciphertextSize: 1,
+            wrappedKey: 'wrapped-key',
+            agentId: randomUUID(),
+            machineId: null,
+            userId: null,
+            tags: [],
+            description: null,
+            createdAt: new Date().toISOString(),
+          };
+        },
+      }) as unknown as AgentDriveClient;
+
+    const firstRun = syncDirectory(makeClient(true), 'drive', root);
+    await fourEntered;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    releaseSiblings();
+    await expect(firstRun).rejects.toThrow('injected upload failure');
+
+    const stateDirectory = `${configPath()}.state`;
+    const [manifestName] = await readdir(stateDirectory);
+    const manifestPath = join(stateDirectory, manifestName!);
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      files: Record<string, { hash: string; versionId: string }>;
+    };
+    expect(Object.keys(manifest.files).sort()).toEqual(['file-1.txt', 'file-2.txt', 'file-3.txt']);
+    expect(Array.from(remoteVersions.keys()).sort()).toEqual([
+      '/file-1.txt',
+      '/file-2.txt',
+      '/file-3.txt',
+    ]);
+
+    const resumed = await syncDirectory(makeClient(false), 'drive', root);
+    expect(resumed).toMatchObject({ uploaded: 2, skipped: 3, conflicts: 0 });
+    const finalManifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      files: Record<string, { hash: string; versionId: string }>;
+    };
+    expect(Object.keys(finalManifest.files).sort()).toHaveLength(5);
+  });
+
+  it('uploads distinct files concurrently with a bounded worker pool', async () => {
+    const { root } = await fixture();
+    for (let index = 0; index < 8; index++) {
+      await writeFile(join(root, `file-${index}.txt`), `contents ${index}`);
+    }
+
+    let active = 0;
+    let peak = 0;
+    const { client, uploaded } = mockClient(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      active--;
+    });
+
+    const result = await syncDirectory(client, 'drive', root);
+
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(result.uploaded).toBe(8);
+    expect(uploaded.map((file) => file.path).sort()).toEqual(
+      Array.from({ length: 8 }, (_, index) => `/file-${index}.txt`).sort(),
+    );
+    const stateDirectory = `${configPath()}.state`;
+    const [manifestName] = await readdir(stateDirectory);
+    const manifest = JSON.parse(await readFile(join(stateDirectory, manifestName!), 'utf8')) as {
+      files: Record<string, { hash: string; versionId: string }>;
+    };
+    expect(Object.keys(manifest.files).sort()).toEqual(
+      Array.from({ length: 8 }, (_, index) => `file-${index}.txt`).sort(),
+    );
   });
 });

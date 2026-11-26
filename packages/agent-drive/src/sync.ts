@@ -17,6 +17,7 @@ type FileSelection = {
   ctimeMs: number;
 };
 type SyncClient = Pick<AgentDriveClient, 'apiOrigin' | 'whoami' | 'list' | 'putStream'>;
+const SYNC_WORKERS = 4;
 
 function canonicalPrefix(value: string) {
   const prefix = value || '/';
@@ -141,6 +142,7 @@ async function* streamSelectedFile(
   rootRealPath: string,
   selected: FileSelection,
   expectedHash?: string,
+  onHash?: (hash: string) => void,
 ): AsyncGenerator<Uint8Array> {
   const changed = () =>
     new Error(`Sync file ${selected.path} changed after enumeration; refusing to read it.`);
@@ -210,7 +212,9 @@ async function* streamSelectedFile(
       afterRealPath !== selected.realPath
     )
       throw changed();
-    if (expectedHash !== undefined && hash.digest('hex') !== expectedHash) throw changed();
+    const digest = hash.digest('hex');
+    if (expectedHash !== undefined && digest !== expectedHash) throw changed();
+    onHash?.(digest);
   } catch (error) {
     if (error instanceof Error && error.message.includes('refusing to read it')) throw error;
     throw new Error(changed().message, { cause: error });
@@ -220,9 +224,18 @@ async function* streamSelectedFile(
 }
 
 async function digestFile(rootRealPath: string, selected: FileSelection) {
-  const hash = createHash('sha256');
-  for await (const chunk of streamSelectedFile(rootRealPath, selected)) hash.update(chunk);
-  return hash.digest('hex');
+  let digest: string | undefined;
+  let bytesRead = 0;
+  for await (const chunk of streamSelectedFile(rootRealPath, selected, undefined, (value) => {
+    digest = value;
+  })) {
+    // The stream computes the digest while yielding bounded chunks.
+    bytesRead += chunk.byteLength;
+  }
+  if (digest === undefined || bytesRead !== selected.size) {
+    throw new Error(`Sync file ${selected.path} could not be hashed.`);
+  }
+  return digest;
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -292,6 +305,7 @@ export async function ensurePrivateStateDirectory(path: string) {
 }
 
 async function saveManifest(path: string, manifest: Manifest) {
+  const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
   await ensurePrivateStateDirectory(dirname(path));
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let created = false;
@@ -300,7 +314,7 @@ async function saveManifest(path: string, manifest: Manifest) {
     created = true;
     try {
       await handle.chmod(0o600);
-      await handle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+      await handle.writeFile(serialized, 'utf8');
       await handle.sync();
     } finally {
       await handle.close();
@@ -380,25 +394,79 @@ export async function syncDirectory(
         `Remote file ${relativePath} has no local sync history; use --overwrite-existing to replace it.`,
       );
     }
-    const hash = await digestFile(rootRealPath, file);
     if (prior && (!remoteFile || remoteFile.versionId !== prior.versionId)) {
       stats.conflicts++;
       throw new Error(`Remote conflict for ${relativePath}; refusing to overwrite.`);
     }
+  }
+
+  let nextFile = 0;
+  let hasFailure = false;
+  let firstFailure: unknown;
+  let lastSave = Promise.resolve();
+  let nextSave: Promise<void> | undefined;
+
+  const checkpoint = () => {
+    if (!nextSave) {
+      nextSave = lastSave
+        .catch(() => undefined)
+        .then(() => {
+          nextSave = undefined;
+          return saveManifest(manifestPath, manifest);
+        });
+      lastSave = nextSave;
+    }
+    return nextSave;
+  };
+
+  const syncFile = async (file: FileSelection) => {
+    const relativePath = relative(root, file.path).split(sep).join('/');
+    const remoteFile = remote.get(relativePath);
+    const prior = Object.hasOwn(manifest.files, relativePath)
+      ? manifest.files[relativePath]
+      : undefined;
+    const hash: string | undefined = prior ? await digestFile(rootRealPath, file) : undefined;
     if (prior && remoteFile && prior.hash === hash && prior.versionId === remoteFile.versionId) {
       stats.skipped++;
-      continue;
+      return;
     }
+    let uploadedHash: string | undefined;
     const version = await client.putStream(
       driveId,
       remotePath(remotePrefix, relativePath),
-      streamSelectedFile(rootRealPath, file, hash),
+      streamSelectedFile(rootRealPath, file, hash, (value) => {
+        uploadedHash = value;
+      }),
       file.size,
       remoteFile ? { mode: 'overwrite', ifVersionId: remoteFile.versionId } : { mode: 'create' },
     );
-    manifest.files[relativePath] = { hash, versionId: version.id };
-    await saveManifest(manifestPath, manifest);
+    if (uploadedHash === undefined) {
+      throw new Error(`Sync upload for ${relativePath} did not consume the local file stream.`);
+    }
+    manifest.files[relativePath] = { hash: uploadedHash, versionId: version.id };
+    await checkpoint();
     stats.uploaded++;
+  };
+
+  const worker = async () => {
+    while (!hasFailure) {
+      const index = nextFile++;
+      const file = files[index];
+      if (!file) return;
+      try {
+        await syncFile(file);
+      } catch (error) {
+        if (!hasFailure) {
+          hasFailure = true;
+          firstFailure = error;
+        }
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: SYNC_WORKERS }, () => worker()));
+  if (hasFailure) {
+    throw firstFailure;
   }
   return { ...stats, accountId: who.accountId, manifestPath };
 }
