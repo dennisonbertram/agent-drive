@@ -500,6 +500,7 @@ describe('mount bridge', () => {
         undefined,
         true,
         true,
+        false,
       );
       await expect(
         bridge.request({
