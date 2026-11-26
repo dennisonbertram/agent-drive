@@ -101,12 +101,16 @@ These are deliberate and shape the stories below:
 
 ## Epic 3 — Core file operations
 
-Exposed identically as MCP tools, CLI commands, and a client library.
+Available through MCP tools, CLI commands, and the Node client, with transfer modes and inline limits suited to each entry point.
 
 - **S3.1** As an agent, I want to write a file by path (`put`), so that I can
-  save outputs. Large files upload straight to S3 through presigned URLs.
+  save outputs. Node local-file commands and tools stream files through client
+  encryption without loading the whole file into memory; the byte API remains
+  available for callers that already hold the contents.
 - **S3.2** As an agent, I want to read a file (`get`), returning text inline
-  when small and writing to a local path when large or binary.
+  when small and writing to a local path when large or binary. MCP `get` is
+  limited to 64 KiB of printable UTF-8; CLI `get` is limited to 1 MiB. Each
+  checks metadata before downloading a file that exceeds its inline limit.
 - **S3.3** As an agent, I want to `list` a folder with sizes, timestamps, and
   author.
 - **S3.4** As an agent, I want to `move`, `copy`, and `delete` files.
@@ -120,6 +124,26 @@ Exposed identically as MCP tools, CLI commands, and a client library.
   other.
 - **S3.8** As an agent, I want clear, actionable errors (quota exceeded,
   permission denied, not found, payment required).
+- **S3.9** As a developer with files already in a drive, I want the streaming
+  implementation to keep the existing ciphertext format, so old and new clients
+  can read each other's versions without rewriting stored data.
+  *Accept:* Streaming and byte APIs use the same ADRV v1 header, 1 MiB
+  authenticated frames and size formula. A source length mismatch prevents
+  commit; a truncated or corrupt frame fails while reading.
+- **S3.10** As an agent downloading a file to disk, I want a failed or incomplete
+  download never to replace the destination with partial plaintext.
+  *Accept:* The Node file helper writes to a temporary file, verifies
+  the full declared length and every frame, then publishes atomically. On
+  failure it removes the temporary file and leaves any existing output alone.
+  MCP `download` creates a new file and refuses an existing path; CLI
+  `get --output` replaces an existing regular file and preserves its mode.
+- **S3.11** As a client developer consuming a plaintext stream, I want to know
+  that later integrity failures can occur after earlier frames were yielded.
+  *Accept:* Each yielded frame has already passed authentication, but a later
+  truncation or tag failure throws after prior frames may have been consumed.
+  Callers that need all-or-nothing output use the file helper or stage output
+  themselves. CLI stdout and MCP inline responses are buffered and returned
+  only after complete validation.
 
 ## Epic 4 — Agent workspace and handoff
 

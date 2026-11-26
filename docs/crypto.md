@@ -16,7 +16,7 @@ Everything uses AES-256-GCM, ECDH on P-256, HKDF-SHA-256 and PBKDF2-SHA-256 thro
 
 ## ADRV v1 ciphertext
 
-The byte API buffers a complete file in memory. The authenticated chunks are an integrity format. They are not a constant-memory streaming guarantee.
+The byte API buffers a complete file in memory. Node file-backed helpers and folder commands read files in bounded chunks and process one 1 MiB frame at a time, plus transport buffers. Callers that pass their own stream should also yield bounded chunks if they need bounded memory. The streaming APIs keep the same `ADRV v1` header, frame boundaries, nonces, associated data and size formula as the byte API. A byte API can read a file written by a streaming API, and vice versa; existing versions need no rewrite or migration.
 
 The first 25 bytes are the header:
 
@@ -34,7 +34,7 @@ The payload has one AES-256-GCM frame per 1 MiB (1,048,576 byte) chunk. The last
 - **Empty files.** An empty file still has one authenticated empty frame, so the ciphertext is 25 + 16 = 41 bytes.
 - **Size.** Ciphertext size is `25 + plaintext length + 16 * max(1, ceil(plaintext length / 1048576))`.
 
-A reader rejects a ciphertext with an unknown magic, a chunk size other than 1 MiB, or a length that does not match the length in the header. Binding the chunk index and the final flag into the AAD means chunks cannot be reordered, and a file cannot be truncated, without detection.
+A reader rejects a ciphertext with an unknown magic, a chunk size other than 1 MiB, or a length that does not match the length in the header. Binding the chunk index and the final flag into the AAD means chunks cannot be reordered, and a file cannot be truncated, without detection. A streaming reader yields a plaintext frame only after its tag verifies. If a later frame is truncated or corrupt, iteration then throws, but earlier verified frames have already been yielded. A caller that writes each yielded frame directly to stdout can therefore leave partial output; use the Node `getFile` helper when output must be published only after the whole file verifies.
 
 ## Wrapped file key
 
@@ -103,6 +103,7 @@ The webhook is the one place where the service handles plaintext. `POST /api/web
 Frozen vectors are permanent compatibility guards. They are never regenerated to make a change pass.
 
 - `ADRV v1` and the wrapped file key: `packages/agent-drive/src/crypto.unit.test.ts`, with tamper and isolation tests.
+- Streaming and byte-API interoperability, truncation, trailing-byte and tag failures: `packages/agent-drive/src/crypto-stream.unit.test.ts`.
 - Trace inbox v1 and envelope v2: `packages/agent-drive/src/trace-inbox.vectors.ts`.
 - Account key v1: `apps/web/src/console/account-key.vectors.ts`, run by a unit test and by a Chromium test in `tests/e2e/account-key-vectors.spec.ts`.
 
