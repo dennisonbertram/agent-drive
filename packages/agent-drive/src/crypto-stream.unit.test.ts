@@ -33,6 +33,15 @@ function concat(parts: Uint8Array[]) {
   return result;
 }
 
+function expectBytesEqual(actual: Uint8Array, expected: Uint8Array) {
+  expect(actual.byteLength).toBe(expected.byteLength);
+  expect(
+    Buffer.from(actual.buffer, actual.byteOffset, actual.byteLength).equals(
+      Buffer.from(expected.buffer, expected.byteOffset, expected.byteLength),
+    ),
+  ).toBe(true);
+}
+
 async function collect(stream: AsyncIterable<Uint8Array>) {
   const parts: Uint8Array[] = [];
   for await (const part of stream) parts.push(part);
@@ -85,7 +94,7 @@ describe('encryptFileStream', () => {
       expect(result.ciphertextSize).toBe(encryptedSize(size));
       const ciphertext = await collect(result.ciphertext);
       expect(ciphertext.length).toBe(result.ciphertextSize);
-      expect(await decryptFile(ciphertext, result.wrappedKey, driveKey)).toEqual(plaintext);
+      expectBytesEqual(await decryptFile(ciphertext, result.wrappedKey, driveKey), plaintext);
     },
     30_000,
   );
@@ -151,9 +160,10 @@ describe('decryptWithFileKeyStream', () => {
       const plaintext = sequence(size);
       const ciphertext = await seal(plaintext, RAW_KEY, sequence(8));
       const sizes = [1, HEADER_SIZE, 3, 1024, CHUNK_SIZE - 9, 17, 4096];
-      expect(
+      expectBytesEqual(
         await collect(decryptWithFileKeyStream(fragmentsOf(ciphertext, sizes), RAW_KEY_B64)),
-      ).toEqual(plaintext);
+        plaintext,
+      );
     },
     30_000,
   );
@@ -164,8 +174,9 @@ describe('decryptWithFileKeyStream', () => {
     const ciphertext = await collect(
       sealStream(fragmentsOf(plaintext, [plaintext.length]), plaintext.length, key, sequence(8)),
     );
-    expect(await open(ciphertext, RAW_KEY)).toEqual(plaintext);
-    expect(await collect(openStream(fragmentsOf(ciphertext, [ciphertext.length]), key))).toEqual(
+    expectBytesEqual(await open(ciphertext, RAW_KEY), plaintext);
+    expectBytesEqual(
+      await collect(openStream(fragmentsOf(ciphertext, [ciphertext.length]), key)),
       plaintext,
     );
   });
@@ -180,7 +191,7 @@ describe('decryptWithFileKeyStream', () => {
       yield ciphertext.subarray(10);
       yield new Uint8Array(0);
     }
-    expect(await collect(decryptWithFileKeyStream(zeroPadded(), RAW_KEY_B64))).toEqual(plaintext);
+    expectBytesEqual(await collect(decryptWithFileKeyStream(zeroPadded(), RAW_KEY_B64)), plaintext);
   });
 
   it('checks expectedCiphertextBytes before the body', async () => {
@@ -192,7 +203,7 @@ describe('decryptWithFileKeyStream', () => {
         ciphertext.length,
       ),
     );
-    expect(good).toEqual(sequence(CHUNK_SIZE + 5));
+    expectBytesEqual(good, sequence(CHUNK_SIZE + 5));
     for (const bad of [ciphertext.length + 1, ciphertext.length - 16, Number.NaN, 0])
       await expect(
         collect(
@@ -228,7 +239,7 @@ describe('decryptWithFileKeyStream', () => {
       error = caught;
     }
     expect(error).toBe(sourceFailure);
-    expect(concat(chunks)).toEqual(plaintext.subarray(0, CHUNK_SIZE));
+    expectBytesEqual(concat(chunks), plaintext.subarray(0, CHUNK_SIZE));
   });
 
   it.each([
@@ -263,7 +274,7 @@ describe('decryptWithFileKeyStream', () => {
       error = caught;
     }
     expect(error).toMatchObject({ code: 'decryption_failed' });
-    expect(concat(parts)).toEqual(plaintext.subarray(0, CHUNK_SIZE));
+    expectBytesEqual(concat(parts), plaintext.subarray(0, CHUNK_SIZE));
   });
 
   it.each([1, 40, CHUNK_SIZE + 16])('rejects %i trailing bytes', async (extra) => {
@@ -283,7 +294,7 @@ describe('decryptWithFileKeyStream', () => {
       error = caught;
     }
     expect(error).toMatchObject({ code: 'decryption_failed' });
-    expect(concat(parts)).toEqual(plaintext);
+    expectBytesEqual(concat(parts), plaintext);
   });
 
   it.each([0, 5, 10, 24, HEADER_SIZE + 5])(
@@ -315,7 +326,7 @@ describe('decryptWithFileKeyStream', () => {
       error = caught;
     }
     expect(error).toMatchObject({ code: 'decryption_failed' });
-    expect(concat(parts)).toEqual(plaintext.subarray(0, CHUNK_SIZE));
+    expectBytesEqual(concat(parts), plaintext.subarray(0, CHUNK_SIZE));
   });
 
   it('rejects reordered chunks', async () => {
