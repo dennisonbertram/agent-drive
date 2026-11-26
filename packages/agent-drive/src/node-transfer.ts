@@ -178,10 +178,13 @@ export async function getFile(
       const code = (error as NodeJS.ErrnoException)?.code;
       const terminalApiFailure =
         error instanceof AgentDriveApiError && error.status >= 400 && error.status < 500;
+      // getStream has not exposed a selected version yet; retrying "latest" could switch versions.
+      const unpinnedLatestFailedBeforeSelection = !versionId && !stream;
       if (
         attempt === retries ||
         code === 'EEXIST' ||
         terminalApiFailure ||
+        unpinnedLatestFailedBeforeSelection ||
         options.signal?.aborted ||
         (error instanceof Error && error.name === 'AbortError')
       ) {

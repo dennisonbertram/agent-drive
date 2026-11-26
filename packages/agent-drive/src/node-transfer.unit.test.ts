@@ -225,6 +225,25 @@ describe('Node file transfer helpers', () => {
     expect(attempts).toBe(1);
   });
 
+  it('does not retry an unpinned latest lookup when getStream fails before returning metadata', async () => {
+    const directory = await fixture();
+    let attempts = 0;
+    const client = {
+      getStream: async () => {
+        attempts++;
+        throw new AgentDriveApiError('internal_error', 503, 'Temporary storage failure.');
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', join(directory, 'output')),
+    ).rejects.toMatchObject({
+      code: 'internal_error',
+      status: 503,
+    });
+    expect(attempts).toBe(1);
+  });
+
   it('does not replace an existing create-only destination', async () => {
     const directory = await fixture();
     const destination = join(directory, 'output');
