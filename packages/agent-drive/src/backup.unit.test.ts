@@ -162,13 +162,15 @@ describe('backupDirectory', () => {
     await expect(readFileInside(file, await realpath(root), info)).rejects.toThrow();
   });
 
-  it('with gitignore, skips .gitignore entries but keeps .git, and reports the scan counts', async () => {
+  it('with gitignore, skips ignored entries and .git control metadata', async () => {
     const { root } = await fixture();
     execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
     await writeFile(join(root, '.gitignore'), 'ignored/\n*.log\n');
     await mkdir(join(root, 'ignored'));
     await writeFile(join(root, 'ignored', 'x.txt'), 'X');
     await writeFile(join(root, 'a.log'), 'L');
+    // A nested .git (an embedded repo or submodule marker) is control metadata too.
+    await writeFile(join(root, 'sub', '.git'), 'gitdir: /elsewhere');
     const { client, puts } = mock();
     const lines: string[] = [];
     await backupDirectory(client, 'd', root, '/p', { gitignore: true, log: (l) => lines.push(l) });
@@ -176,10 +178,47 @@ describe('backupDirectory', () => {
     expect(paths).not.toContain('/p/ignored/x.txt');
     expect(paths).not.toContain('/p/a.log');
     expect(paths).toContain('/p/a.txt');
-    expect(paths.some((p) => p.startsWith('/p/.git/'))).toBe(true);
+    expect(paths).toContain('/p/sub/b.txt');
+    expect(paths.some((p) => p.startsWith('/p/.git/'))).toBe(false);
+    expect(paths).not.toContain('/p/sub/.git');
     expect(lines.join('\n')).toMatch(
-      /backup found \d+ files \([\d.]+ MB\) in .+; skipped 2 ignored paths/u,
+      /backup found \d+ files \([\d.]+ MB\) in .+; skipped 4 ignored paths/u,
     );
+  });
+
+  it('with gitignore, skips a linked worktree .git file and honors its rules', async () => {
+    const { dir } = await fixture();
+    const main = join(dir, 'main');
+    const worktree = join(dir, 'wt');
+    await mkdir(main);
+    execFileSync('git', ['init'], { cwd: main, stdio: 'pipe' });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.email=backup@test',
+        '-c',
+        'user.name=backup',
+        'commit',
+        '--allow-empty',
+        '-m',
+        'init',
+      ],
+      { cwd: main, stdio: 'pipe' },
+    );
+    execFileSync('git', ['worktree', 'add', '--detach', worktree], { cwd: main, stdio: 'pipe' });
+    // In a linked worktree .git is a file pointing at the real git dir, not a directory.
+    expect((await lstat(join(worktree, '.git'))).isFile()).toBe(true);
+    await writeFile(join(worktree, '.gitignore'), 'ignored/\n');
+    await mkdir(join(worktree, 'ignored'));
+    await writeFile(join(worktree, 'ignored', 'x.txt'), 'X');
+    await writeFile(join(worktree, 'kept.txt'), 'K');
+    const { client, puts } = mock();
+    await backupDirectory(client, 'd', worktree, '/p', { gitignore: true });
+    const paths = puts.map((p) => p.path);
+    expect(paths).toContain('/p/kept.txt');
+    expect(paths).not.toContain('/p/.git');
+    expect(paths).not.toContain('/p/ignored/x.txt');
   });
 
   it('uploads gitignored files and .git by default', async () => {

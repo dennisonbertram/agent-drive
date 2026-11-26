@@ -488,7 +488,12 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   collapsed Details section. Reconnects do not show it.
   The default one-click view is otherwise unchanged.
 - The human picks a drive and supplies its key in the browser: a pasted key or `adcred1.` bundle,
-  or a recovery file or bundle file. The key is checked with `decodeDriveKey`, sealed to the
+  or a recovery file or bundle file. The key is checked with `decodeDriveKey`, then verified in
+  the browser against the drive itself — it must unwrap the newest wrapped key of one live file
+  (`GET /drives/:id/search?limit=1` plus `versions` or `trace-inbox` metadata only, never a file
+  body) or the trace inbox of an empty drive. A well-formed key for another drive is rejected
+  locally, before anything is posted. A drive with no live file and no trace inbox cannot be
+  checked and enrolls unchecked, which the approval receipt says. The key is sealed to the
   request's `public_key` with `sealDriveKey` (section 4), and kept only in page state.
 - The page posts an explicit approve body: `driveIds: [driveId]`, `scopes` (`read` only when "Read
   only" is ticked, otherwise `read write delete share`, plus `delegate` when that box is ticked),

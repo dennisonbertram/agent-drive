@@ -576,6 +576,62 @@ describe('account key: slot routes', () => {
       ),
     ).rejects.toMatchObject({ code: '23503' });
   });
+
+  it('filters slots by driveId, preserving isolation, paging and the deleting-drive check', async () => {
+    const f = await fixture(2);
+    const other = await fixture(1);
+    const body = await setup(f);
+    const path = (d: string) => `drives/${d}/account-key`;
+    const s0 = sealed();
+    const s1 = sealed();
+    const [d0, d1] = f.driveIds as [string, string];
+    const put0 = await call(f.userId, path(d0), 'POST', {
+      keyId: body.id,
+      expectedRevision: null,
+      sealed: s0,
+    });
+    const r0 = (await json(put0)).revision as number;
+    await call(f.userId, path(d1), 'POST', {
+      keyId: body.id,
+      expectedRevision: null,
+      sealed: s1,
+    });
+
+    // The scoped read returns exactly this drive's row in the same item shape.
+    const one = await json(await call(f.userId, `account-key/slots?driveId=${d0}`));
+    expect(one).toEqual({
+      items: [{ driveId: d0, keyId: body.id, format: 1, sealed: s0, revision: r0 }],
+      nextCursor: null,
+    });
+
+    // A drive without a slot and another account's drive both filter to an empty page —
+    // never to a row outside this account.
+    const unknown = await json(await call(f.userId, `account-key/slots?driveId=${randomUUID()}`));
+    expect(unknown).toEqual({ items: [], nextCursor: null });
+    expect(
+      await json(await call(f.userId, `account-key/slots?driveId=${other.driveIds[0]}`)),
+    ).toEqual({ items: [], nextCursor: null });
+    expect((await call(f.userId, 'account-key/slots?driveId=not-a-uuid')).status).toBe(400);
+
+    // A deleting drive's slot stays hidden, scoped or not.
+    await pool.query('UPDATE drives SET deleting_at = now() WHERE id = $1', [d1]);
+    expect(await json(await call(f.userId, `account-key/slots?driveId=${d1}`))).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    const all = await json(await call(f.userId, 'account-key/slots'));
+    expect(all.items.map((i: { driveId: string }) => i.driveId)).toEqual([d0]);
+
+    // Paging still composes with the filter: a cursor past the row ends the page.
+    const cursor = Buffer.from(JSON.stringify({ value: d0, id: d0 }), 'utf8').toString('base64url');
+    const past = await json(
+      await call(
+        f.userId,
+        `account-key/slots?driveId=${d0}&limit=1&cursor=${encodeURIComponent(cursor)}`,
+      ),
+    );
+    expect(past).toEqual({ items: [], nextCursor: null });
+  });
 });
 
 describe('account key: deletion hooks', () => {

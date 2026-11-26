@@ -1,14 +1,17 @@
 import { createRequire } from 'node:module';
+import { randomUUID, webcrypto } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
 import { writeConfig } from './config.js';
-import { issueCredentials } from './credentials.js';
+import { encodeBundle, issueCredentials } from './credentials.js';
+import { unsealDriveKey, type SealedDriveKey } from './seal.js';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
+const ACCOUNT_KEY_ID = '33333333-3333-4333-8333-333333333333';
 const dirs: string[] = [];
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -22,7 +25,13 @@ afterEach(async () => {
 type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 
 /** Runs the real CLI entry point in-process against a stubbed API. */
-async function cli(argv: string[], saved: Saved, respond: (path: string) => unknown = () => ({})) {
+async function cli(
+  argv: string[],
+  saved: Saved,
+  respond: (path: string, init?: RequestInit) => unknown = (path) =>
+    path === 'account-key' ? { accountKey: null } : {},
+  env: Record<string, string> = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
   dirs.push(dir);
   vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
@@ -30,6 +39,7 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   vi.stubEnv('AGENT_DRIVE_API_URL', '');
   vi.stubEnv('AGENT_DRIVE_API_KEY', '');
   vi.stubEnv('AGENT_DRIVE_KEY', '');
+  for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
   await writeConfig({
     apiUrl: 'https://x.test/api',
     apiKey: 'tok',
@@ -41,14 +51,35 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   });
   const paths: string[] = [];
   const queries: string[] = [];
+  const origins: string[] = [];
+  const calls: {
+    path: string;
+    origin: string;
+    method: string;
+    authorization: string | null;
+    body?: string;
+  }[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: URL | string) => {
-      const path = new URL(String(url)).pathname.replace('/api/v1/', '');
+    vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const requestUrl = new URL(String(url));
+      const path = requestUrl.pathname.replace('/api/v1/', '');
       paths.push(path);
-      queries.push(new URL(String(url)).search);
-      // A test that does not answer account-key gets "no key": the throttled seal stays silent.
-      const body = path === 'account-key' ? { accountKey: null } : respond(path);
+      queries.push(requestUrl.search);
+      origins.push(requestUrl.origin);
+      calls.push({
+        path,
+        origin: requestUrl.origin,
+        method: init?.method ?? 'GET',
+        authorization: new Headers(init?.headers).get('authorization'),
+        ...(typeof init?.body === 'string' ? { body: init.body } : {}),
+      });
+      const response = respond(path, init);
+      const hasAccountKey =
+        response !== null &&
+        typeof response === 'object' &&
+        ('accountKey' in response || 'keyId' in response);
+      const body = path === 'account-key' && !hasAccountKey ? { accountKey: null } : response;
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -65,6 +96,7 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   // The CLI entry point runs the command without awaiting it; `done` settles when the whole
   // command (including best-effort account sealing) has finished.
   await mod.done;
+  const exitCode = process.exitCode;
   // Getters, not snapshots: best-effort account sealing can write to stderr after the first
   // output line, and tests poll these inside vi.waitFor.
   return {
@@ -76,7 +108,65 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
     },
     paths,
     queries,
+    origins,
+    calls,
+    exitCode,
   };
+}
+
+async function accountKeyPair() {
+  const pair = await webcrypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, [
+    'deriveBits',
+  ]);
+  const publicKey = Buffer.from(await webcrypto.subtle.exportKey('raw', pair.publicKey)).toString(
+    'base64url',
+  );
+  return { privateKey: pair.privateKey, publicKey };
+}
+
+function sealApi(account: Awaited<ReturnType<typeof accountKeyPair>>, driveIds: string[]) {
+  return (path: string) => {
+    if (path === 'account-key')
+      return { keyId: ACCOUNT_KEY_ID, publicKey: account.publicKey, format: 1 };
+    if (path === 'drives')
+      return {
+        items: driveIds.map((id) => ({ id, name: id, agentOnly: false })),
+        nextCursor: null,
+      };
+    if (path.endsWith('/account-key-slot')) return { status: 'created' };
+    return {};
+  };
+}
+
+async function credentialsFile(bundle: Parameters<typeof encodeBundle>[0]): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-drive-import-'));
+  dirs.push(dir);
+  const path = join(dir, 'credentials.bundle');
+  await writeFile(path, encodeBundle(bundle));
+  return path;
+}
+
+async function openedSlots(
+  calls: Awaited<ReturnType<typeof cli>>['calls'],
+  account: Awaited<ReturnType<typeof accountKeyPair>>,
+) {
+  const opened = new Map<string, string>();
+  for (const call of calls.filter(
+    (entry) => entry.method === 'POST' && entry.path.endsWith('/account-key-slot'),
+  )) {
+    const driveId = /drives\/([^/]+)\/account-key-slot$/u.exec(call.path)?.[1];
+    if (!driveId || !call.body) throw new Error('The account-key slot request was incomplete.');
+    const body = JSON.parse(call.body) as { keyId: string; sealed: SealedDriveKey };
+    expect(body.keyId).toBe(ACCOUNT_KEY_ID);
+    opened.set(
+      driveId,
+      await unsealDriveKey(account.privateKey, driveId, body.sealed, {
+        salt: 'agent-drive-account-v1',
+        label: `${ACCOUNT_KEY_ID}:${driveId}`,
+      }),
+    );
+  }
+  return opened;
 }
 
 const one: Saved = { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } };
@@ -207,6 +297,232 @@ describe('drive default at the command level', () => {
   });
 });
 
+describe('sync flag validation', () => {
+  it('rejects backup-only flags before any key or network lookup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncf-'));
+    dirs.push(dir);
+    await writeFile(join(dir, 'f.txt'), 'x');
+    for (const flags of [['--dry-run'], ['--exclude', 'build/**'], ['--gitignore']]) {
+      const r = await cli(['sync', dir, ...flags], one);
+      expect(r.err).toContain(`sync does not support ${flags[0]}`);
+      expect(r.err).toContain('use backup');
+      // No connect() ran: no drive key lookup, no API call of any kind.
+      expect(r.paths).toEqual([]);
+    }
+  });
+
+  it('still syncs a folder normally', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncok-'));
+    dirs.push(dir);
+    await writeFile(join(dir, 'f.txt'), 'x');
+    const r = await cli(['sync', dir], one, (path) => {
+      if (path === 'whoami')
+        return {
+          accountId: 'a',
+          agentId: 'g',
+          keyId: 'k',
+          scopes: ['read', 'write'],
+          driveIds: [A],
+        };
+      if (path === 'drives' || path.endsWith('/list')) return { items: [], nextCursor: null };
+      if (path.endsWith('/put'))
+        return { intentId: 'i1', uploadUrl: 'https://s3.test/x', ciphertextSize: 1 };
+      if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/f.txt' } };
+      return {};
+    });
+    expect(r.err).toBe('');
+    expect(r.out).toContain('"uploaded":1');
+    expect(r.paths.some((p) => p.includes(`drives/${A}/commit`))).toBe(true);
+  });
+});
+
+describe('credential origin binding at the command level', () => {
+  const whoami = { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read', 'write'] };
+
+  it('sends no request — never the saved bearer — when env or --api selects another origin', async () => {
+    const viaEnv = await cli(['whoami'], one, () => whoami, {
+      AGENT_DRIVE_API_URL: 'https://other.test/api',
+    });
+    expect(viaEnv.err).toContain('API configuration is missing');
+    expect(viaEnv.paths).toEqual([]);
+    const viaFlag = await cli(['whoami', '--api', 'https://other.test/api'], one, () => whoami);
+    expect(viaFlag.err).toContain('API configuration is missing');
+    expect(viaFlag.paths).toEqual([]);
+  });
+
+  it('keeps the saved bearer when the selected URL stays on the saved origin', async () => {
+    const r = await cli(['whoami'], one, () => ({ ...whoami, driveIds: [A] }), {
+      AGENT_DRIVE_API_URL: 'https://x.test/other/path',
+    });
+    expect(r.err).toBe('');
+    expect(r.paths.some((p) => p.includes('whoami'))).toBe(true);
+  });
+
+  it('connects to another origin only with an explicit environment key', async () => {
+    const r = await cli(['whoami'], one, () => ({ ...whoami, driveIds: [] }), {
+      AGENT_DRIVE_API_URL: 'https://other.test/api',
+      AGENT_DRIVE_API_KEY: 'envtok',
+    });
+    expect(r.err).toBe('');
+    expect(r.paths.some((p) => p.includes('whoami'))).toBe(true);
+  });
+
+  it('whoami reports a foreign-origin saved drive key as not held', async () => {
+    const r = await cli(
+      ['whoami'],
+      { keys: one.keys, origins: { [A]: 'https://other.test' } },
+      () => ({ ...whoami, driveIds: [A] }),
+    );
+    expect(r.err).toBe('');
+    expect(r.out).toContain(`"${A}":false`);
+  });
+});
+
+describe('automatic sealing follows the connection saved by the command', () => {
+  it('seals same-origin environment-only keys with the saved connection', async () => {
+    const savedKey = generateDriveKey();
+    const envKey = generateDriveKey();
+    const file = await credentialsFile({
+      v: 1,
+      apiUrl: 'https://production.test/api',
+      apiKey: 'production-token',
+      driveKeys: { [A]: savedKey },
+      driveKeyOrigins: { [A]: 'https://production.test' },
+    });
+    const environment = encodeBundle({
+      v: 1,
+      apiUrl: 'https://production.test/api',
+      apiKey: 'bundle-token',
+      driveKeys: { [B]: envKey },
+      driveKeyOrigins: { [B]: 'https://production.test' },
+    });
+    const account = await accountKeyPair();
+    const r = await cli(['credentials', 'import', '--from', file], one, sealApi(account, [A, B]), {
+      AGENT_DRIVE_API_URL: 'https://staging.test/api',
+      AGENT_DRIVE_API_KEY: 'staging-token',
+      AGENT_DRIVE_CREDENTIALS: environment,
+    });
+
+    expect(r.out).toContain('imported 1 drive key');
+    expect(r.exitCode).toBeUndefined();
+    expect(r.calls.length).toBeGreaterThan(0);
+    expect(new Set(r.calls.map((call) => call.origin))).toEqual(
+      new Set(['https://production.test']),
+    );
+    expect(new Set(r.calls.map((call) => call.authorization))).toEqual(
+      new Set(['Bearer production-token']),
+    );
+    const opened = await openedSlots(r.calls, account);
+    expect([...opened.keys()].sort()).toEqual([A, B].sort());
+    expect(opened.get(A)).toBe(savedKey);
+    expect(opened.get(B)).toBe(envKey);
+  }, 15_000);
+
+  it('uses the saved key when an environment bundle has a conflicting drive ID', async () => {
+    const savedKey = generateDriveKey();
+    const envKey = generateDriveKey();
+    const file = await credentialsFile({
+      v: 1,
+      apiUrl: 'https://production.test/api',
+      apiKey: 'production-token',
+      driveKeys: { [A]: savedKey },
+      driveKeyOrigins: { [A]: 'https://production.test' },
+    });
+    const account = await accountKeyPair();
+    const r = await cli(['credentials', 'import', '--from', file], one, sealApi(account, [A]), {
+      AGENT_DRIVE_CREDENTIALS: encodeBundle({
+        v: 1,
+        apiUrl: 'https://production.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [A]: envKey },
+        driveKeyOrigins: { [A]: 'https://production.test' },
+      }),
+    });
+
+    const opened = await openedSlots(r.calls, account);
+    expect(opened.get(A)).toBe(savedKey);
+    expect(opened.get(A)).not.toBe(envKey);
+  }, 15_000);
+
+  it('does not seal an environment key bound to a different origin', async () => {
+    const savedKey = generateDriveKey();
+    const foreignKey = generateDriveKey();
+    const file = await credentialsFile({
+      v: 1,
+      apiUrl: 'https://production.test/api',
+      apiKey: 'production-token',
+      driveKeys: { [A]: savedKey },
+      driveKeyOrigins: { [A]: 'https://production.test' },
+    });
+    const account = await accountKeyPair();
+    const r = await cli(['credentials', 'import', '--from', file], one, sealApi(account, [A, B]), {
+      AGENT_DRIVE_CREDENTIALS: encodeBundle({
+        v: 1,
+        apiUrl: 'https://production.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [B]: foreignKey },
+        driveKeyOrigins: { [B]: 'https://foreign.test' },
+      }),
+    });
+
+    expect(new Set(r.calls.map((call) => call.origin)).size).toBe(1);
+    expect(new Set(r.calls.map((call) => call.authorization))).toEqual(
+      new Set(['Bearer production-token']),
+    );
+    const opened = await openedSlots(r.calls, account);
+    expect([...opened.keys()]).toEqual([A]);
+    expect(opened.get(A)).toBe(savedKey);
+  }, 15_000);
+
+  it('keeps a malformed environment bundle from failing a successful import', async () => {
+    const savedKey = generateDriveKey();
+    const file = await credentialsFile({
+      v: 1,
+      apiUrl: 'https://production.test/api',
+      apiKey: 'production-token',
+      driveKeys: { [A]: savedKey },
+      driveKeyOrigins: { [A]: 'https://production.test' },
+    });
+    const account = await accountKeyPair();
+    const r = await cli(['credentials', 'import', '--from', file], one, sealApi(account, [A]), {
+      AGENT_DRIVE_CREDENTIALS: 'not-a-valid-bundle',
+    });
+
+    expect(r.out).toContain('imported 1 drive key');
+    expect(r.exitCode).toBeUndefined();
+    expect(r.err).not.toContain('AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle');
+    expect((await openedSlots(r.calls, account)).get(A)).toBe(savedKey);
+  }, 15_000);
+
+  it('imports and seals with the bundle API when the shell URL points elsewhere', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-import-'));
+    dirs.push(dir);
+    const path = join(dir, 'credentials.bundle');
+    await writeFile(
+      path,
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://production.test/api',
+        apiKey: 'production-token',
+        driveKeys: { [A]: generateDriveKey() },
+        driveKeyOrigins: { [A]: 'https://production.test' },
+      }),
+    );
+    const r = await cli(
+      ['credentials', 'import', '--from', path],
+      one,
+      (endpoint) =>
+        endpoint === 'drives'
+          ? { items: [{ id: A, name: 'Research', agentOnly: false }], nextCursor: null }
+          : {},
+      { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
+    );
+    expect(r.err).toContain('no account key yet');
+    expect(r.origins.length).toBeGreaterThan(0);
+    expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
+  });
+});
+
 describe('credentials issue drive default', () => {
   const sink = { isTTY: false, write: async () => {} };
   async function prepare(origins: Record<string, string>, keys: string[]) {
@@ -237,6 +553,15 @@ describe('credentials issue drive default', () => {
     await prepare({ [A]: 'https://x.test', [B]: 'https://other.test' }, [A, B]);
     await issueCredentials({ name: 'n', stdout: true }, sink, createKey as never);
     expect((createKey.mock.calls as unknown[][])[0]?.[2]).toEqual([A]);
+  });
+
+  it('refuses to seal an explicitly named foreign-origin drive key into the bundle', async () => {
+    await prepare({ [B]: 'https://other.test' }, [B]);
+    const issued = createKey.mock.calls.length;
+    await expect(
+      issueCredentials({ name: 'n', drive: B, stdout: true }, sink, createKey as never),
+    ).rejects.toThrow(/no drive key/);
+    expect(createKey.mock.calls.length).toBe(issued);
   });
 });
 

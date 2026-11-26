@@ -278,6 +278,10 @@ export async function backupDirectory(
       const relativePath = relative(root, path).split(sep).join('/');
       if (
         builtinSkip(path) ||
+        // Git never traverses its control metadata, so honoring the ignore rules
+        // also skips .git at any depth — the directory, or the file a linked
+        // worktree or submodule puts in its place.
+        (options.gitignore && relativePath.split('/').includes('.git')) ||
         isIgnored(relativePath, ignored) ||
         excludes.some(
           (glob) =>

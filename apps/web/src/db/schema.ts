@@ -113,6 +113,13 @@ export const accountKeys = pgTable(
     kdfName: text('kdf_name').notNull(),
     kdfIterations: integer('kdf_iterations').notNull(),
     kdfSalt: text('kdf_salt').notNull(),
+    // Optional passkey (WebAuthn PRF) wrap of the private key: opaque base64url parts checked by
+    // the API on enrollment; written once, dropped with the record, kept across passphrase changes.
+    passkeyWrap: jsonb('passkey_wrap').$type<{
+      credentialId: string;
+      iv: string;
+      ciphertext: string;
+    }>(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },

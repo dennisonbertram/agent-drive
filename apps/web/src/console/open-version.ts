@@ -32,6 +32,9 @@ export async function openVersion(
   inboxCache: InboxCache,
 ): Promise<Uint8Array> {
   const url = validateDownloadUrl(metadata.downloadUrl);
+  // A v2 envelope needs the trace inbox; its request overlaps the ciphertext download.
+  const pendingInbox =
+    envelopeVersion(metadata.wrappedKey) === 2 ? loadInbox(api, inboxCache, driveId) : undefined;
   const response = await fetch(url, {
     credentials: 'omit',
     redirect: 'error',
@@ -40,8 +43,8 @@ export async function openVersion(
   if (!response?.ok) throw new Error('The encrypted file could not be downloaded.');
   const bytes = new Uint8Array(await response.arrayBuffer());
   let inbox;
-  if (envelopeVersion(metadata.wrappedKey) === 2) {
-    const record = await loadInbox(api, inboxCache, driveId);
+  if (pendingInbox) {
+    const record = await pendingInbox;
     if (!record) throw new Error(MISSING_INBOX);
     inbox = inboxFor(driveId, record);
   }

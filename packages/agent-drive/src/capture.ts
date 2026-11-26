@@ -520,7 +520,12 @@ function chosenEnvironment(command: string[]) {
 }
 
 /** Runs COMMAND with its LLM calls captured; falls back to running it unwrapped. Returns the exit code. */
-export async function runCapture(input: { command: string[]; agent?: string; drive?: string }) {
+export async function runCapture(input: {
+  command: string[];
+  agent?: string;
+  drive?: string;
+  apiUrl?: string;
+}) {
   const { command } = input;
   if (!command.length)
     throw new Error('Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]');
@@ -545,10 +550,15 @@ export async function runCapture(input: { command: string[]; agent?: string; dri
   let proxy: Awaited<ReturnType<typeof startProxy>>;
   const log = (line: string) => process.stderr.write(`${line}\n`);
   try {
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(input.apiUrl);
     const driveId = resolveDriveId(input.drive, connection.config, connection.apiUrl);
     if (!/^[A-Za-z0-9_-]+$/u.test(driveId)) throw new Error(`invalid drive ID ${driveId}`);
-    const driveKey = await resolveDriveKey(driveId, undefined, connection.config);
+    const driveKey = await resolveDriveKey(
+      driveId,
+      connection.apiUrl,
+      undefined,
+      connection.config,
+    );
     if (!driveKey) throw new Error(`no drive key for drive ${driveId}`);
     decodeDriveKey(driveKey);
     const client = new AgentDriveClient({

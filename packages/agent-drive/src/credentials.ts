@@ -122,32 +122,74 @@ export function envBundle(): Bundle | undefined {
  * The saved config with the environment bundle merged in memory. Saved values win over the
  * bundle (a later login is newer than a stored backup); bundle drives count as backed up.
  * Never write the result back: writeConfig re-reads the file itself.
+ * A stored bearer is emitted only for the origin it was recorded with — an explicitly
+ * selected --api/AGENT_DRIVE_API_URL at another origin never inherits it. The emitted
+ * apiUrl is the effective URL, so apiUrl and apiKey always describe one connection. Callers
+ * that already resolved a connection may provide both overrides to pin it during the merge.
  */
-export async function loadConfig(): Promise<AgentDriveConfig> {
+export async function loadConfig(
+  apiUrlOverride?: string,
+  apiKeyOverride?: string,
+): Promise<AgentDriveConfig> {
   const saved = await readConfig();
   const bundle = envBundle();
-  if (!bundle) return saved;
-  const at = new Date().toISOString();
-  const effectiveUrl = process.env.AGENT_DRIVE_API_URL || saved.apiUrl || bundle.apiUrl;
+  const effectiveUrl =
+    apiUrlOverride ||
+    process.env.AGENT_DRIVE_API_URL ||
+    saved.apiUrl ||
+    bundle?.apiUrl ||
+    DEFAULT_API_URL;
   const effectiveOrigin = originOf(effectiveUrl);
+  // A bearer recorded for one origin is never served at another. A config written before
+  // apiUrl existed binds its apiKey to the default API.
+  const apiKey =
+    apiKeyOverride ??
+    (process.env.AGENT_DRIVE_API_KEY || undefined) ??
+    (originOf(saved.apiUrl ?? DEFAULT_API_URL) === effectiveOrigin ? saved.apiKey : undefined) ??
+    (bundle !== undefined && originOf(bundle.apiUrl) === effectiveOrigin
+      ? bundle.apiKey
+      : undefined);
+  if (!bundle) {
+    const withoutBundle: AgentDriveConfig = { ...saved, apiUrl: effectiveUrl };
+    if (apiKey === undefined) delete withoutBundle.apiKey;
+    else withoutBundle.apiKey = apiKey;
+    return withoutBundle;
+  }
+  const at = new Date().toISOString();
   // A bundle is a backup only of the connection it holds: same API key and origin.
-  const sameConnection =
-    (process.env.AGENT_DRIVE_API_KEY || saved.apiKey || bundle.apiKey) === bundle.apiKey &&
-    originOf(bundle.apiUrl) === effectiveOrigin;
+  const sameConnection = apiKey === bundle.apiKey && originOf(bundle.apiUrl) === effectiveOrigin;
   const driveKeys = { ...bundle.driveKeys, ...saved.driveKeys };
+  const driveKeyOrigins = { ...bundle.driveKeyOrigins, ...saved.driveKeyOrigins };
+  // Bundles written before drive-key origins were recorded bind their keys to the bundle's
+  // own API — the same migration readConfig applies to saved configs.
+  const bundleOrigin = originOf(bundle.apiUrl);
+  for (const [id, bundleKey] of Object.entries(bundle.driveKeys)) {
+    const savedKey = saved.driveKeys?.[id];
+    // Keys and origins are one record. The saved key wins, so never leave the bundle's
+    // origin attached to a different saved value that has no origin of its own.
+    if (
+      savedKey !== undefined &&
+      savedKey !== bundleKey &&
+      saved.driveKeyOrigins?.[id] === undefined
+    )
+      delete driveKeyOrigins[id];
+    if (bundleOrigin)
+      if (driveKeyOrigins[id] === undefined && (savedKey === undefined || savedKey === bundleKey))
+        driveKeyOrigins[id] = bundleOrigin;
+  }
   const keyBackup: Record<string, KeyBackup> = { ...saved.keyBackup };
   for (const id of Object.keys(bundle.driveKeys))
     if (
       sameConnection &&
       driveKeys[id] === bundle.driveKeys[id] &&
-      bundle.driveKeyOrigins[id] === effectiveOrigin
+      driveKeyOrigins[id] === effectiveOrigin
     )
       keyBackup[id] = { at, method: 'env' };
   return {
-    apiUrl: saved.apiUrl ?? bundle.apiUrl,
-    apiKey: saved.apiKey ?? bundle.apiKey,
+    apiUrl: effectiveUrl,
+    ...(apiKey === undefined ? {} : { apiKey }),
     driveKeys,
-    driveKeyOrigins: { ...bundle.driveKeyOrigins, ...saved.driveKeyOrigins },
+    driveKeyOrigins,
     keyBackup,
     // Pins were read from config.json by the first version of auto-sealing; keep the legacy
     // read as a fallback. New pins only ever live in `<config>.state/account-seal.json`.
@@ -197,6 +239,7 @@ export async function issueCredentials(
     writePaths?: string[];
     label?: string;
     machine?: string;
+    apiUrl?: string;
     to?: string;
     force?: boolean;
     stdout?: boolean;
@@ -221,10 +264,11 @@ export async function issueCredentials(
     );
     if (present) throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
   }
-  const config = await loadConfig();
-  const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
+  const config = await loadConfig(options.apiUrl);
+  const apiUrl =
+    options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   const drive = resolveDriveId(options.drive, config, apiUrl);
-  const driveKey = await resolveDriveKey(drive, undefined, config);
+  const driveKey = await resolveDriveKey(drive, apiUrl, undefined, config);
   if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
   try {
     decodeDriveKey(driveKey);
@@ -241,7 +285,9 @@ export async function issueCredentials(
       apiUrl,
       apiKey: key.token,
       driveKeys: { [drive]: driveKey },
-      driveKeyOrigins: { [drive]: config.driveKeyOrigins?.[drive] ?? new URL(apiUrl).origin },
+      // resolveDriveKey only returns a saved key for this origin; explicit environment and
+      // key-file values are intentionally unbound until issued into this bundle.
+      driveKeyOrigins: { [drive]: new URL(apiUrl).origin },
     },
     [drive],
   );
@@ -363,7 +409,13 @@ export async function importCredentials(text: string, method: 'file' | 'stdout')
   return Object.keys(bundle.driveKeys);
 }
 
-/** Tells the service a key was backed up (never the key). A failure is only a warning. */
+export const REPORT_CONCURRENCY = 4;
+
+/**
+ * Tells the service a key was backed up (never the key). Reports run a few at a time under one
+ * shared 5s deadline, so a bundle of many drives cannot hold the calling command for a round
+ * trip per drive. A failure is only a warning.
+ */
 export async function reportKeyBackup(
   apiUrl: string,
   apiKey: string,
@@ -371,26 +423,34 @@ export async function reportKeyBackup(
   method: 'file' | 'stdout' | 'env',
   deps: { fetch?: typeof fetch; warn?: (message: string) => void } = {},
 ) {
+  if (!driveIds.length) return;
   const doFetch = deps.fetch ?? globalThis.fetch.bind(globalThis);
   const warn = deps.warn ?? ((m: string) => process.stderr.write(`${m}\n`));
-  for (const id of driveIds) {
-    try {
-      // Same HTTPS/loopback rule as the client, checked before the token is attached.
-      const base = validateUrl(apiUrl, true).toString().replace(/\/+$/u, '');
-      const response = await doFetch(`${base}/v1/drives/${encodeURIComponent(id)}/key-backup`, {
-        method: 'POST',
-        redirect: 'error',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ method }),
-        signal: AbortSignal.timeout(5000),
-      });
-      // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
-      if (response.status === 403) continue;
-      if (!response.ok) throw new Error(String(response.status));
-    } catch {
-      warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);
+  const deadline = AbortSignal.timeout(5000);
+  let next = 0;
+  const worker = async () => {
+    while (next < driveIds.length) {
+      const id = driveIds[next++]!;
+      try {
+        if (deadline.aborted) throw new Error('deadline');
+        // Same HTTPS/loopback rule as the client, checked before the token is attached.
+        const base = validateUrl(apiUrl, true).toString().replace(/\/+$/u, '');
+        const response = await doFetch(`${base}/v1/drives/${encodeURIComponent(id)}/key-backup`, {
+          method: 'POST',
+          redirect: 'error',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ method }),
+          signal: deadline,
+        });
+        // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
+        if (response.status === 403) continue;
+        if (!response.ok) throw new Error(String(response.status));
+      } catch {
+        warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(REPORT_CONCURRENCY, driveIds.length) }, worker));
 }
 
 let reportedEnv = false;
@@ -404,13 +464,14 @@ export async function reportEnvBackups(
   if (!bundle || reportedEnv) return;
   reportedEnv = true;
   if (bundle.apiKey !== apiKey || originOf(bundle.apiUrl) !== originOf(apiUrl)) return;
-  const config = await loadConfig();
   const origin = originOf(apiUrl);
+  const effectiveConfig = await loadConfig(apiUrl);
   const ids: string[] = [];
   for (const [id, key] of Object.entries(bundle.driveKeys))
     if (
-      bundle.driveKeyOrigins[id] === origin &&
-      (await resolveDriveKey(id, undefined, config)) === key
+      effectiveConfig.driveKeyOrigins?.[id] === origin &&
+      effectiveConfig.driveKeys?.[id] === key &&
+      (await resolveDriveKey(id, apiUrl, undefined, effectiveConfig)) === key
     )
       ids.push(id);
   await reportKeyBackup(apiUrl, apiKey, ids, 'env', deps);

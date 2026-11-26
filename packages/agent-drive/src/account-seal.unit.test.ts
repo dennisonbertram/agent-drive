@@ -811,6 +811,7 @@ describe('account sealing at the command level', () => {
   it('keeps pins isolated per effective api origin', async () => {
     // AGENT_DRIVE_API_URL overrides the effective origin; the pin keys off that, not the saved
     // apiUrl. The saved driveKeyOrigins bind the key to the override origin so it is 'held'.
+    // The saved bearer is bound to the saved apiUrl, so the override needs an explicit key.
     const account = await accountKeyPair();
     const r = await cli(
       ['account', 'seal'],
@@ -825,7 +826,12 @@ describe('account sealing at the command level', () => {
           return { keyId: KEY_ID, publicKey: account.publicKey, format: 1 };
         return { status: 'created' };
       },
-      { env: { AGENT_DRIVE_API_URL: 'https://other.test/api' } },
+      {
+        env: {
+          AGENT_DRIVE_API_URL: 'https://other.test/api',
+          AGENT_DRIVE_API_KEY: 'envtok',
+        },
+      },
     );
     expect(r.out).toContain(`${A}: sealed`);
     const state = await readSealState();

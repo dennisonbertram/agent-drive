@@ -11,6 +11,7 @@ const { query, state, ids } = vi.hoisted(() => {
   const query = vi.fn(async (...args: [sql: string, params?: unknown[]]) => {
     const [sql] = args;
     if (sql.includes('pg_advisory_xact_lock')) return {};
+    if (sql.includes('JOIN agents g ON g.account_id = a.id')) return { rows: [] };
     if (sql.includes('console_user_tombstones')) return { rowCount: 0 };
     if (sql.includes('SELECT id, name, deleting_at FROM accounts')) return { rows: [] };
     if (sql.includes('INSERT INTO accounts'))

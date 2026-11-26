@@ -1,5 +1,13 @@
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+// The WebAuthn ceremony module is a browser surface; the vault's own guards are tested here
+// with the ceremony replaced by controllable fakes.
+vi.mock('./passkey', () => ({
+  enrollAccountPasskey: vi.fn(),
+  unlockWithAccountPasskey: vi.fn(),
+}));
+
 import {
   encryptFile,
   generateDriveKey,
@@ -18,6 +26,7 @@ import {
 } from './account-key';
 import type { PersistedStore } from './persisted-key';
 import { sealDriveKey } from '../device/seal';
+import { enrollAccountPasskey, unlockWithAccountPasskey } from './passkey';
 import { BROWSER_KEY_DELETE_FAILED, Vault, vaultRequest, type LockReason } from './vault';
 
 const ACCOUNT = '11111111-1111-4111-8111-111111111111';
@@ -107,6 +116,14 @@ const base = (slot: unknown = goodSlot): Routes => ({
   whoami: () => ({ accountId: ACCOUNT }),
   'account-key/slots': () => ({ items: [slot], nextCursor: null }),
   'account-key': () => ({ accountKey: { ...record, createdAt: 'x', updatedAt: 'x' } }),
+});
+
+const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
+  read: async () => null,
+  readLockGeneration: async () => 0,
+  write: async () => true,
+  clear: async () => {},
+  ...over,
 });
 
 describe('Vault', () => {
@@ -581,15 +598,158 @@ describe('Vault setup', () => {
   }, 30_000);
 });
 
-describe('browser-held key', () => {
-  const store = (over: Partial<PersistedStore> = {}): PersistedStore => ({
-    read: async () => null,
-    readLockGeneration: async () => 0,
-    write: async () => true,
-    clear: async () => {},
-    ...over,
-  });
+describe('Vault ensureSlot', () => {
+  // A tab that unlocked before an agent sealed a drive has no cached slot: the scoped read
+  // asks for just that drive, never a retry or a poll of the whole list.
+  it('fetches one filtered slot for a drive enrolled after unlock, then opens it', async () => {
+    let enrolled = false;
+    const { vault, calls } = makeVault({
+      ...base(),
+      'account-key/slots': () => ({ items: enrolled ? [goodSlot] : [], nextCursor: null }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    enrolled = true;
+    expect(await vault.ensureSlot(DRIVE)).toBe(true);
+    expect(vault.hasSlot(DRIVE)).toBe(true);
+    const scoped = calls.filter(({ path }) => path.startsWith('account-key/slots?driveId='));
+    expect(scoped).toEqual([
+      { path: `account-key/slots?driveId=${DRIVE}&limit=1`, method: 'GET', body: undefined },
+    ]);
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+  }, 30_000);
 
+  it('serves a known slot from cache without another request', async () => {
+    const { vault, calls } = makeVault(base());
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(true);
+    const seen = calls.length;
+    expect(await vault.ensureSlot(DRIVE)).toBe(true);
+    expect(calls).toHaveLength(seen);
+  }, 30_000);
+
+  it('returns false on a confirmed miss and does not cache it', async () => {
+    const { vault, calls } = makeVault({
+      ...base(),
+      'account-key/slots': () => ({ items: [], nextCursor: null }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(await vault.ensureSlot(DRIVE)).toBe(false);
+    // A miss is not cached: a later seal is still discovered by asking again.
+    expect(await vault.ensureSlot(DRIVE)).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    expect(calls.filter(({ path }) => path.includes('driveId='))).toHaveLength(2);
+  }, 30_000);
+
+  it('throws when the slot read fails instead of reporting a miss', async () => {
+    let broken = false;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => {
+        if (broken) throw new Error('offline');
+        return { items: [], nextCursor: null };
+      },
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    broken = true;
+    await expect(vault.ensureSlot(DRIVE)).rejects.toThrow('Retry');
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+
+  it('answers false without a request while locked or without a record', async () => {
+    const { vault, calls } = makeVault(base());
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    expect(await vault.ensureSlot(DRIVE)).toBe(false);
+    expect(calls.some(({ path }) => path.includes('slots'))).toBe(false);
+    await vault.unlock(PASSPHRASE);
+    vault.lock('manual');
+    const seen = calls.length;
+    expect(await vault.ensureSlot(DRIVE)).toBe(false);
+    expect(calls).toHaveLength(seen);
+    const empty = makeVault({ ...base(), 'account-key': () => ({ accountKey: null }) });
+    await empty.vault.load();
+    expect(await empty.vault.ensureSlot(DRIVE)).toBe(false);
+    expect(empty.calls.some(({ path }) => path.includes('slots'))).toBe(false);
+  }, 30_000);
+
+  it('discards a slot read that resolves after Lock', async () => {
+    const gate = deferred<unknown>();
+    const routes: Routes = { ...base() };
+    const { vault, calls } = makeVault(routes);
+    routes['account-key/slots'] = () =>
+      calls.at(-1)!.path.includes('driveId=') ? gate.promise : { items: [], nextCursor: null };
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    const pending = vault.ensureSlot(DRIVE);
+    await vi.waitFor(() => expect(calls.some(({ path }) => path.includes('driveId='))).toBe(true), {
+      timeout: 10_000,
+    });
+    vault.lock('manual');
+    gate.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await pending).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+
+  it('never writes into the slot map a newer unlock installed', async () => {
+    const gate = deferred<unknown>();
+    const routes: Routes = { ...base() };
+    const { vault, calls } = makeVault(routes);
+    routes['account-key/slots'] = () =>
+      calls.at(-1)!.path.includes('driveId=') ? gate.promise : { items: [], nextCursor: null };
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    const pending = vault.ensureSlot(DRIVE);
+    await vi.waitFor(() => expect(calls.some(({ path }) => path.includes('driveId='))).toBe(true), {
+      timeout: 10_000,
+    });
+    const again = vault.unlock(PASSPHRASE);
+    gate.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await again).toBe(true);
+    expect(await pending).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+
+  it('coalesces two refreshes of the same drive into a single read', async () => {
+    const gate = deferred<unknown>();
+    const routes: Routes = { ...base() };
+    const { vault, calls } = makeVault(routes);
+    routes['account-key/slots'] = () =>
+      calls.at(-1)!.path.includes('driveId=') ? gate.promise : { items: [], nextCursor: null };
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    const first = vault.ensureSlot(DRIVE);
+    const second = vault.ensureSlot(DRIVE);
+    gate.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(calls.filter(({ path }) => path.includes('driveId='))).toHaveLength(1);
+  }, 30_000);
+
+  it('refuses a slot sealed under another account key', async () => {
+    const foreign = {
+      ...(goodSlot as Record<string, unknown>),
+      keyId: '55555555-5555-4555-8555-555555555555',
+    };
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => ({ items: [foreign], nextCursor: null }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+    expect(await vault.ensureSlot(DRIVE)).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+});
+
+describe('browser-held key', () => {
   it('reports unlocked only after the persisted write has resolved', async () => {
     const write = deferred<void>();
     const writes: string[] = [];
@@ -1006,6 +1166,270 @@ describe('browser-held key', () => {
   }, 30_000);
 });
 
+describe('Vault passkey', () => {
+  const enroll = vi.mocked(enrollAccountPasskey);
+  const passkeyUnlock = vi.mocked(unlockWithAccountPasskey);
+  // A wrap that passes the record parser: 4-byte credential id, 12-byte iv, 48-byte ciphertext.
+  const wrap = {
+    credentialId: 'AQIDBA',
+    iv: 'AAAAAAAAAAAAAAAA',
+    ciphertext: 'A'.repeat(64),
+  };
+  const passkeyRoutes = (extra: Routes = {}): Routes => ({
+    whoami: () => ({ accountId: ACCOUNT }),
+    'account-key/slots': () => ({ items: [goodSlot], nextCursor: null }),
+    'account-key/passkey': (_m, body) => ({
+      accountKey: {
+        ...record,
+        passkey: (body as { passkey?: unknown }).passkey ?? wrap,
+      },
+    }),
+    'account-key': () => ({ accountKey: { ...record, passkey: wrap } }),
+    ...extra,
+  });
+
+  it('refreshes a cached slot when another tab may have repaired it', async () => {
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => {
+        reads += 1;
+        return { items: [reads === 1 ? badSlot : goodSlot], nextCursor: null };
+      },
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(await vault.ensureSlot(DRIVE)).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(otherKey);
+    expect(await vault.ensureSlot(DRIVE, true)).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(driveKey);
+    expect(reads).toBe(2);
+  }, 30_000);
+
+  it('preserves a locally repaired slot when an older refresh finishes late', async () => {
+    const refresh = deferred<unknown>();
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(),
+      'account-key/slots': () => {
+        reads += 1;
+        return reads === 1 ? { items: [badSlot], nextCursor: null } : refresh.promise;
+      },
+      [`drives/${DRIVE}/account-key`]: () => ({ revision: 5 }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    const refreshing = vault.ensureSlot(DRIVE, true);
+    await vi.waitFor(() => expect(reads).toBe(2));
+    expect(await vault.addKey(DRIVE, driveKey)).toBe('added');
+    refresh.resolve({ items: [badSlot], nextCursor: null });
+    expect(await refreshing).toBe(true);
+    expect(await vault.slotKey(DRIVE)).toBe(driveKey);
+  }, 30_000);
+
+  it('clears only a cached slot confirmed absent by a refresh', async () => {
+    let reads = 0;
+    const { vault } = makeVault({
+      ...base(badSlot),
+      'account-key/slots': () => ({
+        items: reads++ === 0 ? [badSlot] : [],
+        nextCursor: null,
+      }),
+    });
+    await vault.load();
+    await vault.unlock(PASSPHRASE);
+    expect(vault.hasSlot(DRIVE)).toBe(true);
+    expect(await vault.ensureSlot(DRIVE, true)).toBe(false);
+    expect(vault.hasSlot(DRIVE)).toBe(false);
+  }, 30_000);
+
+  it('unlocks with the passkey assertion and installs slots plus the browser key', async () => {
+    const privateKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    passkeyUnlock.mockResolvedValue(privateKey);
+    const writes: string[] = [];
+    const { vault } = makeVault(
+      passkeyRoutes(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        write: async (keyId) => {
+          writes.push(keyId);
+          return true;
+        },
+      }),
+    );
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    expect(await vault.unlockWithPasskey(true)).toBe(true);
+    expect(vault.status).toBe('unlocked');
+    expect(writes).toEqual([record.id]);
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'key', key: driveKey });
+    expect(passkeyUnlock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: record.id }),
+      expect.anything(),
+    );
+  }, 30_000);
+
+  it('refuses a passkey unlock when the record has no wrapper', async () => {
+    const { vault } = makeVault(base());
+    await vault.load();
+    await expect(vault.unlockWithPasskey()).rejects.toThrow('no passkey');
+    expect(vault.status).toBe('locked');
+    expect(passkeyUnlock).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it('aborting the dialog cancels the assertion and installs nothing', async () => {
+    const gate = deferred<CryptoKey>();
+    let seen: AbortSignal | undefined;
+    passkeyUnlock.mockImplementation((_record, signal) => {
+      seen = signal as AbortSignal;
+      return gate.promise;
+    });
+    const { vault } = makeVault(passkeyRoutes());
+    await vault.load();
+    const pending = vault.unlockWithPasskey();
+    await vi.waitFor(() => expect(seen).toBeDefined(), { timeout: 10_000 });
+    vault.cancelUnlock();
+    expect(seen!.aborted).toBe(true);
+    gate.resolve({} as CryptoKey);
+    expect(await pending).toBe(false);
+    expect(vault.status).toBe('locked');
+    expect(await vault.keyFor(DRIVE, '/a.txt')).toEqual({ status: 'none' });
+  }, 30_000);
+
+  it('supersedes an in-flight passphrase unlock', async () => {
+    const slots = deferred<unknown>();
+    const privateKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    passkeyUnlock.mockResolvedValue(privateKey);
+    const { vault } = makeVault({
+      ...passkeyRoutes(),
+      'account-key/slots': () => slots.promise,
+    });
+    await vault.load();
+    const first = vault.unlock(PASSPHRASE);
+    await vi.waitFor(() => expect(vault.fetchingSlots).toBe(true), { timeout: 10_000 });
+    const second = vault.unlockWithPasskey();
+    slots.resolve({ items: [goodSlot], nextCursor: null });
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('clears the stored key on a passkey unlock with Keep unlocked off', async () => {
+    const privateKey = await unlockAccountKey(record, ACCOUNT, PASSPHRASE);
+    passkeyUnlock.mockResolvedValue(privateKey);
+    let cleared = 0;
+    const { vault } = makeVault(
+      passkeyRoutes(),
+      undefined,
+      undefined,
+      undefined,
+      store({
+        clear: async () => {
+          cleared += 1;
+        },
+      }),
+    );
+    await vault.load();
+    expect(await vault.unlockWithPasskey(false)).toBe(true);
+    expect(cleared).toBe(1);
+    expect(vault.status).toBe('unlocked');
+  }, 30_000);
+
+  it('enrolls and stores the wrap through the strict endpoint', async () => {
+    enroll.mockResolvedValue(wrap);
+    const posts: unknown[] = [];
+    const { vault } = makeVault({
+      whoami: () => ({ accountId: ACCOUNT }),
+      'account-key/slots': () => ({ items: [goodSlot], nextCursor: null }),
+      'account-key/passkey': (_m, body) => {
+        posts.push(body);
+        return { accountKey: { ...record, passkey: wrap } };
+      },
+      'account-key': () => ({ accountKey: record }),
+    });
+    await vault.load();
+    expect(vault.status).toBe('locked');
+    expect(await vault.addPasskey(PASSPHRASE, 'owner@example.com')).toBe(true);
+    expect(enroll).toHaveBeenCalledWith(
+      expect.objectContaining({ id: record.id }),
+      PASSPHRASE,
+      'owner@example.com',
+      expect.anything(),
+    );
+    expect(posts).toEqual([
+      {
+        expectedKeyId: record.id,
+        expectedGeneration: record.wrapGeneration,
+        passkey: wrap,
+      },
+    ]);
+    expect(vault.record?.passkey).toEqual(wrap);
+  }, 30_000);
+
+  it('does not enroll when a wrapper already exists', async () => {
+    const posts: unknown[] = [];
+    const { vault } = makeVault({
+      ...passkeyRoutes(),
+      'account-key/passkey': (_m, body) => {
+        posts.push(body);
+        return { accountKey: { ...record, passkey: wrap } };
+      },
+    });
+    await vault.load();
+    expect(await vault.addPasskey(PASSPHRASE, 'owner@example.com')).toBe(true);
+    expect(enroll).not.toHaveBeenCalled();
+    expect(posts).toHaveLength(0);
+  }, 30_000);
+
+  it('cancelling enrollment aborts the ceremony and writes nothing', async () => {
+    const gate = deferred<typeof wrap>();
+    let seen: AbortSignal | undefined;
+    enroll.mockImplementation((_record, _passphrase, _user, signal) => {
+      seen = signal as AbortSignal;
+      return gate.promise;
+    });
+    const posts: unknown[] = [];
+    const { vault } = makeVault({
+      ...passkeyRoutes(),
+      'account-key/passkey': (_m, body) => {
+        posts.push(body);
+        return { accountKey: { ...record, passkey: wrap } };
+      },
+      'account-key': () => ({ accountKey: record }),
+    });
+    await vault.load();
+    const pending = vault.addPasskey(PASSPHRASE, 'owner@example.com');
+    await vi.waitFor(() => expect(seen).toBeDefined(), { timeout: 10_000 });
+    vault.cancelUnlock();
+    expect(seen!.aborted).toBe(true);
+    gate.resolve(wrap);
+    expect(await pending).toBe(false);
+    expect(posts).toHaveLength(0);
+    expect(vault.record?.passkey ?? null).toBeNull();
+  }, 30_000);
+
+  it('locks stale when the passkey store answers with a changed-generation conflict', async () => {
+    enroll.mockResolvedValue(wrap);
+    const { vault, locked } = makeVault({
+      ...passkeyRoutes(),
+      'account-key/passkey': () => {
+        throw Object.assign(new Error('Your passphrase was changed elsewhere. Reload the page.'), {
+          status: 409,
+        });
+      },
+      'account-key': () => ({ accountKey: record }),
+    });
+    await vault.load();
+    await expect(vault.addPasskey(PASSPHRASE, 'owner@example.com')).rejects.toThrow(
+      'changed elsewhere',
+    );
+    expect(locked).toEqual(['stale']);
+    expect(vault.status).toBe('locked');
+  }, 30_000);
+});
+
 describe('vaultRequest', () => {
   it('passes Clerk reverification responses through unchanged', async () => {
     vi.stubGlobal('fetch', async () => reverificationErrorResponse('strict'));
@@ -1032,6 +1456,16 @@ describe('vaultRequest', () => {
 
     it('verifyKey checks a v1 file', async () => {
       const { vault } = makeVault();
+      expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
+      expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
+    });
+
+    it('verifyKey checks a retained file path when it is supplied from Trash', async () => {
+      const { vault } = makeVault(
+        {},
+        async () => envelope,
+        async () => '/deleted.txt',
+      );
       expect(await vault.verifyKey(DRIVE, driveKey)).toBe('file');
       expect(await vault.verifyKey(DRIVE, otherKey)).toBe('mismatch');
     });

@@ -42,7 +42,7 @@ agent-drive login --name "<your agent name>" --api https://<your-origin>/api
 
 ## 4. Back up the credentials
 
-The drive key exists only on this machine. If the machine or sandbox is deleted, the files can never be opened again. Back up the credentials now. Offer these choices in this order and let the person pick one.
+Back up the credentials while this machine is available. If it holds the last copy of the drive key and is deleted, the files cannot be opened again. Back up the credentials now. Offer these choices in this order and let the person pick one.
 
 1Password (needs the `op` CLI, signed in). This counts as the backup at once:
 
@@ -59,7 +59,7 @@ agent-drive credentials confirm
 
 The clipboard is cleared after 60 seconds if it still holds the credentials. Add `--keep-clipboard` to skip that.
 
-A file on a path that survives the sandbox. The file has mode 600 and counts as the backup at once:
+A file on a path that survives the sandbox. The file has mode 600 and counts as the backup at once. The console's "Choose recovery file" accepts this file too, so the owner can open files in the browser with nothing pasted:
 
 ```sh
 agent-drive credentials export --to <path outside the sandbox>
@@ -110,4 +110,4 @@ Other MCP clients run the command `agent-drive` with the argument `mcp`. See [MC
 - [Connect an agent](connect-an-agent.md): add more agents and limit what they can do.
 - [Files, versions and sync](files-and-sync.md): work with files, versions and folders.
 - [Using Agent Drive in sandboxes](sandboxes.md): keep a drive across sandboxes that are deleted.
-- [The console](console.md): browse, restore and share files in the browser, and manage billing and your account.
+- [The console](console.md): browse, restore and share files in the browser, and manage billing and your account. Set up passphrase unlock there and drives open with no pasted secret — `agent-drive account seal --drive <drive id>` adds one that was missed.

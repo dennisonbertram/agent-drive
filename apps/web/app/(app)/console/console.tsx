@@ -28,7 +28,7 @@ import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
-import { keySourceFor, type Source } from '@/src/console/webhook-setup';
+import { isDriveBoundSource, keySourceFor, type Source } from '@/src/console/webhook-setup';
 import {
   BROWSER_KEY_DELETE_FAILED,
   Vault,
@@ -447,6 +447,25 @@ function vaultFailure(reason: unknown, doing: string) {
   return reason instanceof Error ? reason.message : 'Something went wrong. Please try again.';
 }
 
+/**
+ * Can this browser run a passkey ceremony with the PRF extension? WebAuthn missing or an
+ * explicit `extension:prf: false` means no; an unknown answer still gets the option — the
+ * ceremony itself reports when this device cannot run it.
+ */
+async function detectPasskey() {
+  if (
+    typeof PublicKeyCredential === 'undefined' ||
+    typeof navigator.credentials?.create !== 'function'
+  )
+    return false;
+  try {
+    const capabilities = await PublicKeyCredential.getClientCapabilities?.();
+    return capabilities?.['extension:prf'] !== false;
+  } catch {
+    return true;
+  }
+}
+
 export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // clerkEnabled is constant for the life of the deployment, so the hook order never changes.
   const useIdentity = clerkEnabled ? useClerkIdentity : useNoIdentity;
@@ -476,10 +495,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           return wrapped;
         },
         anyPath: async (driveId) => {
-          const result = await api<{ items: { path: string; kind?: string }[] }>(
-            `drives/${driveId}/list?limit=1`,
+          const result = await api<{ items: { path: string }[] }>(
+            `drives/${driveId}/search?limit=1`,
           );
-          return result.items.find((item) => item.kind !== 'folder')?.path;
+          const live = result.items[0]?.path;
+          if (live) return live;
+          // Trash retains versions too. Check one retained path so a key can still be proven
+          // when every file has been deleted.
+          const trash = await api<{ items: { path: string }[] }>(`drives/${driveId}/trash?limit=1`);
+          return trash.items[0]?.path;
         },
         inbox: async (driveId) =>
           (await api<{ inbox: TraceInboxRecord | null }>(`drives/${driveId}/trace-inbox`)).inbox,
@@ -493,6 +517,21 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   );
   const [unlockMode, setUnlockMode] = useState<UnlockMode>('recovery');
   const [recoveryNote, setRecoveryNote] = useState('');
+  // WebAuthn + PRF support, probed once; drives the passkey affordances in menu and dialog.
+  const [passkeyCapable, setPasskeyCapable] = useState(false);
+  useEffect(() => {
+    let on = true;
+    void detectPasskey().then((ok) => {
+      if (on) setPasskeyCapable(ok);
+    });
+    return () => {
+      on = false;
+    };
+  }, []);
+  const [passkeyOffer, setPasskeyOffer] = useState<string | null>(null);
+  const hasPasskey = vault.record?.passkey != null;
+  // The unlock dialog opens on the strongest method this account+device pair has.
+  const unlockEntry = (): UnlockMode => (hasPasskey && passkeyCapable ? 'passkey' : 'passphrase');
   // Increases when the drive changes, the unlock dialog closes, or a new action waits for a key.
   const actionEpoch = useRef(0);
   // Drives whose key this tab generated itself; those are sealed without a file check.
@@ -547,8 +586,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The row whose Download or Preview asked for the key; it continues once the key loads.
   const [pendingAction, setPendingAction] = useState<
     | { driveId: string; file: FileEntry; kind: 'download' | 'preview' | 'share' }
-    // The webhook setup needs a key but no file.
+    // The webhook setup and a fresh recovery file need a key but no file.
     | { driveId: string; kind: 'webhook' }
+    | { driveId: string; kind: 'recovery' }
     | null
   >(null);
   // The key the unlock dialog just loaded for the webhook dialog, handed over once as it opens.
@@ -741,7 +781,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     } catch (reason) {
       if (owner === refreshOwner.current) throw reason;
     }
-  }, [identity.userId]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -914,6 +954,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           : current,
       );
       setPendingAction(null);
+      setPasskeyOffer(null);
       actionEpoch.current += 1;
       vault.cancelUnlock();
       previewRequest.current += 1;
@@ -1033,6 +1074,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     );
     setPendingAction(null);
     setTracesResume(undefined);
+    setPasskeyOffer(null);
     trustedDrives.current.clear();
     keySources.current.clear();
     setDriveKeys({});
@@ -1079,7 +1121,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (lastUser.current === identity.userId) return;
     const hadUser = lastUser.current !== null;
     lastUser.current = identity.userId;
-    if (!hadUser) return;
+    if (!hadUser) {
+      void refresh();
+      return;
+    }
     vault.clearBrowser();
     inboxCache.current.clear();
     recordedBackups.current = {};
@@ -1095,7 +1140,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setReady(false);
     lockAll('');
     void vault.load();
-  }, [identity.userId, vault]);
+    void refresh();
+  }, [identity.userId, refresh, vault]);
   // A key prompt or resume belongs to one drive.
   useEffect(() => {
     actionEpoch.current += 1;
@@ -1122,10 +1168,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal(name);
   }
   function close() {
-    if (!busy) {
+    if (modal === 'preview' || !busy) {
       setPendingAction(null);
       actionEpoch.current += 1;
       vault.cancelUnlock();
+      setPasskeyOffer(null);
       closePreview();
       setShareFile(null);
       setModal(null);
@@ -1170,6 +1217,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         : current,
     );
     setPendingAction(null);
+    setPasskeyOffer(null);
     actionEpoch.current += 1;
     vault.cancelUnlock();
     closePreview();
@@ -1235,9 +1283,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     let note = '';
     if (vault.status === 'unlocked' && !agentOnly) {
       note = NOT_IN_ACCOUNT;
-      if (vault.hasSlot(driveId)) {
-        const mark = actionEpoch.current;
-        const epoch = vault.epochNow;
+      const mark = actionEpoch.current;
+      const epoch = vault.epochNow;
+      const enrolled = await vault.ensureSlot(driveId);
+      if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
+      if (enrolled) {
         const result = await vault.keyFor(driveId, file.path);
         if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
         if (result.status === 'key') {
@@ -1252,7 +1302,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     actionEpoch.current += 1;
     setPendingAction({ driveId, file, kind });
     setRecoveryNote(agentOnly ? AGENT_ONLY : note);
-    setUnlockMode(vault.status === 'locked' && !agentOnly ? 'passphrase' : 'recovery');
+    setUnlockMode(vault.status === 'locked' && !agentOnly ? unlockEntry() : 'recovery');
     open('unlock');
     return undefined;
   }
@@ -1273,9 +1323,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       };
     const agentOnly = drives.find((item) => item.id === driveId)?.agentOnly === true;
     let invalid = false;
-    if (vault.status === 'unlocked' && vault.hasSlot(driveId) && !agentOnly) {
-      const mark = actionEpoch.current;
-      const epoch = vault.epochNow;
+    const mark = actionEpoch.current;
+    const epoch = vault.epochNow;
+    const enrolled = vault.status === 'unlocked' && !agentOnly && (await vault.ensureSlot(driveId));
+    if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
+    if (enrolled) {
       const key = await vault.slotKey(driveId);
       if (mark !== actionEpoch.current || epoch !== vault.epochNow) return undefined;
       if (key) {
@@ -1297,7 +1349,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             ? NOT_IN_ACCOUNT
             : '',
     );
-    setUnlockMode(vault.status === 'locked' && !agentOnly ? 'passphrase' : 'recovery');
+    setUnlockMode(vault.status === 'locked' && !agentOnly ? unlockEntry() : 'recovery');
     open('unlock');
     return undefined;
   }
@@ -1375,20 +1427,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   async function openPreview(file: FileEntry, key?: string) {
-    key ??= await keyFor(file, 'preview');
-    if (!key) return;
-    const name = file.path.split('/').at(-1) || file.path;
     const mine = ++previewRequest.current;
+    const name = file.path.split('/').at(-1) || file.path;
     const show = (view: PreviewView) => {
       if (mine === previewRequest.current) setPreview({ file, view });
     };
     open('preview');
+    show({ status: 'loading' });
     const kind = previewKind(name);
     const listed = Number(file.ciphertext_size ?? 0);
     if (kind === 'none') return show({ status: 'unsupported' });
     if (listed > PREVIEW_MAX_BYTES) return show({ status: 'too-large', sizeLabel: size(listed) });
-    show({ status: 'loading' });
     try {
+      key ??= await keyFor(file, 'preview');
+      if (mine !== previewRequest.current || !key) return;
       // Pin the listed version, so the size checked above is the size fetched.
       const bytes = await fetchPlaintext(selected, file.path, key, file.version_id);
       if (bytes.length > PREVIEW_MAX_BYTES)
@@ -1675,6 +1727,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (pending.driveId === selected) openTraces({ key, source });
       return;
     }
+    // Recovery keys must not enter the cache or account until the recovery export verifies them.
+    if (pending?.kind === 'recovery') {
+      if (pending.driveId === selected) void act(() => downloadRecovery(key, source));
+      return;
+    }
     setDriveKeys((current) => ({ ...current, [selected]: key }));
     keySources.current.set(selected, source);
     // A key the user supplied also goes into the account, once it opens a real file.
@@ -1682,7 +1739,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       vault.status === 'unlocked' &&
       drives.find((item) => item.id === selected)?.agentOnly !== true
     )
-      void addToAccount(selected, key, (pending?.file ?? loadedFiles[0])?.path, true);
+      void addToAccount(
+        selected,
+        key,
+        (pending && 'file' in pending ? pending.file : loadedFiles[0])?.path,
+        true,
+      );
     if (pending?.driveId !== selected) return;
     if (pending.kind === 'preview') void openPreview(pending.file, key);
     else if (pending.kind === 'share') void openShare(pending.file, key);
@@ -1690,9 +1752,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
 
   function resume(pending: NonNullable<typeof pendingAction>) {
-    if (pending.kind === 'webhook') void resumeWebhook();
+    if (pending.kind === 'webhook') void act(resumeWebhook);
+    else if (pending.kind === 'recovery') void act(() => downloadRecovery());
     else if (pending.kind === 'preview') void openPreview(pending.file);
-    else if (pending.kind === 'share') void openShare(pending.file);
+    else if (pending.kind === 'share') void act(() => openShare(pending.file));
     else void act(() => download(pending.file));
   }
 
@@ -1711,6 +1774,32 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     resume(pending);
     return '';
   }
+  async function unlockWithPasskey(keepUnlocked: boolean) {
+    const mark = actionEpoch.current;
+    const pending = pendingAction;
+    try {
+      if (!(await vault.unlockWithPasskey(keepUnlocked))) return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'unlock with your passkey');
+    }
+    setModal(null);
+    // Same pending action resumes as a passphrase unlock: the download, preview or share the
+    // user asked for continues with no second click.
+    if (mark !== actionEpoch.current || !pending || pending.driveId !== selected) return '';
+    setPendingAction(null);
+    resume(pending);
+    return '';
+  }
+  async function addPasskey(passphrase: string) {
+    try {
+      if (!(await vault.addPasskey(passphrase, identity.email || 'Agent Drive'))) return '';
+    } catch (reason) {
+      return vaultFailure(reason, 'add the passkey');
+    }
+    setModal(null);
+    setNotice('Passkey added. Use it to unlock this account on this device.');
+    return '';
+  }
   async function setUpPassphrase(_old: string, passphrase: string) {
     try {
       const result = await vault.setup(
@@ -1724,12 +1813,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         ),
       );
       if (!result) return '';
+      const text = result.total
+        ? `Passphrase set up. ${count(result.added, 'drive')} added to your account.`
+        : 'Passphrase set up. Your agent can now add its drives to your account.';
       setModal(null);
-      setNotice(
-        result.total
-          ? `Passphrase set up. ${count(result.added, 'drive')} added to your account.`
-          : 'Passphrase set up. Load each drive’s recovery file once to add it.',
-      );
+      setNotice(text);
+      if (passkeyCapable) setPasskeyOffer(text);
       return '';
     } catch (reason) {
       return vaultFailure(reason, 'set up the passphrase');
@@ -1771,6 +1860,96 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     );
   }
 
+  async function downloadRecovery(
+    suppliedKey?: string,
+    suppliedSource?: Exclude<Source, 'trusted'>,
+  ) {
+    const driveId = selected;
+    const mark = actionEpoch.current;
+    const epoch = vault.epochNow;
+    const current = () => mark === actionEpoch.current && epoch === vault.epochNow;
+    let key = suppliedKey ?? driveKeys[driveId];
+    const rejectKey = (rejectedKey: string, message: string): never => {
+      setDriveKeys((current) => {
+        if (current[driveId] !== rejectedKey) return current;
+        const next = { ...current };
+        delete next[driveId];
+        return next;
+      });
+      if (driveKeys[driveId] === rejectedKey) keySources.current.delete(driveId);
+      setPendingAction({ driveId, kind: 'recovery' });
+      setRecoveryNote(message);
+      setUnlockMode('recovery');
+      open('unlock');
+      throw new Error(message);
+    };
+    let fromAccount = false;
+    let invalidAccountSlot = false;
+    if (!key && vault.status === 'unlocked' && !drive?.agentOnly) {
+      const enrolled = await vault.ensureSlot(driveId);
+      if (!current()) return;
+      if (enrolled) {
+        key = (await vault.slotKey(driveId)) ?? undefined;
+        if (!current()) return;
+        if (!key) {
+          invalidAccountSlot = true;
+          if (await vault.ensureSlot(driveId, true))
+            key = (await vault.slotKey(driveId)) ?? undefined;
+          if (!current()) return;
+        }
+        fromAccount = true;
+      }
+    }
+    if (!key) {
+      actionEpoch.current += 1;
+      setPendingAction({ driveId, kind: 'recovery' });
+      setRecoveryNote(
+        drive?.agentOnly
+          ? AGENT_ONLY
+          : invalidAccountSlot
+            ? MISMATCH
+            : 'No usable copy of this key is in your account.',
+      );
+      setUnlockMode(vault.status === 'locked' && !drive?.agentOnly ? unlockEntry() : 'recovery');
+      open('unlock');
+      return;
+    }
+    const source: Source = fromAccount
+      ? 'vault'
+      : (suppliedSource ??
+        keySourceFor(trustedDrives.current.get(driveId), keySources.current.get(driveId), key));
+    if (source !== 'trusted') {
+      let verdict = await vault.verifyKey(driveId, key);
+      if (!current()) return;
+      // Another tab may have repaired this account slot while the current tab was unlocked.
+      if (fromAccount && (verdict === 'mismatch' || verdict === 'unverifiable')) {
+        if (await vault.ensureSlot(driveId, true)) {
+          const refreshed = await vault.slotKey(driveId);
+          if (!current()) return;
+          if (refreshed) {
+            key = refreshed;
+            verdict = await vault.verifyKey(driveId, key);
+            if (!current()) return;
+          }
+        }
+      }
+      if (verdict === 'mismatch') rejectKey(key, MISMATCH);
+      if (verdict === 'unverifiable' && !isDriveBoundSource(source))
+        rejectKey(
+          key,
+          'This drive has no file or trace inbox to confirm the key. Use a recovery file or credentials bundle for an empty drive.',
+        );
+    }
+    if (fromAccount || suppliedKey) {
+      setDriveKeys((keys) => ({ ...keys, [driveId]: key }));
+      keySources.current.set(driveId, source);
+      if (suppliedKey && vault.status === 'unlocked' && !drive?.agentOnly)
+        void addToAccount(driveId, key, undefined, true);
+    }
+    saveRecoveryFile(driveId, key);
+    setKeylineConfirm(driveId);
+  }
+
   // Called only after the user confirms the file saved. Records the method; the key never leaves this page.
   async function recordBackup(driveId: string) {
     let recorded: { keyBackupAt: string; keyBackupMethod: string };
@@ -1805,6 +1984,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       {error}
     </div>
   );
+  const unlockStep = unlockMode === 'recovery' ? 'the key loads' : 'you unlock';
   return (
     <div className="console-shell">
       <aside className="sidebar" data-nav-open={navOpen}>
@@ -1900,7 +2080,27 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 ) : notice ? (
                   <>
                     <span className="notice-text">{notice}</span>
-                    <button type="button" className="notice-dismiss" onClick={() => setNotice('')}>
+                    {passkeyOffer === notice && (
+                      <button
+                        type="button"
+                        className="notice-dismiss"
+                        data-testid="passkey-offer"
+                        onClick={() => {
+                          setUnlockMode('passkeyAdd');
+                          open('unlock');
+                        }}
+                      >
+                        Add a passkey
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="notice-dismiss"
+                      onClick={() => {
+                        setNotice('');
+                        setPasskeyOffer(null);
+                      }}
+                    >
                       Dismiss
                     </button>
                   </>
@@ -2205,9 +2405,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               vault={vault.status}
                               fingerprint={vault.fingerprint}
                               agentOnly={drive?.agentOnly === true}
+                              passkey={
+                                hasPasskey && passkeyCapable
+                                  ? 'use'
+                                  : !hasPasskey && passkeyCapable
+                                    ? 'add'
+                                    : undefined
+                              }
                               vaultActions={{
                                 onSetup: () => openVaultDialog('setup'),
                                 onUnlock: () => openVaultDialog('passphrase'),
+                                onPasskeyUnlock: () => openVaultDialog('passkey'),
+                                onAddPasskey: () => openVaultDialog('passkeyAdd'),
                                 onLock: () => vault.lock('manual'),
                                 onLockBrowser: () => {
                                   void vault
@@ -2218,10 +2427,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                 onReset: () => openVaultDialog('reset'),
                                 onRetry: retryVault,
                               }}
-                              onDownload={() => {
-                                saveRecoveryFile(selected, driveKeys[selected]!);
-                                setKeylineConfirm(selected);
-                              }}
+                              onDownload={() => void act(() => downloadRecovery())}
                               onSaved={() =>
                                 void act(async () => {
                                   setKeylineConfirm('');
@@ -2544,7 +2750,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                             event.currentTarget
                                               .closest<HTMLElement>('[popover]')
                                               ?.hidePopover();
-                                            void openShare(file);
+                                            void act(() => openShare(file));
                                           }}
                                         >
                                           Share
@@ -3132,6 +3338,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 setup: 'Set up passphrase unlock',
                 change: 'Change passphrase',
                 reset: 'Reset passphrase',
+                passkey: 'Unlock with your passkey',
+                passkeyAdd: 'Add a passkey',
               }[unlockMode],
               agent: 'Create an agent',
               connect: 'Connect an agent',
@@ -3148,10 +3356,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           className={modal === 'preview' ? 'preview' : undefined}
           onClose={close}
           closable={
-            !busy &&
-            !(modal === 'traces' && tracesBusy) &&
-            modal !== 'driveReceipt' &&
-            modal !== 'keyReceipt'
+            modal === 'preview' ||
+            (!busy &&
+              !(modal === 'traces' && tracesBusy) &&
+              modal !== 'driveReceipt' &&
+              modal !== 'keyReceipt')
           }
         >
           {modal !== 'unlock' && errorBanner}
@@ -3254,16 +3463,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveId={selected}
               pendingMessage={
                 pendingAction?.kind === 'webhook'
-                  ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, you can set up the OpenRouter webhook.`
-                  : pendingAction
-                    ? `After ${unlockMode === 'passphrase' ? 'you unlock' : 'the key loads'}, ${
-                        pendingAction.kind === 'share'
-                          ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
-                          : `${pendingAction.file.path.split('/').at(-1)} ${
-                              pendingAction.kind === 'preview' ? 'opens' : 'downloads'
-                            }`
-                      }.`
-                    : undefined
+                  ? `After ${unlockStep}, you can set up the OpenRouter webhook.`
+                  : pendingAction?.kind === 'recovery'
+                    ? `After ${unlockStep}, a fresh recovery file downloads.`
+                    : pendingAction
+                      ? `After ${unlockStep}, ${
+                          pendingAction.kind === 'share'
+                            ? `you can share ${pendingAction.file.path.split('/').at(-1)}`
+                            : `${pendingAction.file.path.split('/').at(-1)} ${
+                                pendingAction.kind === 'preview' ? 'opens' : 'downloads'
+                              }`
+                        }.`
+                      : undefined
               }
               onKey={keyLoaded}
               mode={unlockMode}
@@ -3272,12 +3483,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 setUnlockMode(mode);
               }}
               recoveryNote={recoveryNote}
+              agentOnly={drive?.agentOnly === true}
               vault={{
                 email: identity.email,
                 status: vault.status,
                 onRetry: retryVault,
                 hasVault: vault.status === 'locked' && drive?.agentOnly !== true,
+                hasPasskey: hasPasskey && passkeyCapable && drive?.agentOnly !== true,
                 onUnlock: unlockWithPassphrase,
+                onPasskeyUnlock: unlockWithPasskey,
+                onAddPasskey: addPasskey,
                 onSetup: setUpPassphrase,
                 onChange: changePassphrase,
                 onReset: resetPassphrase,

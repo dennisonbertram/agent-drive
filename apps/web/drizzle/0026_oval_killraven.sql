@@ -1,0 +1,1 @@
+ALTER TABLE "account_keys" ADD COLUMN "passkey_wrap" jsonb;

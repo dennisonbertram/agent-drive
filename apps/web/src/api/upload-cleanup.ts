@@ -45,6 +45,41 @@ export async function cleanupAllExpiredUploads(batchSize = 25) {
   }
 }
 
+const UPLOAD_CLEANUP_INTERVAL_MS = 60_000;
+const UPLOAD_CLEANUP_FAILURE_RETRY_MS = 5_000;
+
+type OpportunisticUploadCleanupOptions = {
+  run?: () => Promise<number>;
+  warn?: (message: string) => void;
+  now?: () => number;
+};
+
+export function createOpportunisticUploadCleanup(options: OpportunisticUploadCleanupOptions = {}) {
+  const run = options.run ?? cleanupExpiredUploads;
+  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const now = options.now ?? (() => Date.now());
+
+  let nextEligibleAt = 0;
+  let running = false;
+  return async function maybeCleanupExpiredUploads(): Promise<boolean> {
+    const startedAt = now();
+    if (running || startedAt < nextEligibleAt) return false;
+    running = true;
+    nextEligibleAt = startedAt + UPLOAD_CLEANUP_INTERVAL_MS;
+    try {
+      await run();
+    } catch {
+      nextEligibleAt = now() + UPLOAD_CLEANUP_FAILURE_RETRY_MS;
+      warn('Expired upload cleanup failed. A later request will retry.');
+    } finally {
+      running = false;
+    }
+    return true;
+  };
+}
+
+export const maybeCleanupExpiredUploads = createOpportunisticUploadCleanup();
+
 export async function cleanupDeviceAuthorizations() {
   const removed = await getPool().query(
     "DELETE FROM device_authorizations WHERE created_at < now() - interval '24 hours'",

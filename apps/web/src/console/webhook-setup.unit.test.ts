@@ -1,6 +1,13 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { EMPTY_DRIVE, MISMATCH, keySourceFor, setUpWebhook, type Source } from './webhook-setup';
+import {
+  EMPTY_DRIVE,
+  MISMATCH,
+  isDriveBoundSource,
+  keySourceFor,
+  setUpWebhook,
+  type Source,
+} from './webhook-setup';
 
 const driveId = randomUUID();
 const key = randomBytes(32).toString('base64url');
@@ -112,5 +119,18 @@ describe('keySourceFor', () => {
     expect(keySourceFor('k1', 'pasted', 'k2')).toBe('pasted');
     expect(keySourceFor(undefined, 'bundle', 'k2')).toBe('bundle');
     expect(keySourceFor(undefined, undefined, 'k2')).toBe('pasted');
+  });
+});
+
+describe('isDriveBoundSource', () => {
+  it.each(['trusted', 'recovery-file', 'bundle'] as const)(
+    '%s identifies an empty drive',
+    (source) => {
+      expect(isDriveBoundSource(source)).toBe(true);
+    },
+  );
+
+  it.each(['pasted', 'vault'] as const)('%s cannot identify an empty drive', (source) => {
+    expect(isDriveBoundSource(source)).toBe(false);
   });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
-import { readConfig, resolveConnection, writeConfig } from './config.js';
+import { readConfig, resolveConnection, resolveDriveKey, writeConfig } from './config.js';
 import {
   decodeBundle,
   encodeBundle,
@@ -15,6 +15,7 @@ import {
   reportEnvBackups,
   loadConfig,
   reportKeyBackup,
+  REPORT_CONCURRENCY,
   unbackedUp,
 } from './credentials.js';
 import { backupCandidates, runCheck } from './check.js';
@@ -186,6 +187,126 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
     );
     expect((await resolveConnection()).apiKey).toBe('explicit');
   });
+
+  it('never grafts a bundle bearer onto a saved URL of another origin', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    await writeConfig({ apiUrl: 'https://a.test/api' });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://b.test/api',
+        apiKey: 'bundle-key',
+        driveKeys: {},
+        driveKeyOrigins: {},
+      }),
+    );
+    // The effective URL is the saved origin; the bundle key must not attach to it.
+    expect((await loadConfig()).apiKey).toBeUndefined();
+    // Selecting the bundle origin serves the bundle key.
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://b.test/api');
+    expect((await loadConfig()).apiKey).toBe('bundle-key');
+  });
+
+  it('backfills missing bundle drive-key origins with the bundle origin (legacy bundles)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    const key = generateDriveKey();
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://env.test/api',
+        apiKey: 'envtok',
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    const config = await loadConfig();
+    expect(config.driveKeyOrigins?.[E1]).toBe('https://env.test');
+    expect(await resolveDriveKey(E1, 'https://env.test/api', undefined, config)).toBe(key);
+    expect(await resolveDriveKey(E1, 'https://other.test/api', undefined, config)).toBeUndefined();
+    expect(unbackedUp(config, [E1])).toEqual([]);
+  });
+
+  it.each([
+    ['explicit bundle origin', 'https://bundle.test'],
+    ['legacy bundle origin', undefined],
+  ])('does not bind a different saved key to a %s', async (_label, bundleKeyOrigin) => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://bundle.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'bundle-token');
+    const bundleKey = generateDriveKey();
+    const savedKey = generateDriveKey();
+    await writeConfig({ driveKeys: { [E1]: savedKey } });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://bundle.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [E1]: bundleKey },
+        driveKeyOrigins: bundleKeyOrigin ? { [E1]: bundleKeyOrigin } : {},
+      }),
+    );
+    const merged = await loadConfig();
+    expect(merged.driveKeys?.[E1]).toBe(savedKey);
+    expect(merged.driveKeyOrigins?.[E1]).toBeUndefined();
+    expect(await resolveDriveKey(E1, 'https://bundle.test/api', undefined, merged)).toBeUndefined();
+  });
+
+  it('backfills a legacy bundle origin for the same saved key bytes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://bundle.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'bundle-token');
+    const key = generateDriveKey();
+    await writeConfig({ driveKeys: { [E1]: key } });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://bundle.test/api',
+        apiKey: 'bundle-token',
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    const merged = await loadConfig();
+    expect(merged.driveKeyOrigins?.[E1]).toBe('https://bundle.test');
+    expect(await resolveDriveKey(E1, 'https://bundle.test/api', undefined, merged)).toBe(key);
+  });
+
+  it('issues an explicit environment drive key for the selected origin', async () => {
+    const { key } = await setup();
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://other.test/api');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'other-token');
+    vi.stubEnv('AGENT_DRIVE_KEY', key);
+    const output = io(false);
+    await issueCredentials({ name: 'agent', drive: D1, stdout: true }, output, async () => ({
+      id: 'issued',
+      agent_id: 'agent-under-test',
+      label: 'issued key',
+      drive_ids: [D1],
+      scopes: ['read'],
+      created_at: '2026-01-01T00:00:00Z',
+      token: 'issued-token',
+    }));
+    const bundle = decodeBundle(output.out.join('').trim().replace('AGENT_DRIVE_CREDENTIALS=', ''));
+    expect(bundle.apiUrl).toBe('https://other.test/api');
+    expect(bundle.driveKeyOrigins[D1]).toBe('https://other.test');
+    expect(bundle.driveKeys[D1]).toBe(key);
+  });
 });
 
 describe('login replacing the API key', () => {
@@ -231,6 +352,36 @@ describe('env bundle reporting', () => {
     });
     const urls = fetcher.mock.calls.map((call) => (call as unknown as [string])[0]);
     expect(urls).toEqual([`https://x.test/api/v1/drives/${IA}/key-backup`]);
+  });
+
+  it('reports a legacy bundle key after its own origin is safely backfilled', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    await writeConfig({ apiUrl: 'https://saved.test/api' });
+    const key = generateDriveKey();
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://legacy.test/api',
+        apiKey: 'legacy-token',
+        driveKeys: { [IA]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    vi.resetModules();
+    const fresh = await import('./credentials.js');
+    const fetcher = vi.fn(async () => new Response('{}', { status: 200 }));
+    await fresh.reportEnvBackups('https://legacy.test/api', 'legacy-token', {
+      fetch: fetcher as unknown as typeof fetch,
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      `https://legacy.test/api/v1/drives/${IA}/key-backup`,
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });
 
@@ -373,6 +524,104 @@ describe('enforcement and reporting', () => {
     });
     expect(denied).toHaveBeenCalledTimes(1);
     expect(warn).toEqual([]);
+  });
+
+  it('reports a few drives at a time under one shared deadline', async () => {
+    const ids = [IA, IB, IC, ID, E1, D1, D2];
+    const slots: { signal: AbortSignal | null; resolve: (r: Response) => void }[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetcher = vi.fn((_url: string, init?: RequestInit) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise<Response>((resolve) => {
+        slots.push({
+          signal: (init?.signal as AbortSignal | undefined) ?? null,
+          resolve: (r) => {
+            inFlight -= 1;
+            resolve(r);
+          },
+        });
+      });
+    });
+    const warn: string[] = [];
+    const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+      fetch: fetcher as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    // Bounded workers: only REPORT_CONCURRENCY requests start before any response arrives.
+    expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY);
+    expect(maxInFlight).toBe(REPORT_CONCURRENCY);
+    // One shared deadline: every request carries the same AbortSignal.
+    expect(slots[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(new Set(slots.map((s) => s.signal)).size).toBe(1);
+    // Overlap: resolving one frees a lane, and the next drive goes out in order.
+    for (let i = REPORT_CONCURRENCY; i < ids.length; i += 1) {
+      slots[i - REPORT_CONCURRENCY]!.resolve(new Response('{}', { status: 200 }));
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(i + 1));
+    }
+    for (const slot of slots.splice(0)) slot.resolve(new Response('{}', { status: 200 }));
+    await done;
+    expect(fetcher).toHaveBeenCalledTimes(ids.length);
+    expect(warn).toEqual([]);
+    expect(fetcher.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual(
+      ids.map((id) => `https://x.test/api/v1/drives/${id}/key-backup`),
+    );
+  });
+
+  it('cuts every unreported drive when the shared deadline aborts', async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    try {
+      const fetcher = vi.fn((_url: string, init?: RequestInit) => {
+        const signal = init?.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          const fail = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal.aborted) fail();
+          else signal.addEventListener('abort', fail, { once: true });
+        });
+      });
+      const warn: string[] = [];
+      const ids = [IA, IB, IC, ID, E1, D1];
+      const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+        fetch: fetcher as unknown as typeof fetch,
+        warn: (m) => warn.push(m),
+      });
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY));
+      controller.abort();
+      await done;
+      // The deadline never let the queued drives start a request.
+      expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY);
+      // Every unreported drive is a warning; none is silently dropped or claimed.
+      expect(warn).toHaveLength(ids.length);
+      for (const id of ids) expect(warn.join('\n')).toContain(id);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('warns only for reports that fail while the rest succeed', async () => {
+    const resolveBy = new Map<string, (r: Response) => void>();
+    const fetcher = vi.fn(
+      (url: string) => new Promise<Response>((resolve) => resolveBy.set(url, resolve)),
+    );
+    const warn: string[] = [];
+    const ids = [IA, IB, IC, ID, E1];
+    const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+      fetch: fetcher as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY));
+    const at = (id: string) => `https://x.test/api/v1/drives/${id}/key-backup`;
+    resolveBy.get(at(IA))!(new Response('{}', { status: 500 }));
+    resolveBy.get(at(IB))!(new Response('{}', { status: 200 }));
+    resolveBy.get(at(IC))!(new Response('{}', { status: 403 }));
+    resolveBy.get(at(ID))!(new Response('{}', { status: 200 }));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(ids.length));
+    resolveBy.get(at(E1))!(new Response('{}', { status: 200 }));
+    await done;
+    expect(warn).toHaveLength(1);
+    expect(warn[0]).toContain(IA);
   });
 });
 

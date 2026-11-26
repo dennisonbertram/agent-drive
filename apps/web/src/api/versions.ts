@@ -23,6 +23,9 @@ export type CommitPutInput = {
   mode: PutMode;
   // Optional: callers that embed the version id in objectKey pass it so the two stay in step.
   versionId?: string;
+  // Set only when the caller already ran putConflict and checkDriveQuota under the locks this
+  // transaction holds; `file` is the row putConflict returned (undefined when the path is free).
+  prechecked?: { file: Row | undefined };
 };
 
 const trashedMessage = 'The file is in the trash. Restore it, or write with overwrite.';
@@ -71,13 +74,28 @@ export async function putConflict(
 }
 
 /** Throws quota_exceeded if adding `size` bytes of versions would exceed the drive quota. */
-export async function checkDriveQuota(client: PoolClient, driveId: string, size: number) {
+export async function checkDriveQuota(
+  client: PoolClient,
+  driveId: string,
+  size: number,
+  // Optional quota already read off a row the caller locked in this transaction.
+  quotaBytes?: number,
+) {
   const used = await client.query(
     'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
     [driveId],
   );
-  const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
-  if (Number(used.rows[0].used) + size > Number(quota.rows[0].quota_bytes)) {
+  const quota =
+    quotaBytes ??
+    Number(
+      (
+        await client.query<{ quota_bytes: string }>(
+          'SELECT quota_bytes FROM drives WHERE id = $1',
+          [driveId],
+        )
+      ).rows[0]!.quota_bytes,
+    );
+  if (Number(used.rows[0].used) + size > quota) {
     throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
   }
 }
@@ -85,12 +103,16 @@ export async function checkDriveQuota(client: PoolClient, driveId: string, size:
 /**
  * Records a new version of a file: conflict checks, drive quota, files and versions rows and the
  * 'put' event. The caller holds lockBillingAccount and the drive row FOR UPDATE, has run
- * enforceWriteBudget, and has already placed the object at input.objectKey.
+ * enforceWriteBudget, and has already placed the object at input.objectKey. A caller that already
+ * ran putConflict and checkDriveQuota under the same locks passes input.prechecked so the checks
+ * are not repeated.
  * Returns the new versions row joined with files.path.
  */
 export async function commitPut(client: PoolClient, input: CommitPutInput): Promise<Row> {
-  const file = await putConflict(client, input.driveId, input.path, input.mode);
-  await checkDriveQuota(client, input.driveId, input.ciphertextSize);
+  const file = input.prechecked
+    ? input.prechecked.file
+    : await putConflict(client, input.driveId, input.path, input.mode);
+  if (!input.prechecked) await checkDriveQuota(client, input.driveId, input.ciphertextSize);
   const versionId = input.versionId ?? randomUUID();
   const fileId = (file?.id as string | undefined) ?? randomUUID();
   if (!file) {

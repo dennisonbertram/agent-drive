@@ -6,7 +6,7 @@ For what each key is and what losing it means, see [Keys and recovery](keys-and-
 
 ## What you are backing up
 
-The drive key exists only in the CLI config file (`~/.config/agent-drive/config.json`, or the path in `AGENT_DRIVE_CONFIG`). Agent Drive never receives it. If that file is lost, the files in the drive cannot be opened, and Agent Drive cannot restore the key for you.
+The CLI saves the drive key in `~/.config/agent-drive/config.json` or the path in `AGENT_DRIVE_CONFIG`. If the agent seals it to your account, you can also open the drive in the dashboard. Back up the credentials before retiring the machine.
 
 `agent-drive credentials export` writes a credentials bundle: the text `adcred1.` followed by base64url of JSON. The bundle holds the API key and every drive key saved on this machine. Treat it as a secret. It is the only secret the CLI ever prints.
 
@@ -132,26 +132,25 @@ To give a new agent access to the old drive, run `agent-drive login` on it. On t
 
 ## Open files in the console
 
-The console shows file names and metadata without any key. To decrypt and download a file in the browser, it needs the drive key. You have two ways to give it one:
+The console shows file names and metadata without any key. To decrypt and download a file in the browser, it needs the drive key. Load it in one of these ways:
 
-- **Recovery file.** Choose "Load key" in the key menu, then "Choose recovery file" (or drop the file on the box). The recovery file is JSON named `agent-drive-<drive id>.key.json` with the fields `format` (`agent-drive-key-v1`), `driveId` and `key`. It must be under 16,384 bytes and its `driveId` must match the drive. Otherwise the console says `That recovery file is not for this drive.` or `That is not a recovery file.`
+- **Passphrase.** If you set up passphrase unlock, drives an agent sealed to your account open with it — nothing is pasted. Agents seal held keys on their own; `agent-drive account seal --drive <drive id>` seals one on demand. A passphrase slot is not a backup of the drive key. See [Keys and recovery](keys-and-recovery.md).
+- **Recovery file.** Choose "Load key" in the key menu, then "Choose recovery file" (or drop the file on the box). The recovery file is JSON named `agent-drive-<drive id>.key.json` with the fields `format` (`agent-drive-key-v1`), `driveId` and `key`. It must be under 16,384 bytes and its `driveId` must match the drive. Otherwise the console says `That recovery file is not for this drive.` or `That is not a recovery file.` The chooser also accepts an `adcred1.` bundle saved as a file; it takes the key for this drive.
 - **Pasted key or bundle.** Open "Paste a key instead" and paste the drive key or an `adcred1.` bundle. From a bundle the console takes the key for the selected drive only.
 
 The key stays in that browser tab. It is cleared when you reload the page or after 30 minutes without use. It is not sent to the service and not saved in browser storage.
 
-If you have no recovery file, ask the agent that created the drive to run `agent-drive credentials export`, then choose or paste what it gives you.
-
-If you set up a passphrase in the console, you can unlock your drives with it instead. A passphrase slot is not a backup of the drive key. See [Keys and recovery](keys-and-recovery.md).
+If you have no recovery file, prefer the path that pastes no secret: set up passphrase unlock in the console, then ask the agent that holds the drive to run `agent-drive account seal --drive <drive id>` and unlock with your passphrase. If you skip the passphrase, ask the agent to run `agent-drive credentials export --to <a file on your machine>` and choose that file — an `adcred1.` bundle works in the file chooser too. Do not let the agent paste the bundle into a chat. An agent-only drive is never sealed, so it always needs a recovery file or bundle.
 
 ### Download a recovery file
 
-When a drive key is loaded in the tab, choose "Download recovery file" in the key menu. The console also offers the file when it creates a drive. The file holds the key in plaintext, so store it in a password manager or another secure place. After the file saves, choose "I saved it". The console then records the backup with method `file`. The key is not sent.
+In Files, open the drive’s key menu and choose **Download recovery file**. An enrolled passkey or passphrase unlocks the account’s copy if the tab needs it. The download contains the same key that opens your existing files. Save it privately and choose **I saved it** to record the backup.
 
 ## Back up folders (not keys)
 
 Key backup is separate from file backup. To upload a working directory to the drive before a sandbox ends, use `agent-drive backup`. See [Files, versions and sync](files-and-sync.md).
 
-`backup` scans the folder first and prints what it found, then uploads. `--gitignore` skips paths the folder's `.gitignore` excludes, and `--exclude GLOB` skips more paths. Neither is on by default, so ignored files such as `.env` and the `.git` folder are backed up. More than 5000 files or 1 GiB is refused unless `--yes` is passed — preview first with `--dry-run`. Only one backup runs per prefix at a time; progress goes to stderr every 10 seconds. `agent-drive --version` prints the CLI version.
+`backup` scans the folder first and prints what it found, then uploads. `--gitignore` skips paths the folder's `.gitignore` excludes — and `.git` control metadata, since git never traverses it (a `.git` directory or a linked worktree's `.git` file). `--exclude GLOB` skips more paths. Neither is on by default, so ignored files such as `.env` and the `.git` folder are backed up. More than 5000 files or 1 GiB is refused unless `--yes` is passed — preview first with `--dry-run`. Only one backup runs per prefix at a time; progress goes to stderr every 10 seconds. `agent-drive --version` prints the CLI version.
 
 ## A login that replaces the API key
 

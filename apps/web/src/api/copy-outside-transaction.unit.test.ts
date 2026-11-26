@@ -375,6 +375,21 @@ describe('commitIntent', () => {
     expect(deletedObjectKeys()).toHaveLength(1);
   });
 
+  it('runs the conflict and quota checks once unlocked and once under the commit locks', async () => {
+    const file = { id: ids.file, current_version_id: ids.sourceVersion, deleted_at: null };
+    vi.mocked(putConflict).mockResolvedValue(file as never);
+    const response = await commit();
+    expect(response.status).toBe(201);
+    // One unlocked pre-check before the copy and one authoritative check under the locks;
+    // commitPut must reuse the locked result, not re-run the same checks a third time.
+    expect(putConflict).toHaveBeenCalledTimes(2);
+    expect(checkDriveQuota).toHaveBeenCalledTimes(2);
+    expect(commitPut).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ prechecked: { file } }),
+    );
+  });
+
   it('deletes the copy when the final transaction conflicts', async () => {
     // The unlocked pre-check passes; the conflict appears only under the lock.
     vi.mocked(putConflict)

@@ -30,6 +30,7 @@ import {
   driveKeyEnvironmentName,
   keysForOrigin,
   machineName,
+  readConfig,
   resolveLoginApiUrl,
   resolveDriveId,
   resolveConnection,
@@ -184,7 +185,7 @@ function sealHook(
 }
 
 async function connect(args: ReturnType<typeof parse>) {
-  const connection = await resolveConnection();
+  const connection = await resolveConnection(args.values.api);
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
   // Kept apart from args.values.drive: `check` has its own selection when --drive is omitted.
   try {
@@ -194,7 +195,7 @@ async function connect(args: ReturnType<typeof parse>) {
   }
   const drive = args.values.drive?.[0] ?? defaultDrive;
   const driveKey = drive
-    ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
+    ? await resolveDriveKey(drive, connection.apiUrl, args.values['key-file'], connection.config)
     : undefined;
   const client = new AgentDriveClient({
     apiUrl: connection.apiUrl,
@@ -220,20 +221,33 @@ let missingDrive: string | undefined;
 let defaultDrive: string | undefined;
 
 /** Forced account-key seal after login/grant/import put drive keys on this machine. */
-function sealAfterKeyChange() {
+function sealAfterKeyChange(connection: Awaited<ReturnType<typeof resolveConnection>>) {
   scheduledSeals.push(async () => {
-    const config = await loadConfig();
-    if (!config.apiUrl || !config.apiKey) return;
-    const seal = sealClientWithDeadline(config.apiUrl, config.apiKey, machineName());
+    const seal = sealClientWithDeadline(connection.apiUrl, connection.apiKey, machineName());
     await autoSealHeldKeys({
       client: seal.client,
-      config,
+      config: connection.config,
       force: true,
       deadline: seal.deadline,
       deadlineAt: seal.deadlineAt,
       warn: (line) => process.stderr.write(`${line}\n`),
     });
   });
+}
+
+async function sealSavedConnectionAfterKeyChange() {
+  const saved = await readConfig();
+  if (!saved.apiUrl || !saved.apiKey) return;
+  let config = saved;
+  try {
+    // Keep the imported/saved connection as the seal client, but include valid in-scope
+    // environment-bundle keys using the same origin-aware merge as ordinary config loads.
+    config = await loadConfig(saved.apiUrl, saved.apiKey);
+  } catch {
+    // A malformed or unrelated environment bundle must not turn a successful import into a
+    // command failure. The saved keys remain safe to seal with their saved connection.
+  }
+  sealAfterKeyChange({ apiUrl: saved.apiUrl, apiKey: saved.apiKey, config });
 }
 
 function requiredDrive(args: ReturnType<typeof parse>) {
@@ -278,10 +292,21 @@ async function run(command: string, raw: string[]) {
       command: wrapped,
       ...(flags.values.agent ? { agent: flags.values.agent } : {}),
       ...(flags.values.drive?.[0] ? { drive: flags.values.drive[0] } : {}),
+      ...(flags.values.api ? { apiUrl: flags.values.api } : {}),
     });
     return;
   }
   const args = parse(raw);
+  // One flag set is parsed for every command, so backup-only flags parse for sync
+  // too — and would be silently ignored, turning `sync --dry-run` into a real
+  // upload. Reject them before connect() performs any key or network lookup.
+  if (command === 'sync') {
+    const backupOnly = (['dry-run', 'exclude', 'gitignore'] as const)
+      .filter((name) => args.values[name] !== undefined)
+      .map((name) => `--${name}`);
+    if (backupOnly.length)
+      throw new Error(`sync does not support ${backupOnly.join(' ')}; use backup instead.`);
+  }
   if (command === 'login') {
     const apiUrl = await resolveLoginApiUrl(args.values.api);
     const apiKey =
@@ -294,7 +319,7 @@ async function run(command: string, raw: string[]) {
         log: (line) => process.stdout.write(`${line}\n`),
         openBrowser: shouldOpenBrowser(args.values['no-browser']),
       });
-      sealAfterKeyChange();
+      await sealSavedConnectionAfterKeyChange();
       return;
     }
     const client = new AgentDriveClient({ apiUrl, apiKey, machine: machineName() });
@@ -306,10 +331,15 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'backup') {
     if (!args.positionals[0]) throw new Error('backup requires LOCAL_DIRECTORY.');
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     await reportEnvBackups(connection.apiUrl, connection.apiKey);
     const driveId = resolveDriveId(args.values.drive?.[0], connection.config, connection.apiUrl);
-    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const key = await resolveDriveKey(
+      driveId,
+      connection.apiUrl,
+      args.values['key-file'],
+      connection.config,
+    );
     const dryRun = args.values['dry-run'] ?? false;
     // Throttled account-key sealing, same as the generic connect() path (backup bypasses it).
     // A dry run previews the upload and must not seal — it neither creates nor holds anything.
@@ -402,10 +432,11 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'issue') {
       if (!args.values.name) throw new Error('--name is required.');
-      const { client } = await connect(args);
+      const { client, connection } = await connect(args);
       const result = await issueCredentials(
         {
           name: args.values.name,
+          apiUrl: connection.apiUrl,
           ...(args.values.drive?.[0] ? { drive: args.values.drive[0] } : {}),
           ...(args.values.scope ? { scopes: args.values.scope } : {}),
           ...(args.values['write-path'] ? { writePaths: args.values['write-path'] } : {}),
@@ -440,7 +471,7 @@ async function run(command: string, raw: string[]) {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
       const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
       process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
-      sealAfterKeyChange();
+      await sealSavedConnectionAfterKeyChange();
       return;
     }
     if (sub === 'status') {
@@ -463,7 +494,7 @@ async function run(command: string, raw: string[]) {
   if (command === 'grant') {
     const code = args.positionals[0];
     if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     const drive = args.values.drive?.[0];
     await grantLogin({
       code,
@@ -479,11 +510,11 @@ async function run(command: string, raw: string[]) {
       config: connection.config,
       log: (line) => process.stdout.write(`${line}\n`),
     });
-    sealAfterKeyChange();
+    sealAfterKeyChange(connection);
     return;
   }
   if (command === 'account' && args.positionals[0] === 'seal') {
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     const client = new AgentDriveClient({
       apiUrl: connection.apiUrl,
       apiKey: connection.apiKey,
@@ -559,11 +590,11 @@ async function run(command: string, raw: string[]) {
   const { client, connection } = await connect(args);
   if (command === 'whoami') {
     const who = await client.whoami();
-    const config = await loadConfig();
+    const config = connection.config;
     return output({
       ...who,
       localDriveKeys: await localKeyMap(who.driveIds, (id) =>
-        resolveDriveKey(id, args.values['key-file'], config),
+        resolveDriveKey(id, connection.apiUrl, args.values['key-file'], config),
       ),
       keyBackup: Object.fromEntries(
         Object.keys(config.driveKeys ?? {})
@@ -573,12 +604,11 @@ async function run(command: string, raw: string[]) {
     });
   }
   if (command === 'check') {
-    const connection = await resolveConnection();
     const who = await client.whoami();
     const candidates = who.driveIds ?? Object.keys(connection.config.driveKeys ?? {});
     const explicit = args.values.drive?.[0];
     const keys = await localKeyMap([...candidates, ...(explicit ? [explicit] : [])], (id) =>
-      resolveDriveKey(id, args.values['key-file'], connection.config),
+      resolveDriveKey(id, connection.apiUrl, args.values['key-file'], connection.config),
     );
     const driveId = pickCheckDrive(explicit, candidates, keys);
     const unbacked = unbackedUp(
@@ -586,7 +616,12 @@ async function run(command: string, raw: string[]) {
       backupCandidates(keys, driveId, args.values['key-file']),
     );
     if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
-    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const key = await resolveDriveKey(
+      driveId,
+      connection.apiUrl,
+      args.values['key-file'],
+      connection.config,
+    );
     const checker = new AgentDriveClient({
       apiUrl: connection.apiUrl,
       apiKey: connection.apiKey,
@@ -612,7 +647,12 @@ async function run(command: string, raw: string[]) {
     // Seal through the same connection that created the drive — a second resolveConnection
     // could pick up an account or origin another process just changed.
     const saved = await loadConfig();
-    const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
+    const existingKey = await resolveDriveKey(
+      drive.id,
+      connection.apiUrl,
+      args.values['key-file'],
+      saved,
+    );
     let sealedKey = existingKey;
     if (drive.created) {
       const key = generateDriveKey();
@@ -902,8 +942,11 @@ Commands:
   share list --drive ID
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
+                                        sync takes no filter or preview flags; the backup-only flags below are rejected, not ignored.
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--exclude GLOB]... [--gitignore] [--dry-run] [--yes]
-                                        Scans the folder first, then uploads. --gitignore skips paths the folder's .gitignore excludes.
+                                        Scans the folder first, then uploads. --gitignore skips paths the folder's .gitignore excludes
+                                        and .git control metadata (a .git directory or a linked worktree's .git file). Without it or
+                                        --exclude, everything is uploaded, .git included.
                                         --exclude GLOB matches the root-relative path: 'build/**' skips everything under build/,
                                         '**/node_modules' skips node_modules at any depth, a bare 'node_modules' only the top-level one.
                                         Over 5000 files or 1 GiB needs --yes (or preview with --dry-run). One backup per prefix at a time.

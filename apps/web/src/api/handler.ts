@@ -14,6 +14,7 @@ import {
   jsonBody,
   kdfField,
   onlyFields,
+  passkeyWrapField,
   positiveRevision,
   sealedSlotField,
   wrappedPrivateKeyField,
@@ -43,7 +44,7 @@ import {
   presignedUpload,
 } from './storage';
 import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
-import { cleanupExpiredUploads } from './upload-cleanup';
+import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -151,9 +152,39 @@ async function authenticateConsole(userId: string): Promise<Auth> {
   if (!userId || userId.length > 256 || /[\u0000-\u001f\u007f]/u.test(userId)) {
     throw new ApiError('unauthorized', 'The console session is invalid.');
   }
+  const userHash = hashToken(userId);
+  const resolved = await getPool().query<{
+    account_id: string;
+    account_name: string;
+    deleting_at: Date | null;
+    agent_id: string;
+    drive_ids: string[] | null;
+  }>(
+    `SELECT a.id AS account_id, a.name AS account_name, a.deleting_at, g.id AS agent_id,
+            ARRAY(SELECT d.id FROM drives d WHERE d.account_id = a.id ORDER BY d.id) AS drive_ids
+       FROM accounts a
+       JOIN agents g ON g.account_id = a.id AND g.name = '__console__'
+      WHERE a.external_clerk_user_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM console_user_tombstones t WHERE t.external_user_hash = $2
+        )`,
+    [userId, userHash],
+  );
+  const resolvedRow = resolved.rows[0];
+  if (resolvedRow) {
+    return {
+      keyId: null,
+      accountId: resolvedRow.account_id,
+      accountName: resolvedRow.account_name,
+      agentId: resolvedRow.agent_id,
+      scopes: [...scopeNames],
+      writePaths: [],
+      driveIds: resolvedRow.deleting_at ? [] : (resolvedRow.drive_ids ?? []),
+      userId,
+    };
+  }
   return withTransaction(async (client) => {
     await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [userId]);
-    const userHash = hashToken(userId);
     if (
       (
         await client.query('SELECT 1 FROM console_user_tombstones WHERE external_user_hash = $1', [
@@ -329,6 +360,8 @@ export function actionFor(method: string, parts: string[], bearer = false) {
       );
     if (parts.length === 2 && parts[1] === 'slots' && method === 'GET')
       return 'console.account_key.slots';
+    if (parts.length === 2 && parts[1] === 'passkey' && method === 'POST')
+      return 'console.account_key.passkey';
   }
   if (
     bearer &&
@@ -906,6 +939,7 @@ function accountKeyOutput(row: Row) {
       wrappedPrivateKey: row.wrapped_private_key,
       wrapGeneration: row.wrap_generation,
       kdf: { name: row.kdf_name, iterations: row.kdf_iterations, salt: row.kdf_salt },
+      passkey: row.passkey_wrap ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     },
@@ -1038,11 +1072,51 @@ async function accountKeyEndpoint(
     }
     return undefined;
   }
+  // One optional passkey wrap per record. It enrolls only when none exists — reset drops it with
+  // the record, a passphrase change keeps it — and it never leaves the console route.
+  if (parts[0] === 'account-key' && parts[1] === 'passkey' && parts.length === 2) {
+    if (method !== 'POST') return undefined;
+    if (!reverified) return reverificationErrorResponse('strict');
+    const body = await jsonBody(request);
+    onlyFields(body, ['expectedKeyId', 'expectedGeneration', 'passkey']);
+    const expectedKeyId = uuid(
+      typeof body.expectedKeyId === 'string' ? body.expectedKeyId : undefined,
+      'expectedKeyId',
+    );
+    const expectedGeneration = positiveRevision(
+      body.expectedGeneration,
+      'expectedGeneration',
+      false,
+    );
+    const passkey = passkeyWrapField(body.passkey);
+    const updated = await withTransaction(async (client) => {
+      const key = await lockVault(client, auth.accountId);
+      if (!key) throw new ApiError('not_found', 'No passphrase is set up.');
+      if (key.id !== expectedKeyId || key.wrap_generation !== expectedGeneration)
+        throw new ApiError('conflict', staleKeyMessage);
+      if (key.passkey_wrap)
+        throw new ApiError('conflict', 'A passkey is already enrolled. Reload the page.');
+      const result = await client.query(
+        `UPDATE account_keys SET passkey_wrap = $2::jsonb, updated_at = now()
+         WHERE id = $1 RETURNING *`,
+        [key.id, JSON.stringify(passkey)],
+      );
+      return result.rows[0] as Row;
+    });
+    return response(accountKeyOutput(updated));
+  }
   if (parts[0] === 'account-key' && parts[1] === 'slots' && parts.length === 2) {
     const { limit, cursor } = page(url);
     const decoded = decodeCursor(cursor, 'name');
     const params: unknown[] = [auth.accountId];
     let clause = 's.account_id = $1';
+    // Optional single-drive read: an unlocked tab refreshes the slot an agent sealed after it
+    // loaded, instead of paging every drive again. A foreign or deleting drive filters to empty.
+    const scoped = url.searchParams.get('driveId');
+    if (scoped !== null) {
+      params.push(uuid(scoped, 'driveId'));
+      clause += ` AND s.drive_id = $${params.length}`;
+    }
     if (decoded) {
       params.push(decoded.id);
       clause += ` AND s.drive_id > $${params.length}`;
@@ -1815,8 +1889,9 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
     mode === 'version'
       ? uuid(typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined, 'ifVersionId')
       : null;
-  const drive = await ensureDrive(auth, driveId);
-  await cleanupExpiredUploads();
+  // fileEndpoint already ran ensureDrive for this drive; the transaction below re-locks and
+  // re-validates the drive row, so a second unlocked read here would change nothing.
+  await maybeCleanupExpiredUploads();
   const id = randomUUID();
   const stagingKey = `staging/${auth.accountId}/${driveId}/${id}`;
   const result = await withTransaction(async (client) => {
@@ -1856,7 +1931,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
         auth.accountId,
         auth.agentId,
         machine,
-        drive.id,
+        driveId,
         path,
         stagingKey,
         ciphertextSize,
@@ -1900,17 +1975,6 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   }
   if (new Date(source.expires_at).getTime() < Date.now())
     throw new ApiError('conflict', 'The upload intent has expired.');
-  let staged: { size: number; etag: string | undefined };
-  try {
-    staged = await objectInfo(source.staging_key);
-  } catch {
-    throw new ApiError('conflict', 'The staged ciphertext is not available.');
-  }
-  if (staged.size !== Number(source.ciphertext_size) || !staged.etag)
-    throw new ApiError('conflict', 'Uploaded ciphertext size does not match the intent.');
-  const stagedEtag = staged.etag;
-  const versionId = randomUUID();
-  const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
   const intentMode = (row: Row): PutMode =>
     row.conditional_mode === 'create'
       ? 'create'
@@ -1920,18 +1984,31 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   // Cheap unlocked reads reject the common conflict and quota failures before the S3 copy,
   // so a rejected commit leaves nothing in objects/ to clean up. The FOR UPDATE in putConflict
   // is only a statement-scoped lock here; lockAndCheck re-runs the same checks under the
-  // locks and stays authoritative.
-  const precheck = await getPool().connect();
-  try {
-    await putConflict(precheck, driveId, source.path, intentMode(source));
-    await checkDriveQuota(precheck, driveId, Number(source.ciphertext_size));
-  } finally {
-    precheck.release();
-  }
+  // locks and stays authoritative. The pre-check and the staging HEAD are independent, so they
+  // run together instead of paying the storage round-trip after the database one.
+  const precheck = getPool()
+    .connect()
+    .then(async (client) => {
+      try {
+        await putConflict(client, driveId, source.path, intentMode(source));
+        await checkDriveQuota(client, driveId, Number(source.ciphertext_size));
+      } finally {
+        client.release();
+      }
+    });
+  const [staging, checks] = await Promise.allSettled([objectInfo(source.staging_key), precheck]);
+  if (staging.status === 'rejected')
+    throw new ApiError('conflict', 'The staged ciphertext is not available.');
+  const { size, etag: stagedEtag } = staging.value;
+  if (size !== Number(source.ciphertext_size) || !stagedEtag)
+    throw new ApiError('conflict', 'Uploaded ciphertext size does not match the intent.');
+  if (checks.status === 'rejected') throw checks.reason;
+  const versionId = randomUUID();
+  const finalKey = `objects/${source.account_id}/${driveId}/${versionId}`;
   // Takes the account, intent and drive locks and re-runs every pre-commit check under them.
   const lockAndCheck = async (
     client: PoolClient,
-  ): Promise<{ committed: Row } | { lockedIntent: Row; mode: PutMode }> => {
+  ): Promise<{ committed: Row } | { lockedIntent: Row; mode: PutMode; file: Row | undefined }> => {
     await lockBillingAccount(client, auth.accountId);
     const lockedIntentResult = await client.query(
       `SELECT * FROM upload_intents
@@ -1942,7 +2019,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     const lockedIntent = lockedIntentResult.rows[0] as Row | undefined;
     if (!lockedIntent) throw new ApiError('not_found', 'Upload intent not found.');
     const lockedDrive = await client.query(
-      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      'SELECT id, quota_bytes FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
@@ -1960,10 +2037,16 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     if (new Date(lockedIntent.expires_at).getTime() < Date.now())
       throw new ApiError('conflict', 'The upload intent has expired.');
     const mode = intentMode(lockedIntent);
-    // Report a conflict or quota failure before commitPut, which re-checks under the same locks.
-    await putConflict(client, driveId, source.path, mode);
-    await checkDriveQuota(client, driveId, Number(lockedIntent.ciphertext_size));
-    return { lockedIntent, mode };
+    // The authoritative conflict and quota checks, run once under the locks; commitPut gets the
+    // result through `prechecked` instead of re-running them a third time in this transaction.
+    const file = await putConflict(client, driveId, source.path, mode);
+    await checkDriveQuota(
+      client,
+      driveId,
+      Number(lockedIntent.ciphertext_size),
+      Number(lockedDrive.rows[0].quota_bytes),
+    );
+    return { lockedIntent, mode, file };
   };
   let copied = false;
   let copyReferenced = false;
@@ -2016,6 +2099,7 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
         description: checked.lockedIntent.description,
         mode: checked.mode,
         versionId,
+        prechecked: { file: checked.file },
       });
       await client.query('UPDATE upload_intents SET committed_version_id = $1 WHERE id = $2', [
         versionId,
@@ -2428,7 +2512,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
   > => {
     await lockBillingAccount(client, auth.accountId);
     const lockedDrive = await client.query(
-      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      'SELECT id, quota_bytes FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
@@ -2471,8 +2555,10 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       'SELECT COALESCE(SUM(ciphertext_size),0)::bigint AS used FROM versions WHERE drive_id = $1',
       [driveId],
     );
-    const quota = await client.query('SELECT quota_bytes FROM drives WHERE id = $1', [driveId]);
-    if (Number(used.rows[0].used) + Number(row.ciphertext_size) > Number(quota.rows[0].quota_bytes))
+    if (
+      Number(used.rows[0].used) + Number(row.ciphertext_size) >
+      Number(lockedDrive.rows[0].quota_bytes)
+    )
       throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
     return {
       sourceVersionId: row.id as string,
@@ -2578,7 +2664,8 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     return true;
   if (parts[0] === 'account-key') {
     if (parts.length === 1) return ['GET', 'POST', 'PATCH', 'DELETE'].includes(method);
-    return parts.length === 2 && parts[1] === 'slots' && method === 'GET';
+    if (parts.length === 2 && parts[1] === 'slots') return method === 'GET';
+    return parts.length === 2 && parts[1] === 'passkey' && method === 'POST';
   }
   if (method === 'DELETE' && parts.length === 1 && parts[0] === 'account') return true;
   if (method === 'DELETE' && parts.length === 2 && parts[0] === 'drives') return true;

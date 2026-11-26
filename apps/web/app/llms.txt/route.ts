@@ -35,8 +35,8 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
 3. The human approves (step 2). Wait for the command to finish.
 
-4. Back up your credentials. Your drive key exists only on this machine. If the machine or
-   sandbox is deleted, your files can never be opened again. Offer these to the person, in this
+4. Back up your credentials. If this machine holds the last copy of the drive key, losing it
+   makes the files unreadable. Offer these to the person, in this
    order, and let them choose:
 
    agent-drive credentials export --to 1password
@@ -144,6 +144,19 @@ Any other MCP client (Cursor, etc.):
    {"mcpServers":{"agent-drive":{"command":"agent-drive","args":["mcp"]}}}
 
 Restart the client after changing its configuration.
+
+## If the human wants to open files in the console
+
+Once they set a passphrase in the console (the key menu's "Set up passphrase unlock"), run:
+
+   agent-drive account seal --drive <drive id>
+
+Sealing also happens automatically, so this only adds a drive that was missed; \`no account key\`
+means the passphrase is not set up yet, and \`agent-only\` means the drive is kept out by design.
+The human can open files or download a fresh recovery file using the account passphrase or an enrolled passkey.
+Never paste a credentials bundle or drive key into chat — if a file is needed, run
+\`agent-drive credentials export --to <path>\` on their machine and tell them to choose that file
+under "Choose recovery file" (the console accepts the bundle as a file).
 
 ## Commands
 

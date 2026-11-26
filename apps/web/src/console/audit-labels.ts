@@ -41,6 +41,7 @@ const LABELS: Record<string, string> = {
   'console.account_key.read': 'Viewed the passphrase record',
   'console.account_key.create': 'Set up an account passphrase',
   'console.account_key.update': 'Changed the account passphrase',
+  'console.account_key.passkey': 'Added a passkey for dashboard unlock',
   'console.account_key.reset': 'Reset the account passphrase',
   'console.account_key.slots': 'Listed drives added to the passphrase',
   'console.drive.account_key.put': 'Added a drive to the passphrase',

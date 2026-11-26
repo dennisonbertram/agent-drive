@@ -18,19 +18,31 @@ The key chip near the top of Files shows the state: Key needed, Key loaded, Lock
 
 Load the key in one of these ways:
 
-- Recovery file: choose the recovery file for the drive. The file is named like `agent-drive-<id>.key.json`.
-- Pasted key: open "Paste a key instead" and paste the drive key, or an `adcred1.` credentials bundle from `agent-drive credentials export`.
+- **Passkey.** After setting up an account passphrase, add a passkey in the Files key menu. On a browser where the passkey is available, approve the device prompt to open an enrolled drive.
 - Passphrase: set up passphrase unlock once, then a passphrase opens the drives in your account. A passphrase is at least 14 characters, or you can use one the browser generates. Agents that hold a drive key seal it to your account automatically, so agent-created drives open this way without a recovery file. "Forgot or exposed passphrase?" resets it. A reset removes every drive from your account key but does not delete files; you add each drive again with its recovery file.
+- Recovery file: choose the recovery file for the drive. The file is named like `agent-drive-<id>.key.json`. The chooser also accepts an `adcred1.` credentials bundle saved as a file; it takes the key for this drive.
+- Pasted key: open "Paste a key instead" and paste the drive key, or an `adcred1.` credentials bundle from `agent-drive credentials export`.
 
 The passphrase prompt has a "Keep this browser unlocked" box, ticked by default. While it is ticked, the console keeps the account private key in this browser's IndexedDB as a non-extractable CryptoKey, so later visits open your drives with no prompt. "Lock this browser" in the key menu deletes it, and signing out clears it. Untick the box to be asked for the passphrase on every visit.
 
 A drive key itself stays in memory in this browser tab. It is cleared when you reload the page or leave the Files page, or after 30 minutes without use, and is fetched again from its slot when needed. Agent-only drives have no slot by design: the console always asks for their recovery file.
 
-If you have no recovery file, ask the agent that created the drive to run:
+If you have no recovery file, the simplest path pastes no secret at all:
 
-```sh
-agent-drive credentials export
-```
+1. Set up passphrase unlock once, if you have not: the banner on Files, or "Set up passphrase unlock" in the key menu.
+2. Copy the drive ID from the drive menu and give the agent that holds the drive one command:
+
+   ```sh
+   agent-drive account seal --drive <drive id>
+   ```
+
+   It prints `<drive id>: sealed` or `already sealed`. `agent-only` means the drive is kept out of passphrase unlock by design; `no account key` means step 1 was skipped.
+
+3. Open the drive’s key menu and choose **Download recovery file**. If prompted, use your enrolled passkey or your account passphrase. The downloaded file contains the existing drive key and opens existing file versions. Store it privately and confirm once it has saved.
+
+You can also open any supported file directly in Files. On a new browser, sign in and choose your enrolled passkey when prompted. Your device may ask for a fingerprint, face scan or PIN. If the passkey is unavailable on that device, use your passphrase or recovery file.
+
+If you skip the passphrase, the agent can instead write the bundle to a file on your machine (`agent-drive credentials export --to <path>`) and you choose that file. Do not let an agent paste the bundle or a key into a chat.
 
 ## Files
 

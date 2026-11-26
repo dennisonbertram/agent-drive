@@ -9,6 +9,7 @@ import {
 } from '../../../../../packages/agent-drive/src/crypto.ts';
 import { driveKeyFromBundle, BUNDLE_PREFIX } from '@/src/console/credentials-bundle';
 import { parseRecoveryFile, sealDriveKey, type SealedKey } from '@/src/device/seal';
+import { verifyDriveKey, type DriveKeyCheck } from '@/src/device/verify-key';
 
 type Drive = { id: string; name: string };
 type DeviceRequest = {
@@ -77,8 +78,13 @@ function formatCode(value: string) {
 // Raised while reading or checking the key in the browser, before anything is posted.
 class KeyError extends Error {}
 
+// Raised when the drive check itself cannot run; shown as a form error, not a key complaint.
+class CheckError extends Error {}
+
 const BAD_KEY =
   'This is not a valid drive key. Paste the key from the console, or choose a recovery file or credentials bundle.';
+const WRONG_DRIVE =
+  'This key does not open the selected drive. Check the drive and paste its own key.';
 const DEFAULT_SCOPES = ['read', 'write', 'delete', 'share'];
 const capitalize = (scopes: string[]) => {
   const text = scopes.join(', ');
@@ -133,7 +139,12 @@ export default function Connect({
   );
   const loading = phase === 'loading';
   const busy = phase === 'approving';
-  const [done, setDone] = useState<{ name: string; access: string; drive: string } | null>(null);
+  const [done, setDone] = useState<{
+    name: string;
+    access: string;
+    drive: string;
+    uncheckedKey?: boolean;
+  } | null>(null);
   const [formError, setFormError] = useState('');
   const [fieldError, setFieldError] = useState<{ field: 'key' | 'folder'; message: string } | null>(
     null,
@@ -314,6 +325,7 @@ export default function Connect({
       // The revision binds this approval to the offer (or lack of one) the page showed.
       const offerRevision = request.offerRevision ?? 0;
       let body: unknown = delegate ? { delegate: true, offerRevision } : { offerRevision };
+      let uncheckedKey = false;
       let scopes: string[] = request.offer?.scopes ?? request.scopes ?? DEFAULT_SCOPES;
       let driveLabel = request.offer
         ? `the drive ${request.offer.drive.name}`
@@ -322,22 +334,46 @@ export default function Connect({
           : 'its new drive';
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
+        // The selection is captured up front so a late render can never mix drives.
+        const target = driveId;
         let sealed: SealedKey;
         try {
           const pasted = keyText.trim();
-          const text = keyFile ? await keyFile.text() : pasted;
-          if (!text) throw new Error('Paste the drive key or choose a recovery file.');
           if (keyFile && keyFile.size > 16_384)
             throw new Error('This is not a valid drive key file.');
+          const text = keyFile ? await keyFile.text() : pasted;
+          if (!text) throw new Error('Paste the drive key or choose a recovery file.');
           const key = text.trim().startsWith(BUNDLE_PREFIX)
-            ? driveKeyFromBundle(text, driveId)
+            ? driveKeyFromBundle(text, target)
             : keyFile
-              ? parseRecoveryFile(text, driveId)
+              ? parseRecoveryFile(text, target)
               : text.trim();
           decodeDriveKey(key);
           if (!request.public_key) throw new Error('This request has no agent key. Start again.');
-          sealed = await sealDriveKey(request.public_key, driveId, key);
+          // A well-formed key can still belong to another drive: it must open this one before
+          // sealing. Metadata GETs only — the key itself is never sent.
+          let check: DriveKeyCheck;
+          try {
+            check = await verifyDriveKey(api, target, key);
+          } catch (error) {
+            if (error instanceof HttpError && error.status === 401) throw error;
+            throw new CheckError(
+              error instanceof HttpError && error.status === 404
+                ? 'This drive is no longer available. Reload the page and pick it again.'
+                : 'The key could not be checked against the drive. Try again.',
+            );
+          }
+          if (check === 'mismatch') throw new KeyError(WRONG_DRIVE);
+          // 'unverifiable' means the drive has no file or trace inbox to check against.
+          uncheckedKey = check === 'unverifiable';
+          sealed = await sealDriveKey(request.public_key, target, key);
         } catch (error) {
+          if (
+            error instanceof KeyError ||
+            error instanceof CheckError ||
+            error instanceof HttpError
+          )
+            throw error;
           const message = error instanceof Error ? error.message : '';
           throw new KeyError(
             error instanceof DriveCryptoError || /base64url|key length/i.test(message)
@@ -345,12 +381,13 @@ export default function Connect({
               : message || BAD_KEY,
           );
         }
+        if (!live()) return;
         scopes = readOnly ? ['read'] : DEFAULT_SCOPES;
-        driveLabel = `the drive ${accountDrives.find((d) => d.id === driveId)?.name ?? ''}`.trim();
+        driveLabel = `the drive ${accountDrives.find((d) => d.id === target)?.name ?? ''}`.trim();
         body = {
-          driveIds: [driveId],
+          driveIds: [target],
           scopes: [...scopes, ...(delegate ? ['delegate'] : [])],
-          sealedDriveKeys: { [driveId]: sealed },
+          sealedDriveKeys: { [target]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
           offerRevision,
         };
@@ -364,6 +401,7 @@ export default function Connect({
         name: request.client_name,
         access: describeScopes(scopes),
         drive: driveLabel,
+        uncheckedKey,
       });
     } catch (error) {
       if (!live()) return;
@@ -412,6 +450,12 @@ export default function Connect({
           You approved {done.name} to {done.access} {done.drive}. Return to your agent to finish
           setup and confirm it is ready.
         </p>
+        {done.uncheckedKey && (
+          <p className="connect-note">
+            This drive has nothing to check the key against, so it could not be checked before
+            sending.
+          </p>
+        )}
         <a className="button secondary" href="/console">
           Open console
         </a>
@@ -548,6 +592,7 @@ export default function Connect({
             <button
               type="button"
               className="connect-link"
+              disabled={busy}
               onClick={(event) => {
                 event.currentTarget.closest('details')?.removeAttribute('open');
                 setExisting(true);
@@ -560,6 +605,7 @@ export default function Connect({
           <input
             type="checkbox"
             checked={delegate}
+            disabled={busy}
             onChange={(event) => setDelegate(event.target.checked)}
           />
           <span>
@@ -578,6 +624,7 @@ export default function Connect({
             Drive
             <select
               value={driveId}
+              disabled={busy}
               onChange={(event) => {
                 setDriveId(event.target.value);
                 clearKey();
@@ -598,6 +645,7 @@ export default function Connect({
               autoComplete="off"
               placeholder="Paste the drive key or an adcred1… bundle"
               value={keyText}
+              disabled={busy}
               aria-invalid={keyInvalid || undefined}
               aria-describedby={keyInvalid ? 'connect-key-error' : undefined}
               className={keyInvalid ? 'invalid' : undefined}
@@ -609,6 +657,7 @@ export default function Connect({
             <input
               key={fileInputKey}
               type="file"
+              disabled={busy}
               aria-invalid={keyInvalid || undefined}
               aria-describedby={keyInvalid ? 'connect-key-error' : undefined}
               className={keyInvalid ? 'invalid' : undefined}
@@ -621,14 +670,15 @@ export default function Connect({
             </p>
           ) : (
             <p className="connect-hint cf-note">
-              A recovery file or bundle is checked against the drive. A pasted key cannot be checked
-              here.
+              The key is checked against the drive before it is sent. A drive with no files or trace
+              inbox has nothing to check it against.
             </p>
           )}
           <label className="connect-check cf-check">
             <input
               type="checkbox"
               checked={readOnly}
+              disabled={busy}
               onChange={(event) => setReadOnly(event.target.checked)}
             />
             Read only
@@ -638,6 +688,7 @@ export default function Connect({
             <input
               id="connect-folder"
               value={folder}
+              disabled={busy}
               onChange={(event) => setFolder(event.target.value)}
               placeholder="/inbox/x"
               autoComplete="off"
@@ -659,6 +710,7 @@ export default function Connect({
           <button
             type="button"
             className="button secondary connect-branch cf-back"
+            disabled={busy}
             onClick={() => {
               setExisting(false);
               clearKey();
