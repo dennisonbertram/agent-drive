@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { withTransaction } from '../db/client';
+import { TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { enforceOperationBudget } from '../billing/ledger';
 import { ApiError } from './errors';
 import { deleteObject } from './storage';
@@ -322,6 +322,63 @@ describe('mount rename operation accounting and quota reservations', () => {
     expect(await json(replay)).not.toEqual(await json(first));
   });
 
+  it('counts a rename once when the mutation commits but its acknowledgement is lost', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-temp-lost-ack',
+      Buffer.from('new destination contents'),
+    );
+    const target = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/lost-ack.txt',
+      Buffer.from('previous destination contents'),
+    );
+    const body = {
+      path: '/.editor-temp-lost-ack',
+      destinationPath: '/lost-ack.txt',
+      ifSourceVersionId: source.id,
+      ifDestinationVersionId: target.id,
+      operationId: randomUUID(),
+    };
+    const actual = await vi.importActual<typeof import('../db/client')>('../db/client');
+    vi.mocked(withTransaction).mockImplementation(async (callback) => {
+      const result = await actual.withTransaction(callback);
+      const value = result as { result?: { versionId?: unknown }; replay?: unknown } | null;
+      if (value?.result?.versionId && value.replay === false)
+        throw new TransactionCommitUnknownError(new Error('lost commit acknowledgement'));
+      return result;
+    });
+    try {
+      const first = await rename(f.driveId, f.token, body);
+      expect(first.status).toBe(500);
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+      const replay = await rename(f.driveId, f.token, body);
+      expect(replay.status).toBe(200);
+
+      const operations = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM audit_events
+          WHERE account_id=$1 AND action='drive.rename' AND outcome='success'`,
+        [f.accountId],
+      );
+      expect(operations.rows[0]!.count).toBe(1);
+      const audit = await pool.query<{ action: string; outcome: string; count: number }>(
+        `SELECT action,outcome,count(*)::int AS count FROM audit_events
+          WHERE account_id=$1 AND action IN ('drive.rename','drive.rename.replay')
+          GROUP BY action,outcome ORDER BY action,outcome`,
+        [f.accountId],
+      );
+      expect(audit.rows).toEqual([
+        { action: 'drive.rename', outcome: 'success', count: 1 },
+        { action: 'drive.rename.replay', outcome: 'success', count: 1 },
+      ]);
+    } finally {
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+    }
+  });
+
   it('rejects replacement during prepare when active uploads reserve the remaining drive quota', async () => {
     const f = await fixture(100);
     const source = await uploadCommit(f.token, f.driveId, '/.editor-temp-d', Buffer.alloc(40, 1));
@@ -342,6 +399,12 @@ describe('mount rename operation accounting and quota reservations', () => {
       Buffer.alloc(40, 1),
     );
     expect((await getBytes(f.token, f.driveId, '/target.txt')).bytes).toEqual(Buffer.alloc(20, 2));
+    const successfulRenames = await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM audit_events
+        WHERE account_id=$1 AND action='drive.rename' AND outcome='success'`,
+      [f.accountId],
+    );
+    expect(successfulRenames.rows[0]!.count).toBe(0);
   });
 
   it('rechecks active upload reservations at commit after prepare', async () => {
@@ -381,6 +444,12 @@ describe('mount rename operation accounting and quota reservations', () => {
         [f.driveId],
       );
       expect(versions.rows[0]!.count).toBe(2);
+      const successfulRenames = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM audit_events
+          WHERE account_id=$1 AND action='drive.rename' AND outcome='success'`,
+        [f.accountId],
+      );
+      expect(successfulRenames.rows[0]!.count).toBe(0);
     } finally {
       vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
     }

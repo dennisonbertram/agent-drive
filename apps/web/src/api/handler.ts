@@ -496,7 +496,19 @@ async function audit(
        WHERE id = $1 AND outcome = 'pending'`,
       [context.auditId, outcome, context.errorCode ?? null, context.status],
     );
-    if (updated.rowCount !== 1) throw new Error('The reserved audit event was not found.');
+    if (updated.rowCount !== 1) {
+      // Rename transactions finalize this reservation with the receipt. A lost COMMIT reply can
+      // still reach this request finalizer after that transaction committed successfully.
+      if (context.action === 'drive.rename') {
+        const existing = await client.query<{ action: string; outcome: string }>(
+          'SELECT action, outcome FROM audit_events WHERE id = $1',
+          [context.auditId],
+        );
+        if (existing.rows[0]?.action === 'drive.rename' && existing.rows[0].outcome === 'success')
+          return context.auditId;
+      }
+      throw new Error('The reserved audit event was not found.');
+    }
     return context.auditId;
   }
   const inserted = await client.query<{ id: string }>(
@@ -2809,6 +2821,18 @@ async function fileEndpoint(
       () => reserveOperation(context),
       () => {
         context.action = 'drive.rename.replay';
+      },
+      async (client) => {
+        if (!context.auditId)
+          throw new Error('A rename reservation is required to complete the operation.');
+        const completed = await client.query(
+          `UPDATE audit_events SET outcome = 'success', error_code = NULL, http_status = 200
+            WHERE id = $1 AND action = 'drive.rename' AND outcome = 'pending'
+            RETURNING id`,
+          [context.auditId],
+        );
+        if (completed.rowCount !== 1)
+          throw new Error('The rename reservation was not pending when the operation committed.');
       },
     );
   if ((operation === 'delete' || operation === 'unlink') && request.method === 'POST') {
