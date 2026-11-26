@@ -1,4 +1,9 @@
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { billingSummary, recordTransfer } from './ledger';
@@ -250,7 +255,11 @@ async function processLogPage(
   bucket: string,
   sourceHash: string,
   leaseOwner: string,
-  listed: Array<{ Key?: string | undefined; ETag?: string | undefined }>,
+  listed: Array<{
+    Key?: string | undefined;
+    ETag?: string | undefined;
+    Size?: number | undefined;
+  }>,
   attemptedObjects: Set<string>,
   canRead: () => boolean,
   accountBytes: (count: number) => void,
@@ -281,18 +290,22 @@ async function processLogPage(
       !attemptedObjects.has(`${object.Key}\0${object.ETag}`)
     ) {
       attemptedObjects.add(`${object.Key}\0${object.ETag}`);
-      const result = await ingestLogObject(
-        client,
-        bucket,
-        sourceHash,
-        leaseOwner,
-        object.Key,
-        object.ETag,
-        canRead,
-        accountBytes,
-      );
-      if (result === 'missing') {
-        await deleteLogProgress(sourceHash, leaseOwner, object.Key, object.ETag);
+      if (object.Size === 0) {
+        await markLogObjectProcessed(sourceHash, leaseOwner, object.Key, object.ETag);
+      } else {
+        const result = await ingestLogObject(
+          client,
+          bucket,
+          sourceHash,
+          leaseOwner,
+          object.Key,
+          object.ETag,
+          canRead,
+          accountBytes,
+        );
+        if (result === 'missing') {
+          await deleteLogProgress(sourceHash, leaseOwner, object.Key, object.ETag);
+        }
       }
       accountObject();
     }
@@ -349,6 +362,27 @@ async function deleteLogProgress(
   );
 }
 
+async function markLogObjectProcessed(
+  sourceHash: string,
+  leaseOwner: string,
+  objectKey: string,
+  etag: string,
+) {
+  const marked = await getPool().query(
+    `WITH owned AS (
+       SELECT source_hash FROM billing_log_ingest_leases
+        WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+        FOR UPDATE
+     )
+     INSERT INTO billing_log_processed_objects (source_hash,object_key,etag)
+     SELECT source_hash,$2,$3 FROM owned ON CONFLICT DO NOTHING RETURNING object_key`,
+    [sourceHash, objectKey, etag, leaseOwner],
+  );
+  if (!marked.rowCount && !(await ownsLogIngestLease(sourceHash, leaseOwner)))
+    throw new Error('S3 log ingest lease expired.');
+  await deleteLogProgress(sourceHash, leaseOwner, objectKey, etag);
+}
+
 async function ingestLogObject(
   client: S3Client,
   bucket: string,
@@ -358,6 +392,7 @@ async function ingestLogObject(
   etag: string,
   canRead: () => boolean,
   accountBytes: (count: number) => void,
+  recoveredStaleOffset = false,
 ): Promise<'complete' | 'partial' | 'missing'> {
   await getPool().query(
     `WITH owned AS (
@@ -393,6 +428,51 @@ async function ingestLogObject(
   } catch (error) {
     const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
     if (status === 404 || status === 412) return 'missing';
+    if (status === 416) {
+      let metadata;
+      try {
+        metadata = await client.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: objectKey, IfMatch: etag }),
+        );
+      } catch (headError) {
+        const headStatus = (headError as { $metadata?: { httpStatusCode?: number } }).$metadata
+          ?.httpStatusCode;
+        if (headStatus === 404 || headStatus === 412) return 'missing';
+        throw headError;
+      }
+      const currentSize = BigInt(metadata.ContentLength ?? -1);
+      if (currentSize === safeOffset) {
+        await markLogObjectProcessed(sourceHash, leaseOwner, objectKey, etag);
+        return 'complete';
+      }
+      if (currentSize >= 0n && currentSize < safeOffset && !recoveredStaleOffset) {
+        const reset = await getPool().query(
+          `WITH owned AS (
+             SELECT source_hash FROM billing_log_ingest_leases
+              WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
+              FOR UPDATE
+           )
+           UPDATE billing_log_object_progress p
+              SET byte_offset=0, discarding_line=false, updated_at=clock_timestamp()
+             FROM owned
+            WHERE p.source_hash=owned.source_hash AND p.object_key=$2 AND p.etag=$3
+            RETURNING p.object_key`,
+          [sourceHash, objectKey, etag, leaseOwner],
+        );
+        if (!reset.rowCount) throw new Error('S3 log ingest lease expired.');
+        return ingestLogObject(
+          client,
+          bucket,
+          sourceHash,
+          leaseOwner,
+          objectKey,
+          etag,
+          canRead,
+          accountBytes,
+          true,
+        );
+      }
+    }
     throw error;
   }
   if (!request.Body) throw new Error('S3 log object body is unavailable.');
@@ -523,21 +603,7 @@ async function ingestLogObject(
       linesSinceCheckpoint += 1;
     }
     await checkpoint();
-    const marked = await getPool().query(
-      `WITH owned AS (
-         SELECT source_hash FROM billing_log_ingest_leases
-          WHERE source_hash=$1 AND owner_token=$4 AND lease_until > clock_timestamp()
-          FOR UPDATE
-       )
-       INSERT INTO billing_log_processed_objects (source_hash,object_key,etag)
-       SELECT source_hash,$2,$3 FROM owned ON CONFLICT DO NOTHING RETURNING object_key`,
-      [sourceHash, objectKey, etag, leaseOwner],
-    );
-    if (!marked.rowCount) {
-      const stillOwns = await ownsLogIngestLease(sourceHash, leaseOwner);
-      if (!stillOwns) throw new Error('S3 log ingest lease expired.');
-    }
-    await deleteLogProgress(sourceHash, leaseOwner, objectKey, etag);
+    await markLogObjectProcessed(sourceHash, leaseOwner, objectKey, etag);
     if (discardedLine) console.warn('Skipped an oversized line in an S3 access log object.');
     return 'complete';
   }

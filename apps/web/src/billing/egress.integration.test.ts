@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectVersionsCommand,
   ListObjectsV2Command,
   S3Client,
@@ -119,7 +120,7 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
         Contents: [...logObjects.entries()]
           .filter(([key]) => key.startsWith(Prefix ?? '') && (!StartAfter || key > StartAfter))
           .sort(([left], [right]) => left.localeCompare(right))
-          .map(([Key, value]) => ({ Key, ETag: value.etag })),
+          .map(([Key, value]) => ({ Key, ETag: value.etag, Size: Buffer.byteLength(value.body) })),
       } as never;
     }
     if (command instanceof ListObjectVersionsCommand) {
@@ -134,10 +135,20 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
       downloadedKeys.push(command.input.Key ?? '');
       if (command.input.Range) ranges.push(command.input.Range);
       const offset = Number(/^bytes=(\d+)-/u.exec(command.input.Range ?? '')?.[1] ?? 0);
+      if (offset >= Buffer.byteLength(item.body)) {
+        const error = new Error('Synthetic range starts at or beyond end of object.');
+        Object.assign(error, { $metadata: { httpStatusCode: 416 } });
+        throw error;
+      }
       return {
         Body: Readable.from([Buffer.from(item.body).subarray(offset)]),
         ContentLength: Buffer.byteLength(item.body) - offset,
       } as never;
+    }
+    if (command instanceof HeadObjectCommand) {
+      const item = logObjects.get(command.input.Key ?? '');
+      if (!item) throw new Error('Synthetic log object was not found.');
+      return { ContentLength: Buffer.byteLength(item.body), ETag: item.etag } as never;
     }
     throw new Error('Unexpected S3 command in synthetic egress test.');
   });
@@ -163,7 +174,7 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
     const deletionStore = new S3Client({ region: 'us-east-1' });
     await runDeletionMaintenance({ objectStore: deletionStore, jobIds: [deletionJobId] });
     deletionStore.destroy();
-    logObjects.set(`${logPrefix}late-old.log`, { etag: 'late-etag', body: `${lateLog}\n` });
+    logObjects.set(`${logPrefix}late-old.log`, { etag: 'late-etag', body: lateLog });
     await ingestLogs();
     await ingestLogs();
     expect(ranges.some((range) => Number(/^bytes=(\d+)-/u.exec(range)?.[1] ?? 0) > 0)).toBe(true);
@@ -192,6 +203,50 @@ it('uses bounded cursors for new and late old-named logs and retains only hashed
         ])
       ).rowCount,
     ).toBe(0);
+
+    const emptyObjectKey = `${logPrefix}empty.log`;
+    logObjects.set(emptyObjectKey, { etag: 'empty-etag', body: '' });
+    await getPool().query(
+      `INSERT INTO billing_log_object_progress
+       (source_hash,object_key,etag,byte_offset,discarding_line) VALUES ($1,$2,$3,0,false)`,
+      [sourceHash, emptyObjectKey, 'empty-etag'],
+    );
+    await ingestLogs();
+    expect(
+      (
+        await getPool().query(
+          `SELECT 1 FROM billing_log_processed_objects
+            WHERE source_hash=$1 AND object_key=$2 AND etag='empty-etag'`,
+          [sourceHash, emptyObjectKey],
+        )
+      ).rowCount,
+    ).toBe(1);
+    expect(
+      (
+        await getPool().query(
+          `SELECT 1 FROM billing_log_object_progress
+            WHERE source_hash=$1 AND object_key=$2 AND etag='empty-etag'`,
+          [sourceHash, emptyObjectKey],
+        )
+      ).rowCount,
+    ).toBe(0);
+
+    const staleObjectKey = `${logPrefix}stale-progress.log`;
+    const staleLog = `owner ${process.env.S3_BUCKET} [30/Oct/2026:10:02:00 +0000] 192.0.2.3 requester SCAN-STALE REST.GET.OBJECT ${encodeURIComponent(objectKey)} "GET /${objectKey} HTTP/1.1" 200 - 11 2048 17 4 "-" "fixture" -`;
+    logObjects.set(staleObjectKey, { etag: 'stale-etag', body: staleLog });
+    await getPool().query(
+      `INSERT INTO billing_log_object_progress
+       (source_hash,object_key,etag,byte_offset,discarding_line) VALUES ($1,$2,$3,9999,false)`,
+      [sourceHash, staleObjectKey, 'stale-etag'],
+    );
+    await ingestLogs();
+    expect(
+      (
+        await getPool().query('SELECT 1 FROM billing_egress_events WHERE id=$1', [
+          `${process.env.S3_BUCKET}:SCAN-STALE`,
+        ])
+      ).rowCount,
+    ).toBe(1);
   } finally {
     await getPool().query('DELETE FROM billing_log_object_progress WHERE source_hash=$1', [
       sourceHash,
