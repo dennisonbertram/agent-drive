@@ -71,6 +71,11 @@ Uploading takes three requests.
 
 The intent and the upload URL expire after 10 minutes. The conditional-write check (`ifVersionId`) runs at commit, so a 409 appears there.
 
+To create again at a path in Trash without an unconditional overwrite, set both `ifVersionId:null`
+and `allowTrashedCreate:true`. The intent records the trashed file's current version. Commit succeeds
+only if that same version is still in Trash; it creates a new version and retains the existing
+history. If a live file appears or the trashed file changes before commit, the request conflicts.
+
 ```sh
 SIZE=$(wc -c < file.enc)
 curl -sS -X POST "$API/drives/$DRIVE/put" \
@@ -214,15 +219,16 @@ Without `manage`, a key with `delegate` can create keys too, with `agentName` (1
 
 `POST /drives/:id/put` body:
 
-| Field            | Rule                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------- |
-| `path`           | Required. Canonical absolute path, and inside the key's `writePaths`.                             |
-| `ciphertextSize` | Required. Positive integer, at most 5 GiB (5,368,709,120 bytes). Size of the encrypted bytes.     |
-| `wrappedKey`     | Required. Up to 16,384 characters.                                                                |
-| `description`    | Optional. Up to 2,048 characters.                                                                 |
-| `tags`           | Optional. Up to 32 strings, each up to 64 characters.                                             |
-| `userId`         | Optional. Up to 256 characters. Recorded as the person behind the write.                          |
-| `ifVersionId`    | Optional. See Conditional writes and conflicts. Absent means overwrite. `null` means create only. |
+| Field                | Rule                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `path`               | Required. Canonical absolute path, and inside the key's `writePaths`.                                                  |
+| `ciphertextSize`     | Required. Positive integer, at most 5 GiB (5,368,709,120 bytes). Size of the encrypted bytes.                          |
+| `wrappedKey`         | Required. Up to 16,384 characters.                                                                                     |
+| `description`        | Optional. Up to 2,048 characters.                                                                                      |
+| `tags`               | Optional. Up to 32 strings, each up to 64 characters.                                                                  |
+| `userId`             | Optional. Up to 256 characters. Recorded as the person behind the write.                                               |
+| `ifVersionId`        | Optional. See Conditional writes and conflicts. Absent means overwrite. `null` means create only.                      |
+| `allowTrashedCreate` | Optional boolean. `true` requires `ifVersionId:null`; allows a guarded create over the same unchanged trashed version. |
 
 Response 201: `{ intentId, uploadUrl, expiresAt, ciphertextSize }`. It returns 413 `quota_exceeded` if the drive quota would be exceeded, and 402 `payment_required` if the plan storage allowance would be exceeded.
 
@@ -430,11 +436,12 @@ A share link points to one version of one file. The file key travels in the link
 
 `ifVersionId` on put sets what the write is allowed to replace.
 
-| `ifVersionId`    | Meaning                                                                        |
-| ---------------- | ------------------------------------------------------------------------------ |
-| absent           | Overwrite. Writes whether or not the file exists. Revives a file in the trash. |
-| `null`           | Create only. Fails if any file, even one in the trash, has this path.          |
-| `"<version id>"` | Replace only if that version is still the current version.                     |
+| `ifVersionId`                         | Meaning                                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| absent                                | Overwrite. Writes whether or not the file exists. Revives a file in the trash.                                                                                                                   |
+| `null`                                | Create only. Fails if any file, even one in the trash, has this path.                                                                                                                            |
+| `null` with `allowTrashedCreate:true` | Create if the path is absent or the same trashed version observed at intent creation is still in Trash. Retains prior versions; conflicts if a live file appears or the trashed version changes. |
+| `"<version id>"`                      | Replace only if that version is still the current version.                                                                                                                                       |
 
 A conditional write that loses returns 409:
 
@@ -449,14 +456,14 @@ A conditional write that loses returns 409:
 }
 ```
 
-| `state`   | Cause                                                             | What to do                                                                |
-| --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `exists`  | Create only, and a live file is at the path.                      | Read the file. Retry with `ifVersionId` set to `currentVersionId`.        |
-| `changed` | Someone wrote a newer version.                                    | Read the file, merge, retry with `ifVersionId` set to `currentVersionId`. |
-| `trashed` | The file is in the trash. `currentVersionId` is its last version. | Call restore, or write again without `ifVersionId`.                       |
-| `absent`  | `ifVersionId` was a version id but no file exists at the path.    | Write again without `ifVersionId`. `currentVersionId` is `null`.          |
+| `state`   | Cause                                                             | What to do                                                                                                                          |
+| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `exists`  | Create only, and a live file is at the path.                      | Read the file. Retry with `ifVersionId` set to `currentVersionId`.                                                                  |
+| `changed` | Someone wrote a newer version.                                    | Read the file, merge, retry with `ifVersionId` set to `currentVersionId`.                                                           |
+| `trashed` | The file is in the trash. `currentVersionId` is its last version. | Call restore, use `ifVersionId:null` with `allowTrashedCreate:true`, or write without `ifVersionId` for an unconditional overwrite. |
+| `absent`  | `ifVersionId` was a version id but no file exists at the path.    | Write again without `ifVersionId`. `currentVersionId` is `null`.                                                                    |
 
-A conditional write never revives a file in the trash. An unconditional write does. The conflict is reported by commit, not by put.
+A plain conditional write never revives a file in the trash. `allowTrashedCreate:true` permits a guarded create over the unchanged trashed version; an unconditional write can revive it without that guard. The conflict is reported by commit, not by put.
 
 Move, copy and restore return 409 `conflict` with no `state` when the destination exists or the source is missing.
 
