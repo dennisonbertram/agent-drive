@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { configPath } from './config.js';
+import { configPath, withSqliteFileLock } from './config.js';
 import type { AgentDriveClient } from './client.js';
 
 type ManifestEntry = { hash: string; versionId: string };
@@ -19,6 +19,21 @@ type FileSelection = {
 type SyncClient = Pick<AgentDriveClient, 'apiOrigin' | 'whoami' | 'list' | 'putStream'>;
 const SYNC_WORKERS = 4;
 const STREAM_PRIME_BYTES = 1024 * 1024;
+
+export class SyncInterruptedError extends Error {
+  readonly signalName: 'SIGINT' | 'SIGTERM' | undefined;
+
+  constructor(reason?: unknown, cause?: unknown) {
+    const signalName = reason === 'SIGINT' || reason === 'SIGTERM' ? reason : undefined;
+    super(signalName ? `Sync interrupted by ${signalName}.` : 'Sync interrupted.', { cause });
+    this.name = 'SyncInterruptedError';
+    this.signalName = signalName;
+  }
+}
+
+function throwIfInterrupted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new SyncInterruptedError(signal.reason);
+}
 
 function canonicalPrefix(value: string) {
   const prefix = value || '/';
@@ -370,8 +385,9 @@ export async function syncDirectory(
   driveId: string,
   localRoot: string,
   prefix = '/',
-  options: { overwriteExisting?: boolean } = {},
+  options: { overwriteExisting?: boolean; signal?: AbortSignal } = {},
 ) {
+  throwIfInterrupted(options.signal);
   const root = resolve(localRoot);
   const rootStat = await lstat(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
@@ -397,112 +413,139 @@ export async function syncDirectory(
   const identity = `${client.apiOrigin}|${who.accountId}|${driveId}|${remotePrefix}|${root}`;
   const stateKey = createHash('sha256').update(identity).digest('hex');
   const manifestPath = join(stateDirectory, `${stateKey}.json`);
-  const manifest = await loadManifest(manifestPath);
-  const remote = new Map<string, { versionId: string }>();
-  let cursor: string | undefined;
-  do {
-    const page = await client.list(driveId, remotePrefix, 100, cursor);
-    for (const file of page.items) {
-      const path = relativeRemotePath(file.path, remotePrefix);
-      if (path !== undefined) remote.set(path, { versionId: file.versionId });
-    }
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+  try {
+    return await withSqliteFileLock(
+      `${manifestPath}.lock.sqlite`,
+      async () => {
+        throwIfInterrupted(options.signal);
+        const manifest = await loadManifest(manifestPath);
+        const remote = new Map<string, { versionId: string }>();
+        let cursor: string | undefined;
+        do {
+          throwIfInterrupted(options.signal);
+          const page = await client.list(driveId, remotePrefix, 100, cursor);
+          for (const file of page.items) {
+            const path = relativeRemotePath(file.path, remotePrefix);
+            if (path !== undefined) remote.set(path, { versionId: file.versionId });
+          }
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
 
-  const files = await localFiles(root, rootRealPath, excludedPaths);
-  const stats = { uploaded: 0, skipped: 0, conflicts: 0 };
-  for (const file of files) {
-    const relativePath = relative(root, file.path).split(sep).join('/');
-    const remoteFile = remote.get(relativePath);
-    const prior = Object.hasOwn(manifest.files, relativePath)
-      ? manifest.files[relativePath]
-      : undefined;
-    if (!prior && remoteFile && !options.overwriteExisting) {
-      stats.conflicts++;
-      throw new Error(
-        `Remote file ${relativePath} has no local sync history; use --overwrite-existing to replace it.`,
-      );
-    }
-    if (prior && (!remoteFile || remoteFile.versionId !== prior.versionId)) {
-      stats.conflicts++;
-      throw new Error(`Remote conflict for ${relativePath}; refusing to overwrite.`);
-    }
-  }
-
-  let nextFile = 0;
-  let hasFailure = false;
-  let firstFailure: unknown;
-  let lastSave = Promise.resolve();
-  let nextSave: Promise<void> | undefined;
-
-  const checkpoint = () => {
-    if (!nextSave) {
-      nextSave = lastSave
-        .catch(() => undefined)
-        .then(() => {
-          nextSave = undefined;
-          return saveManifest(manifestPath, manifest);
-        });
-      lastSave = nextSave;
-    }
-    return nextSave;
-  };
-
-  const syncFile = async (file: FileSelection) => {
-    const relativePath = relative(root, file.path).split(sep).join('/');
-    const remoteFile = remote.get(relativePath);
-    const prior = Object.hasOwn(manifest.files, relativePath)
-      ? manifest.files[relativePath]
-      : undefined;
-    const hash: string | undefined = prior ? await digestFile(rootRealPath, file) : undefined;
-    if (prior && remoteFile && prior.hash === hash && prior.versionId === remoteFile.versionId) {
-      stats.skipped++;
-      return;
-    }
-    let uploadedHash: string | undefined;
-    const version = await putStreamAfterPriming(
-      streamSelectedFile(rootRealPath, file, hash, (value) => {
-        uploadedHash = value;
-      }),
-      file.size,
-      (source) =>
-        client.putStream(
-          driveId,
-          remotePath(remotePrefix, relativePath),
-          source,
-          file.size,
-          remoteFile
-            ? { mode: 'overwrite', ifVersionId: remoteFile.versionId }
-            : { mode: 'create' },
-        ),
-    );
-    if (uploadedHash === undefined) {
-      throw new Error(`Sync upload for ${relativePath} did not consume the local file stream.`);
-    }
-    manifest.files[relativePath] = { hash: uploadedHash, versionId: version.id };
-    await checkpoint();
-    stats.uploaded++;
-  };
-
-  const worker = async () => {
-    while (!hasFailure) {
-      const index = nextFile++;
-      const file = files[index];
-      if (!file) return;
-      try {
-        await syncFile(file);
-      } catch (error) {
-        if (!hasFailure) {
-          hasFailure = true;
-          firstFailure = error;
+        const files = await localFiles(root, rootRealPath, excludedPaths);
+        throwIfInterrupted(options.signal);
+        const stats = { uploaded: 0, skipped: 0, conflicts: 0 };
+        for (const file of files) {
+          const relativePath = relative(root, file.path).split(sep).join('/');
+          const remoteFile = remote.get(relativePath);
+          const prior = Object.hasOwn(manifest.files, relativePath)
+            ? manifest.files[relativePath]
+            : undefined;
+          if (!prior && remoteFile && !options.overwriteExisting) {
+            stats.conflicts++;
+            throw new Error(
+              `Remote file ${relativePath} has no local sync history; use --overwrite-existing to replace it.`,
+            );
+          }
+          if (prior && (!remoteFile || remoteFile.versionId !== prior.versionId)) {
+            stats.conflicts++;
+            throw new Error(`Remote conflict for ${relativePath}; refusing to overwrite.`);
+          }
         }
-      }
-    }
-  };
 
-  await Promise.all(Array.from({ length: SYNC_WORKERS }, () => worker()));
-  if (hasFailure) {
-    throw firstFailure;
+        let nextFile = 0;
+        let hasFailure = false;
+        let firstFailure: unknown;
+        let lastSave = Promise.resolve();
+        let nextSave: Promise<void> | undefined;
+
+        const checkpoint = () => {
+          if (!nextSave) {
+            nextSave = lastSave
+              .catch(() => undefined)
+              .then(() => {
+                nextSave = undefined;
+                return saveManifest(manifestPath, manifest);
+              });
+            lastSave = nextSave;
+          }
+          return nextSave;
+        };
+
+        const syncFile = async (file: FileSelection) => {
+          throwIfInterrupted(options.signal);
+          const relativePath = relative(root, file.path).split(sep).join('/');
+          const remoteFile = remote.get(relativePath);
+          const prior = Object.hasOwn(manifest.files, relativePath)
+            ? manifest.files[relativePath]
+            : undefined;
+          const hash: string | undefined = prior ? await digestFile(rootRealPath, file) : undefined;
+          if (
+            prior &&
+            remoteFile &&
+            prior.hash === hash &&
+            prior.versionId === remoteFile.versionId
+          ) {
+            stats.skipped++;
+            return;
+          }
+          let uploadedHash: string | undefined;
+          const version = await putStreamAfterPriming(
+            streamSelectedFile(rootRealPath, file, hash, (value) => {
+              uploadedHash = value;
+            }),
+            file.size,
+            (source) => {
+              throwIfInterrupted(options.signal);
+              return client.putStream(
+                driveId,
+                remotePath(remotePrefix, relativePath),
+                source,
+                file.size,
+                remoteFile
+                  ? { mode: 'overwrite', ifVersionId: remoteFile.versionId }
+                  : { mode: 'create' },
+              );
+            },
+          );
+          if (uploadedHash === undefined) {
+            throw new Error(
+              `Sync upload for ${relativePath} did not consume the local file stream.`,
+            );
+          }
+          manifest.files[relativePath] = { hash: uploadedHash, versionId: version.id };
+          await checkpoint();
+          stats.uploaded++;
+        };
+
+        const worker = async () => {
+          while (!hasFailure && !options.signal?.aborted) {
+            const index = nextFile++;
+            const file = files[index];
+            if (!file) return;
+            try {
+              await syncFile(file);
+            } catch (error) {
+              if (!hasFailure) {
+                hasFailure = true;
+                firstFailure = error;
+              }
+            }
+          }
+        };
+
+        await Promise.all(Array.from({ length: SYNC_WORKERS }, () => worker()));
+        if (options.signal?.aborted) {
+          throw new SyncInterruptedError(options.signal.reason, firstFailure);
+        }
+        if (hasFailure) throw firstFailure;
+        return { ...stats, accountId: who.accountId, manifestPath };
+      },
+      { owner: 'sync target', ...(options.signal ? { signal: options.signal } : {}) },
+    );
+  } catch (error) {
+    if (options.signal?.aborted && !(error instanceof SyncInterruptedError)) {
+      throw new SyncInterruptedError(options.signal.reason, error);
+    }
+    throw error;
   }
-  return { ...stats, accountId: who.accountId, manifestPath };
 }

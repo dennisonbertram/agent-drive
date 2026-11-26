@@ -214,23 +214,98 @@ async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
 
 // POSIX record locks are process-associated. Closing any descriptor for this inode can release
 // another SQLite connection's live lock, so same-process writers must not open/close descriptors
-// for one config while another writer is using its SQLite transaction.
-const configWriteTails = new Map<string, Promise<void>>();
+// for one lock database while another writer is using its SQLite transaction.
+const sqliteWriteTails = new Map<string, Promise<void>>();
 
-async function withConfigWriteLock<T>(path: string, write: () => Promise<T>): Promise<T> {
-  const previous = configWriteTails.get(path) ?? Promise.resolve();
+async function withConfigWriteLock<T>(
+  path: string,
+  write: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const key = resolve(path);
+  const previous = sqliteWriteTails.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolveTail) => {
     release = resolveTail;
   });
-  configWriteTails.set(path, current);
-  await previous;
+  sqliteWriteTails.set(key, current);
   try {
+    if (signal) {
+      await new Promise<void>((resolveWait, rejectWait) => {
+        if (signal.aborted) {
+          rejectWait(signal.reason ?? new Error('The lock wait was aborted.'));
+          return;
+        }
+        const onAbort = () => {
+          signal.removeEventListener('abort', onAbort);
+          rejectWait(signal.reason ?? new Error('The lock wait was aborted.'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+        previous.then(
+          () => {
+            signal.removeEventListener('abort', onAbort);
+            resolveWait();
+          },
+          (error: unknown) => {
+            signal.removeEventListener('abort', onAbort);
+            rejectWait(error);
+          },
+        );
+      });
+    } else {
+      await previous;
+    }
+  } catch (error) {
+    // Keep later same-process contenders queued behind the current writer even when this
+    // waiter is interrupted before its turn.
+    const releaseAbortedWaiter = () => {
+      release();
+      if (sqliteWriteTails.get(key) === current) sqliteWriteTails.delete(key);
+    };
+    void previous.then(releaseAbortedWaiter, releaseAbortedWaiter);
+    throw error;
+  }
+  try {
+    if (signal?.aborted) throw signal.reason ?? new Error('The lock wait was aborted.');
     return await write();
   } finally {
     release();
-    if (configWriteTails.get(path) === current) configWriteTails.delete(path);
+    if (sqliteWriteTails.get(key) === current) sqliteWriteTails.delete(key);
   }
+}
+
+/** Hold an owner-private SQLite transaction while performing work for one local target. */
+export async function withSqliteFileLock<T>(
+  path: string,
+  work: () => Promise<T>,
+  options: { signal?: AbortSignal; owner?: string; timeoutMs?: number } = {},
+): Promise<T> {
+  const owner = options.owner ?? 'configuration';
+  const lockPath = resolve(path);
+  return withConfigWriteLock(
+    lockPath,
+    async () => {
+      const database = await openConfigLockDatabase(lockPath, owner);
+      try {
+        await acquireConfigLockDatabase(
+          database,
+          Date.now() + (options.timeoutMs ?? 10_000),
+          lockPath,
+          owner,
+          options.signal,
+        );
+        return await work();
+      } finally {
+        try {
+          if (database.isTransaction) database.exec('ROLLBACK');
+        } finally {
+          database.close();
+        }
+      }
+    },
+    options.signal,
+  );
 }
 
 function isSafeConfigLockMode(mode: number) {
@@ -242,7 +317,9 @@ function isSafeConfigLockMode(mode: number) {
 
 let sqliteImport: Promise<typeof import('node:sqlite')> | undefined;
 
-async function openConfigLockDatabase(path: string) {
+async function openConfigLockDatabase(path: string, owner = 'configuration') {
+  const lockName = `${owner} lock database`;
+  const displayLockName = owner === 'configuration' ? 'Configuration lock database' : lockName;
   let handle;
   let created = false;
   try {
@@ -251,14 +328,13 @@ async function openConfigLockDatabase(path: string) {
   } catch (error) {
     if (!isCode(error, 'EEXIST')) throw error;
     const existing = await lstat(path).catch((statError: unknown) => {
-      throw new Error(`Unable to inspect configuration lock database at ${path}.`, {
+      throw new Error(`Unable to inspect ${lockName} at ${path}.`, {
         cause: statError,
       });
     });
-    if (!existing.isFile())
-      throw new Error(`Configuration lock database must be a regular file: ${path}`);
+    if (!existing.isFile()) throw new Error(`${displayLockName} must be a regular file: ${path}`);
     if (!isSafeConfigLockMode(existing.mode))
-      throw new Error(`Configuration lock database has unsafe permissions: ${path}`);
+      throw new Error(`${displayLockName} has unsafe permissions: ${path}`);
     handle = await open(path, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
   }
   try {
@@ -271,22 +347,21 @@ async function openConfigLockDatabase(path: string) {
       opened.dev !== current.dev ||
       opened.ino !== current.ino
     )
-      throw new Error(`Configuration lock database changed while opening: ${path}`);
+      throw new Error(`${displayLockName} changed while opening: ${path}`);
   } finally {
     await handle.close();
   }
   try {
     const info = await lstat(path);
-    if (!info.isFile())
-      throw new Error(`Configuration lock database must be a regular file: ${path}`);
+    if (!info.isFile()) throw new Error(`${displayLockName} must be a regular file: ${path}`);
   } catch (error) {
-    throw new Error(`Unable to access configuration lock database at ${path}.`, { cause: error });
+    throw new Error(`Unable to access ${lockName} at ${path}.`, { cause: error });
   }
   const { DatabaseSync } = await getSqlite();
   try {
     return new DatabaseSync(path);
   } catch (error) {
-    throw new Error(`Unable to open configuration lock database at ${path}.`, { cause: error });
+    throw new Error(`Unable to open ${lockName} at ${path}.`, { cause: error });
   }
 }
 
@@ -298,21 +373,45 @@ async function acquireConfigLockDatabase(
   database: import('node:sqlite').DatabaseSync,
   timeoutAt: number,
   path: string,
+  owner = 'configuration',
+  signal?: AbortSignal,
 ) {
+  const lockName = `${owner} lock database`;
   while (true) {
+    if (signal?.aborted) throw signal.reason ?? new Error('The lock wait was aborted.');
     try {
       database.exec('BEGIN IMMEDIATE');
       return;
     } catch (error) {
       if (!isSqliteBusy(error))
-        throw new Error(`Unable to acquire configuration lock database at ${path}.`, {
+        throw new Error(`Unable to acquire ${lockName} at ${path}.`, {
           cause: error,
         });
-      if (Date.now() >= timeoutAt)
-        throw new Error(`Timed out waiting for configuration lock database at ${path}.`);
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+      if (Date.now() >= timeoutAt) throw new Error(`Timed out waiting for ${lockName} at ${path}.`);
+      await delayWithAbort(50, signal);
     }
   }
+}
+
+function delayWithAbort(delayMs: number, signal?: AbortSignal) {
+  if (!signal) return new Promise<void>((resolveDelay) => setTimeout(resolveDelay, delayMs));
+  return new Promise<void>((resolveDelay, rejectDelay) => {
+    if (signal.aborted) {
+      rejectDelay(signal.reason ?? new Error('The lock wait was aborted.'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolveDelay();
+    }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      rejectDelay(signal.reason ?? new Error('The lock wait was aborted.'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
 }
 
 async function acquireConfigFileLock(

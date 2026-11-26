@@ -555,10 +555,7 @@ describe('pipe command guard validation', () => {
     const stdinIterator = vi
       .spyOn(process.stdin, Symbol.asyncIterator)
       .mockReturnValue(input[Symbol.asyncIterator]());
-    const result = await cli(
-      ['put', '-', '/x', '--drive', A],
-      { keys: {}, origins: {} },
-    );
+    const result = await cli(['put', '-', '/x', '--drive', A], { keys: {}, origins: {} });
 
     expect(result.err).toContain('Missing drive key');
     expect(result.paths).toEqual([]);

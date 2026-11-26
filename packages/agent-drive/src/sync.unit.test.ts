@@ -101,6 +101,12 @@ function mockClient(
   return { client: client as unknown as AgentDriveClient, uploaded };
 }
 
+async function syncManifestFile(stateDirectory: string) {
+  const manifests = (await readdir(stateDirectory)).filter((name) => name.endsWith('.json'));
+  if (manifests.length !== 1) throw new Error('Expected one sync manifest in the state directory.');
+  return join(stateDirectory, manifests[0]!);
+}
+
 describe('upload-only sync safety', () => {
   it('closes a primed file iterator when put rejects before consuming it', async () => {
     let closed = false;
@@ -225,8 +231,7 @@ describe('upload-only sync safety', () => {
     const stateDirectory = `${configPath()}.state`;
     expect((await stat(configurationDirectory)).mode & 0o777).toBe(0o755);
     expect((await stat(stateDirectory)).mode & 0o777).toBe(0o700);
-    const [manifest] = await readdir(stateDirectory);
-    expect((await stat(join(stateDirectory, manifest!))).mode & 0o777).toBe(0o600);
+    expect((await stat(await syncManifestFile(stateDirectory))).mode & 0o777).toBe(0o600);
   });
 
   it('does not change permissions on an existing unsafe state directory', async () => {
@@ -269,8 +274,7 @@ describe('upload-only sync safety', () => {
     const first = mockClient();
     await syncDirectory(first.client, 'drive', root);
     const stateDirectory = `${configPath()}.state`;
-    const [manifestName] = await readdir(stateDirectory);
-    const manifestPath = join(stateDirectory, manifestName!);
+    const manifestPath = await syncManifestFile(stateDirectory);
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
       files: Record<string, { hash: string; versionId: string }>;
     };
@@ -292,8 +296,7 @@ describe('upload-only sync safety', () => {
     await syncDirectory(first.client, 'drive', root);
 
     const stateDirectory = `${configPath()}.state`;
-    const [manifestName] = await readdir(stateDirectory);
-    const manifest = JSON.parse(await readFile(join(stateDirectory, manifestName!), 'utf8')) as {
+    const manifest = JSON.parse(await readFile(await syncManifestFile(stateDirectory), 'utf8')) as {
       files: Record<string, { hash: string; versionId: string }>;
     };
     const changed = mockClient(undefined, [
@@ -390,8 +393,7 @@ describe('upload-only sync safety', () => {
     await expect(firstRun).rejects.toThrow('injected upload failure');
 
     const stateDirectory = `${configPath()}.state`;
-    const [manifestName] = await readdir(stateDirectory);
-    const manifestPath = join(stateDirectory, manifestName!);
+    const manifestPath = await syncManifestFile(stateDirectory);
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
       files: Record<string, { hash: string; versionId: string }>;
     };
@@ -434,8 +436,7 @@ describe('upload-only sync safety', () => {
       Array.from({ length: 8 }, (_, index) => `/file-${index}.txt`).sort(),
     );
     const stateDirectory = `${configPath()}.state`;
-    const [manifestName] = await readdir(stateDirectory);
-    const manifest = JSON.parse(await readFile(join(stateDirectory, manifestName!), 'utf8')) as {
+    const manifest = JSON.parse(await readFile(await syncManifestFile(stateDirectory), 'utf8')) as {
       files: Record<string, { hash: string; versionId: string }>;
     };
     expect(Object.keys(manifest.files).sort()).toEqual(
