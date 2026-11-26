@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
-import { generateDriveKey } from './crypto.js';
+import { decodeDriveKey, generateDriveKey } from './crypto.js';
 import {
   apiErrorLines,
   createdDriveNote,
@@ -49,7 +49,7 @@ import {
   sealDrivesToAccount,
   UNKNOWN_TYPE_HINT,
 } from './account-seal.js';
-import { syncDirectory } from './sync.js';
+import { SyncInterruptedError, syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
 import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
@@ -185,7 +185,10 @@ function sealHook(
   });
 }
 
-async function connect(args: ReturnType<typeof parse>) {
+async function connect(
+  args: ReturnType<typeof parse>,
+  options: { requireDriveKey?: boolean } = {},
+) {
   const connection = await resolveConnection(args.values.api);
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
   // Kept apart from args.values.drive: `check` has its own selection when --drive is omitted.
@@ -198,6 +201,7 @@ async function connect(args: ReturnType<typeof parse>) {
   const driveKey = drive
     ? await resolveDriveKey(drive, connection.apiUrl, args.values['key-file'], connection.config)
     : undefined;
+  if (options.requireDriveKey && drive) decodeDriveKey(driveKey);
   const client = new AgentDriveClient({
     apiUrl: connection.apiUrl,
     apiKey: connection.apiKey,
@@ -287,6 +291,7 @@ async function run(command: string, raw: string[]) {
     const split = raw.indexOf('--');
     const flags = parse(split < 0 ? raw : raw.slice(0, split));
     const wrapped = split < 0 ? [] : raw.slice(split + 1);
+    if (flags.values['token-stdin']) throw new Error('--token-stdin is only supported by `login`.');
     if (flags.values.size !== undefined) throw new Error('--size is only supported by `put -`.');
     if (flags.positionals.length || !wrapped.length)
       throw new Error('Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]');
@@ -300,6 +305,16 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const args = parse(raw);
+  if (args.values['token-stdin'] && command !== 'login')
+    throw new Error('--token-stdin is only supported by `login`.');
+  if (command === 'put') {
+    if (args.values.overwrite && args.values['if-version'] !== undefined)
+      throw new Error('--overwrite and --if-version are mutually exclusive.');
+    if (args.values['if-version'] !== undefined && !args.values['if-version'].trim())
+      throw new Error('--if-version must not be empty.');
+  }
+  if (command === 'get' && args.values.version !== undefined && !args.values.version.trim())
+    throw new Error('--version must not be empty.');
   let stdinSize: number | undefined;
   if (args.values.size !== undefined) {
     if (command !== 'put' || args.positionals[0] !== '-')
@@ -596,7 +611,9 @@ async function run(command: string, raw: string[]) {
       process.exitCode = 1;
     return;
   }
-  const { client, connection } = await connect(args);
+  const { client, connection } = await connect(args, {
+    requireDriveKey: command === 'put' && args.positionals[0] === '-',
+  });
   if (command === 'whoami') {
     const who = await client.whoami();
     const config = connection.config;
@@ -846,8 +863,6 @@ async function run(command: string, raw: string[]) {
     const local = args.positionals[0];
     const remote = args.positionals[1];
     if (!local || !remote) throw new Error('put requires LOCAL and REMOTE.');
-    if (args.values.overwrite && args.values['if-version'])
-      throw new Error('--overwrite and --if-version are mutually exclusive.');
     const options = {
       ...(args.values.overwrite ? { mode: 'overwrite' as const } : {}),
       ...(args.values['if-version'] ? { ifVersionId: args.values['if-version'] } : {}),
@@ -949,13 +964,45 @@ async function run(command: string, raw: string[]) {
     );
   if (command === 'sync') {
     if (!args.positionals[0]) throw new Error('sync requires LOCAL_DIRECTORY.');
-    return output(
-      await syncDirectory(client, requiredDrive(args), args.positionals[0], args.values.prefix, {
-        ...(args.values['overwrite-existing'] === undefined
-          ? {}
-          : { overwriteExisting: args.values['overwrite-existing'] }),
-      }),
-    );
+    const controller = new AbortController();
+    let interruptedBy: 'SIGINT' | 'SIGTERM' | undefined;
+    const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+      if (interruptedBy) {
+        process.exit(signal === 'SIGINT' ? 130 : 143);
+        return;
+      }
+      interruptedBy = signal;
+      controller.abort(signal);
+    };
+    const onSigint = () => onSignal('SIGINT');
+    const onSigterm = () => onSignal('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    try {
+      const result = await syncDirectory(
+        client,
+        requiredDrive(args),
+        args.positionals[0],
+        args.values.prefix,
+        {
+          ...(args.values['overwrite-existing'] === undefined
+            ? {}
+            : { overwriteExisting: args.values['overwrite-existing'] }),
+          signal: controller.signal,
+        },
+      );
+      return output(result);
+    } catch (error) {
+      if (!(error instanceof SyncInterruptedError)) throw error;
+      const signal = error.signalName ?? interruptedBy;
+      if (!signal) throw error;
+      process.stderr.write(`Sync interrupted by ${signal}.\n`);
+      process.exitCode = signal === 'SIGINT' ? 130 : 143;
+    } finally {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+    }
+    return;
   }
   throw new Error('Unknown command.');
 }
