@@ -20,6 +20,13 @@ function request(path: string) {
   );
 }
 
+function queryText(query: unknown): string | undefined {
+  if (typeof query === 'string') return query;
+  if (typeof query !== 'object' || query === null || !('text' in query)) return undefined;
+  const text = (query as { text?: unknown }).text;
+  return typeof text === 'string' ? text : undefined;
+}
+
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: resolve(process.cwd(), 'apps/web/drizzle') });
   const account = await pool.query<{ id: string }>(
@@ -71,10 +78,15 @@ describe('console browse authentication', () => {
     expect(drives.status).toBe(200);
     expect((await drives.json()).items).toHaveLength(5);
 
-    const browseAuthQueries = spy.mock.calls
-      .map(([query]) => (typeof query === 'string' ? query : query.text))
+    const browseAuthQueries = (
+      spy.mock.calls as unknown as readonly (readonly [unknown, ...unknown[]])[]
+    )
+      .map(([query]) => queryText(query))
       .filter(
-        (query) => query.includes('FROM accounts a') && query.includes("g.name = '__console__'"),
+        (query): query is string =>
+          query !== undefined &&
+          query.includes('FROM accounts a') &&
+          query.includes("g.name = '__console__'"),
       );
     expect(browseAuthQueries).toHaveLength(2);
     expect(browseAuthQueries.every((query) => !query.includes('ARRAY(SELECT d.id'))).toBe(true);
@@ -85,10 +97,15 @@ describe('console browse authentication', () => {
     expect(foreignList.status).toBe(403);
     expect((await foreignList.json()).error.code).toBe('permission_denied');
 
-    const scopedAuthQuery = spy.mock.calls
-      .map(([query]) => (typeof query === 'string' ? query : query.text))
+    const scopedAuthQuery = (
+      spy.mock.calls as unknown as readonly (readonly [unknown, ...unknown[]])[]
+    )
+      .map(([query]) => queryText(query))
       .filter(
-        (query) => query.includes('FROM accounts a') && query.includes("g.name = '__console__'"),
+        (query): query is string =>
+          query !== undefined &&
+          query.includes('FROM accounts a') &&
+          query.includes("g.name = '__console__'"),
       )
       .at(-1);
     expect(scopedAuthQuery).toContain('d.id = $3::uuid');
