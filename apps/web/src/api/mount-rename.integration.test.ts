@@ -317,6 +317,80 @@ describe('mount editor rename API', () => {
     expect(newerTarget.id).not.toBe(target.id);
   });
 
+  it('accepts uppercase source UUIDs and canonicalizes the operation receipt fingerprint', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-uppercase-source',
+      Buffer.from('source'),
+    );
+    const operationId = randomUUID();
+    const requestBody = {
+      path: '/.editor-tmp-uppercase-source',
+      destinationPath: '/uppercase-source.txt',
+      ifSourceVersionId: source.id.toUpperCase(),
+      ifDestinationVersionId: null,
+      operationId: operationId.toUpperCase(),
+    };
+
+    const first = await rename(f.driveId, f.token, requestBody);
+    expect(first.status).toBe(200);
+    const firstBody = await json(first);
+    const replay = await rename(f.driveId, f.token, {
+      ...requestBody,
+      ifSourceVersionId: source.id,
+      operationId,
+    });
+    expect(replay.status).toBe(200);
+    expect(await json(replay)).toEqual(firstBody);
+  });
+
+  it('accepts an uppercase expected destination version UUID', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-uppercase-destination',
+      Buffer.from('replacement'),
+    );
+    const target = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/uppercase-destination.txt',
+      Buffer.from('prior'),
+    );
+
+    const response = await rename(f.driveId, f.token, {
+      path: '/.editor-tmp-uppercase-destination',
+      destinationPath: '/uppercase-destination.txt',
+      ifSourceVersionId: source.id,
+      ifDestinationVersionId: target.id.toUpperCase(),
+      operationId: randomUUID(),
+    });
+
+    expect(response.status).toBe(200);
+    expect((await json(response)).versionId).not.toBe(target.id);
+  });
+
+  it('accepts an uppercase current version UUID for guarded unlink', async () => {
+    const f = await fixture();
+    const file = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/uppercase-unlink.txt',
+      Buffer.from('file'),
+    );
+
+    const response = await request(`/drives/${f.driveId}/unlink`, f.token, {
+      path: '/uppercase-unlink.txt',
+      ifVersionId: file.id.toUpperCase(),
+    });
+
+    expect(response.status).toBe(200);
+    expect((await getBytes(f.token, f.driveId, '/uppercase-unlink.txt')).response.status).toBe(404);
+  });
+
   it('replays an acknowledged operation id after the destination advances and rejects a changed payload', async () => {
     const f = await fixture();
     const prior = await uploadCommit(f.token, f.driveId, '/notes.txt', Buffer.from('old'));

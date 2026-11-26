@@ -65,7 +65,7 @@ async function parseInput(request: Request, auth: RenameAuth, driveId: string) {
   const ifSourceVersionId = uuid(
     typeof body.ifSourceVersionId === 'string' ? body.ifSourceVersionId : undefined,
     'ifSourceVersionId',
-  );
+  ).toLowerCase();
   if (!Object.hasOwn(body, 'ifDestinationVersionId'))
     throw new ApiError('validation_error', 'ifDestinationVersionId is required.');
   const ifDestinationVersionId =
@@ -74,11 +74,11 @@ async function parseInput(request: Request, auth: RenameAuth, driveId: string) {
       : uuid(
           typeof body.ifDestinationVersionId === 'string' ? body.ifDestinationVersionId : undefined,
           'ifDestinationVersionId',
-        );
+        ).toLowerCase();
   const operationId = uuid(
     typeof body.operationId === 'string' ? body.operationId : undefined,
     'operationId',
-  );
+  ).toLowerCase();
   if (path === destinationPath)
     throw new ApiError('validation_error', 'The source and destination paths must differ.');
   if (
@@ -224,6 +224,7 @@ async function moveToAbsentDestination(
   driveId: string,
   input: RenameInput,
   machineId: (client: PoolClient, request: Request) => Promise<string | null>,
+  completeOperation: (client: PoolClient) => Promise<void>,
 ) {
   return withTransaction(async (client) => {
     await lockBillingAccount(client, auth.accountId);
@@ -273,6 +274,7 @@ async function moveToAbsentDestination(
       versionId: moved.current_version_id as string,
     };
     await insertReceipt(client, driveId, auth, input, result);
+    await completeOperation(client);
     return { result, replay: false };
   });
 }
@@ -330,6 +332,7 @@ async function commitReplacement(
   objectKey: string,
   machineId: (client: PoolClient, request: Request) => Promise<string | null>,
   markObjectReferenced: () => void,
+  completeOperation: (client: PoolClient) => Promise<void>,
 ) {
   return withTransaction(async (client) => {
     await lockBillingAccount(client, auth.accountId);
@@ -421,6 +424,7 @@ async function commitReplacement(
       versionId,
     };
     await insertReceipt(client, driveId, auth, input, result);
+    await completeOperation(client);
     return { result, replay: false };
   });
 }
@@ -432,6 +436,7 @@ export async function renameFile(
   machineId: (client: PoolClient, request: Request) => Promise<string | null>,
   reserveOperation: () => Promise<void>,
   markReplay: () => void,
+  completeOperation: (client: PoolClient) => Promise<void>,
 ) {
   const input = await parseInput(request, auth, driveId);
   const prior = await withTransaction(async (client) => {
@@ -446,7 +451,14 @@ export async function renameFile(
   // This runs only after the receipt lookup transaction released its account lock.
   await reserveOperation();
   if (input.ifDestinationVersionId === null) {
-    const moved = await moveToAbsentDestination(request, auth, driveId, input, machineId);
+    const moved = await moveToAbsentDestination(
+      request,
+      auth,
+      driveId,
+      input,
+      machineId,
+      completeOperation,
+    );
     if (moved.replay) markReplay();
     return Response.json(moved.result, { headers: { 'Cache-Control': 'no-store' } });
   }
@@ -479,6 +491,7 @@ export async function renameFile(
       () => {
         copyReferenced = true;
       },
+      completeOperation,
     );
     if (committed.replay) {
       await deleteObject(objectKey).catch(() => undefined);
