@@ -1,6 +1,6 @@
 import { chmod, link, lstat, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { hostname, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { decodeDriveKey } from './crypto.js';
@@ -132,13 +132,17 @@ function originOf(url: string) {
   }
 }
 
-export async function writeConfig(config: AgentDriveConfig) {
-  const path = configPath();
+export function writeConfig(config: AgentDriveConfig) {
+  const path = resolve(configPath());
+  return withConfigWriteLock(`${path}.lock.sqlite`, () => writeConfigUnlocked(config, path));
+}
+
+async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
   const directory = dirname(path);
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lockDbPath = `${path}.lock.sqlite`;
   const lockPath = `${path}.lock`;
   const timeoutAt = Date.now() + 10_000;
-  const lockDbPath = `${path}.lock.sqlite`;
   const database = await openConfigLockDatabase(lockDbPath);
   let databaseInfo: Awaited<ReturnType<typeof lstat>>;
   try {
@@ -208,6 +212,34 @@ export async function writeConfig(config: AgentDriveConfig) {
   return { backupsCleared };
 }
 
+// POSIX record locks are process-associated. Closing any descriptor for this inode can release
+// another SQLite connection's live lock, so same-process writers must not open/close descriptors
+// for one config while another writer is using its SQLite transaction.
+const configWriteTails = new Map<string, Promise<void>>();
+
+async function withConfigWriteLock<T>(path: string, write: () => Promise<T>): Promise<T> {
+  const previous = configWriteTails.get(path) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveTail) => {
+    release = resolveTail;
+  });
+  configWriteTails.set(path, current);
+  await previous;
+  try {
+    return await write();
+  } finally {
+    release();
+    if (configWriteTails.get(path) === current) configWriteTails.delete(path);
+  }
+}
+
+function isSafeConfigLockMode(mode: number) {
+  if ((mode & 0o200) === 0) return false;
+  // Node exposes only owner read/write semantics on Windows; the other POSIX bits do not
+  // describe Windows ACLs. Do not change an existing file's ACL or mode when accepting it.
+  return process.platform === 'win32' || (mode & 0o077) === 0;
+}
+
 let sqliteImport: Promise<typeof import('node:sqlite')> | undefined;
 
 async function openConfigLockDatabase(path: string) {
@@ -225,12 +257,21 @@ async function openConfigLockDatabase(path: string) {
     });
     if (!existing.isFile())
       throw new Error(`Configuration lock database must be a regular file: ${path}`);
-    if ((existing.mode & 0o077) !== 0 || (existing.mode & 0o200) === 0)
+    if (!isSafeConfigLockMode(existing.mode))
       throw new Error(`Configuration lock database has unsafe permissions: ${path}`);
     handle = await open(path, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
   }
   try {
     if (created) await handle.chmod(0o600);
+    const opened = await handle.stat();
+    const current = await lstat(path);
+    if (
+      !opened.isFile() ||
+      !current.isFile() ||
+      opened.dev !== current.dev ||
+      opened.ino !== current.ino
+    )
+      throw new Error(`Configuration lock database changed while opening: ${path}`);
   } finally {
     await handle.close();
   }

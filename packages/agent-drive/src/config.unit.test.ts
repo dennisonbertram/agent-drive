@@ -1,5 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,6 +75,111 @@ describe('private CLI configuration', () => {
         driveB: 'key-b',
       },
     });
+  });
+
+  it('does not release a live SQLite lock when a same-process writer opens the lock file', async () => {
+    await isolatedConfig();
+    const lockDbPath = `${configPath()}.lock.sqlite`;
+    const legacyLock = `${configPath()}.lock`;
+    await mkdir(legacyLock, { mode: 0o700 });
+
+    const firstWrite = writeConfig({ driveKeys: { first: 'first-key' } });
+    firstWrite.catch(() => {});
+    const probeScript = [
+      "import { DatabaseSync } from 'node:sqlite';",
+      'const db = new DatabaseSync(process.env.AGENT_DRIVE_LOCK_DB);',
+      "db.exec('PRAGMA busy_timeout = 0');",
+      "try { db.exec('BEGIN IMMEDIATE'); db.exec('ROLLBACK'); process.stdout.write('free'); }",
+      "catch (error) { if (error.errcode === 5 || error.errcode === 6) process.stdout.write('busy'); else throw error; }",
+      'db.close();',
+    ].join('\n');
+    const waitForBusyLock = async () => {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const probe = spawnSync(process.execPath, ['--input-type=module', '-e', probeScript], {
+          env: { ...process.env, AGENT_DRIVE_LOCK_DB: lockDbPath },
+          encoding: 'utf8',
+          timeout: 2_000,
+        });
+        if (probe.status === 0 && probe.stdout === 'busy') return;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      throw new Error('The first config writer did not acquire the SQLite lock.');
+    };
+
+    const contenderScript = [
+      "import { DatabaseSync } from 'node:sqlite';",
+      'const db = new DatabaseSync(process.env.AGENT_DRIVE_LOCK_DB);',
+      "db.exec('PRAGMA busy_timeout = 0');",
+      "process.stdout.write('ready\\n');",
+      'function contend() {',
+      "  try { db.exec('BEGIN IMMEDIATE'); process.stdout.write('acquired\\n'); }",
+      '  catch (error) { if (error.errcode === 5 || error.errcode === 6) { setTimeout(contend, 1); return; } throw error; }',
+      "  process.stdin.once('data', () => { db.exec('ROLLBACK'); db.close(); process.exit(0); });",
+      '}',
+      'contend();',
+    ].join('\n');
+    let contender: ReturnType<typeof spawn> | undefined;
+    let contenderExit: ReturnType<typeof once> | undefined;
+    let contenderOutput = '';
+    let secondWrite: Promise<unknown> | undefined;
+    try {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+      await waitForBusyLock();
+      contender = spawn(process.execPath, ['--input-type=module', '-e', contenderScript], {
+        env: { ...process.env, AGENT_DRIVE_LOCK_DB: lockDbPath },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const contenderStdout = contender.stdout;
+      if (!contenderStdout) throw new Error('The SQLite contender has no stdout pipe.');
+      contenderStdout.setEncoding('utf8');
+      contenderStdout.on('data', (chunk: string) => {
+        contenderOutput += chunk;
+      });
+      contenderExit = once(contender, 'exit');
+      await vi.waitFor(() => expect(contenderOutput).toContain('ready'), { timeout: 5_000 });
+
+      secondWrite = writeConfig({ driveKeys: { second: 'second-key' } });
+      secondWrite.catch(() => {});
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
+      const acquiredWhileFirstWriterWaited = contenderOutput.includes('acquired');
+
+      contender.kill('SIGKILL');
+      await contenderExit;
+      await rmdir(legacyLock);
+      await Promise.all([firstWrite, secondWrite]);
+
+      expect(acquiredWhileFirstWriterWaited).toBe(false);
+      await expect(readConfig()).resolves.toMatchObject({
+        driveKeys: { first: 'first-key', second: 'second-key' },
+      });
+    } finally {
+      if (contender && contender.exitCode === null) {
+        contender.kill('SIGKILL');
+        if (contenderExit) await contenderExit;
+      }
+      await rmdir(legacyLock).catch(() => {});
+      await Promise.allSettled([firstWrite, ...(secondWrite ? [secondWrite] : [])]);
+    }
+  }, 20_000);
+
+  it('accepts the Windows owner-writable mode while preserving the existing lock file mode', async () => {
+    await isolatedConfig();
+    await writeConfig({ apiKey: 'before-windows-mode-check' });
+    const lockDbPath = `${configPath()}.lock.sqlite`;
+    await chmod(lockDbPath, 0o666);
+
+    const originalPlatform = process.platform;
+    try {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' });
+      await expect(writeConfig({ apiKey: 'after-windows-mode-check' })).resolves.toEqual({
+        backupsCleared: false,
+      });
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform });
+    }
+
+    if (originalPlatform !== 'win32') expect((await stat(lockDbPath)).mode & 0o777).toBe(0o666);
+    await expect(readConfig()).resolves.toMatchObject({ apiKey: 'after-windows-mode-check' });
   });
 
   it('recovers a config lock left by a process killed with SIGKILL', async () => {
