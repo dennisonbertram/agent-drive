@@ -882,14 +882,29 @@ export class AgentDriveClient {
       if (!Number.isSafeInteger(options.maxPlaintextBytes) || options.maxPlaintextBytes < 0)
         throw new TypeError('maxPlaintextBytes must be a non-negative safe integer.');
       query.set('maxPlaintextBytes', String(options.maxPlaintextBytes));
+      // Older servers understand metadataOnly but ignore maxPlaintextBytes. This prevents them
+      // from authorizing a download until the client has checked the selected version's size.
+      query.set('metadataOnly', '1');
+      query.set('authorizeIfWithinLimit', '1');
     }
-    const metadata = await this.request<Version & { downloadUrl?: string }>(
+    let metadata = await this.request<Version & { downloadUrl?: string }>(
       `drives/${encode(driveId)}/get?${query.toString()}`,
       options.signal ? { signal: options.signal } : {},
     );
     const plaintextBytes = plaintextSize(metadata.ciphertextSize);
     if (options.maxPlaintextBytes !== undefined && plaintextBytes > options.maxPlaintextBytes)
       throw new StreamSizeLimitError(plaintextBytes, options.maxPlaintextBytes);
+    if (!metadata.downloadUrl && options.maxPlaintextBytes !== undefined) {
+      const pinnedQuery = new URLSearchParams({ path, versionId: metadata.id });
+      pinnedQuery.set('maxPlaintextBytes', String(options.maxPlaintextBytes));
+      const pinned = await this.request<Version & { downloadUrl?: string }>(
+        `drives/${encode(driveId)}/get?${pinnedQuery.toString()}`,
+        options.signal ? { signal: options.signal } : {},
+      );
+      if (pinned.id !== metadata.id || pinned.ciphertextSize !== metadata.ciphertextSize)
+        throw new AgentDriveApiError('internal_error', 502, 'The pinned file metadata changed.');
+      metadata = pinned;
+    }
     if (!metadata.downloadUrl)
       throw new AgentDriveApiError('internal_error', 502, 'The download URL is missing.');
     const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey, options.signal).then(

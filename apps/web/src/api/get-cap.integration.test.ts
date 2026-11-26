@@ -103,11 +103,15 @@ describe('server-side bounded GET', () => {
     const original = freePlan.operations;
     freePlan.operations = 1n;
     try {
-      const allowed = await request(`versionId=${smallVersionId}&maxPlaintextBytes=6`);
+      const allowed = await request(
+        `versionId=${smallVersionId}&metadataOnly=1&maxPlaintextBytes=6&authorizeIfWithinLimit=1`,
+      );
       expect(allowed.status).toBe(200);
       expect((await allowed.json()).downloadUrl).toEqual(expect.any(String));
 
-      const next = await request(`versionId=${smallVersionId}&maxPlaintextBytes=6`);
+      const next = await request(
+        `versionId=${smallVersionId}&metadataOnly=1&maxPlaintextBytes=6&authorizeIfWithinLimit=1`,
+      );
       expect(next.status).toBe(402);
       expect((await next.json()).error.code).toBe('payment_required');
     } finally {
@@ -116,15 +120,31 @@ describe('server-side bounded GET', () => {
   });
 
   it('returns metadata without signing or fetching storage when the selected version exceeds the cap', async () => {
-    const largeBound = await request('maxPlaintextBytes=9007199254740991');
+    const metadataOnly = await request('metadataOnly=1');
+    expect(metadataOnly.status).toBe(200);
+    expect((await metadataOnly.json()).downloadUrl).toBeUndefined();
+
+    const metadataOnlyWithCap = await request('metadataOnly=1&maxPlaintextBytes=9007199254740991');
+    expect(metadataOnlyWithCap.status).toBe(200);
+    expect((await metadataOnlyWithCap.json()).downloadUrl).toBeUndefined();
+
+    const largeBound = await request(
+      'metadataOnly=1&maxPlaintextBytes=9007199254740991&authorizeIfWithinLimit=1',
+    );
     expect(largeBound.status).toBe(200);
     expect((await largeBound.json()).downloadUrl).toEqual(expect.any(String));
 
-    const result = await request(`versionId=${largeVersionId}&maxPlaintextBytes=7`);
+    const result = await request(
+      `versionId=${largeVersionId}&metadataOnly=1&maxPlaintextBytes=7&authorizeIfWithinLimit=1`,
+    );
     expect(result.status).toBe(200);
     const metadata = await result.json();
     expect(metadata).toMatchObject({ id: largeVersionId, path, ciphertextSize: encryptedSize(8) });
     expect(metadata).not.toHaveProperty('downloadUrl');
+    const authorizedBeforeClient = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
 
     const fetchCalls: string[] = [];
     const clientApiUrl = 'http://localhost/api/v1';
@@ -146,5 +166,12 @@ describe('server-side bounded GET', () => {
     ).rejects.toBeInstanceOf(StreamSizeLimitError);
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0]).toContain(`versionId=${largeVersionId}`);
+    const authorizedAfterClient = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
+    expect(authorizedAfterClient.rows[0]?.authorized_egress_bytes).toBe(
+      authorizedBeforeClient.rows[0]?.authorized_egress_bytes,
+    );
   });
 });

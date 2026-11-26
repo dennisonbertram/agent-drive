@@ -2307,6 +2307,9 @@ async function fileEndpoint(
     const path = canonicalPath(url.searchParams.get('path'));
     const versionParam = url.searchParams.get('versionId');
     const versionId = versionParam ? uuid(versionParam, 'versionId') : undefined;
+    const authorizeIfWithinLimit = queryValue(url, 'authorizeIfWithinLimit', 1);
+    if (authorizeIfWithinLimit !== null && authorizeIfWithinLimit !== '1')
+      throw new ApiError('validation_error', 'authorizeIfWithinLimit must be 1.');
     const capParam = queryValue(url, 'maxPlaintextBytes', 16);
     let maxPlaintextBytes: number | undefined;
     if (capParam !== null) {
@@ -2329,7 +2332,15 @@ async function fileEndpoint(
     );
     const row = result.rows[0] as Row | undefined;
     if (!row) throw new ApiError('not_found', 'File not found.');
-    if (url.searchParams.get('metadataOnly') === '1') return response(rowVersion(row));
+    const metadataOnly = url.searchParams.get('metadataOnly') === '1';
+    const conditionalAuthorization =
+      authorizeIfWithinLimit === '1' && metadataOnly && maxPlaintextBytes !== undefined;
+    if (authorizeIfWithinLimit === '1' && !conditionalAuthorization)
+      throw new ApiError(
+        'validation_error',
+        'authorizeIfWithinLimit requires metadataOnly=1 and maxPlaintextBytes.',
+      );
+    if (metadataOnly && !conditionalAuthorization) return response(rowVersion(row));
     if (
       maxPlaintextBytes !== undefined &&
       plaintextSize(Number(row.ciphertext_size)) > maxPlaintextBytes
