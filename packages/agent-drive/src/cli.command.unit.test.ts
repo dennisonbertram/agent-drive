@@ -26,7 +26,7 @@ type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 async function cli(
   argv: string[],
   saved: Saved,
-  respond: (path: string) => unknown = () => ({}),
+  respond: (path: string, url: URL, init?: RequestInit) => unknown = () => ({}),
   env: Record<string, string> = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
@@ -50,12 +50,21 @@ async function cli(
   const queries: string[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: URL | string) => {
-      const path = new URL(String(url)).pathname.replace('/api/v1/', '');
+    vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const parsed = new URL(String(url));
+      const api = parsed.pathname.startsWith('/api/v1/');
+      const path = api ? parsed.pathname.replace('/api/v1/', '') : `storage${parsed.pathname}`;
       paths.push(path);
-      queries.push(new URL(String(url)).search);
+      queries.push(parsed.search);
+      if (init?.body instanceof ReadableStream) {
+        const reader = init.body.getReader();
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+        }
+      }
       // A test that does not answer account-key gets "no key": the throttled seal stays silent.
-      const body = path === 'account-key' ? { accountKey: null } : respond(path);
+      const body = path === 'account-key' ? { accountKey: null } : respond(path, parsed, init);
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -232,7 +241,8 @@ describe('sync flag validation', () => {
     const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncok-'));
     dirs.push(dir);
     await writeFile(join(dir, 'f.txt'), 'x');
-    const r = await cli(['sync', dir], one, (path) => {
+    const r = await cli(['sync', dir], one, (path, url, init) => {
+      void url;
       if (path === 'whoami')
         return {
           accountId: 'a',
@@ -243,7 +253,12 @@ describe('sync flag validation', () => {
         };
       if (path === 'drives' || path.endsWith('/list')) return { items: [], nextCursor: null };
       if (path.endsWith('/put'))
-        return { intentId: 'i1', uploadUrl: 'https://s3.test/x', ciphertextSize: 1 };
+        return {
+          intentId: 'i1',
+          uploadUrl: 'https://s3.test/x',
+          ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+            .ciphertextSize,
+        };
       if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/f.txt' } };
       return {};
     });

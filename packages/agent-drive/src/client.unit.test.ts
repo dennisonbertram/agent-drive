@@ -1,6 +1,6 @@
 import { getEventListeners } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { AgentDriveClient, AgentDriveApiError } from './client.js';
+import { AgentDriveClient, AgentDriveApiError, StreamSizeLimitError } from './client.js';
 import { decodeDriveKey, encryptFile, generateDriveKey } from './crypto.js';
 import { seal } from './crypto-format.js';
 import { createTraceInbox, sealFileKeyToInbox } from './trace-inbox.js';
@@ -276,6 +276,164 @@ describe('AgentDriveClient transport guards', () => {
       await new Promise((resolve) => setTimeout(resolve, 2300));
       expect(fetcher.mock.calls.length).toBe(calls);
     });
+  });
+});
+
+describe('AgentDriveClient streaming transfers', () => {
+  const driveKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const version = {
+    id: '11111111-1111-4111-8111-111111111111',
+    path: '/x',
+    ciphertextSize: 44,
+    wrappedKey: 'wrapped',
+    agentId: 'a',
+    machineId: null,
+    userId: null,
+    tags: [],
+    description: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('streams an encrypted upload with the declared length and commits only after the body completes', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), ...(init ? { init } : {}) });
+      if (calls.length === 1)
+        return new Response(
+          JSON.stringify({
+            intentId: 'i',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      if (calls.length === 2) {
+        const body = init?.body as ReadableStream<Uint8Array>;
+        const reader = body.getReader();
+        let length = 0;
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) break;
+          length += next.value.byteLength;
+        }
+        expect(length).toBe(52);
+        expect(new Headers(init?.headers).get('content-length')).toBe('52');
+        expect((init as RequestInit & { duplex?: string }).duplex).toBe('half');
+        return new Response('', { status: 200 });
+      }
+      return new Response(JSON.stringify({ version }), { status: 201 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const source = (async function* () {
+      yield new TextEncoder().encode('stream data');
+    })();
+    await client.putStream('d', '/x', source, 11, { tags: ['stream'], mode: 'overwrite' });
+    expect(calls).toHaveLength(3);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
+      path: '/x',
+      ciphertextSize: 52,
+      tags: ['stream'],
+    });
+    expect(calls[1]?.init?.headers).not.toHaveProperty('authorization');
+    expect(String(calls[2]?.url)).toContain('/commit');
+  });
+
+  it('does not commit when the plaintext stream ends before its declared size', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(String(input));
+      if (calls.length === 1)
+        return new Response(
+          JSON.stringify({
+            intentId: 'i',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
+      await expect(reader.read()).resolves.toMatchObject({ done: false });
+      await expect(reader.read()).rejects.toThrow();
+      return new Response('', { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const shortSource = (async function* () {
+      yield new TextEncoder().encode('short');
+    })();
+    await expect(client.putStream('d', '/x', shortSource, 11)).rejects.toThrow();
+    expect(calls).toHaveLength(2);
+    expect(calls.some((url) => url.includes('/commit'))).toBe(false);
+  });
+
+  it('does not request a signed URL or download when the metadata size exceeds the cap', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return new Response(JSON.stringify({ ...version, ciphertextSize: 1024 }), { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    await expect(client.getStream('d', '/x', { maxPlaintextBytes: 10 })).rejects.toBeInstanceOf(
+      StreamSizeLimitError,
+    );
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('metadataOnly=1');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('decrypts a streamed download and cancels when the consumer stops early', async () => {
+    const plaintext = new Uint8Array(1024 * 1024 + 5).fill(42);
+    const encrypted = await encryptFile(plaintext, driveKey);
+    const ciphertext = new Uint8Array(encrypted.ciphertext);
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: ciphertext.subarray(0, 25) })
+        .mockResolvedValueOnce({
+          done: false,
+          value: ciphertext.subarray(25, 25 + 1024 * 1024 + 16),
+        })
+        .mockImplementation(() => new Promise(() => {})),
+      cancel: vi.fn(async () => {}),
+      releaseLock: vi.fn(),
+    };
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      if (String(input).includes('/get?'))
+        return new Response(
+          JSON.stringify({
+            ...version,
+            ciphertextSize: ciphertext.byteLength,
+            wrappedKey: encrypted.wrappedKey,
+            downloadUrl: 'http://localhost:9000/d',
+          }),
+          { status: 200 },
+        );
+      return { ok: true, body: { getReader: () => reader } } as unknown as Response;
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const result = await client.getStream('d', '/x');
+    const iterator = result.plaintext[Symbol.asyncIterator]();
+    expect((await iterator.next()).value).toEqual(plaintext.subarray(0, 1024 * 1024));
+    await iterator.return?.();
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
   });
 });
 

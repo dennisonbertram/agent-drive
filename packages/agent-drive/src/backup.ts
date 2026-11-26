@@ -30,7 +30,7 @@ const MANIFEST_SAVE_MS = 2_000;
 const PROGRESS_MS = 10_000;
 const LOCK_STALE_MS = 2 * 60 * 1000;
 const LOCK_REFRESH_MS = 30 * 1000;
-type BackupClient = Pick<AgentDriveClient, 'apiOrigin' | 'put'>;
+type BackupClient = Pick<AgentDriveClient, 'apiOrigin' | 'putStream'>;
 type Manifest = { files: Record<string, string> };
 type IgnoreRules = { files: Set<string>; directories: Set<string> };
 type ScannedFile = { path: string; relativePath: string; info: Stats };
@@ -181,6 +181,51 @@ export async function readFileInside(path: string, root: string, expected: Stats
   } finally {
     await handle.close();
   }
+}
+
+/** Read a backup file in bounded chunks and verify its identity and content at EOF. */
+async function* streamFileInside(
+  path: string,
+  root: string,
+  expected: Stats,
+  expectedDigest?: string,
+): AsyncGenerator<Uint8Array> {
+  const changed = () => new Error('file changed since the scan; refusing to read it');
+  const same = (a: Stats) =>
+    a.isFile() && a.dev === expected.dev && a.ino === expected.ino && a.size === expected.size;
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  const hash = createHash('sha256');
+  try {
+    if (!same(await handle.stat()) || !within(root, await realpath(dirname(path)))) throw changed();
+    let position = 0;
+    while (position < expected.size) {
+      const bytes = Buffer.allocUnsafe(Math.min(1024 * 1024, expected.size - position));
+      const { bytesRead } = await handle.read(bytes, 0, bytes.byteLength, position);
+      if (bytesRead === 0) throw changed();
+      position += bytesRead;
+      const chunk = bytesRead === bytes.byteLength ? bytes : bytes.subarray(0, bytesRead);
+      hash.update(chunk);
+      yield chunk;
+    }
+    const extra = Buffer.allocUnsafe(1);
+    if ((await handle.read(extra, 0, 1, position)).bytesRead !== 0) throw changed();
+    if (
+      !same(await handle.stat()) ||
+      !same(await lstat(path)) ||
+      !within(root, await realpath(dirname(path)))
+    ) {
+      throw changed();
+    }
+    if (expectedDigest !== undefined && hash.digest('hex') !== expectedDigest) throw changed();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function hashFileInside(path: string, root: string, expected: Stats) {
+  const hash = createHash('sha256');
+  for await (const chunk of streamFileInside(path, root, expected)) hash.update(chunk);
+  return hash.digest('hex');
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
@@ -359,9 +404,7 @@ export async function backupDirectory(
       const remote = `${remotePrefix}/${file.relativePath}`;
       try {
         if (file.info.size > MAX_BYTES) throw new Error('file exceeds the 5 GiB limit');
-        const bytes = await readFileInside(file.path, root, file.info);
-        if (bytes.byteLength !== file.info.size) throw new Error('file changed since the scan');
-        const hash = createHash('sha256').update(bytes).digest('hex');
+        const hash = await hashFileInside(file.path, root, file.info);
         if (loaded.files[file.relativePath] === hash) {
           result.unchanged++;
           return;
@@ -370,7 +413,13 @@ export async function backupDirectory(
           result.wouldUpload.push(remote);
           return;
         }
-        await client.put(driveId, remote, bytes, { mode: 'overwrite' });
+        await client.putStream(
+          driveId,
+          remote,
+          streamFileInside(file.path, root, file.info, hash),
+          file.info.size,
+          { mode: 'overwrite' },
+        );
         loaded.files[file.relativePath] = hash;
         result.uploaded++;
         saveSoon();

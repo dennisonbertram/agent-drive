@@ -42,8 +42,17 @@ function mock(failOn?: string) {
   const puts: { path: string; options: unknown }[] = [];
   const client = {
     apiOrigin: 'https://x.test',
-    put: async (_d: string, path: string, _b: Uint8Array, options: unknown) => {
+    putStream: async (
+      _d: string,
+      path: string,
+      source: AsyncIterable<Uint8Array>,
+      size: number,
+      options: unknown,
+    ) => {
       if (failOn && path.endsWith(failOn)) throw new Error('boom');
+      let uploadedBytes = 0;
+      for await (const chunk of source) uploadedBytes += chunk.byteLength;
+      if (uploadedBytes !== size) throw new Error('stream size mismatch');
       puts.push({ path, options });
       return { id: 'v' };
     },
@@ -345,7 +354,7 @@ describe('backupDirectory', () => {
     let calls = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      put: async (_d: string, path: string) => {
+      putStream: async (_d: string, path: string) => {
         if (path.endsWith('a.txt')) {
           calls++;
           throw new AgentDriveApiError('rate_limited', 429, 'slow down', { retryAfter: 0 });
@@ -362,7 +371,7 @@ describe('backupDirectory', () => {
     const { root } = await fixture();
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         await new Promise((r) => setTimeout(r, 30));
         return { id: 'v' };
       },
@@ -386,7 +395,7 @@ describe('backupDirectory', () => {
     let max = 0;
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         inflight++;
         max = Math.max(max, inflight);
         await new Promise((r) => setTimeout(r, 10));
@@ -435,7 +444,7 @@ describe('backupDirectory', () => {
     const seen: string[] = [];
     const client = {
       apiOrigin: 'https://x.test',
-      put: async () => {
+      putStream: async () => {
         seen.push((await readFile(lock, 'utf8')).trim());
         return { id: 'v' };
       },
@@ -596,7 +605,7 @@ describe('backupDirectory', () => {
       await chmod(join(root, 'sub'), 0);
       const client = {
         apiOrigin: 'https://x.test',
-        put: async () => {
+        putStream: async () => {
           await new Promise((r) => setTimeout(r, 30));
           return { id: 'v' };
         },

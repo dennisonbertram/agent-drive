@@ -1,10 +1,13 @@
 import {
   DriveCryptoError,
   decryptFile,
+  decryptWithFileKeyStream,
   encryptFile,
+  encryptFileStream,
   envelopeVersion,
   unwrapFileKey,
 } from './crypto.js';
+import { plaintextSize } from './crypto-format.js';
 import type { TraceInbox, TraceInboxRecord } from './trace-inbox.js';
 import type { SealedDriveKey } from './seal.js';
 
@@ -33,7 +36,7 @@ export type PutOptions = {
   signal?: AbortSignal;
 };
 
-export type GetOptions = { versionId?: string };
+export type GetOptions = { versionId?: string; maxPlaintextBytes?: number; signal?: AbortSignal };
 
 export type Version = {
   id: string;
@@ -204,6 +207,18 @@ export class AgentDriveApiError extends Error {
     this.currentVersionId = details.currentVersionId;
     this.state = details.state;
     this.name = 'AgentDriveApiError';
+  }
+}
+
+export class StreamSizeLimitError extends Error {
+  readonly code = 'size_limit_exceeded';
+
+  constructor(
+    readonly plaintextBytes: number,
+    readonly maxPlaintextBytes: number,
+  ) {
+    super(`File is ${plaintextBytes} bytes; the inline limit is ${maxPlaintextBytes} bytes.`);
+    this.name = 'StreamSizeLimitError';
   }
 }
 
@@ -712,6 +727,85 @@ export class AgentDriveClient {
     return this.putEncrypted(driveId, path, encrypted.ciphertext, encrypted.wrappedKey, options);
   }
 
+  /** Encrypt and upload a bounded stream through the normal intent, upload and commit flow. */
+  async putStream(
+    driveId: string,
+    path: string,
+    plaintext: AsyncIterable<Uint8Array>,
+    plaintextBytes: number,
+    options: PutOptions = {},
+  ) {
+    if (options.mode === 'create' && options.ifVersionId !== undefined) {
+      throw new TypeError('Create-only writes cannot include ifVersionId.');
+    }
+    const encrypted = await encryptFileStream(plaintext, plaintextBytes, this.keyFor(driveId));
+    const body: Record<string, unknown> = {
+      path,
+      ciphertextSize: encrypted.ciphertextSize,
+      wrappedKey: encrypted.wrappedKey,
+    };
+    if (options.tags !== undefined) body.tags = options.tags;
+    if (options.description !== undefined) body.description = options.description;
+    if (options.userId !== undefined) body.userId = options.userId;
+    if (options.ifVersionId !== undefined) body.ifVersionId = options.ifVersionId;
+    else if (options.mode !== 'overwrite') body.ifVersionId = null;
+    const intent = await this.request<{
+      intentId: string;
+      uploadUrl: string;
+      ciphertextSize: number;
+    }>(`drives/${encode(driveId)}/put`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    if (intent.ciphertextSize !== encrypted.ciphertextSize) {
+      throw new AgentDriveApiError('storage_error', 502, 'The upload intent size did not match.');
+    }
+    const iterator = encrypted.ciphertext[Symbol.asyncIterator]();
+    let resolveUpload!: () => void;
+    let rejectUpload!: (reason?: unknown) => void;
+    const uploadFinished = new Promise<void>((resolve, reject) => {
+      resolveUpload = resolve;
+      rejectUpload = reject;
+    });
+    uploadFinished.catch(() => {});
+    const uploadBody = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const next = await iterator.next();
+          if (next.done) {
+            resolveUpload();
+            controller.close();
+          } else controller.enqueue(next.value);
+        } catch (error) {
+          rejectUpload(error);
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        rejectUpload(reason ?? new Error('The upload stream was cancelled.'));
+        await iterator.return?.(reason);
+      },
+    });
+    await this.storage(intent.uploadUrl, {
+      method: 'PUT',
+      body: uploadBody,
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': String(encrypted.ciphertextSize),
+      },
+      duplex: 'half',
+      ...(options.signal ? { signal: options.signal } : {}),
+    } as RequestInit);
+    await uploadFinished;
+    const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
+      method: 'POST',
+      body: JSON.stringify({ intentId: intent.intentId }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
+    return committed.version;
+  }
+
   /** Uploads bytes that were already encrypted with `encryptFile`. */
   async putEncrypted(
     driveId: string,
@@ -776,6 +870,119 @@ export class AgentDriveClient {
       await inbox,
     );
     return { bytes, version: metadata };
+  }
+
+  /** Open a metered download as authenticated plaintext chunks. */
+  async getStream(driveId: string, path: string, options: GetOptions = {}) {
+    const query = new URLSearchParams({ path });
+    if (options.versionId) query.set('versionId', options.versionId);
+    let metadata: Version & { downloadUrl?: string };
+    if (options.maxPlaintextBytes !== undefined) {
+      if (!Number.isSafeInteger(options.maxPlaintextBytes) || options.maxPlaintextBytes < 0)
+        throw new TypeError('maxPlaintextBytes must be a non-negative safe integer.');
+      const preflight = await this.request<Version>(
+        `drives/${encode(driveId)}/get?${query.toString()}&metadataOnly=1`,
+        options.signal ? { signal: options.signal } : {},
+      );
+      const declaredBytes = plaintextSize(preflight.ciphertextSize);
+      if (declaredBytes > options.maxPlaintextBytes)
+        throw new StreamSizeLimitError(declaredBytes, options.maxPlaintextBytes);
+      const pinnedQuery = new URLSearchParams({ path, versionId: preflight.id });
+      metadata = await this.request<Version & { downloadUrl: string }>(
+        `drives/${encode(driveId)}/get?${pinnedQuery.toString()}`,
+        options.signal ? { signal: options.signal } : {},
+      );
+      if (metadata.id !== preflight.id || metadata.ciphertextSize !== preflight.ciphertextSize)
+        throw new AgentDriveApiError('internal_error', 502, 'The pinned file metadata changed.');
+    } else {
+      metadata = await this.request<Version & { downloadUrl: string }>(
+        `drives/${encode(driveId)}/get?${query.toString()}`,
+        options.signal ? { signal: options.signal } : {},
+      );
+    }
+    if (!metadata.downloadUrl)
+      throw new AgentDriveApiError('internal_error', 502, 'The download URL is missing.');
+    const plaintextBytes = plaintextSize(metadata.ciphertextSize);
+    const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey).then((inbox) =>
+      unwrapFileKey(metadata.wrappedKey, this.keyFor(driveId), inbox),
+    );
+    fileKeyPromise.catch(() => {});
+    const response = await this.storage(
+      metadata.downloadUrl,
+      options.signal ? { signal: options.signal } : {},
+    );
+    if (!response.body)
+      throw new AgentDriveApiError('storage_error', 502, 'The download body is missing.');
+    const reader = response.body.getReader();
+    let cancelled = false;
+    const ciphertext: AsyncIterable<Uint8Array> = {
+      async *[Symbol.asyncIterator]() {
+        try {
+          for (;;) {
+            const result = await reader.read();
+            if (result.done) return;
+            yield result.value;
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      },
+    };
+    let fileKey: string;
+    try {
+      fileKey = await fileKeyPromise;
+    } catch (error) {
+      await reader.cancel(error).catch(() => undefined);
+      throw error;
+    }
+    const decrypted = decryptWithFileKeyStream(ciphertext, fileKey, metadata.ciphertextSize);
+    const plaintext: AsyncIterable<Uint8Array> = {
+      async *[Symbol.asyncIterator]() {
+        const iterator = decrypted[Symbol.asyncIterator]();
+        let complete = false;
+        let seen = 0;
+        try {
+          for (;;) {
+            const next = await iterator.next();
+            if (next.done) {
+              complete = true;
+              if (seen !== plaintextBytes)
+                throw new AgentDriveApiError(
+                  'storage_error',
+                  502,
+                  'The plaintext size did not match.',
+                );
+              return;
+            }
+            seen += next.value.byteLength;
+            if (
+              seen > plaintextBytes ||
+              (options.maxPlaintextBytes !== undefined && seen > options.maxPlaintextBytes)
+            )
+              throw new StreamSizeLimitError(seen, options.maxPlaintextBytes ?? plaintextBytes);
+            yield next.value;
+          }
+        } finally {
+          if (!complete) {
+            await iterator.return?.();
+            if (!cancelled) {
+              cancelled = true;
+              await reader.cancel().catch(() => undefined);
+            }
+          }
+        }
+      },
+    };
+    return {
+      plaintext,
+      plaintextBytes,
+      version: metadata,
+      cancel: async (reason?: unknown) => {
+        if (cancelled) return;
+        cancelled = true;
+        await reader.cancel(reason).catch(() => undefined);
+      },
+    };
   }
 
   async move(driveId: string, path: string, destinationPath: string, userId?: string) {
