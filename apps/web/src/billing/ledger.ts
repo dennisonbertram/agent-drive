@@ -101,8 +101,8 @@ export async function billingState(
   }>(
     `SELECT (SELECT count(*) FROM drives WHERE account_id = $1 AND created_at < $3)::text AS drives,
        (SELECT COALESCE(sum(v.ciphertext_size),0) FROM versions v JOIN drives d ON d.id = v.drive_id WHERE d.account_id = $1 AND v.created_at < $3)::text AS storage,
-       (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'success')::text AS operations,
-       (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'pending')::text AS pending_operations,
+       (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'success' AND action <> 'drive.rename.replay')::text AS operations,
+       (SELECT count(*) FROM audit_events WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 AND outcome = 'pending' AND action <> 'drive.rename.replay')::text AS pending_operations,
        (SELECT COALESCE(sum(bytes_sent),0) FROM billing_egress_events WHERE account_id = $1 AND occurred_at >= $2 AND occurred_at < $3)::text AS egress`,
     [accountId, start, end],
   );
@@ -508,7 +508,7 @@ export async function billingSummary(accountId: string, periodStart?: Date) {
       `SELECT a.id, a.name,
         (SELECT COALESCE(sum(v.ciphertext_size),0)::text FROM versions v WHERE v.agent_id = a.id AND v.created_at < $3) AS storage_bytes,
         (SELECT COALESCE(sum(e.bytes_sent),0)::text FROM billing_egress_events e WHERE e.agent_id = a.id AND e.occurred_at >= $2 AND e.occurred_at < $3) AS egress_bytes,
-        (SELECT count(*)::text FROM audit_events e WHERE e.agent_id = a.id AND e.created_at >= $2 AND e.created_at < $3 AND e.outcome = 'success') AS operations
+        (SELECT count(*)::text FROM audit_events e WHERE e.agent_id = a.id AND e.created_at >= $2 AND e.created_at < $3 AND e.outcome = 'success' AND e.action <> 'drive.rename.replay') AS operations
        FROM agents a WHERE a.account_id = $1 ORDER BY a.name,a.id`,
       [accountId, state.start, state.end],
     );

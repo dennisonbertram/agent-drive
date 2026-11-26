@@ -45,8 +45,19 @@ import {
   presignedRangeDownload,
   presignedUpload,
 } from './storage';
-import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
+import {
+  checkDriveQuota,
+  checkDriveQuotaWithReservations,
+  commitPut,
+  putConflict,
+  type PutMode,
+} from './versions';
+import {
+  assertNoExplicitDirectoryAtFilePath,
+  assertNoLiveFileNamespaceCollision,
+} from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
+import { renameFile } from './mount-rename';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -89,6 +100,9 @@ type RequestContext = {
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
+// API-generated version ids are UUIDv4 values, so this sentinel cannot be a real version id.
+// upload_intents.base_version_id has no foreign key and external clients cannot set new version ids.
+const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
@@ -98,6 +112,8 @@ const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
   'drive.commit',
+  'drive.mkdir',
+  'drive.rmdir',
   'drive.get',
   'drive.trace_inbox.read',
   'drive.list',
@@ -106,6 +122,7 @@ const quotaControlledActions = new Set([
   'drive.search',
   'drive.trash',
   'drive.move',
+  'drive.rename',
   'drive.copy',
   'drive.restore',
   'share.create',
@@ -431,8 +448,12 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     'GET:get': 'drive.get',
     'GET:list': 'drive.list',
     'POST:move': 'drive.move',
+    'POST:rename': 'drive.rename',
+    'POST:unlink': 'drive.delete',
     'POST:copy': 'drive.copy',
     'POST:delete': 'drive.delete',
+    'POST:mkdir': 'drive.mkdir',
+    'POST:rmdir': 'drive.rmdir',
     'POST:restore': 'drive.restore',
     'GET:versions': 'drive.versions',
     'GET:recent': 'drive.recent',
@@ -464,12 +485,30 @@ async function audit(
 ) {
   const outcome = pending ? 'pending' : context.status >= 400 ? 'failure' : 'success';
   if (context.auditId && !pending) {
+    if (context.action === 'drive.rename.replay') {
+      await client.query(
+        `UPDATE audit_events SET action = $2 WHERE id = $1 AND outcome = 'pending'`,
+        [context.auditId, context.action],
+      );
+    }
     const updated = await client.query(
       `UPDATE audit_events SET outcome = $2, error_code = $3, http_status = $4
        WHERE id = $1 AND outcome = 'pending'`,
       [context.auditId, outcome, context.errorCode ?? null, context.status],
     );
-    if (updated.rowCount !== 1) throw new Error('The reserved audit event was not found.');
+    if (updated.rowCount !== 1) {
+      // Rename transactions finalize this reservation with the receipt. A lost COMMIT reply can
+      // still reach this request finalizer after that transaction committed successfully.
+      if (context.action === 'drive.rename') {
+        const existing = await client.query<{ action: string; outcome: string }>(
+          'SELECT action, outcome FROM audit_events WHERE id = $1',
+          [context.auditId],
+        );
+        if (existing.rows[0]?.action === 'drive.rename' && existing.rows[0].outcome === 'success')
+          return context.auditId;
+      }
+      throw new Error('The reserved audit event was not found.');
+    }
     return context.auditId;
   }
   const inserted = await client.query<{ id: string }>(
@@ -544,9 +583,8 @@ function decodeModifiedCursor(cursor: string | undefined) {
 }
 
 // Immediate children of `base` (files and folders). Filters apply to files before grouping.
-// ponytail: each page re-aggregates every live file under the prefix (O(files in the subtree));
-// add a (drive_id, path text_pattern_ops) WHERE deleted_at IS NULL index if EXPLAIN shows root
-// listings over ~300 ms. Migration 0020 adds it; this query does not depend on it.
+// The path grouping also uses explicit directory paths, so empty descendants keep their virtual
+// ancestors visible after the files that first created those ancestors have been deleted.
 async function listChildren(
   url: URL,
   driveId: string,
@@ -583,19 +621,54 @@ async function listChildren(
               v.ciphertext_size, v.agent_id, v.machine_id, v.user_id, v.tags, v.description, v.created_at
          FROM files f JOIN versions v ON v.id = f.current_version_id
         WHERE f.drive_id = $1 AND f.deleted_at IS NULL AND f.path LIKE $2 ESCAPE '\\'${filters}
-     ), kids AS (
+     ), explicit_dirs AS (
+       SELECT d.id, d.path, d.created_at,
+              substr(d.path, length($3::text) + 1) AS rest
+         FROM drive_directories d
+        WHERE d.drive_id = $1 AND d.path LIKE $2 ESCAPE '\\'
+     ), folder_members AS (
+       SELECT split_part(rest, '/', 1) AS parent_name,
+              split_part(rest, '/', 2) ||
+                CASE WHEN split_part(rest, '/', 3) <> '' THEN '/' ELSE '' END AS child_key,
+              ciphertext_size, created_at
+         FROM live WHERE strpos(rest, '/') > 0
+       UNION ALL
+       SELECT split_part(rest, '/', 1), split_part(rest, '/', 2) || '/',
+              0::bigint, created_at
+         FROM explicit_dirs WHERE strpos(rest, '/') > 0
+     ), folder_stats AS (
+       SELECT parent_name, count(DISTINCT child_key)::bigint AS items,
+              sum(ciphertext_size)::bigint AS ciphertext_size, max(created_at) AS created_at
+         FROM folder_members GROUP BY parent_name
+     ), folder_candidates AS (
+       SELECT NULL::uuid AS id, $3 || s.parent_name AS path, s.items, s.ciphertext_size,
+              s.created_at
+         FROM folder_stats s
+       UNION ALL
+       SELECT d.id, d.path, COALESCE(s.items, 0::bigint),
+              COALESCE(s.ciphertext_size, 0::bigint), GREATEST(d.created_at, s.created_at)
+         FROM explicit_dirs d
+         LEFT JOIN folder_stats s ON s.parent_name = d.rest
+        WHERE strpos(d.rest, '/') = 0
+     ), folders AS (
+       SELECT 'folder' AS kind,
+              (array_agg(id) FILTER (WHERE id IS NOT NULL))[1] AS id,
+              path, NULL::uuid AS version_id,
+              max(ciphertext_size)::bigint AS ciphertext_size,
+              NULL::uuid AS agent_id, NULL::uuid AS machine_id, NULL::text AS user_id,
+              NULL::text[] AS tags, NULL::text AS description, max(created_at) AS created_at,
+              max(items)::bigint AS items, path || '/' AS key
+         FROM folder_candidates GROUP BY path
+     ), direct_files AS (
        SELECT 'file' AS kind, id, path, version_id, ciphertext_size, agent_id, machine_id, user_id,
               tags, description, created_at, NULL::bigint AS items, path AS key
          FROM live WHERE strpos(rest, '/') = 0
+     ), children AS (
+       SELECT * FROM direct_files
        UNION ALL
-       SELECT 'folder', NULL, $3 || split_part(rest, '/', 1), NULL, sum(ciphertext_size)::bigint,
-              NULL, NULL, NULL, NULL, NULL, max(created_at),
-              count(DISTINCT split_part(rest, '/', 2) ||
-                CASE WHEN split_part(rest, '/', 3) <> '' THEN '/' ELSE '' END),
-              $3 || split_part(rest, '/', 1) || '/'
-         FROM live WHERE strpos(rest, '/') > 0 GROUP BY split_part(rest, '/', 1)
+       SELECT * FROM folders
      )
-     SELECT *, ${isoText('created_at')} AS cursor_created_at FROM kids ${outer}
+     SELECT *, ${isoText('created_at')} AS cursor_created_at FROM children ${outer}
       ORDER BY ${sort === 'modified' ? 'created_at DESC, ' : ''}key COLLATE "C" LIMIT $${params.length}`,
     params,
   );
@@ -607,6 +680,7 @@ async function listChildren(
         ? {
             kind: r.kind,
             path: r.path,
+            ...(r.id ? { directory_id: r.id } : {}),
             items: Number(r.items),
             ciphertext_size: r.ciphertext_size,
             created_at: r.created_at,
@@ -634,6 +708,120 @@ async function listChildren(
           )
         : null,
   };
+}
+
+async function makeDirectory(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'write', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['path']);
+  const path = canonicalPath(body.path);
+  needWritePath(auth, path);
+  const parent = path.slice(0, path.lastIndexOf('/')) || '/';
+  const created = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+
+    const fileAtPath = await client.query(
+      'SELECT id FROM files WHERE drive_id = $1 AND path = $2',
+      [driveId, path],
+    );
+    if (fileAtPath.rowCount)
+      throw new ApiError('conflict', 'A file already exists at this directory path.');
+    const directoryAtPath = await client.query(
+      'SELECT id FROM drive_directories WHERE drive_id = $1 AND path = $2',
+      [driveId, path],
+    );
+    if (directoryAtPath.rowCount) throw new ApiError('conflict', 'The directory already exists.');
+
+    const childrenAtPath = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM files
+          WHERE drive_id = $1 AND deleted_at IS NULL AND strpos(path, $2 || '/') = 1
+       ) OR EXISTS (
+         SELECT 1 FROM drive_directories
+          WHERE drive_id = $1 AND strpos(path, $2 || '/') = 1
+       ) AS has_children`,
+      [driveId, path],
+    );
+    if (childrenAtPath.rows[0]!.has_children)
+      throw new ApiError('conflict', 'A directory already exists at this path.');
+
+    await assertNoLiveFileNamespaceCollision(client, driveId, path, null);
+
+    if (parent !== '/') {
+      const parentDirectoryPrefix = `${parent.replace(/[\\%_]/g, '\\$&')}/%`;
+      const parentState = await client.query(
+        `SELECT
+           EXISTS (SELECT 1 FROM drive_directories WHERE drive_id = $1 AND path = $2) AS has_explicit_directory,
+           (EXISTS (SELECT 1 FROM files WHERE drive_id = $1 AND deleted_at IS NULL AND strpos(path, $2 || '/') = 1)
+             OR EXISTS (SELECT 1 FROM drive_directories WHERE drive_id = $1 AND path LIKE $3 ESCAPE '\\')) AS has_implicit_directory,
+           EXISTS (SELECT 1 FROM files WHERE drive_id = $1 AND path = $2) AS has_file_at_path`,
+        [driveId, parent, parentDirectoryPrefix],
+      );
+      const state = parentState.rows[0] as {
+        has_explicit_directory: boolean;
+        has_implicit_directory: boolean;
+        has_file_at_path: boolean;
+      };
+      if (!state.has_explicit_directory && !state.has_implicit_directory) {
+        if (state.has_file_at_path) throw new ApiError('conflict', 'The parent path is a file.');
+        throw new ApiError('not_found', 'The parent directory does not exist.');
+      }
+    }
+
+    const result = await client.query(
+      `INSERT INTO drive_directories (drive_id, path)
+       VALUES ($1, $2)
+       RETURNING id, path, created_at`,
+      [driveId, path],
+    );
+    return result.rows[0] as Row;
+  });
+  return response(
+    { path: created.path, directory_id: created.id, created_at: created.created_at },
+    201,
+  );
+}
+
+async function removeDirectory(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'delete', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['path']);
+  const path = canonicalPath(body.path);
+  needWritePath(auth, path);
+  const removed = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    const lockedDrive = await client.query(
+      'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL FOR UPDATE',
+      [driveId, auth.accountId],
+    );
+    if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+    const directory = await client.query(
+      'SELECT id FROM drive_directories WHERE drive_id = $1 AND path = $2 FOR UPDATE',
+      [driveId, path],
+    );
+    if (!directory.rowCount) throw new ApiError('not_found', 'Directory not found.');
+    const children = await client.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM files
+          WHERE drive_id = $1 AND deleted_at IS NULL
+            AND (path = $2 OR strpos(path, $2 || '/') = 1)
+       ) OR EXISTS (
+         SELECT 1 FROM drive_directories
+          WHERE drive_id = $1 AND path <> $2 AND strpos(path, $2 || '/') = 1
+       ) AS has_children`,
+      [driveId, path],
+    );
+    if (children.rows[0]!.has_children)
+      throw new ApiError('conflict', 'The directory is not empty.');
+    await client.query('DELETE FROM drive_directories WHERE id = $1', [directory.rows[0]!.id]);
+    return { path };
+  });
+  return response(removed);
 }
 
 export function appendFileFilters(url: URL, params: unknown[], includeQuery: boolean) {
@@ -1572,6 +1760,7 @@ async function consoleEndpoint(
            FROM audit_events e
           WHERE e.account_id = $1 AND e.agent_id IS NOT NULL
             AND e.created_at >= $2 AND e.created_at < $3 AND e.outcome = 'success'
+            AND e.action <> 'drive.rename.replay'
           GROUP BY e.agent_id
        ), egress_usage AS (
          SELECT agent_id, COALESCE(sum(bytes_sent),0)::text AS egress_bytes
@@ -1938,6 +2127,15 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
   const description = optionalString(body, 'description', 2_048);
   const userId = optionalString(body, 'userId', 256);
   const fileTags = tags(body);
+  const hasAllowTrashedCreate = Object.hasOwn(body, 'allowTrashedCreate');
+  if (hasAllowTrashedCreate && typeof body.allowTrashedCreate !== 'boolean')
+    throw new ApiError('validation_error', 'allowTrashedCreate must be a boolean.');
+  const allowTrashedCreate = body.allowTrashedCreate === true;
+  if (allowTrashedCreate && (!Object.hasOwn(body, 'ifVersionId') || body.ifVersionId !== null))
+    throw new ApiError(
+      'validation_error',
+      'allowTrashedCreate requires an explicit ifVersionId:null create.',
+    );
   const mode = !Object.prototype.hasOwnProperty.call(body, 'ifVersionId')
     ? 'unconditional'
     : body.ifVersionId === null
@@ -1959,23 +2157,35 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
+    let intentBaseVersionId = baseVersionId;
+    if (allowTrashedCreate) {
+      await assertNoLiveFileNamespaceCollision(client, driveId, path, null);
+      const existing = await client.query(
+        `SELECT current_version_id, deleted_at FROM files
+          WHERE drive_id = $1 AND path = $2 FOR UPDATE`,
+        [driveId, path],
+      );
+      const file = existing.rows[0] as Row | undefined;
+      if (file && !file.deleted_at)
+        throw new ApiError('conflict', 'The file already exists.', 409, {
+          state: 'exists',
+          currentVersionId: file.current_version_id as string | null,
+        });
+      if (file && !file.current_version_id)
+        throw new ApiError('conflict', 'The trashed file has no current version.', 409, {
+          state: 'changed',
+          currentVersionId: null,
+        });
+      intentBaseVersionId =
+        (file?.current_version_id as string | undefined) ?? ABSENT_VERSION_MARKER;
+    }
     await enforceWriteBudget(client, auth.accountId, {
       bytes: BigInt(ciphertextSize),
       reserveOnly: true,
     });
-    const used = await client.query<{ bytes: string }>(
-      `SELECT (
-         (SELECT COALESCE(sum(ciphertext_size),0) FROM versions WHERE drive_id = $1) +
-         (SELECT COALESCE(sum(ciphertext_size),0) FROM upload_intents
-           WHERE drive_id = $1 AND committed_version_id IS NULL AND expires_at > now())
-       )::text AS bytes`,
-      [driveId],
-    );
-    const usedBytes = BigInt(used.rows[0]!.bytes);
     const quotaBytes = BigInt(lockedDrive.rows[0].quota_bytes);
-    if (usedBytes + BigInt(ciphertextSize) > quotaBytes) {
-      throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
-    }
+    await checkDriveQuotaWithReservations(client, driveId, ciphertextSize, quotaBytes);
     const machine = await machineId(client, auth, request);
     return client.query(
       `INSERT INTO upload_intents
@@ -1995,7 +2205,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
         ciphertextSize,
         wrappedKey,
         mode,
-        baseVersionId,
+        intentBaseVersionId,
         userId ?? null,
         fileTags,
         description ?? null,
@@ -2033,12 +2243,22 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   }
   if (new Date(source.expires_at).getTime() < Date.now())
     throw new ApiError('conflict', 'The upload intent has expired.');
-  const intentMode = (row: Row): PutMode =>
-    row.conditional_mode === 'create'
+  // A missing base id on older create intents remains ordinary flat create mode. Only the
+  // sentinel means the opted-in create observed an absent path and must be rechecked as such.
+  const intentMode = (row: Row): PutMode => {
+    if (row.conditional_mode === 'create' && row.base_version_id) {
+      const baseVersionId = String(row.base_version_id);
+      return {
+        allowTrashedCreate: true,
+        baseVersionId: baseVersionId === ABSENT_VERSION_MARKER ? null : baseVersionId,
+      };
+    }
+    return row.conditional_mode === 'create'
       ? 'create'
       : row.conditional_mode === 'version'
         ? { baseVersionId: row.base_version_id as string }
         : 'unconditional';
+  };
   // Cheap unlocked reads reject the common conflict and quota failures before the S3 copy,
   // so a rejected commit leaves nothing in objects/ to clean up. The FOR UPDATE in putConflict
   // is only a statement-scoped lock here; lockAndCheck re-runs the same checks under the
@@ -2299,11 +2519,16 @@ async function fileEndpoint(
   driveId: string,
   operation: string,
   url: URL,
+  context: RequestContext,
 ) {
   const drive = await ensureDrive(auth, driveId);
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
+  if (operation === 'mkdir' && request.method === 'POST')
+    return makeDirectory(request, auth, drive.id);
+  if (operation === 'rmdir' && request.method === 'POST')
+    return removeDirectory(request, auth, drive.id);
   if (operation === 'get' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
@@ -2567,6 +2792,7 @@ async function fileEndpoint(
         [driveId, auth.accountId],
       );
       if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      await assertNoExplicitDirectoryAtFilePath(client, driveId, to);
       const machine = await machineId(client, auth, request);
       const result = await client.query(
         `UPDATE files SET path = $1 WHERE drive_id = $2 AND path = $3 AND deleted_at IS NULL
@@ -2586,10 +2812,40 @@ async function fileEndpoint(
     });
     return response(moved);
   }
-  if (operation === 'delete' && request.method === 'POST') {
+  if (operation === 'rename' && request.method === 'POST')
+    return renameFile(
+      request,
+      auth,
+      drive.id,
+      (client, currentRequest) => machineId(client, auth, currentRequest),
+      () => reserveOperation(context),
+      () => {
+        context.action = 'drive.rename.replay';
+      },
+      async (client) => {
+        if (!context.auditId)
+          throw new Error('A rename reservation is required to complete the operation.');
+        const completed = await client.query(
+          `UPDATE audit_events SET outcome = 'success', error_code = NULL, http_status = 200
+            WHERE id = $1 AND action = 'drive.rename' AND outcome = 'pending'
+            RETURNING id`,
+          [context.auditId],
+        );
+        if (completed.rowCount !== 1)
+          throw new Error('The rename reservation was not pending when the operation committed.');
+      },
+    );
+  if ((operation === 'delete' || operation === 'unlink') && request.method === 'POST') {
+    const guarded = operation === 'unlink';
     need(auth, 'delete', driveId);
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
+    const ifVersionId = guarded
+      ? uuid(
+          typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined,
+          'ifVersionId',
+        ).toLowerCase()
+      : undefined;
     needWritePath(auth, path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const deleted = await withTransaction(async (client) => {
@@ -2600,14 +2856,33 @@ async function fileEndpoint(
       );
       if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       const machine = await machineId(client, auth, request);
+      if (ifVersionId) {
+        const selected = await client.query(
+          `SELECT id, current_version_id, deleted_at
+             FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE`,
+          [driveId, path],
+        );
+        const current = selected.rows[0] as Row | undefined;
+        if (!current || current.deleted_at) throw new ApiError('not_found', 'File not found.');
+        if (current.current_version_id !== ifVersionId)
+          throw new ApiError('conflict', 'The file changed since it was opened.', 409, {
+            state: 'changed',
+            currentVersionId: String(current.current_version_id),
+          });
+      }
       const result = await client.query(
         `UPDATE files SET deleted_at = now()
           WHERE drive_id = $1 AND path = $2 AND deleted_at IS NULL
+            AND ($3::uuid IS NULL OR current_version_id = $3::uuid)
           RETURNING id, path, current_version_id, deleted_at`,
-        [driveId, path],
+        [driveId, path, ifVersionId ?? null],
       );
       const file = result.rows[0] as Row | undefined;
-      if (!file) throw new ApiError('not_found', 'File not found.');
+      if (!file) {
+        if (ifVersionId)
+          throw new ApiError('conflict', 'The file changed before unlink completed.');
+        throw new ApiError('not_found', 'File not found.');
+      }
       await client.query(
         `INSERT INTO file_events
           (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
@@ -2665,6 +2940,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
       [driveId, auth.accountId],
     );
     if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, destinationPath);
     const machine = await machineId(client, auth, request);
     const source = await client.query(
       `SELECT f.*, v.* FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
@@ -2856,7 +3132,7 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)
   )
     return true;
-  return method === 'POST' && ['delete', 'restore', 'move', 'copy'].includes(parts[2]!);
+  return method === 'POST' && ['delete', 'restore', 'move', 'rename', 'copy'].includes(parts[2]!);
 }
 
 function requireConsoleOrigin(request: Request, url: URL) {
@@ -2932,7 +3208,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     if (mode.kind === 'console') await enforceConsoleRateLimit(auth.accountId);
     else await enforceKeyRateLimit(auth.keyId);
-    if (quotaControlledActions.has(context.action)) await reserveOperation(context);
+    if (quotaControlledActions.has(context.action) && context.action !== 'drive.rename')
+      await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console'
         ? ((await consoleDeviceEndpoint(request, auth.accountId, relative)) ??
@@ -2970,7 +3247,7 @@ async function handleRequest(request: Request, mode: RequestMode) {
       );
     } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
-      output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url);
+      output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url, context);
     } else {
       throw new ApiError('not_found', 'Endpoint not found.');
     }

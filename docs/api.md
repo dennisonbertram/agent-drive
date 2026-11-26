@@ -31,18 +31,18 @@ Errors use one shape, described in [Errors and limits](errors.md):
 
 Every route except the public share route needs an API key. A key has a list of scopes, a list of drive IDs, and an optional list of write paths.
 
-| Scope      | Allows                                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                    |
-| `write`    | Put, commit, move, copy, restore and key-backup (copy and restore also need `read`)            |
-| `delete`   | Move a file to the trash                                                                       |
-| `share`    | Create, list and revoke share links (creating also needs `read`)                               |
-| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                              |
-| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md)) |
+| Scope      | Allows                                                                                                          |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                                     |
+| `write`    | Put, commit, move, rename, copy, restore, create directories and key-backup (copy and restore also need `read`) |
+| `delete`   | Move files to the trash, remove empty directories and guarded unlink; rename replacement also needs this scope  |
+| `share`    | Create, list and revoke share links (creating also needs `read`)                                                |
+| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                                               |
+| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md))                  |
 
 A drive route needs both the scope and the drive: the drive ID must be in the key's drive list. If it is not, the API returns 403 `permission_denied` with `The API key is not scoped to this drive.` A missing scope returns 403 `permission_denied` with `The API key lacks the "<scope>" scope.`
 
-`writePaths` limits where a key may change files. When the list is not empty, put, move, copy, delete and restore work only on a path equal to or below one of the listed paths. Otherwise the API returns 403 `permission_denied`: `The API key may only write under <paths>.` An empty list means no limit. Reads are never limited by write paths. A key holds at most 16 write paths, each a canonical absolute path.
+`writePaths` limits where a key may change files or directories. When the list is not empty, put, move, rename, copy, delete, unlink, restore, `mkdir` and `rmdir` work only on paths equal to or below one of the listed paths. Rename checks both its source and destination. Otherwise the API returns 403 `permission_denied`: `The API key may only write under <paths>.` An empty list means no limit. Reads are never limited by write paths. A key holds at most 16 write paths, each a canonical absolute path.
 
 To get a key:
 
@@ -70,6 +70,11 @@ Uploading takes three requests.
 3. `POST /drives/:id/commit` checks the staged object and creates the version.
 
 The intent and the upload URL expire after 10 minutes. The conditional-write check (`ifVersionId`) runs at commit, so a 409 appears there.
+
+To create again at a path in Trash without an unconditional overwrite, set both `ifVersionId:null`
+and `allowTrashedCreate:true`. The intent records the trashed file's current version. Commit succeeds
+only if that same version is still in Trash; it creates a new version and retains the existing
+history. If a live file appears or the trashed file changes before commit, the request conflicts.
 
 ```sh
 SIZE=$(wc -c < file.enc)
@@ -100,34 +105,38 @@ List routes return `{ "items": [...], "nextCursor": string | null }`.
 
 All paths are relative to `/api/v1`. `:id` is a drive ID (a UUID). File paths are canonical absolute POSIX paths: they start with `/`, are at most 1,024 characters, and contain no `//`, `.`, `..`, backslash or trailing `/`.
 
-| Method | Route                         | Scope                   |
-| ------ | ----------------------------- | ----------------------- |
-| GET    | `/whoami`                     | any valid key           |
-| GET    | `/agents`                     | `manage`                |
-| POST   | `/agents`                     | `manage`                |
-| GET    | `/drives`                     | `manage`, or `read`     |
-| POST   | `/drives`                     | `manage`                |
-| GET    | `/keys`                       | `manage`                |
-| POST   | `/keys`                       | `manage`, or `delegate` |
-| DELETE | `/keys/:id`                   | `manage`                |
-| POST   | `/drives/:id/put`             | `write`                 |
-| POST   | `/drives/:id/commit`          | `write`                 |
-| GET    | `/drives/:id/get`             | `read`                  |
-| GET    | `/drives/:id/list`            | `read`                  |
-| GET    | `/drives/:id/versions`        | `read`                  |
-| GET    | `/drives/:id/search`          | `read`                  |
-| GET    | `/drives/:id/recent`          | `read`                  |
-| POST   | `/drives/:id/move`            | `write`                 |
-| POST   | `/drives/:id/copy`            | `read` and `write`      |
-| POST   | `/drives/:id/delete`          | `delete`                |
-| POST   | `/drives/:id/restore`         | `read` and `write`      |
-| POST   | `/drives/:id/key-backup`      | `write`                 |
-| GET    | `/drives/:id/trace-inbox`     | `read`                  |
-| POST   | `/drives/:id/shares`          | `share` and `read`      |
-| GET    | `/drives/:id/shares`          | `share`                 |
-| DELETE | `/drives/:id/shares/:shareId` | `share`                 |
-| GET    | `/device/:code`               | `delegate`              |
-| POST   | `/device/:code/grant`         | `delegate`              |
+| Method | Route                         | Scope                                            |
+| ------ | ----------------------------- | ------------------------------------------------ |
+| GET    | `/whoami`                     | any valid key                                    |
+| GET    | `/agents`                     | `manage`                                         |
+| POST   | `/agents`                     | `manage`                                         |
+| GET    | `/drives`                     | `manage`, or `read`                              |
+| POST   | `/drives`                     | `manage`                                         |
+| GET    | `/keys`                       | `manage`                                         |
+| POST   | `/keys`                       | `manage`, or `delegate`                          |
+| DELETE | `/keys/:id`                   | `manage`                                         |
+| POST   | `/drives/:id/put`             | `write`                                          |
+| POST   | `/drives/:id/commit`          | `write`                                          |
+| POST   | `/drives/:id/mkdir`           | `write`                                          |
+| POST   | `/drives/:id/rmdir`           | `delete`                                         |
+| GET    | `/drives/:id/get`             | `read`                                           |
+| GET    | `/drives/:id/list`            | `read`                                           |
+| GET    | `/drives/:id/versions`        | `read`                                           |
+| GET    | `/drives/:id/search`          | `read`                                           |
+| GET    | `/drives/:id/recent`          | `read`                                           |
+| POST   | `/drives/:id/move`            | `write`                                          |
+| POST   | `/drives/:id/rename`          | `write` (also `delete` to replace a destination) |
+| POST   | `/drives/:id/copy`            | `read` and `write`                               |
+| POST   | `/drives/:id/delete`          | `delete`                                         |
+| POST   | `/drives/:id/unlink`          | `delete`                                         |
+| POST   | `/drives/:id/restore`         | `read` and `write`                               |
+| POST   | `/drives/:id/key-backup`      | `write`                                          |
+| GET    | `/drives/:id/trace-inbox`     | `read`                                           |
+| POST   | `/drives/:id/shares`          | `share` and `read`                               |
+| GET    | `/drives/:id/shares`          | `share`                                          |
+| DELETE | `/drives/:id/shares/:shareId` | `share`                                          |
+| GET    | `/device/:code`               | `delegate`                                       |
+| POST   | `/device/:code/grant`         | `delegate`                                       |
 
 The two `/device` routes are described in [HTTP API: device login and delegation](api-device-login.md). One public route sits outside `/api/v1`: `GET /api/shares/:id` (see Shares).
 
@@ -210,15 +219,16 @@ Without `manage`, a key with `delegate` can create keys too, with `agentName` (1
 
 `POST /drives/:id/put` body:
 
-| Field            | Rule                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------- |
-| `path`           | Required. Canonical absolute path, and inside the key's `writePaths`.                             |
-| `ciphertextSize` | Required. Positive integer, at most 5 GiB (5,368,709,120 bytes). Size of the encrypted bytes.     |
-| `wrappedKey`     | Required. Up to 16,384 characters.                                                                |
-| `description`    | Optional. Up to 2,048 characters.                                                                 |
-| `tags`           | Optional. Up to 32 strings, each up to 64 characters.                                             |
-| `userId`         | Optional. Up to 256 characters. Recorded as the person behind the write.                          |
-| `ifVersionId`    | Optional. See Conditional writes and conflicts. Absent means overwrite. `null` means create only. |
+| Field                | Rule                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `path`               | Required. Canonical absolute path, and inside the key's `writePaths`.                                                  |
+| `ciphertextSize`     | Required. Positive integer, at most 5 GiB (5,368,709,120 bytes). Size of the encrypted bytes.                          |
+| `wrappedKey`         | Required. Up to 16,384 characters.                                                                                     |
+| `description`        | Optional. Up to 2,048 characters.                                                                                      |
+| `tags`               | Optional. Up to 32 strings, each up to 64 characters.                                                                  |
+| `userId`             | Optional. Up to 256 characters. Recorded as the person behind the write.                                               |
+| `ifVersionId`        | Optional. See Conditional writes and conflicts. Absent means overwrite. `null` means create only.                      |
+| `allowTrashedCreate` | Optional boolean. `true` requires `ifVersionId:null`; allows a guarded create over the same unchanged trashed version. |
 
 Response 201: `{ intentId, uploadUrl, expiresAt, ciphertextSize }`. It returns 413 `quota_exceeded` if the drive quota would be exceeded, and 402 `payment_required` if the plan storage allowance would be exceeded.
 
@@ -258,9 +268,15 @@ A version object:
 curl -sS "$API/drives/$DRIVE/get?path=/notes/plan.md" -H "Authorization: Bearer $KEY"
 ```
 
+#### mkdir and rmdir
+
+`POST /drives/:id/mkdir` creates one explicit directory. Its body is `{ "path": "/notes/drafts" }`; the path must be canonical and inside `writePaths`. The parent must already exist as an explicit directory or as a directory implied by live files or explicit descendants. `/` is implicit and cannot be created. The API does not create missing parents. A file or directory collision, or a path already serving as an implicit directory, returns 409 `conflict`; a missing parent returns 404 `not_found`. Response 201: `{ path, directory_id, created_at }`.
+
+`POST /drives/:id/rmdir` removes an explicit empty directory. Its body is `{ "path": "/notes/drafts" }`; it needs `delete`, and the path must be inside `writePaths`. It cannot remove `/`, an implicit directory, or a directory with live files or child directories. A non-empty directory returns 409 `conflict`; a path that is not an explicit directory returns 404 `not_found`. It removes only the directory entry. Response 200: `{ path }`.
+
 #### list
 
-`GET /drives/:id/list` returns the current version of each live file, ordered by path.
+Without `delimiter`, `GET /drives/:id/list` returns the current version of each live file, ordered by path. With `delimiter=%2F`, it returns immediate file and folder children under the requested prefix; this mode includes explicit empty directories.
 
 | Query             | Meaning                                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------------------- |
@@ -278,6 +294,8 @@ Any other `sort` or `delimiter` value returns 400 `validation_error`. Filters ap
 
 File items use snake_case: `{ id, path, version_id, ciphertext_size, agent_id, machine_id, user_id, tags, description, created_at }`. `ciphertext_size` may arrive as a string for large values, so convert it with `Number()`.
 
+In delimiter mode, explicit directories also include `directory_id`; virtual folders synthesized from descendants do not. Explicit empty directories are included even when file filters match no files.
+
 With `delimiter=/`, file items also carry `"kind": "file"`, and folder items look like this:
 
 ```json
@@ -290,7 +308,7 @@ With `delimiter=/`, file items also carry `"kind": "file"`, and folder items loo
 }
 ```
 
-`items` is the number of direct children. `ciphertext_size` is the sum of the current versions below the folder. `created_at` is the newest of them.
+`items` is the number of direct file and directory children. `ciphertext_size` is the sum of live files' current versions below the folder. `created_at` is the latest file-version or explicit-directory creation time included in the folder summary. The `ciphertext_size` field may be a string for large values; convert it with `Number()`.
 
 ```sh
 curl -sS "$API/drives/$DRIVE/list?prefix=/notes&delimiter=/&sort=modified&limit=20" \
@@ -323,6 +341,28 @@ curl -sS "$API/drives/$DRIVE/recent?cursor=<latestCursor>&limit=50" -H "Authoriz
 #### move
 
 `POST /drives/:id/move` body: `{ "path": "/a.md", "destinationPath": "/b.md", "userId": "<optional>" }`. Needs `write`. Both paths must be inside `writePaths`. Response: `{ id, path }`. If the source is missing or the destination exists, the API returns 409 `conflict` (without `state`). Moving does not create a version.
+
+#### unlink
+
+`POST /drives/:id/unlink` moves one live file to the trash only if it still has the version the caller observed. Body: `{ "path": "/a.md", "ifVersionId": "<current version UUID>", "userId": "<optional>" }`. It needs `delete`, and the path must be inside `writePaths`. `ifVersionId` is required. A missing or already trashed file returns 404 `not_found`; if its current version differs, the API returns 409 `conflict` with `state: "changed"` and `currentVersionId`. Response: `{ id, path, deleted_at }`. All versions remain in the trash. The older `/delete` route remains unguarded; use `/unlink` when deletion must depend on the version you read.
+
+#### rename
+
+`POST /drives/:id/rename` moves a file to another path with version checks and an idempotency key. The body requires `path`, `destinationPath`, `ifSourceVersionId`, `ifDestinationVersionId` and `operationId`; optional fields are not accepted.
+
+```json
+{
+  "path": "/draft.md",
+  "destinationPath": "/published.md",
+  "ifSourceVersionId": "<current source version UUID>",
+  "ifDestinationVersionId": null,
+  "operationId": "<UUID generated once for this rename>"
+}
+```
+
+The key needs `write`, and both paths must be inside `writePaths`. `ifSourceVersionId` must match the live source file's current version. `ifDestinationVersionId` is required: `null` means the destination must be absent; a UUID means the destination must be live at exactly that version, and this replacement mode also needs `delete`. A successful rename to an absent destination moves the file without creating a version. Replacing an existing destination creates a new destination version from the source contents and moves the source to the trash. Response 200: `{ id, path, versionId }` for the resulting file at the destination.
+
+`operationId` is a UUID used to safely retry the same request. Repeating the same request with the same ID returns the original result. Reusing that ID for a different request, or from a different agent, returns 409 `conflict`. Keep the same ID and body when retrying after a timeout. A stale source or destination version returns 409 `conflict`; re-read both paths and, if the operation is still appropriate, prepare it with the current versions and a new ID.
 
 #### copy
 
@@ -396,11 +436,12 @@ A share link points to one version of one file. The file key travels in the link
 
 `ifVersionId` on put sets what the write is allowed to replace.
 
-| `ifVersionId`    | Meaning                                                                        |
-| ---------------- | ------------------------------------------------------------------------------ |
-| absent           | Overwrite. Writes whether or not the file exists. Revives a file in the trash. |
-| `null`           | Create only. Fails if any file, even one in the trash, has this path.          |
-| `"<version id>"` | Replace only if that version is still the current version.                     |
+| `ifVersionId`                         | Meaning                                                                                                                                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| absent                                | Overwrite. Writes whether or not the file exists. Revives a file in the trash.                                                                                                                   |
+| `null`                                | Create only. Fails if any file, even one in the trash, has this path.                                                                                                                            |
+| `null` with `allowTrashedCreate:true` | Create if the path is absent or the same trashed version observed at intent creation is still in Trash. Retains prior versions; conflicts if a live file appears or the trashed version changes. |
+| `"<version id>"`                      | Replace only if that version is still the current version.                                                                                                                                       |
 
 A conditional write that loses returns 409:
 
@@ -415,14 +456,14 @@ A conditional write that loses returns 409:
 }
 ```
 
-| `state`   | Cause                                                             | What to do                                                                |
-| --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `exists`  | Create only, and a live file is at the path.                      | Read the file. Retry with `ifVersionId` set to `currentVersionId`.        |
-| `changed` | Someone wrote a newer version.                                    | Read the file, merge, retry with `ifVersionId` set to `currentVersionId`. |
-| `trashed` | The file is in the trash. `currentVersionId` is its last version. | Call restore, or write again without `ifVersionId`.                       |
-| `absent`  | `ifVersionId` was a version id but no file exists at the path.    | Write again without `ifVersionId`. `currentVersionId` is `null`.          |
+| `state`   | Cause                                                             | What to do                                                                                                                          |
+| --------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `exists`  | Create only, and a live file is at the path.                      | Read the file. Retry with `ifVersionId` set to `currentVersionId`.                                                                  |
+| `changed` | Someone wrote a newer version.                                    | Read the file, merge, retry with `ifVersionId` set to `currentVersionId`.                                                           |
+| `trashed` | The file is in the trash. `currentVersionId` is its last version. | Call restore, use `ifVersionId:null` with `allowTrashedCreate:true`, or write without `ifVersionId` for an unconditional overwrite. |
+| `absent`  | `ifVersionId` was a version id but no file exists at the path.    | Write again without `ifVersionId`. `currentVersionId` is `null`.                                                                    |
 
-A conditional write never revives a file in the trash. An unconditional write does. The conflict is reported by commit, not by put.
+A plain conditional write never revives a file in the trash. `allowTrashedCreate:true` permits a guarded create over the unchanged trashed version; an unconditional write can revive it without that guard. The conflict is reported by commit, not by put.
 
 Move, copy and restore return 409 `conflict` with no `state` when the destination exists or the source is missing.
 

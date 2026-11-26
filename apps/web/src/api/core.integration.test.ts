@@ -1647,6 +1647,171 @@ describe('Phase 1 core API', () => {
     expect(files.rows[0].deleted_at).not.toBeNull();
   });
 
+  it('allows an explicit create over an unchanged trashed path and preserves prior versions', async () => {
+    const path = `/create-after-trash-${randomUUID()}.bin`;
+    const original = await uploadCommit(writeToken, driveId, path, Buffer.from('original'));
+    const originalVersionId = original.body.version.id as string;
+    const livePathOptIn = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+      path,
+      ciphertextSize: 10,
+      wrappedKey: 'opaque',
+      ifVersionId: null,
+      allowTrashedCreate: true,
+    });
+    expect(livePathOptIn.status).toBe(409);
+    expect((await json(livePathOptIn)).error).toMatchObject({
+      state: 'exists',
+      currentVersionId: originalVersionId,
+    });
+    expect((await request(`/drives/${driveId}/delete`, writeToken, 'POST', { path })).status).toBe(
+      200,
+    );
+
+    const prepare = async (allowTrashedCreate: boolean, bytes: string) => {
+      const intentResponse = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+        path,
+        ciphertextSize: Buffer.byteLength(bytes),
+        wrappedKey: 'opaque',
+        ifVersionId: null,
+        ...(allowTrashedCreate ? { allowTrashedCreate: true } : {}),
+      });
+      expect(intentResponse.status).toBe(201);
+      const intent = await json(intentResponse);
+      const uploaded = await fetch(intent.uploadUrl, { method: 'PUT', body: Buffer.from(bytes) });
+      expect(uploaded.ok).toBe(true);
+      return intent.intentId as string;
+    };
+
+    const strictIntent = await prepare(false, 'strict create');
+    const allowedIntent = await prepare(true, 'first replacement');
+    const persistedIntent = await pool.query(
+      'SELECT conditional_mode,base_version_id FROM upload_intents WHERE id=$1',
+      [allowedIntent],
+    );
+    expect(persistedIntent.rows[0]).toEqual({
+      conditional_mode: 'create',
+      base_version_id: originalVersionId,
+    });
+
+    const strictCommit = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: strictIntent,
+    });
+    expect(strictCommit.status).toBe(409);
+    expect((await json(strictCommit)).error).toMatchObject({
+      state: 'trashed',
+      currentVersionId: originalVersionId,
+    });
+
+    const firstReplacement = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: allowedIntent,
+    });
+    expect(firstReplacement.status).toBe(201);
+    const firstReplacementVersionId = (await json(firstReplacement)).version.id as string;
+
+    const redelete = await request(`/drives/${driveId}/delete`, writeToken, 'POST', { path });
+    expect(redelete.status).toBe(200);
+    const staleIntent = await prepare(true, 'stale replacement');
+    const concurrent = await uploadCommit(
+      writeToken,
+      driveId,
+      path,
+      Buffer.from('concurrent write'),
+    );
+    const concurrentVersionId = concurrent.body.version.id as string;
+    expect((await request(`/drives/${driveId}/delete`, writeToken, 'POST', { path })).status).toBe(
+      200,
+    );
+    const staleCommit = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: staleIntent,
+    });
+    expect(staleCommit.status).toBe(409);
+    expect((await json(staleCommit)).error).toMatchObject({
+      state: 'changed',
+      currentVersionId: concurrentVersionId,
+    });
+
+    const repeatedIntent = await prepare(true, 'second replacement');
+    const repeatedCommit = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: repeatedIntent,
+    });
+    expect(repeatedCommit.status).toBe(201);
+    const repeatedVersionId = (await json(repeatedCommit)).version.id as string;
+    expect(repeatedVersionId).not.toBe(firstReplacementVersionId);
+
+    const history = await pool.query(
+      `SELECT v.id FROM versions v JOIN files f ON f.id=v.file_id
+        WHERE f.drive_id=$1 AND f.path=$2 ORDER BY v.created_at`,
+      [driveId, path],
+    );
+    expect(history.rows.map((row) => row.id)).toEqual([
+      originalVersionId,
+      firstReplacementVersionId,
+      concurrentVersionId,
+      repeatedVersionId,
+    ]);
+    const current = await pool.query(
+      'SELECT current_version_id,deleted_at FROM files WHERE drive_id=$1 AND path=$2',
+      [driveId, path],
+    );
+    expect(current.rows[0]).toEqual({ current_version_id: repeatedVersionId, deleted_at: null });
+  });
+
+  it('does not let an opted-in absent-path intent replace a new live file', async () => {
+    const path = `/create-absent-race-${randomUUID()}.bin`;
+    const prepare = async (allowTrashedCreate: boolean, bytes: string) => {
+      const intentResponse = await request(`/drives/${driveId}/put`, writeToken, 'POST', {
+        path,
+        ciphertextSize: Buffer.byteLength(bytes),
+        wrappedKey: 'opaque',
+        ifVersionId: null,
+        ...(allowTrashedCreate ? { allowTrashedCreate: true } : {}),
+      });
+      expect(intentResponse.status).toBe(201);
+      const intent = await json(intentResponse);
+      const uploaded = await fetch(intent.uploadUrl, { method: 'PUT', body: Buffer.from(bytes) });
+      expect(uploaded.ok).toBe(true);
+      return intent.intentId as string;
+    };
+    const optedIntent = await prepare(true, 'opted-in bytes');
+    const strictIntent = await prepare(false, 'first live bytes');
+
+    const strictCommit = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: strictIntent,
+    });
+    expect(strictCommit.status).toBe(201);
+    const liveVersionId = (await json(strictCommit)).version.id as string;
+    const optedCommit = await request(`/drives/${driveId}/commit`, writeToken, 'POST', {
+      intentId: optedIntent,
+    });
+    expect(optedCommit.status).toBe(409);
+    expect((await json(optedCommit)).error).toMatchObject({
+      state: 'exists',
+      currentVersionId: liveVersionId,
+    });
+    const current = await pool.query(
+      'SELECT current_version_id,deleted_at FROM files WHERE drive_id=$1 AND path=$2',
+      [driveId, path],
+    );
+    expect(current.rows[0]).toEqual({ current_version_id: liveVersionId, deleted_at: null });
+  });
+
+  it('requires the explicit null create precondition for allowTrashedCreate', async () => {
+    const path = `/invalid-trashed-create-${randomUUID()}.bin`;
+    for (const body of [
+      { path, ciphertextSize: 1, wrappedKey: 'opaque', allowTrashedCreate: true },
+      {
+        path,
+        ciphertextSize: 1,
+        wrappedKey: 'opaque',
+        ifVersionId: randomUUID(),
+        allowTrashedCreate: true,
+      },
+      { path, ciphertextSize: 1, wrappedKey: 'opaque', ifVersionId: null, allowTrashedCreate: 1 },
+    ]) {
+      expect((await request(`/drives/${driveId}/put`, writeToken, 'POST', body)).status).toBe(400);
+    }
+  });
+
   it('rejects an upload intent that would exceed an explicit drive quota', async () => {
     const intent = await request(`/drives/${quotaDriveId}/put`, writeToken, 'POST', {
       path: '/too-large.bin',

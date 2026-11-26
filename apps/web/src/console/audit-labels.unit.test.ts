@@ -53,3 +53,9 @@ describe('trace capture actions', () => {
     'webhook.trace.ingest',
   ])('labels %s', (action) => expect(auditLabel(action)).not.toBe('Other request'));
 });
+
+describe('mounted file actions', () => {
+  it.each(['drive.mkdir', 'drive.rmdir', 'drive.rename', 'drive.delete'])('labels %s', (action) =>
+    expect(auditLabel(action)).not.toBe('Other request'),
+  );
+});

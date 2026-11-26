@@ -160,6 +160,18 @@ agent-drive rm /outputs/report-copy.md
 - `cp` copies the current version, or the version you pass with `--version`, to a new path.
 - `rm` moves the file to the trash. `restore` brings it back.
 
+The filesystem mount uses `POST /api/v1/drives/:id/rename` for an editor's already-committed
+temporary file. It supplies the source's current version, the expected destination version (or
+`null` when the destination must be absent), and a UUID `operationId`. Both paths must be inside
+the API key's `writePaths`. A rename to an absent path uses the same atomic path move as `mv` and
+requires `write`. Replacing an existing destination requires `write` and `delete`: the service
+copies the encrypted source version into a new destination version, keeps the destination's older
+versions, and moves the source temp file to Trash in the same transaction. The request fails with a
+conflict if either version changed, the destination is in Trash, or the operation id was reused for
+a different request. The replacement keeps the destination's tags and description. Retrying the same
+operation id and payload returns the original result. Explicit directory paths cannot be used as a
+file destination, and a file cannot occupy a path that would shadow an explicit directory below it.
+
 Ask the user before deleting or overwriting anything you did not create.
 
 ## Versions and restore

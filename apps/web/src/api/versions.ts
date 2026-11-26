@@ -1,12 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { ApiError } from './errors';
+import {
+  assertNoExplicitDirectoryAtFilePath,
+  assertNoLiveFileNamespaceCollision,
+} from './directories';
 
 // Database rows are intentionally untyped at this boundary, like in handler.ts.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
 
-export type PutMode = 'unconditional' | 'create' | { baseVersionId: string };
+export type PutMode =
+  | 'unconditional'
+  | 'create'
+  | { baseVersionId: string }
+  | { allowTrashedCreate: true; baseVersionId: string | null };
 
 export type CommitPutInput = {
   accountId: string;
@@ -40,12 +48,50 @@ export async function putConflict(
   path: string,
   mode: PutMode,
 ): Promise<Row | undefined> {
+  await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
   const fileResult = await client.query(
     'SELECT id, current_version_id, deleted_at FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE',
     [driveId, path],
   );
   const file = fileResult.rows[0] as Row | undefined;
   const currentVersionId = (file?.current_version_id as string | undefined) ?? null;
+  if (typeof mode === 'object' && 'allowTrashedCreate' in mode) {
+    if (mode.baseVersionId === null) {
+      if (file?.deleted_at)
+        throw new ApiError('conflict', trashedMessage, 409, {
+          state: 'trashed',
+          currentVersionId,
+        });
+      if (file)
+        throw new ApiError('conflict', 'A live file now exists at this path.', 409, {
+          state: 'exists',
+          currentVersionId,
+        });
+    } else {
+      if (!file)
+        throw new ApiError('conflict', 'The trashed file is no longer at this path.', 409, {
+          state: 'absent',
+          currentVersionId: null,
+        });
+      if (!file.deleted_at)
+        throw new ApiError('conflict', 'A live file now exists at this path.', 409, {
+          state: 'exists',
+          currentVersionId,
+        });
+      if (file.current_version_id !== mode.baseVersionId)
+        throw new ApiError(
+          'conflict',
+          'The trashed file changed since the intent was created.',
+          409,
+          {
+            state: 'changed',
+            currentVersionId,
+          },
+        );
+    }
+    await assertNoLiveFileNamespaceCollision(client, driveId, path, null);
+    return file;
+  }
   if (mode === 'create' && file) {
     if (file.deleted_at)
       throw new ApiError('conflict', trashedMessage, 409, { state: 'trashed', currentVersionId });
@@ -96,6 +142,36 @@ export async function checkDriveQuota(
       ).rows[0]!.quota_bytes,
     );
   if (Number(used.rows[0].used) + size > quota) {
+    throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
+  }
+}
+
+/** Throws quota_exceeded when stored versions plus active upload reservations exceed the drive quota. */
+export async function checkDriveQuotaWithReservations(
+  client: PoolClient,
+  driveId: string,
+  size: number,
+  quotaBytes?: bigint,
+) {
+  const used = await client.query<{ used: string }>(
+    `SELECT (
+       (SELECT COALESCE(SUM(ciphertext_size),0) FROM versions WHERE drive_id = $1) +
+       (SELECT COALESCE(SUM(ciphertext_size),0) FROM upload_intents
+         WHERE drive_id = $1 AND committed_version_id IS NULL AND expires_at > now())
+     )::bigint AS used`,
+    [driveId],
+  );
+  const quota =
+    quotaBytes ??
+    BigInt(
+      (
+        await client.query<{ quota_bytes: string }>(
+          'SELECT quota_bytes FROM drives WHERE id = $1',
+          [driveId],
+        )
+      ).rows[0]!.quota_bytes,
+    );
+  if (BigInt(used.rows[0]!.used) + BigInt(size) > quota) {
     throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
   }
 }
