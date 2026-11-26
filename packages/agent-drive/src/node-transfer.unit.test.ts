@@ -1,8 +1,18 @@
-import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentDriveClient, Version } from './client.js';
+import { AgentDriveApiError, type AgentDriveClient, type Version } from './client.js';
 import { getFile, putFile } from './node-transfer.js';
 
 const directories: string[] = [];
@@ -105,6 +115,114 @@ describe('Node file transfer helpers', () => {
     expect(await readFile(destination, 'utf8')).toBe('new contents');
     expect((await stat(destination)).mode & 0o777).toBe(0o640);
     expect((await readdir(directory)).sort()).toEqual(['output']);
+  });
+
+  it('keeps plaintext temporary files private until the verified stream completes', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    await writeFile(destination, 'old contents');
+    await chmod(destination, 0o644);
+    let modeWhileWriting: number | undefined;
+    const client = {
+      getStream: async () => ({
+        plaintext: (async function* () {
+          const temporary = (await readdir(directory)).find((name) => name.endsWith('.tmp'))!;
+          modeWhileWriting = (await stat(join(directory, temporary))).mode & 0o777;
+          yield new TextEncoder().encode('new contents');
+        })(),
+        plaintextBytes: 12,
+        version,
+        cancel: async () => {},
+      }),
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 });
+    expect(modeWhileWriting).toBe(0o600);
+    expect(await readFile(destination, 'utf8')).toBe('new contents');
+    expect((await stat(destination)).mode & 0o777).toBe(0o644);
+  });
+
+  it('pins a retry to the version selected by the first stream', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    const latestVersion = { ...version, id: 'new-latest-version' };
+    const requestedVersions: Array<string | undefined> = [];
+    let attempts = 0;
+    const client = {
+      getStream: async (_drive: string, _path: string, options?: { versionId?: string }) => {
+        attempts++;
+        requestedVersions.push(options?.versionId);
+        if (attempts === 1) {
+          return {
+            plaintext: (async function* () {
+              yield new TextEncoder().encode('partial');
+              throw new Error('temporary transfer failure');
+            })(),
+            plaintextBytes: 11,
+            version,
+            cancel: async () => {},
+          };
+        }
+        const selected = options?.versionId === version.id ? version : latestVersion;
+        return {
+          plaintext: (async function* () {
+            yield new TextEncoder().encode('new contents');
+          })(),
+          plaintextBytes: 12,
+          version: selected,
+          cancel: async () => {},
+        };
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    const downloaded = await getFile(client, 'drive', '/remote', destination);
+    expect(attempts).toBe(2);
+    expect(requestedVersions).toEqual([undefined, version.id]);
+    expect(downloaded.id).toBe(version.id);
+    expect(await readFile(destination, 'utf8')).toBe('new contents');
+  });
+
+  it('rejects a destination that becomes a directory before publication', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    await writeFile(destination, 'old contents');
+    const client = {
+      getStream: async () => ({
+        plaintext: (async function* () {
+          yield new TextEncoder().encode('new contents');
+          await rm(destination);
+          await mkdir(destination);
+          await writeFile(join(destination, 'keep'), 'directory stays');
+        })(),
+        plaintextBytes: 12,
+        version,
+        cancel: async () => {},
+      }),
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 }),
+    ).rejects.toThrow('Output path must be a regular file.');
+    expect(await readFile(join(destination, 'keep'), 'utf8')).toBe('directory stays');
+  });
+
+  it('does not retry terminal API errors by default', async () => {
+    const directory = await fixture();
+    let attempts = 0;
+    const client = {
+      getStream: async () => {
+        attempts++;
+        throw new AgentDriveApiError('validation_error', 400, 'Invalid request.');
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', join(directory, 'output')),
+    ).rejects.toMatchObject({
+      code: 'validation_error',
+      status: 400,
+    });
+    expect(attempts).toBe(1);
   });
 
   it('does not replace an existing create-only destination', async () => {

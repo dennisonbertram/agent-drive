@@ -2,7 +2,13 @@ import { constants } from 'node:fs';
 import { lstat, open, link, rename, rm } from 'node:fs/promises';
 import { dirname, basename, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentDriveClient, GetOptions, PutOptions, Version } from './client.js';
+import {
+  AgentDriveApiError,
+  type AgentDriveClient,
+  type GetOptions,
+  type PutOptions,
+  type Version,
+} from './client.js';
 
 const TRANSFER_CHUNK_BYTES = 1024 * 1024;
 
@@ -77,6 +83,7 @@ export async function getFile(
     throw new TypeError('retries must be a non-negative integer.');
   const overwrite = options.overwrite ?? false;
   const outputDirectory = dirname(outputPath);
+  let versionId = options.versionId;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (options.signal?.aborted) throw abortError(options.signal);
@@ -105,9 +112,10 @@ export async function getFile(
       }
 
       stream = await client.getStream(driveId, remotePath, {
-        ...(options.versionId ? { versionId: options.versionId } : {}),
+        ...(versionId ? { versionId } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       });
+      versionId ??= stream.version.id;
       if (options.signal) {
         abortListener = () => void stream?.cancel(options.signal?.reason).catch(() => undefined);
         options.signal.addEventListener('abort', abortListener, { once: true });
@@ -122,7 +130,6 @@ export async function getFile(
         0o600,
       );
       created = true;
-      if (existingMode !== undefined) await handle.chmod(existingMode);
       let written = 0;
       for await (const chunk of stream.plaintext) {
         if (options.signal?.aborted) throw abortError(options.signal);
@@ -138,16 +145,22 @@ export async function getFile(
       }
       if (written !== stream.plaintextBytes) throw new Error('Downloaded file was truncated.');
       await handle.sync();
+      if (options.signal?.aborted) throw abortError(options.signal);
+      // Keep the temporary plaintext owner-only throughout the stream. Broaden its mode only
+      // after the stream has reached authenticated EOF and before publication.
+      if (overwrite && existingMode !== undefined) await handle.chmod(existingMode);
+      await handle.sync();
       await handle.close();
       handle = undefined;
       if (options.signal?.aborted) throw abortError(options.signal);
 
       if (overwrite) {
-        // rename replaces the directory entry itself; reject symlinks so a caller never mistakes
-        // that for a write through the link, and never follows an output symlink.
+        // Check the destination again after the download, since it may have changed while the
+        // stream was in progress. Do not replace a symlink or any other non-file path.
         try {
-          if ((await lstat(outputPath)).isSymbolicLink())
-            throw new Error('Refusing to write through a symlink.');
+          const existing = await lstat(outputPath);
+          if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
+          if (!existing.isFile()) throw new Error('Output path must be a regular file.');
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
@@ -163,9 +176,12 @@ export async function getFile(
       if (handle) await handle.close().catch(() => undefined);
       if (created) await rm(temporaryPath, { force: true }).catch(() => undefined);
       const code = (error as NodeJS.ErrnoException)?.code;
+      const terminalApiFailure =
+        error instanceof AgentDriveApiError && error.status >= 400 && error.status < 500;
       if (
         attempt === retries ||
         code === 'EEXIST' ||
+        terminalApiFailure ||
         options.signal?.aborted ||
         (error instanceof Error && error.name === 'AbortError')
       ) {
