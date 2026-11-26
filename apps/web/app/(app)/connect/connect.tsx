@@ -152,6 +152,9 @@ export default function Connect({
   const [delegate, setDelegate] = useState(false);
   // Add to an existing drive (docs/agent-login.md section 12). The key lives only in this state.
   const [accountDrives, setAccountDrives] = useState<Drive[]>([]);
+  const [driveCursor, setDriveCursor] = useState<string | null>(null);
+  const [drivesLoading, setDrivesLoading] = useState(false);
+  const [drivesError, setDrivesError] = useState('');
   const [existing, setExisting] = useState(false);
   const [driveId, setDriveId] = useState('');
   const [keyText, setKeyText] = useState('');
@@ -194,6 +197,8 @@ export default function Connect({
       setPhase('review');
       setExisting(false);
       setAccountDrives([]);
+      setDriveCursor(null);
+      setDrivesError('');
       if (found.creates_drive) void loadDrives(startedAt);
     } catch (error) {
       if (!live()) return;
@@ -220,21 +225,39 @@ export default function Connect({
   }
 
   async function loadDrives(startedAt: number) {
+    setDrivesLoading(true);
+    setDrivesError('');
     try {
-      const items: Drive[] = [];
-      let cursor: string | null = null;
-      do {
-        const page: { items: Drive[]; nextCursor: string | null } = await api(
-          `drives?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        );
-        if (startedAt !== generation.current) return;
-        items.push(...page.items);
-        cursor = page.nextCursor;
-      } while (cursor);
-      setAccountDrives(items);
-      setDriveId(items[0]?.id ?? '');
-    } catch {
-      // The one-click default still works without the drive list.
+      const page: { items: Drive[]; nextCursor: string | null } = await api('drives?limit=100');
+      if (startedAt !== generation.current) return;
+      setAccountDrives(page.items);
+      setDriveCursor(page.nextCursor);
+      setDriveId(page.items[0]?.id ?? '');
+    } catch (error) {
+      if (startedAt === generation.current)
+        setDrivesError(error instanceof Error ? error.message : 'Could not load drives.');
+    } finally {
+      if (startedAt === generation.current) setDrivesLoading(false);
+    }
+  }
+
+  async function loadMoreDrives() {
+    if (!driveCursor || drivesLoading) return;
+    setDrivesLoading(true);
+    setDrivesError('');
+    try {
+      const page: { items: Drive[]; nextCursor: string | null } = await api(
+        `drives?limit=100&cursor=${encodeURIComponent(driveCursor)}`,
+      );
+      setAccountDrives((current) => {
+        const known = new Set(current.map((drive) => drive.id));
+        return [...current, ...page.items.filter((drive) => !known.has(drive.id))];
+      });
+      setDriveCursor(page.nextCursor);
+    } catch (error) {
+      setDrivesError(error instanceof Error ? error.message : 'Could not load drives.');
+    } finally {
+      setDrivesLoading(false);
     }
   }
 
@@ -284,6 +307,8 @@ export default function Connect({
           setRequest(found);
           setExisting(false);
           setAccountDrives([]);
+          setDriveCursor(null);
+          setDrivesError('');
           if (found.creates_drive) void loadDrives(updatedAt);
           clearKey();
           setNotice(
@@ -624,7 +649,7 @@ export default function Connect({
             Drive
             <select
               value={driveId}
-              disabled={busy}
+              disabled={busy || drivesLoading || !accountDrives.length}
               onChange={(event) => {
                 setDriveId(event.target.value);
                 clearKey();
@@ -637,6 +662,25 @@ export default function Connect({
               ))}
             </select>
           </label>
+          {drivesError && (
+            <p role="alert" className="banner error">
+              {drivesError}
+            </p>
+          )}
+          {driveCursor && (
+            <button
+              type="button"
+              className="connect-link"
+              disabled={busy || drivesLoading}
+              onClick={() => void loadMoreDrives()}
+            >
+              {drivesLoading
+                ? 'Loading drives…'
+                : drivesError
+                  ? 'Retry loading drives'
+                  : 'Load more drives'}
+            </button>
+          )}
           <label className="cf-key">
             Drive key
             <input

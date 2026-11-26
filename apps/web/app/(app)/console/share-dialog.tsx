@@ -17,6 +17,8 @@ export type SharesState = {
   driveId: string;
   items: ShareRow[];
   capped: boolean;
+  nextCursor?: string | null;
+  loadingMore?: boolean;
   status: 'loading' | 'ready' | 'error';
   message?: string;
 };

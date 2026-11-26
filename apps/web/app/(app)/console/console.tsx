@@ -146,8 +146,6 @@ type ModalName =
   | 'traces'
   | null;
 const scopes = ['read', 'write', 'delete', 'share', 'manage'];
-// Trash and a search in a folder load at most this many rows; the list says so when it stops early.
-const LIST_CAP = 1000;
 const isInternal = (path: string) => path.split('/').includes('.agent-drive');
 const itemKey = (item: FileEntry) =>
   item.kind === 'folder' ? `folder:${item.path}` : `file:${item.id}`;
@@ -289,6 +287,10 @@ function ConnectAgentPanel({ open }: { open: boolean }) {
   );
 }
 
+async function firstPage<T>(path: string): Promise<Page<T>> {
+  return api(`${path}${path.includes('?') ? '&' : '?'}limit=100`);
+}
+
 async function all<T>(path: string): Promise<T[]> {
   const items: T[] = [];
   let cursor: string | null = null;
@@ -300,6 +302,11 @@ async function all<T>(path: string): Promise<T[]> {
     cursor = result.nextCursor;
   } while (cursor);
   return items;
+}
+
+function mergePage<T extends { id: string }>(items: T[], next: T[]) {
+  const known = new Set(items.map((item) => item.id));
+  return [...items, ...next.filter((item) => !known.has(item.id))];
 }
 
 function authorLabel(name: string) {
@@ -540,9 +547,30 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const keySources = useRef(new Map<string, Source>());
   const [tab, setTab] = useState<Tab>('Files');
   const [drives, setDrives] = useState<Drive[]>([]);
+  const drivesNow = useRef<Drive[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [collectionPages, setCollectionPages] = useState<
+    Record<'drives' | 'agents' | 'keys', { cursor: string | null; loading: boolean; error: string }>
+  >({
+    drives: { cursor: null, loading: false, error: '' },
+    agents: { cursor: null, loading: false, error: '' },
+    keys: { cursor: null, loading: false, error: '' },
+  });
+  const collectionCursors = useRef<Record<'drives' | 'agents' | 'keys', string | null>>({
+    drives: null,
+    agents: null,
+    keys: null,
+  });
+  const collectionLoads = useRef(new Set<'drives' | 'agents' | 'keys'>());
+  const collectionEpoch = useRef<Record<'drives' | 'agents' | 'keys', number>>({
+    drives: 0,
+    agents: 0,
+    keys: 0,
+  });
   const [usage, setUsage] = useState<Usage | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState('');
   const [folderDrive, setFolderDrive] = useState('');
   const [folderPrefix, setFolderPrefix] = useState('/');
   const [folderUsage, setFolderUsage] = useState<{ key: string; data: FolderUsage } | null>(null);
@@ -651,6 +679,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const urlDrive = params.get('drive');
   // Back and Forward change the drive in the URL; that wins over the last one chosen here.
   const selected = urlDrive && drives.some((item) => item.id === urlDrive) ? urlDrive : chosenDrive;
+  const deepLinkPending = Boolean(
+    urlDrive &&
+      !drives.some((item) => item.id === urlDrive) &&
+      (collectionPages.drives.cursor || collectionPages.drives.loading),
+  );
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
   const searchTerm = tab === 'Files' && filter.trim() ? typed : '';
   const pageKey = `${fileScope}|${searchTerm}|${sort.key}:${sort.dir}`;
@@ -750,29 +783,70 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     drive?.key_backup_at ? new Date(drive.key_backup_at).toLocaleDateString() : ''
   } (${drive?.key_backup_method})`;
   const activeAgents = agents.filter((agent) => agent.name !== '__console__');
+  const keyOptionsLoaded =
+    !collectionPages.drives.cursor &&
+    !collectionPages.drives.loading &&
+    !collectionPages.agents.cursor &&
+    !collectionPages.agents.loading;
 
   const refreshOwner = useRef(0);
+  const usageOwner = useRef(0);
+  const usageRequest = useRef<Promise<void> | null>(null);
+  const loadUsage = useCallback(() => {
+    if (usageRequest.current) return usageRequest.current;
+    const owner = ++usageOwner.current;
+    setUsageLoading(true);
+    setUsageError('');
+    const request = api<Usage>('usage')
+      .then((nextUsage) => {
+        if (owner === usageOwner.current) setUsage(nextUsage);
+      })
+      .catch((reason: unknown) => {
+        if (owner === usageOwner.current)
+          setUsageError(reason instanceof Error ? reason.message : 'Could not load usage.');
+      })
+      .finally(() => {
+        if (owner === usageOwner.current) setUsageLoading(false);
+        if (usageRequest.current === request) usageRequest.current = null;
+      });
+    usageRequest.current = request;
+    return request;
+  }, []);
   const refresh = useCallback(async () => {
     const owner = ++refreshOwner.current;
+    collectionEpoch.current = {
+      drives: collectionEpoch.current.drives + 1,
+      agents: collectionEpoch.current.agents + 1,
+      keys: collectionEpoch.current.keys + 1,
+    };
     try {
-      const [nextDrives, nextAgents, nextKeys, nextUsage] = await Promise.all([
-        all<Drive>('drives'),
-        all<Agent>('agents'),
-        all<ApiKey>('keys'),
-        api<Usage>('usage'),
+      const [drivePage, agentPage, keyPage] = await Promise.all([
+        firstPage<Drive>('drives'),
+        firstPage<Agent>('agents'),
+        firstPage<ApiKey>('keys'),
       ]);
       if (owner !== refreshOwner.current) return;
-      setDrives(
-        nextDrives.map((item) => {
-          const recorded = recordedBackups.current[item.id];
-          return recorded && !item.key_backup_at
-            ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
-            : item;
-        }),
-      );
-      setAgents(nextAgents);
-      setApiKeys(nextKeys);
-      setUsage(nextUsage);
+      // Keep previously loaded drives so Refresh cannot strand a selection from a later page.
+      const nextDrives = mergePage(drivePage.items, drivesNow.current).map((item) => {
+        const recorded = recordedBackups.current[item.id];
+        return recorded && !item.key_backup_at
+          ? { ...item, key_backup_at: recorded.at, key_backup_method: recorded.method }
+          : item;
+      });
+      drivesNow.current = nextDrives;
+      setDrives(nextDrives);
+      setAgents(agentPage.items);
+      setApiKeys(keyPage.items);
+      collectionCursors.current = {
+        drives: drivePage.nextCursor,
+        agents: agentPage.nextCursor,
+        keys: keyPage.nextCursor,
+      };
+      setCollectionPages({
+        drives: { cursor: drivePage.nextCursor, loading: false, error: '' },
+        agents: { cursor: agentPage.nextCursor, loading: false, error: '' },
+        keys: { cursor: keyPage.nextCursor, loading: false, error: '' },
+      });
       setSelected((current) =>
         nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives),
       );
@@ -782,6 +856,76 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (owner === refreshOwner.current) throw reason;
     }
   }, []);
+
+  useEffect(() => {
+    drivesNow.current = drives;
+  }, [drives]);
+
+  useEffect(() => {
+    if (tab === 'Usage') void loadUsage();
+  }, [tab, loadUsage]);
+
+  async function loadCollectionPages(collection: 'drives' | 'agents' | 'keys', allPages = false) {
+    if (collectionLoads.current.has(collection)) return;
+    collectionLoads.current.add(collection);
+    const epoch = collectionEpoch.current[collection];
+    setCollectionPages((current) => ({
+      ...current,
+      [collection]: { ...current[collection], loading: true, error: '' },
+    }));
+    let cursor = collectionCursors.current[collection];
+    try {
+      do {
+        if (!cursor) break;
+        const page: Page<Drive | Agent | ApiKey> = await api(
+          `${collection}?limit=100&cursor=${encodeURIComponent(cursor)}`,
+        );
+        if (epoch !== collectionEpoch.current[collection]) return;
+        if (collection === 'drives')
+          setDrives((current) => mergePage(current, page.items as Drive[]));
+        else if (collection === 'agents')
+          setAgents((current) => mergePage(current, page.items as Agent[]));
+        else setApiKeys((current) => mergePage(current, page.items as ApiKey[]));
+        cursor = page.nextCursor;
+        collectionCursors.current[collection] = cursor;
+        setCollectionPages((current) => ({
+          ...current,
+          [collection]: { cursor, loading: allPages && Boolean(cursor), error: '' },
+        }));
+      } while (allPages && cursor);
+    } catch (reason) {
+      if (epoch !== collectionEpoch.current[collection]) return;
+      setCollectionPages((current) => ({
+        ...current,
+        [collection]: {
+          cursor,
+          loading: false,
+          error: reason instanceof Error ? reason.message : 'Could not load more items.',
+        },
+      }));
+    } finally {
+      collectionLoads.current.delete(collection);
+      setCollectionPages((current) => ({
+        ...current,
+        [collection]: { ...current[collection], loading: false },
+      }));
+    }
+  }
+
+  async function loadAllKeyOptions() {
+    await Promise.all([loadCollectionPages('drives', true), loadCollectionPages('agents', true)]);
+  }
+
+  useEffect(() => {
+    // Preserve direct links to drives beyond the first page without delaying the first render.
+    if (
+      urlDrive &&
+      !drives.some((item) => item.id === urlDrive) &&
+      collectionCursors.current.drives
+    )
+      void loadCollectionPages('drives');
+    // The loader is stable in behavior and reads the current cursor from a ref.
+  }, [urlDrive, drives]);
 
   useEffect(() => {
     let active = true;
@@ -803,7 +947,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => clearTimeout(timer);
   }, [filter]);
   useEffect(() => {
-    if (!selected || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
+    if (!selected || deepLinkPending || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
     let active = true;
     void (async () => {
       const searched = tab === 'Files' && Boolean(searchTerm);
@@ -812,9 +956,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       // Recent lists the newest changes under the open folder (all of them at the root).
       const prefix = browse || recent ? listPrefix(folder) : null;
       const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
-      // Browse is one page of the folder's own rows. Recent is the newest 100 changes.
-      // Trash and a search in a folder page on up to LIST_CAP rows.
-      const wholeList = tab === 'Trash' || (searched && browse);
+      // Browse, Trash, and search show a page first. Recent fills up to 50 visible files
+      // (internal rows do not count), with a bounded traversal for sparse roots.
       const items: FileEntry[] = [];
       let cursor: string | null = null;
       let capped = false;
@@ -836,13 +979,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         if (!active) return;
         items.push(...result.items);
         cursor = result.nextCursor;
-        if (cursor && wholeList && items.length >= LIST_CAP) capped = true;
         if (cursor && recent && recentShort() && pages >= 10) capped = true;
-      } while (cursor && !capped && (wholeList || (recent && recentShort())));
+      } while (cursor && !capped && recent && recentShort());
       setFilePage({
         items,
         capped,
-        next: wholeList || !browse ? null : cursor,
+        next: recent && !recentShort() ? null : cursor,
         searched,
         scope: fileScope,
       });
@@ -853,7 +995,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => {
       active = false;
     };
-  }, [selected, tab, view, folder, fileScope, sharedView, searchTerm]);
+  }, [selected, tab, view, folder, fileScope, sharedView, searchTerm, deepLinkPending]);
   // Load more: the next page of this folder, added below the rows already shown.
   async function loadMore() {
     const page = filePage;
@@ -875,22 +1017,34 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       );
     setMore({ key, loading: true, error: '', changed: false, done: '' });
     try {
-      const query = new URLSearchParams({
-        limit: '100',
-        cursor: page.next,
-        delimiter: '/',
-        sort: 'modified',
-      });
-      const prefix = listPrefix(folder);
+      const searched = page.searched;
+      const browse = tab === 'Files' && view === 'browse' && !searched;
+      const recent = tab === 'Files' && view === 'recent';
+      const path = `drives/${selected}/${tab === 'Trash' ? 'trash' : 'list'}`;
+      const query = new URLSearchParams({ limit: '100', cursor: page.next });
+      if (tab === 'Files') {
+        if (searched) query.set('q', searchTerm);
+        else if (browse) query.set('delimiter', '/');
+        if (!searched || !browse) query.set('sort', 'modified');
+      }
+      const prefix = tab === 'Files' && (browse || recent) ? listPrefix(folder) : null;
       if (prefix) query.set('prefix', prefix);
-      const result: Page<FileEntry> = await api(`drives/${selected}/list?${query}`);
+      const result: Page<FileEntry> = await api(`${path}?${query}`);
       // The listing changed while the page loaded: drop it.
       if (pageKeyNow.current !== key) return;
       const known = new Set(page.items.map(itemKey));
       const fresh = result.items.filter((item) => !known.has(itemKey(item)));
       setFilePage((current) =>
         current && current.scope === page.scope && current.next === page.next
-          ? { ...current, items: [...current.items, ...fresh], next: result.nextCursor }
+          ? {
+              ...current,
+              items: [...current.items, ...fresh],
+              next:
+                recent &&
+                [...current.items, ...fresh].filter((file) => !isInternal(file.path)).length >= 50
+                  ? null
+                  : result.nextCursor,
+            }
           : current,
       );
       mark({
@@ -1129,9 +1283,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     inboxCache.current.clear();
     recordedBackups.current = {};
     setDrives([]);
+    drivesNow.current = [];
     setAgents([]);
     setApiKeys([]);
+    collectionCursors.current = { drives: null, agents: null, keys: null };
+    setCollectionPages({
+      drives: { cursor: null, loading: false, error: '' },
+      agents: { cursor: null, loading: false, error: '' },
+      keys: { cursor: null, loading: false, error: '' },
+    });
     setUsage(null);
+    usageOwner.current += 1;
+    usageRequest.current = null;
+    setUsageLoading(false);
+    setUsageError('');
     setFolderDrive('');
     setFolderPrefix('/');
     setFolderUsage(null);
@@ -1560,9 +1725,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     let toastId = 0;
     const moved = api(`drives/${driveId}/delete`, 'POST', { path: file.path }).then(
       () => {
-        api<Usage>('usage')
-          .then(setUsage)
-          .catch(() => undefined);
         // A Trash list that loaded while the delete was running would miss this file.
         if (tabNow.current === 'Trash' && driveId === selectedNow.current)
           setFileRefresh((value) => value + 1);
@@ -1607,10 +1769,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (!ok) return;
       const held = sharesNow.current?.driveId === driveId ? sharesNow.current : null;
       const items =
-        held?.status === 'ready'
+        held?.status === 'ready' && !held.nextCursor
           ? held.items
-          : await fetchShares(driveId).then(
-              (r) => r.items,
+          : await fetchAllShares(driveId).then(
+              (rows) => rows,
               () => [],
             );
       const n = items.filter(
@@ -1638,20 +1800,20 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     open('confirm');
   }
 
-  // Up to LIST_CAP links, a page at a time.
-  async function fetchShares(driveId: string) {
+  async function fetchAllShares(driveId: string) {
     const items: ShareRow[] = [];
     let cursor: string | null = null;
-    let capped = false;
     do {
-      const query = new URLSearchParams({ limit: '100' });
-      if (cursor) query.set('cursor', cursor);
-      const result: Page<ShareRow> = await api(`drives/${driveId}/shares?${query}`);
+      const result = await fetchSharePage(driveId, cursor);
       items.push(...result.items);
       cursor = result.nextCursor;
-      if (cursor && items.length >= LIST_CAP) capped = true;
-    } while (cursor && !capped);
-    return { items, capped };
+    } while (cursor);
+    return items;
+  }
+  async function fetchSharePage(driveId: string, cursor?: string | null) {
+    const query = new URLSearchParams({ limit: '100' });
+    if (cursor) query.set('cursor', cursor);
+    return api<Page<ShareRow>>(`drives/${driveId}/shares?${query}`);
   }
   async function loadShares(driveId: string) {
     const mine = ++sharesSeq.current;
@@ -1666,10 +1828,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       driveId,
       items: same(current)?.items ?? [],
       capped: same(current)?.capped ?? false,
+      nextCursor: same(current)?.nextCursor ?? null,
       status: 'loading',
     }));
     try {
-      const result = await fetchShares(driveId);
+      const result = await fetchSharePage(driveId);
       // A link created while this load was running is not in its answer yet (it has no versionId here).
       put((current) => {
         const known = new Set(result.items.map((row) => row.id));
@@ -1679,7 +1842,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         return {
           driveId,
           items: [...fresh, ...result.items],
-          capped: result.capped,
+          capped: false,
+          nextCursor: result.nextCursor,
           status: 'ready',
         };
       });
@@ -1688,8 +1852,37 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         driveId,
         items: same(current)?.items ?? [],
         capped: false,
+        nextCursor: same(current)?.nextCursor ?? null,
         status: 'error',
         message: reason instanceof Error ? reason.message : 'Could not load links.',
+      }));
+    }
+  }
+  async function loadMoreShares(driveId: string) {
+    const current = sharesNow.current;
+    if (current?.driveId !== driveId || !current.nextCursor || current.loadingMore) return;
+    const cursor = current.nextCursor;
+    const mine = ++sharesSeq.current;
+    const put = (next: (state: SharesState) => SharesState) => {
+      if (mine !== sharesSeq.current) return;
+      const value = next(sharesNow.current ?? current);
+      sharesNow.current = value;
+      setShares(value);
+    };
+    put((state) => ({ ...state, loadingMore: true, message: '' }));
+    try {
+      const result = await fetchSharePage(driveId, cursor);
+      put((state) => ({
+        ...state,
+        items: mergePage(state.items, result.items),
+        nextCursor: result.nextCursor,
+        loadingMore: false,
+      }));
+    } catch (reason) {
+      put((state) => ({
+        ...state,
+        loadingMore: false,
+        message: reason instanceof Error ? reason.message : 'Could not load more links.',
       }));
     }
   }
@@ -2134,7 +2327,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               <button
                 className="button secondary"
                 disabled={busy}
-                onClick={() => void act(refresh)}
+                onClick={() =>
+                  void act(async () => {
+                    await refresh();
+                    if (tab === 'Usage' || usage) await loadUsage();
+                  })
+                }
               >
                 Refresh
               </button>
@@ -2256,6 +2454,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               onNewDrive={() => open('drive')}
                               onTraces={showTraces}
                               onCapture={() => openTraces()}
+                              onOpen={loadUsage}
+                              hasMore={Boolean(collectionPages.drives.cursor)}
+                              loadingMore={collectionPages.drives.loading}
+                              loadMoreError={collectionPages.drives.error}
+                              onLoadMore={() => void loadCollectionPages('drives')}
                               disabled={busy || !ready}
                             />
                             {(sharedView ? [] : crumbs(folder)).map((crumb, index, all) => (
@@ -2300,6 +2503,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             formatSize={size}
                             onSelect={selectDrive}
                             onNewDrive={() => open('drive')}
+                            onOpen={loadUsage}
+                            hasMore={Boolean(collectionPages.drives.cursor)}
+                            loadingMore={collectionPages.drives.loading}
+                            loadMoreError={collectionPages.drives.error}
+                            onLoadMore={() => void loadCollectionPages('drives')}
                             disabled={busy || !ready}
                           />
                         </div>
@@ -2842,33 +3050,52 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <span className="sr-only" aria-live="polite">
                       {moreNow?.done}
                     </span>
-                    {listStatus === 'ready' && (pageNow?.next || moreNow?.changed) && (
-                      <div className="list-more">
-                        {pageNow?.next && (
-                          <button
-                            className="button secondary"
-                            disabled={loadingMore}
-                            onClick={() => void loadMore()}
-                          >
-                            {loadingMore ? 'Loading…' : 'Load more'}
-                          </button>
-                        )}
-                        {moreNow?.error && (
-                          <span role="alert">{`Could not load more. ${moreNow.error}`}</span>
-                        )}
-                        {moreNow?.changed && (
-                          <>
-                            <span role="alert">This list changed. Refresh to continue.</span>
+                    {listStatus === 'ready' &&
+                      (pageNow?.next ||
+                        moreNow?.changed ||
+                        (sharedView && sharedNow?.nextCursor)) && (
+                        <div className="list-more">
+                          {pageNow?.next && (
                             <button
                               className="button secondary"
-                              onClick={() => setFileRefresh((value) => value + 1)}
+                              disabled={loadingMore}
+                              onClick={() => void loadMore()}
                             >
-                              Refresh
+                              {loadingMore ? 'Loading…' : 'Load more'}
                             </button>
-                          </>
-                        )}
-                      </div>
-                    )}
+                          )}
+                          {moreNow?.error && (
+                            <span role="alert">{`Could not load more. ${moreNow.error}`}</span>
+                          )}
+                          {moreNow?.changed && (
+                            <>
+                              <span role="alert">This list changed. Refresh to continue.</span>
+                              <button
+                                className="button secondary"
+                                onClick={() => setFileRefresh((value) => value + 1)}
+                              >
+                                Refresh
+                              </button>
+                            </>
+                          )}
+                          {sharedView && sharedNow?.nextCursor && (
+                            <button
+                              className="button secondary"
+                              disabled={sharedNow.loadingMore}
+                              onClick={() => void loadMoreShares(selected)}
+                            >
+                              {sharedNow.loadingMore
+                                ? 'Loading links…'
+                                : sharedNow.message
+                                  ? 'Retry loading links'
+                                  : 'Load more links'}
+                            </button>
+                          )}
+                          {sharedView && sharedNow?.message && (
+                            <span role="alert">{sharedNow.message}</span>
+                          )}
+                        </div>
+                      )}
                     <div className="panel-footer">
                       <span className="footer-count" aria-live="polite">
                         {loaded
@@ -2968,6 +3195,25 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       )}
                     </div>
                   ))}
+                  {collectionPages.agents.cursor && (
+                    <div className="panel-toolbar">
+                      {collectionPages.agents.error && (
+                        <span role="alert">{collectionPages.agents.error}</span>
+                      )}
+                      <button
+                        type="button"
+                        className="button secondary"
+                        disabled={collectionPages.agents.loading}
+                        onClick={() => void loadCollectionPages('agents')}
+                      >
+                        {collectionPages.agents.loading
+                          ? 'Loading agents…'
+                          : collectionPages.agents.error
+                            ? 'Retry loading agents'
+                            : 'Load more agents'}
+                      </button>
+                    </div>
+                  )}
                 </section>
               )}
               {tab === 'API keys' && (
@@ -3055,6 +3301,25 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                         </button>
                       </div>
                     ))}
+                    {collectionPages.keys.cursor && (
+                      <div className="panel-toolbar">
+                        {collectionPages.keys.error && (
+                          <span role="alert">{collectionPages.keys.error}</span>
+                        )}
+                        <button
+                          type="button"
+                          className="button secondary"
+                          disabled={collectionPages.keys.loading}
+                          onClick={() => void loadCollectionPages('keys')}
+                        >
+                          {collectionPages.keys.loading
+                            ? 'Loading API keys…'
+                            : collectionPages.keys.error
+                              ? 'Retry loading API keys'
+                              : 'Load more API keys'}
+                        </button>
+                      </div>
+                    )}
                   </section>
                   {hasRestrictedKeys && (
                     <p>
@@ -3081,6 +3346,25 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     </p>
                   </section>
                 </>
+              )}
+              {tab === 'Usage' && !usage && (
+                <section className="panel empty" aria-live="polite">
+                  {usageLoading || !usageError ? (
+                    <p role="status">Loading usage…</p>
+                  ) : (
+                    <>
+                      <h2>Usage could not be loaded.</h2>
+                      <p role="alert">{usageError}</p>
+                      <button
+                        className="button secondary"
+                        disabled={usageLoading}
+                        onClick={() => void loadUsage()}
+                      >
+                        Retry usage
+                      </button>
+                    </>
+                  )}
+                </section>
               )}
               {tab === 'Usage' && usage && (
                 <>
@@ -3622,6 +3906,28 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 })
               }
             >
+              {!keyOptionsLoaded && (
+                <div className="empty" role="status">
+                  <p>Load every agent and drive before choosing where this key can connect.</p>
+                  {(collectionPages.drives.error || collectionPages.agents.error) && (
+                    <span role="alert">
+                      {collectionPages.drives.error || collectionPages.agents.error}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={collectionPages.drives.loading || collectionPages.agents.loading}
+                    onClick={() => void loadAllKeyOptions()}
+                  >
+                    {collectionPages.drives.loading || collectionPages.agents.loading
+                      ? 'Loading all options…'
+                      : collectionPages.drives.error || collectionPages.agents.error
+                        ? 'Retry loading all options'
+                        : 'Load all agents and drives'}
+                  </button>
+                </div>
+              )}
               <p>
                 Use a different key for each agent or machine. New keys do not grant access to
                 future drives automatically.
@@ -3675,7 +3981,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   </label>
                 ))}
               </fieldset>
-              <button className="button primary" disabled={busy}>
+              <button className="button primary" disabled={busy || !keyOptionsLoaded}>
                 Create API key
               </button>
             </form>

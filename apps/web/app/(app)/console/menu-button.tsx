@@ -16,6 +16,7 @@ export function MenuButton({
   menuTestId,
   menuClassName = '',
   align = 'end',
+  onOpen,
   children,
 }: {
   label: ReactNode;
@@ -25,6 +26,7 @@ export function MenuButton({
   menuTestId?: string;
   menuClassName?: string;
   align?: 'start' | 'end';
+  onOpen?: () => void;
   children: ReactNode;
 }) {
   const id = useId();
@@ -57,6 +59,7 @@ export function MenuButton({
       setOpen(isOpen);
       window.removeEventListener('resize', position);
       if (!isOpen) return;
+      onOpen?.();
       position();
       window.addEventListener('resize', position);
       popover
@@ -68,7 +71,7 @@ export function MenuButton({
       popover.removeEventListener('toggle', onToggle);
       window.removeEventListener('resize', position);
     };
-  }, [align]);
+  }, [align, onOpen]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];

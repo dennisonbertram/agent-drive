@@ -1317,6 +1317,11 @@
   display: grid;
   gap: 10px;
 }
+.menu-popover.drive-list-menu:popover-open {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .menu-popover p {
   margin: 0;
   font-size: 13px;
