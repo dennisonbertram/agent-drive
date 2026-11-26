@@ -22,6 +22,7 @@ let driveId = '';
 let token = '';
 let smallVersionId = '';
 let largeVersionId = '';
+let rangeVersionId = '';
 const path = '/bounded-read.bin';
 
 function request(query: string) {
@@ -78,6 +79,13 @@ beforeAll(async () => {
       [fileId, driveId, `objects/bounded-read/${randomUUID()}`, encryptedSize(8), agentId],
     )
   ).rows[0]!.id;
+  rangeVersionId = (
+    await pool.query<{ id: string }>(
+      `INSERT INTO versions (file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+       VALUES ($1,$2,$3,$4,'opaque-wrapped-key',$5) RETURNING id`,
+      [fileId, driveId, `objects/bounded-read/${randomUUID()}`, 16 * 1024 * 1024 + 256, agentId],
+    )
+  ).rows[0]!.id;
   await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, largeVersionId]);
   await pool.query(
     `INSERT INTO billing_accounts (account_id,plan,spend_cap_cents)
@@ -117,6 +125,118 @@ describe('server-side bounded GET', () => {
     } finally {
       freePlan.operations = original;
     }
+  });
+
+  it('authorizes a pinned closed range and reserves exactly its ciphertext bytes', async () => {
+    const before = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
+    const result = await request(
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=${encodeURIComponent('bytes=0-19')}`,
+    );
+    expect(result.status).toBe(200);
+    const body = await result.json();
+    expect(body).toMatchObject({ id: smallVersionId, downloadRange: 'bytes=0-19' });
+    expect(body.downloadUrl).toEqual(expect.any(String));
+    const signed = new URL(body.downloadUrl);
+    expect(signed.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('range');
+
+    const after = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
+    expect(
+      BigInt(after.rows[0]!.authorized_egress_bytes) -
+        BigInt(before.rows[0]?.authorized_egress_bytes ?? '0'),
+    ).toBe(20n);
+  });
+
+  it('accepts the per-request ciphertext ceiling and rejects one byte over it', async () => {
+    const maximumRangeBytes = 8 * 1024 * 1024 + 128;
+    const accepted = await request(
+      `versionId=${rangeVersionId}&metadataOnly=1&authorizeRange=1&range=${encodeURIComponent(`bytes=0-${maximumRangeBytes - 1}`)}`,
+    );
+    expect(accepted.status).toBe(200);
+    expect((await accepted.json()).downloadRange).toBe(`bytes=0-${maximumRangeBytes - 1}`);
+
+    const rejected = await request(
+      `versionId=${rangeVersionId}&metadataOnly=1&authorizeRange=1&range=${encodeURIComponent(`bytes=0-${maximumRangeBytes}`)}`,
+    );
+    expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error.code).toBe('validation_error');
+  });
+
+  it.each([
+    [
+      'requires metadata-only opt-in',
+      `versionId=${smallVersionId}&authorizeRange=1&range=bytes%3D0-19`,
+    ],
+    [
+      'requires range authorization opt-in',
+      `versionId=${smallVersionId}&metadataOnly=1&range=bytes%3D0-19`,
+    ],
+    ['requires a range value', `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1`],
+    ['requires an explicit version', 'metadataOnly=1&authorizeRange=1&range=bytes%3D0-19'],
+    [
+      'requires a closed range',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-`,
+    ],
+    [
+      'rejects suffix ranges',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D-10`,
+    ],
+    [
+      'rejects multiple ranges',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9%2C20-29`,
+    ],
+    [
+      'rejects reversed ranges',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D20-19`,
+    ],
+    [
+      'rejects ranges beyond the selected version',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-47`,
+    ],
+    [
+      'rejects duplicate range parameters',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9&range=bytes%3D10-19`,
+    ],
+    [
+      'rejects duplicate range opt-ins',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeRange=1&range=bytes%3D0-9`,
+    ],
+    [
+      'rejects duplicate version pins',
+      `versionId=${smallVersionId}&versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+    ],
+    [
+      'rejects duplicate metadata-only flags',
+      `versionId=${smallVersionId}&metadataOnly=1&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+    ],
+    [
+      'rejects plaintext caps on range authorization',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+    ],
+    [
+      'rejects whole-download authorization on range requests',
+      `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeIfWithinLimit=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+    ],
+  ])('%s', async (_label, query) => {
+    const before = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
+    const result = await request(query);
+    expect(result.status).toBe(400);
+    expect((await result.json()).error.code).toBe('validation_error');
+    const after = await pool.query<{ authorized_egress_bytes: string }>(
+      'SELECT authorized_egress_bytes FROM billing_periods WHERE account_id=$1 ORDER BY period_start DESC LIMIT 1',
+      [accountId],
+    );
+    expect(after.rows[0]?.authorized_egress_bytes ?? '0').toBe(
+      before.rows[0]?.authorized_egress_bytes ?? '0',
+    );
   });
 
   it('returns metadata without signing or fetching storage when the selected version exceeds the cap', async () => {

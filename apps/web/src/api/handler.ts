@@ -42,6 +42,7 @@ import {
   deleteObject,
   objectInfo,
   presignedDownload,
+  presignedRangeDownload,
   presignedUpload,
 } from './storage';
 import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
@@ -92,6 +93,7 @@ type Row = QueryResultRow & Record<string, any>;
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
 const MAX_FOLDER_ROWS = 200;
+const MAX_RANGE_DOWNLOAD_BYTES = 8n * 1024n * 1024n + 128n;
 const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
@@ -2305,6 +2307,57 @@ async function fileEndpoint(
   if (operation === 'get' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
+    const rangeOptInPresent =
+      url.searchParams.has('authorizeRange') || url.searchParams.has('range');
+    let downloadRange: string | undefined;
+    let rangeStart: bigint | undefined;
+    let rangeEnd: bigint | undefined;
+    if (rangeOptInPresent) {
+      const authorizeRangeValues = url.searchParams.getAll('authorizeRange');
+      const rangeValues = url.searchParams.getAll('range');
+      const metadataOnlyValues = url.searchParams.getAll('metadataOnly');
+      const versionIdValues = url.searchParams.getAll('versionId');
+      const hasMaximumParameter = [...url.searchParams.keys()].some((name) =>
+        name.startsWith('max'),
+      );
+      if (
+        authorizeRangeValues.length !== 1 ||
+        authorizeRangeValues[0] !== '1' ||
+        rangeValues.length !== 1 ||
+        metadataOnlyValues.length !== 1 ||
+        metadataOnlyValues[0] !== '1' ||
+        versionIdValues.length !== 1 ||
+        !versionIdValues[0] ||
+        hasMaximumParameter ||
+        url.searchParams.has('authorizeIfWithinLimit')
+      ) {
+        throw new ApiError(
+          'validation_error',
+          'Range authorization requires metadataOnly=1, authorizeRange=1, one versionId, and one range.',
+        );
+      }
+      downloadRange = queryValue(url, 'range', 64) ?? undefined;
+      const parsedRange = downloadRange
+        ? /^bytes=(0|[1-9]\d*)-(0|[1-9]\d*)$/u.exec(downloadRange)
+        : null;
+      if (!parsedRange) {
+        throw new ApiError(
+          'validation_error',
+          'range must be one closed byte range in the form bytes=start-end.',
+        );
+      }
+      rangeStart = BigInt(parsedRange[1]!);
+      rangeEnd = BigInt(parsedRange[2]!);
+      if (rangeEnd < rangeStart) {
+        throw new ApiError('validation_error', 'range end must be greater than or equal to start.');
+      }
+      if (rangeEnd - rangeStart + 1n > MAX_RANGE_DOWNLOAD_BYTES) {
+        throw new ApiError(
+          'validation_error',
+          'The requested range exceeds the per-request limit.',
+        );
+      }
+    }
     const versionParam = url.searchParams.get('versionId');
     const versionId = versionParam ? uuid(versionParam, 'versionId') : undefined;
     const authorizeIfWithinLimit = queryValue(url, 'authorizeIfWithinLimit', 1);
@@ -2332,6 +2385,15 @@ async function fileEndpoint(
     );
     const row = result.rows[0] as Row | undefined;
     if (!row) throw new ApiError('not_found', 'File not found.');
+    if (downloadRange !== undefined && rangeStart !== undefined && rangeEnd !== undefined) {
+      if (rangeEnd >= BigInt(row.ciphertext_size)) {
+        throw new ApiError('validation_error', 'range must fit within the selected version.');
+      }
+      const downloadUrl = await authorizeDownload(auth.accountId, rangeEnd - rangeStart + 1n, () =>
+        presignedRangeDownload(row.object_key, downloadRange!),
+      );
+      return response({ ...rowVersion(row), downloadUrl, downloadRange });
+    }
     const metadataOnly = url.searchParams.get('metadataOnly') === '1';
     const conditionalAuthorization =
       authorizeIfWithinLimit === '1' && metadataOnly && maxPlaintextBytes !== undefined;
