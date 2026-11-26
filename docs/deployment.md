@@ -261,9 +261,54 @@ paths require the exact CLI artifact named by `packages/agent-drive/package.json
 on npm first. The production web build runs `apps/web/scripts/prepare-cli-tarball.mjs`, which reads
 that exact package version from npm, verifies the downloaded tarball against npm's SHA-512
 integrity, checks the package identity and both Linux helpers, and fails without falling back to an
-older version. Run the same check from the repository root before starting either path:
+older version. Use this same script as the operator preflight after pinning the release SHA below
+and before starting either production path.
+
+After a PR merges to `main` and its CI passes, work from a clean checkout at the exact fetched
+`origin/main` commit. Record and verify that SHA before reading the local package manifest or
+running the artifact preflight, and keep using this checkout for the remaining release steps:
 
 ```sh
+git fetch origin
+RELEASE_SHA=$(git rev-parse origin/main)
+verify_release_checkout() {
+  test -n "$RELEASE_SHA" || { echo "RELEASE_SHA is not set." >&2; return 1; }
+  test -z "$(git status --porcelain)" || {
+    echo "Release checkout is not clean." >&2
+    return 1
+  }
+  test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || {
+    echo "Release checkout HEAD does not match the pinned SHA $RELEASE_SHA." >&2
+    return 1
+  }
+}
+verify_release_checkout
+```
+
+Compare `packages/agent-drive/package.json` at `origin/prod` and this verified `origin/main`
+checkout. If its `version` changed, get approval to publish that npm version, then create and push
+the matching tag at `RELEASE_SHA`. The `release-cli.yml` workflow builds and publishes the CLI for
+that tag. Run the following commands in the same shell so the manifest and tag stay tied to the
+verified SHA:
+
+```sh
+verify_release_checkout
+CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version")
+git tag "cli-v${CLI_VERSION}" "$RELEASE_SHA"
+git push origin "cli-v${CLI_VERSION}"
+```
+
+Wait for the `cli-v${CLI_VERSION}` workflow to finish successfully. Immediately before the
+production-mode preflight, call `verify_release_checkout` again to ensure the local manifest is
+still from `RELEASE_SHA`. If the manifest version did not change, do not create another CLI tag;
+use the already published version. This keeps web-only releases on the same CLI version working
+while still checking the exact artifact before deployment.
+
+Run the production-mode preflight from the repository root, in the same clean checkout at
+`RELEASE_SHA`:
+
+```sh
+verify_release_checkout
 VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs
 ```
 
@@ -272,34 +317,21 @@ the verified tarball under the ignored `apps/web/public/cli/` directory. Do not 
 command fails. A missing npm version, registry error, integrity mismatch, or invalid package means
 the CLI release is not ready.
 
-After a PR merges to `main` and its CI passes, compare
-`packages/agent-drive/package.json` between `origin/prod` and `origin/main`. If its `version`
-changed, get approval to publish that npm version, then create and push the matching tag from the
-merged `main` commit. The `release-cli.yml` workflow builds and publishes the CLI for that tag:
+To use the direct `prod` branch path, call `verify_release_checkout` again and fast-forward the
+exact verified SHA only after the preflight succeeds:
 
 ```sh
-git fetch origin
-CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version")
-git tag "cli-v${CLI_VERSION}" origin/main
-git push origin "cli-v${CLI_VERSION}"
-```
-
-Wait for the `cli-v${CLI_VERSION}` workflow to finish successfully, then run the production-mode
-preflight above. If the manifest version did not change, do not create another CLI tag; run the
-preflight against the already published version. This keeps web-only releases on the same CLI
-version working while still checking the exact artifact before deployment.
-
-To use the direct `prod` branch path, fast-forward only after the preflight succeeds:
-
-```sh
-git push origin origin/main:prod
+verify_release_checkout
+git push origin "$RELEASE_SHA:refs/heads/prod"
 ```
 
 That path does not run the staged smoke checks. For a staged release, run the same preflight first,
 then use the repository's release entry point (after linking the project and authenticating an
-approved Vercel CLI):
+approved Vercel CLI). Call `verify_release_checkout` immediately before starting it so Vercel
+builds the same SHA whose artifact was preflighted:
 
 ```sh
+verify_release_checkout
 pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
 ```
 
