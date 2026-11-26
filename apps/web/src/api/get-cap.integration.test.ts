@@ -215,32 +215,38 @@ describe('server-side bounded GET', () => {
     ],
     [
       'rejects duplicate range parameters',
-      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9&range=bytes%3D10-19`,
+      () =>
+        `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9&range=bytes%3D10-19`,
       'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate range opt-ins',
-      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeRange=1&range=bytes%3D0-9`,
+      () =>
+        `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeRange=1&range=bytes%3D0-9`,
       'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate version pins',
-      () => `versionId=${smallVersionId}&versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      () =>
+        `versionId=${smallVersionId}&versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
       'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects duplicate metadata-only flags',
-      () => `versionId=${smallVersionId}&metadataOnly=1&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
+      () =>
+        `versionId=${smallVersionId}&metadataOnly=1&metadataOnly=1&authorizeRange=1&range=bytes%3D0-9`,
       'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects plaintext caps on range authorization',
-      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      () =>
+        `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
       'Range authorization requires metadataOnly=1',
     ],
     [
       'rejects whole-download authorization on range requests',
-      () => `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeIfWithinLimit=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
+      () =>
+        `versionId=${smallVersionId}&metadataOnly=1&authorizeRange=1&authorizeIfWithinLimit=1&maxPlaintextBytes=6&range=bytes%3D0-9`,
       'Range authorization requires metadataOnly=1',
     ],
   ])('%s', async (_label, makeQuery, expectedMessage) => {
