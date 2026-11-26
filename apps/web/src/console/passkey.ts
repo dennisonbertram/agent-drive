@@ -22,7 +22,6 @@ const NO_PASSKEY = 'This account key has no passkey.';
 const HAS_PASSKEY = 'This account key already has a passkey.';
 const NO_PRF = 'This passkey cannot protect the account key.';
 const UNLOCK_FAILED = 'This passkey could not unlock the account key.';
-const RECORD_INVALID = 'The passkey record is not valid.';
 const SETUP_FAILED = 'Passkey setup did not complete.';
 
 function credentialsApi(): CredentialsContainer {

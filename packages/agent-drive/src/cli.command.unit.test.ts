@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
 import { writeConfig } from './config.js';
-import { issueCredentials } from './credentials.js';
+import { encodeBundle, issueCredentials } from './credentials.js';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -48,6 +48,7 @@ async function cli(
   });
   const paths: string[] = [];
   const queries: string[] = [];
+  const origins: string[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: URL | string, init?: RequestInit) => {
@@ -56,6 +57,7 @@ async function cli(
       const path = api ? parsed.pathname.replace('/api/v1/', '') : `storage${parsed.pathname}`;
       paths.push(path);
       queries.push(parsed.search);
+      origins.push(parsed.origin);
       if (init?.body instanceof ReadableStream) {
         const reader = init.body.getReader();
         for (;;) {
@@ -92,6 +94,7 @@ async function cli(
     },
     paths,
     queries,
+    origins,
   };
 }
 
@@ -307,6 +310,36 @@ describe('credential origin binding at the command level', () => {
     );
     expect(r.err).toBe('');
     expect(r.out).toContain(`"${A}":false`);
+  });
+});
+
+describe('automatic sealing follows the connection saved by the command', () => {
+  it('imports and seals with the bundle API when the shell URL points elsewhere', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-import-'));
+    dirs.push(dir);
+    const path = join(dir, 'credentials.bundle');
+    await writeFile(
+      path,
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://production.test/api',
+        apiKey: 'production-token',
+        driveKeys: { [A]: generateDriveKey() },
+        driveKeyOrigins: { [A]: 'https://production.test' },
+      }),
+    );
+    const r = await cli(
+      ['credentials', 'import', '--from', path],
+      one,
+      (endpoint) =>
+        endpoint === 'drives'
+          ? { items: [{ id: A, name: 'Research', agentOnly: false }], nextCursor: null }
+          : {},
+      { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
+    );
+    expect(r.err).toContain('no account key yet');
+    expect(r.origins.length).toBeGreaterThan(0);
+    expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
   });
 });
 
