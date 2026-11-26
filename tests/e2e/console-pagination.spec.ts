@@ -80,7 +80,9 @@ test('console pages large synthetic lists after first paint and recovers from a 
     const collection = path === 'drives' || path === 'agents' || path === 'keys' ? path : null;
     if (collection) {
       record(`${collection}:${url.searchParams.get('cursor') ?? 'first'}`);
-      const entries = collection === 'drives' ? drives : collection === 'agents' ? agents : keys;
+      const entries: Array<
+        (typeof drives)[number] | (typeof agents)[number] | (typeof keys)[number]
+      > = collection === 'drives' ? drives : collection === 'agents' ? agents : keys;
       await route.fulfill({ json: page(collection, url.searchParams.get('cursor'), entries) });
       return;
     }
