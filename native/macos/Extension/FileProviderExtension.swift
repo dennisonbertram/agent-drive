@@ -584,7 +584,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
             } else if let bridgeError = error as? BridgeClientError {
                 switch bridgeError {
                 case .remoteFailure(let failure):
-                    if failure.mutationOutcome == "unknown" {
+                    if failure.outcomeIsUnknown {
                         throw BridgeClientError.remoteFailure(RPCFailure(
                             errno: failure.errno,
                             recoveryPath: handle.recoveryPath,
@@ -593,7 +593,10 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
                             operationId: failure.operationId
                         ))
                     }
-                    if failure.recoveryPath != nil { throw error }
+                    if failure.recoveryPath != nil {
+                        try? await client.release(handleId: handle.handleId)
+                        throw error
+                    }
                     errno = failure.errno
                 case .remote(let value): errno = value
                 default: errno = "EIO"

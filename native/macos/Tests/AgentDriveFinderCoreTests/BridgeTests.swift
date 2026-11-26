@@ -239,6 +239,7 @@ final class BridgeTests: XCTestCase {
             XCTAssertEqual(failure.errno, "ESTALE")
             XCTAssertEqual(failure.recoveryPath, "/tmp/agent-drive-recovery/new.txt")
             XCTAssertEqual(failure.currentVersionId, "remote-v2")
+            XCTAssertFalse(failure.outcomeIsUnknown)
         }
         XCTAssertEqual(operations.values, ["openWrite", "write", "completeWrite", "flush"])
     }
@@ -374,6 +375,7 @@ final class BridgeTests: XCTestCase {
             XCTAssertEqual(failure.errno, "ETIMEDOUT")
             XCTAssertEqual(failure.mutationOutcome, "unknown")
             XCTAssertEqual(failure.operationId, operationId.values.first)
+            XCTAssertTrue(failure.outcomeIsUnknown)
         }
     }
 

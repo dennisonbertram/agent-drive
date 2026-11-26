@@ -31,6 +31,8 @@ public struct RPCFailure: Equatable, Error {
         self.mutationOutcome = mutationOutcome
         self.operationId = operationId
     }
+
+    public var outcomeIsUnknown: Bool { mutationOutcome == "unknown" }
 }
 
 public struct MountConnection: CustomStringConvertible, Equatable {
