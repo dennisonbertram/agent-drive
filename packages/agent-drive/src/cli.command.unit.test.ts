@@ -665,6 +665,51 @@ describe('mount command validation', () => {
   });
 });
 
+describe('grant command read-only permission', () => {
+  it('preserves read-only offers while rejecting the flag on unrelated commands', async () => {
+    const devicePair = await webcrypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveBits'],
+    );
+    const publicKey = Buffer.from(
+      await webcrypto.subtle.exportKey('raw', devicePair.publicKey),
+    ).toString('base64url');
+    const code = 'ABCD-EFGH';
+    const granted = await cli(['grant', code, '--read-only'], one, (path) => {
+      if (path === 'whoami')
+        return {
+          accountId: 'account',
+          agentId: 'agent',
+          keyId: 'key',
+          scopes: ['read', 'write'],
+          writePaths: [],
+          driveIds: [A],
+        };
+      if (path === `device/${code}`)
+        return {
+          user_code: code,
+          client_name: 'synthetic-agent',
+          machine: null,
+          created_at: 'now',
+          expires_at: 'later',
+          public_key: publicKey,
+        };
+      if (path === `device/${code}/grant`) return { status: 'offered', revision: 1 };
+      return {};
+    });
+
+    expect(granted.exitCode).toBeUndefined();
+    expect(granted.err).toBe('');
+    const request = granted.calls.find((call) => call.path === `device/${code}/grant`);
+    expect(request).toBeDefined();
+    expect(JSON.parse(request!.body!).scopes).toEqual(['read']);
+    const unrelated = await cli(['ls', '--read-only'], one);
+    expect(unrelated.err).toContain('--read-only is only supported by `mount`');
+    expect(unrelated.calls).toEqual([]);
+  });
+});
+
 describe('pipe command guard validation', () => {
   it('rejects --token-stdin outside login before connecting or consuming put stdin', async () => {
     const input = Readable.from([Buffer.from('synthetic-api-token')]);

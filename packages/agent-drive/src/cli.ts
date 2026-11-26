@@ -307,7 +307,7 @@ async function run(command: string, raw: string[]) {
   const args = parse(raw);
   if (args.values['token-stdin'] && command !== 'login')
     throw new Error('--token-stdin is only supported by `login`.');
-  if (args.values['read-only'] && command !== 'mount')
+  if (args.values['read-only'] && command !== 'mount' && command !== 'grant')
     throw new Error('--read-only is only supported by `mount`.');
   if (command === 'put') {
     if (args.values.overwrite && args.values['if-version'] !== undefined)
