@@ -256,15 +256,48 @@ current value.
 The Vercel project is connected to GitHub with `prod` as its production branch.
 `apps/web/vercel.json` turns Git deploys off for every branch except `prod`
 (`"deploymentEnabled": { "**": false, "prod": true }`), so merges to `main`, task branches and
-pull requests never deploy. Pushing to `prod` builds and deploys to production. To release, wait
-for CI to pass on `main`, then fast-forward `prod`:
+pull requests never deploy. Pushing to `prod` builds and deploys to production. Both production
+paths require the exact CLI artifact named by `packages/agent-drive/package.json` to be published
+on npm first. The production web build runs `apps/web/scripts/prepare-cli-tarball.mjs`, which reads
+that exact package version from npm, verifies the downloaded tarball against npm's SHA-512
+integrity, checks the package identity and both Linux helpers, and fails without falling back to an
+older version. Run the same check from the repository root before starting either path:
+
+```sh
+VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs
+```
+
+This preflight downloads and checks the package; it does not build or deploy the web app. It writes
+the verified tarball under the ignored `apps/web/public/cli/` directory. Do not proceed if the
+command fails. A missing npm version, registry error, integrity mismatch, or invalid package means
+the CLI release is not ready.
+
+After a PR merges to `main` and its CI passes, compare
+`packages/agent-drive/package.json` between `origin/prod` and `origin/main`. If its `version`
+changed, get approval to publish that npm version, then create and push the matching tag from the
+merged `main` commit. The `release-cli.yml` workflow builds and publishes the CLI for that tag:
+
+```sh
+git fetch origin
+CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version")
+git tag "cli-v${CLI_VERSION}" origin/main
+git push origin "cli-v${CLI_VERSION}"
+```
+
+Wait for the `cli-v${CLI_VERSION}` workflow to finish successfully, then run the production-mode
+preflight above. If the manifest version did not change, do not create another CLI tag; run the
+preflight against the already published version. This keeps web-only releases on the same CLI
+version working while still checking the exact artifact before deployment.
+
+To use the direct `prod` branch path, fast-forward only after the preflight succeeds:
 
 ```sh
 git push origin origin/main:prod
 ```
 
-That path does not run the staged smoke checks. When a release needs them, use the repository's
-release entry point instead (after linking the project and authenticating an approved Vercel CLI):
+That path does not run the staged smoke checks. For a staged release, run the same preflight first,
+then use the repository's release entry point (after linking the project and authenticating an
+approved Vercel CLI):
 
 ```sh
 pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
@@ -272,7 +305,8 @@ pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
 
 It runs `pnpm verify`, creates a staged production build using `vercel deploy --prod --skip-domain`,
 runs deployed smoke acceptance, promotes only on success, then repeats smoke on the production
-origin. No GitHub Actions are invoked.
+origin. The Vercel production build repeats the exact npm artifact check, so the preflight does not
+replace the build-time gate. No GitHub Actions are invoked.
 The release checks must run on a workstation with local test services and a Playwright browser.
 They are interactive: complete signup with a NEW disposable identity when the browser opens.
 The smoke requires an observed completed Clerk signup, not just a successful HTML response.
@@ -282,6 +316,10 @@ Deployment protection that requires interactive Vercel login prevents CLI smoke 
 blocks promotion; arrange approved candidate access rather than disabling organization-wide
 protection or claiming the test passed. Production-environment staging may use production resources:
 only synthetic payloads and a disposable isolated workspace are created.
+
+If the CLI preflight fails or a production build cannot verify the exact npm artifact, do not deploy
+or promote. The existing healthy production deployment remains live until a later deployment
+passes its build gate and, for a staged release, its smoke checks.
 
 To run smoke independently against a deployed preview:
 
