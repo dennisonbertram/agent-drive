@@ -12,7 +12,6 @@ const LABELS: Record<string, string> = {
   'drive.delete': 'Moved a file to Trash',
   'drive.mkdir': 'Created a folder',
   'drive.rmdir': 'Removed an empty folder',
-  'drive.rename': 'Renamed a file',
   'drive.restore': 'Restored a file',
   'drive.move': 'Moved a file',
   'drive.rename': 'Renamed a file',
