@@ -48,6 +48,7 @@ import {
 import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
 import { assertNoExplicitDirectoryAtFilePath } from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
+import { renameFile } from './mount-rename';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -109,6 +110,7 @@ const quotaControlledActions = new Set([
   'drive.search',
   'drive.trash',
   'drive.move',
+  'drive.rename',
   'drive.copy',
   'drive.restore',
   'share.create',
@@ -434,6 +436,7 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     'GET:get': 'drive.get',
     'GET:list': 'drive.list',
     'POST:move': 'drive.move',
+    'POST:rename': 'drive.rename',
     'POST:unlink': 'drive.delete',
     'POST:copy': 'drive.copy',
     'POST:delete': 'drive.delete',
@@ -2745,6 +2748,10 @@ async function fileEndpoint(
     });
     return response(moved);
   }
+  if (operation === 'rename' && request.method === 'POST')
+    return renameFile(request, auth, drive.id, (client, currentRequest) =>
+      machineId(client, auth, currentRequest),
+    );
   if ((operation === 'delete' || operation === 'unlink') && request.method === 'POST') {
     const guarded = operation === 'unlink';
     need(auth, 'delete', driveId);
@@ -3042,7 +3049,7 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
     ['get', 'list', 'versions', 'recent', 'search', 'trash'].includes(parts[2]!)
   )
     return true;
-  return method === 'POST' && ['delete', 'restore', 'move', 'copy'].includes(parts[2]!);
+  return method === 'POST' && ['delete', 'restore', 'move', 'rename', 'copy'].includes(parts[2]!);
 }
 
 function requireConsoleOrigin(request: Request, url: URL) {

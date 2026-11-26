@@ -17,6 +17,7 @@ describe('core API contract', () => {
         "GET /api/v1/drives/:id/get",
         "GET /api/v1/drives/:id/list",
         "POST /api/v1/drives/:id/move",
+        "POST /api/v1/drives/:id/rename",
         "POST /api/v1/drives/:id/copy",
         "POST /api/v1/drives/:id/delete",
         "POST /api/v1/drives/:id/restore",

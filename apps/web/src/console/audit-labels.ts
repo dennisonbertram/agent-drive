@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   'drive.delete': 'Moved a file to Trash',
   'drive.restore': 'Restored a file',
   'drive.move': 'Moved a file',
+  'drive.rename': 'Renamed a file',
   'drive.copy': 'Copied a file',
   'drive.key_backup': 'Backed up a drive key',
   'drives.list': 'Listed drives',

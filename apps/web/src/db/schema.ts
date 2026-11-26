@@ -468,6 +468,35 @@ export const fileEvents = pgTable(
   ],
 );
 
+export const mountRenameOperations = pgTable(
+  'mount_rename_operations',
+  {
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id, { onDelete: 'cascade' }),
+    operationId: uuid('operation_id').notNull(),
+    agentId: uuid('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    resultFileId: uuid('result_file_id')
+      .notNull()
+      .references(() => files.id, { onDelete: 'cascade' }),
+    resultPath: text('result_path').notNull(),
+    resultVersionId: uuid('result_version_id')
+      .notNull()
+      .references(() => versions.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.driveId, table.operationId], name: 'mount_rename_operations_pk' }),
+    check(
+      'mount_rename_operations_fingerprint_check',
+      sql`${table.requestFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
 export const billingAccounts = pgTable(
   'billing_accounts',
   {
