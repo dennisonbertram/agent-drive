@@ -320,6 +320,8 @@ const childExit = new Promise((resolveExit) => {
   child.once('error', (error) => resolveExit({ error }));
   child.once('exit', (code, signal) => resolveExit({ code, signal }));
 });
+const isExpectedSigtermExit = (exit) =>
+  Boolean(exit && !exit.error && exit.code === 143 && exit.signal === null);
 
 let ownedMountId;
 let shutdownSignalSent = false;
@@ -529,10 +531,18 @@ try {
   if (!shutdownSignalSent) {
     shutdownError ??= new Error('ordinary SIGTERM was not delivered to a live CLI process');
   }
-  if (exit && (exit.error || exit.code !== 0)) {
-    shutdownError ??= new Error(
-      `ordinary SIGTERM shutdown exited with code ${exit.code ?? 'none'}${exit.signal ? ` (${exit.signal})` : ''}`,
-    );
+  if (exit && !isExpectedSigtermExit(exit)) {
+    if (exit.signal) {
+      shutdownError ??= new Error(
+        `ordinary SIGTERM shutdown was terminated by OS signal ${exit.signal}; expected CLI exit code 143`,
+      );
+    } else if (exit.error) {
+      shutdownError ??= new Error('ordinary SIGTERM shutdown did not report a process exit status');
+    } else {
+      shutdownError ??= new Error(
+        `ordinary SIGTERM shutdown exited with code ${exit.code ?? 'none'}; expected CLI exit code 143`,
+      );
+    }
   }
   if (!exit) {
     shutdownError ??= new Error('CLI did not exit within the graceful shutdown deadline');
@@ -586,7 +596,7 @@ if (
   unmountError ||
   fallbackUnmountUsed ||
   !safeExit ||
-  safeExit.code !== 0
+  !isExpectedSigtermExit(safeExit)
 ) {
   const parts = [
     testError?.message,
@@ -597,7 +607,17 @@ if (
   if (fallbackUnmountUsed) {
     parts.push('The smoke required fallback unmount cleanup; graceful shutdown did not pass.');
   }
-  if (safeExit && safeExit.code !== 0) parts.push(`CLI exit status was ${safeExit.code}.`);
+  if (safeExit && !isExpectedSigtermExit(safeExit)) {
+    if (safeExit.signal) {
+      parts.push(`CLI was terminated by OS signal ${safeExit.signal}.`);
+    } else if (safeExit.error) {
+      parts.push('CLI process exit could not be observed.');
+    } else {
+      parts.push(
+        `CLI exited with code ${safeExit.code ?? 'none'}; expected exit code 143 after SIGTERM.`,
+      );
+    }
+  }
   const redact = (value) =>
     value
       .replaceAll(fixtureToken, '[synthetic-token]')
