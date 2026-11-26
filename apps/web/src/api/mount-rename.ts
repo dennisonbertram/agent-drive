@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { TransactionCommitUnknownError, withTransaction } from '../db/client';
-import { checkDriveQuota } from './versions';
+import { checkDriveQuotaWithReservations } from './versions';
 import { enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
 import { copyObject, deleteObject } from './storage';
 import { ApiError } from './errors';
@@ -243,10 +243,10 @@ async function moveToAbsentDestination(
 ) {
   return withTransaction(async (client) => {
     await lockBillingAccount(client, auth.accountId);
-    await enforceWriteBudget(client, auth.accountId);
     await lockDrive(client, auth.accountId, driveId);
     const prior = await findReceipt(client, driveId, auth, input);
-    if (prior) return prior;
+    if (prior) return { result: prior, replay: true };
+    await enforceWriteBudget(client, auth.accountId);
     await explicitDirectoryCollision(client, driveId, input.path, input.destinationPath);
     const source = await currentSource(client, driveId, input.path);
     assertSourceVersion(source, input.ifSourceVersionId);
@@ -283,7 +283,7 @@ async function moveToAbsentDestination(
       versionId: moved.current_version_id as string,
     };
     await insertReceipt(client, driveId, auth, input, result);
-    return result;
+    return { result, replay: false };
   });
 }
 
@@ -303,7 +303,7 @@ async function prepareReplacement(auth: RenameAuth, driveId: string, input: Rena
       bytes: BigInt(size),
       reserveOnly: true,
     });
-    await checkDriveQuota(client, driveId, size, Number(drive.quota_bytes));
+    await checkDriveQuotaWithReservations(client, driveId, size, BigInt(drive.quota_bytes));
     return {
       result: undefined,
       source: {
@@ -348,7 +348,12 @@ async function commitReplacement(
     if (currentSourceRow!.file_id !== source.fileId || destination!.id !== destinationFileId)
       throw new ApiError('conflict', 'The source or destination changed during rename.');
     await enforceWriteBudget(client, auth.accountId, { bytes: BigInt(source.ciphertextSize) });
-    await checkDriveQuota(client, driveId, source.ciphertextSize, Number(drive.quota_bytes));
+    await checkDriveQuotaWithReservations(
+      client,
+      driveId,
+      source.ciphertextSize,
+      BigInt(drive.quota_bytes),
+    );
     const machine = await machineId(client, request);
     markObjectReferenced();
     const file = await client.query(
@@ -428,16 +433,32 @@ export async function renameFile(
   auth: RenameAuth,
   driveId: string,
   machineId: (client: PoolClient, request: Request) => Promise<string | null>,
+  reserveOperation: () => Promise<void>,
+  markReplay: () => void,
 ) {
   const input = await parseInput(request, auth, driveId);
+  const prior = await withTransaction(async (client) => {
+    await lockBillingAccount(client, auth.accountId);
+    await lockDrive(client, auth.accountId, driveId);
+    return findReceipt(client, driveId, auth, input);
+  });
+  if (prior) {
+    markReplay();
+    return Response.json(prior, { headers: { 'Cache-Control': 'no-store' } });
+  }
+  // This runs only after the receipt lookup transaction released its account lock.
+  await reserveOperation();
   if (input.ifDestinationVersionId === null) {
-    const result = await moveToAbsentDestination(request, auth, driveId, input, machineId);
-    return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
+    const moved = await moveToAbsentDestination(request, auth, driveId, input, machineId);
+    if (moved.replay) markReplay();
+    return Response.json(moved.result, { headers: { 'Cache-Control': 'no-store' } });
   }
 
   const prepared = await prepareReplacement(auth, driveId, input);
-  if (prepared.result)
+  if (prepared.result) {
+    markReplay();
     return Response.json(prepared.result, { headers: { 'Cache-Control': 'no-store' } });
+  }
   const source = prepared.source!;
   const versionId = randomUUID();
   const objectKey = `objects/${auth.accountId}/${driveId}/${versionId}`;
@@ -464,6 +485,7 @@ export async function renameFile(
     );
     if (committed.replay) {
       await deleteObject(objectKey).catch(() => undefined);
+      markReplay();
       return Response.json(committed.result, { headers: { 'Cache-Control': 'no-store' } });
     }
     return Response.json(committed.result, { headers: { 'Cache-Control': 'no-store' } });

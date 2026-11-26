@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   'drive.restore': 'Restored a file',
   'drive.move': 'Moved a file',
   'drive.rename': 'Renamed a file',
+  'drive.rename.replay': 'Replayed a rename request',
   'drive.copy': 'Copied a file',
   'drive.key_backup': 'Backed up a drive key',
   'drives.list': 'Listed drives',

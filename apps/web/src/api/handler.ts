@@ -45,7 +45,13 @@ import {
   presignedRangeDownload,
   presignedUpload,
 } from './storage';
-import { checkDriveQuota, commitPut, putConflict, type PutMode } from './versions';
+import {
+  checkDriveQuota,
+  checkDriveQuotaWithReservations,
+  commitPut,
+  putConflict,
+  type PutMode,
+} from './versions';
 import { assertNoExplicitDirectoryAtFilePath } from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { renameFile } from './mount-rename';
@@ -473,6 +479,12 @@ async function audit(
 ) {
   const outcome = pending ? 'pending' : context.status >= 400 ? 'failure' : 'success';
   if (context.auditId && !pending) {
+    if (context.action === 'drive.rename.replay') {
+      await client.query(
+        `UPDATE audit_events SET action = $2 WHERE id = $1 AND outcome = 'pending'`,
+        [context.auditId, context.action],
+      );
+    }
     const updated = await client.query(
       `UPDATE audit_events SET outcome = $2, error_code = $3, http_status = $4
        WHERE id = $1 AND outcome = 'pending'`,
@@ -1728,6 +1740,7 @@ async function consoleEndpoint(
            FROM audit_events e
           WHERE e.account_id = $1 AND e.agent_id IS NOT NULL
             AND e.created_at >= $2 AND e.created_at < $3 AND e.outcome = 'success'
+            AND e.action <> 'drive.rename.replay'
           GROUP BY e.agent_id
        ), egress_usage AS (
          SELECT agent_id, COALESCE(sum(bytes_sent),0)::text AS egress_bytes
@@ -2149,19 +2162,8 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
       bytes: BigInt(ciphertextSize),
       reserveOnly: true,
     });
-    const used = await client.query<{ bytes: string }>(
-      `SELECT (
-         (SELECT COALESCE(sum(ciphertext_size),0) FROM versions WHERE drive_id = $1) +
-         (SELECT COALESCE(sum(ciphertext_size),0) FROM upload_intents
-           WHERE drive_id = $1 AND committed_version_id IS NULL AND expires_at > now())
-       )::text AS bytes`,
-      [driveId],
-    );
-    const usedBytes = BigInt(used.rows[0]!.bytes);
     const quotaBytes = BigInt(lockedDrive.rows[0].quota_bytes);
-    if (usedBytes + BigInt(ciphertextSize) > quotaBytes) {
-      throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
-    }
+    await checkDriveQuotaWithReservations(client, driveId, ciphertextSize, quotaBytes);
     const machine = await machineId(client, auth, request);
     return client.query(
       `INSERT INTO upload_intents
@@ -2487,6 +2489,7 @@ async function fileEndpoint(
   driveId: string,
   operation: string,
   url: URL,
+  context: RequestContext,
 ) {
   const drive = await ensureDrive(auth, driveId);
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
@@ -2780,8 +2783,15 @@ async function fileEndpoint(
     return response(moved);
   }
   if (operation === 'rename' && request.method === 'POST')
-    return renameFile(request, auth, drive.id, (client, currentRequest) =>
-      machineId(client, auth, currentRequest),
+    return renameFile(
+      request,
+      auth,
+      drive.id,
+      (client, currentRequest) => machineId(client, auth, currentRequest),
+      () => reserveOperation(context),
+      () => {
+        context.action = 'drive.rename.replay';
+      },
     );
   if ((operation === 'delete' || operation === 'unlink') && request.method === 'POST') {
     const guarded = operation === 'unlink';
@@ -2789,10 +2799,7 @@ async function fileEndpoint(
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
     const ifVersionId = guarded
-      ? uuid(
-          typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined,
-          'ifVersionId',
-        )
+      ? uuid(typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined, 'ifVersionId')
       : undefined;
     needWritePath(auth, path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
@@ -3156,7 +3163,8 @@ async function handleRequest(request: Request, mode: RequestMode) {
     }
     if (mode.kind === 'console') await enforceConsoleRateLimit(auth.accountId);
     else await enforceKeyRateLimit(auth.keyId);
-    if (quotaControlledActions.has(context.action)) await reserveOperation(context);
+    if (quotaControlledActions.has(context.action) && context.action !== 'drive.rename')
+      await reserveOperation(context);
     const consoleOutput =
       mode.kind === 'console'
         ? ((await consoleDeviceEndpoint(request, auth.accountId, relative)) ??
@@ -3194,7 +3202,7 @@ async function handleRequest(request: Request, mode: RequestMode) {
       );
     } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');
-      output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url);
+      output = await fileEndpoint(request, auth, relative[1]!, relative[2]!, url, context);
     } else {
       throw new ApiError('not_found', 'Endpoint not found.');
     }

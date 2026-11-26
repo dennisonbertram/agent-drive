@@ -129,6 +129,36 @@ export async function checkDriveQuota(
   }
 }
 
+/** Throws quota_exceeded when stored versions plus active upload reservations exceed the drive quota. */
+export async function checkDriveQuotaWithReservations(
+  client: PoolClient,
+  driveId: string,
+  size: number,
+  quotaBytes?: bigint,
+) {
+  const used = await client.query<{ used: string }>(
+    `SELECT (
+       (SELECT COALESCE(SUM(ciphertext_size),0) FROM versions WHERE drive_id = $1) +
+       (SELECT COALESCE(SUM(ciphertext_size),0) FROM upload_intents
+         WHERE drive_id = $1 AND committed_version_id IS NULL AND expires_at > now())
+     )::bigint AS used`,
+    [driveId],
+  );
+  const quota =
+    quotaBytes ??
+    BigInt(
+      (
+        await client.query<{ quota_bytes: string }>(
+          'SELECT quota_bytes FROM drives WHERE id = $1',
+          [driveId],
+        )
+      ).rows[0]!.quota_bytes,
+    );
+  if (BigInt(used.rows[0]!.used) + BigInt(size) > quota) {
+    throw new ApiError('quota_exceeded', 'The drive quota would be exceeded.');
+  }
+}
+
 /**
  * Records a new version of a file: conflict checks, drive quota, files and versions rows and the
  * 'put' event. The caller holds lockBillingAccount and the drive row FOR UPDATE, has run
