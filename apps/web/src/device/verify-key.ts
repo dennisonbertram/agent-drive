@@ -1,7 +1,7 @@
 // Checks a pasted or recovered drive key against the drive it claims, in the browser, before
 // the key is sealed to an agent (docs/agent-login.md section 12). Same check the console vault
-// makes: the key must unwrap one live file's newest wrapped key, or — for a drive with no
-// files — its trace inbox private key. Every call is a metadata GET: no file bodies, and the
+// makes: the key must unwrap a live file's newest wrapped key, or its trace inbox private key.
+// Every call is a metadata GET: no file bodies, and the
 // key itself is never sent anywhere.
 import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
 import {
@@ -33,32 +33,72 @@ export async function verifyDriveKey(
   driveId: string,
   key: string,
 ): Promise<DriveKeyCheck> {
-  // `search` rather than `list`: it only ever returns live files, never the folder rows a
-  // `list` page can lead with, and each row already carries the newest version's wrapped key.
-  const probe = (await request(`drives/${driveId}/search?limit=1`)) as {
-    items: { wrappedKey?: string }[];
-  };
-  const wrapped = probe.items[0]?.wrappedKey;
-  if (wrapped) {
-    // A v2 envelope is sealed to the drive's trace inbox; the inbox record is needed to open it.
-    let inbox: TraceInbox | undefined;
-    if (envelopeVersion(wrapped) === 2) {
-      const record = await inboxOf(request, driveId);
-      inbox = record ? inboxFor(driveId, record) : undefined;
+  // Search returns live files only (unlike list, which can lead with folders). Sample at most
+  // ten wrapped keys, since one damaged record must not reject a key that opens another file.
+  const sampleLimit = 5;
+  const maxSamples = 10;
+  const maxPages = Math.ceil(maxSamples / sampleLimit);
+  let cursor: string | undefined;
+  let sampled = 0;
+  let pagesRead = 0;
+  let hadEvidence = false;
+  let inboxPromise: Promise<TraceInboxRecord | null> | undefined;
+  const loadInbox = () => (inboxPromise ??= inboxOf(request, driveId));
+
+  while (sampled < maxSamples && pagesRead < maxPages) {
+    const path =
+      `drives/${driveId}/search?limit=${sampleLimit}` +
+      (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+    const page = (await request(path)) as {
+      items: { wrappedKey?: string }[];
+      nextCursor: string | null;
+    };
+    pagesRead += 1;
+    for (const item of page.items) {
+      if (sampled >= maxSamples) break;
+      sampled += 1;
+      const wrapped = item.wrappedKey;
+      if (!wrapped) continue;
+      hadEvidence = true;
+      let inbox: TraceInbox | undefined;
+      let isV2 = false;
+      try {
+        isV2 = envelopeVersion(wrapped) === 2;
+      } catch {
+        // The unwrap attempt below records this as corrupt evidence and continues sampling.
+      }
+      if (isV2) {
+        // Keep the request outside the decrypt catch so network/authorization failures propagate.
+        const record = await loadInbox();
+        if (record) {
+          try {
+            inbox = inboxFor(driveId, record);
+          } catch {
+            // A malformed inbox cannot open this envelope; other samples may still verify.
+          }
+        }
+      }
+      try {
+        await unwrapFileKey(wrapped, key, inbox);
+        return 'file';
+      } catch {
+        // Bad envelopes and failed decryptions are isolated to this sample; keep checking.
+      }
+      if (sampled >= maxSamples) break;
     }
+    if (!page.nextCursor || sampled >= maxSamples) break;
+    cursor = page.nextCursor;
+  }
+
+  const record = await loadInbox();
+  if (record) {
+    hadEvidence = true;
     try {
-      await unwrapFileKey(wrapped, key, inbox);
-      return 'file';
+      await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
+      return 'inbox';
     } catch {
-      return 'mismatch';
+      // A corrupt inbox is still evidence, but cannot establish this key as correct.
     }
   }
-  const record = await inboxOf(request, driveId);
-  if (!record) return 'unverifiable';
-  try {
-    await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
-    return 'inbox';
-  } catch {
-    return 'mismatch';
-  }
+  return hadEvidence ? 'mismatch' : 'unverifiable';
 }

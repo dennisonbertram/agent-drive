@@ -298,6 +298,26 @@ test.describe('agent device login', () => {
     expect(listing.stdout.split(`/backups/${machine}/`).length - 1).toBe(3);
   });
 
+  test('the server decides expiry when the browser clock is ahead', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'fast-clock', `m-${randomBytes(3).toString('hex')}`);
+    const { login, path } = await startLogin(env, 'fast-clock-bot');
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: 'Connect fast-clock-bot?' })).toBeVisible();
+    await page.evaluate(() => {
+      const now = Date.now;
+      Date.now = () => now() + 60 * 60 * 1000;
+    });
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    const result = await login.done;
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   test('new drive with delegate ticked: whoami lists delegate', async ({
     page,
     context,

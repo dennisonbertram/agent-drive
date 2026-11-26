@@ -210,14 +210,41 @@ describe('enrollAccountPasskey', () => {
       userVerification: 'required',
     });
     expect(pk.user?.name).toBe('dennison@example.com');
-    // The user handle is the account id itself, sanitized to its 16-byte UUID form.
-    expect(b64u(bytesOf(pk.user!.id))).toBe(
-      Buffer.from(record.accountId.replaceAll('-', ''), 'hex').toString('base64url'),
-    );
+    // A fresh per-enrollment handle prevents concurrent creates from replacing each other.
+    expect(bytesOf(pk.user!.id).length).toBeGreaterThan(0);
+    expect(bytesOf(pk.user!.id).length).toBeLessThanOrEqual(64);
     const input = text(pk.extensions?.prf?.eval?.first);
     expect(input).toContain(record.accountId);
     expect(input).toContain(record.id);
     expect(input).not.toContain('a fresh passphrase');
+  });
+
+  it('uses a different bounded user handle for concurrent enrollment attempts', async () => {
+    const { record } = await createAccountKey(ACCOUNT, 'a fresh passphrase here', FAST);
+    const handles: Uint8Array[] = [];
+    const create = vi.fn(async (options?: CredentialCreationOptions) => {
+      handles.push(Uint8Array.from(bytesOf(options!.publicKey!.user!.id)));
+      const rawId = globalThis.crypto.getRandomValues(new Uint8Array(32)).buffer as ArrayBuffer;
+      const credential: FakeCredential = {
+        type: 'public-key',
+        rawId,
+        getClientExtensionResults: () => ({
+          prf: { enabled: true, results: { first: new Uint8Array(32).fill(17) } },
+        }),
+      };
+      return credential;
+    });
+    vi.stubGlobal('navigator', { credentials: { create, get: vi.fn() } });
+
+    await Promise.all([
+      enrollAccountPasskey(record, 'a fresh passphrase here', 'd@example.com'),
+      enrollAccountPasskey(record, 'a fresh passphrase here', 'd@example.com'),
+    ]);
+
+    expect(handles).toHaveLength(2);
+    expect(handles[0]!.length).toBeLessThanOrEqual(64);
+    expect(handles[1]!.length).toBeLessThanOrEqual(64);
+    expect(b64u(handles[0]!)).not.toBe(b64u(handles[1]!));
   });
 
   it('produces a contract-shaped wrap that unlocks the same private key', async () => {

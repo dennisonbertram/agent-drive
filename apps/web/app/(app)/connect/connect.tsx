@@ -317,12 +317,6 @@ export default function Connect({
     if (!request || busyRef.current) return;
     setFormError('');
     setFieldError(null);
-    if (Date.now() >= Date.parse(request.expires_at)) {
-      setFormError(
-        'This request expired or was already used. Run `agent-drive login` in your agent to get a new code.',
-      );
-      return;
-    }
     const startedAt = ++generation.current;
     const live = () => startedAt === generation.current;
     setPhase('approving');

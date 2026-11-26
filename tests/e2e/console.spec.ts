@@ -1977,13 +1977,17 @@ test('console preview: decrypts in the tab, never renders HTML or SVG, and revok
     // Every request (any URL, method, header, body) and every console message.
     const requests: string[] = [];
     const consoleText: string[] = [];
+    const pageErrors: string[] = [];
     page.on('request', (request) =>
       requests.push(
         `${request.method()} ${request.url()} ${JSON.stringify(request.headers())} ${request.postData() ?? ''}`,
       ),
     );
     page.on('console', (message) => consoleText.push(message.text()));
-    page.on('pageerror', (error) => consoleText.push(String(error)));
+    page.on('pageerror', (error) => {
+      consoleText.push(String(error));
+      pageErrors.push(String(error));
+    });
 
     await page.goto('/console?path=/p');
     const nameButton = (name: string) => page.getByTitle(`Preview ${name}`, { exact: true });
@@ -1999,6 +2003,30 @@ test('console preview: decrypts in the tab, never renders HTML or SVG, and revok
     await expect(preview('notes.md').locator('b')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // A stalled ciphertext fetch stays dismissible and closing it cancels its visible result.
+    let releasePreview!: () => void;
+    const heldPreview = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    const getRoute = '**/api/console/drives/*/get?*';
+    await page.route(getRoute, async (route) => {
+      await heldPreview;
+      await route.fulfill({ status: 502, contentType: 'application/json', body: '{}' });
+    });
+    const pendingResponse = page.waitForResponse(
+      (response) => response.url().includes('/get?') && response.status() === 502,
+    );
+    await nameButton('evil.html').click();
+    await expect(
+      preview('evil.html').getByText('Decrypting evil.html in your browser…'),
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    releasePreview();
+    await pendingResponse;
+    await page.unroute(getRoute);
+    expect(pageErrors).toEqual([]);
 
     // 2. HTML and SVG are source text. A PNG whose bytes are HTML is not rendered as HTML.
     for (const name of ['evil.html', 'evil.svg']) {

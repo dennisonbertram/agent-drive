@@ -158,9 +158,20 @@ export async function loadConfig(apiUrlOverride?: string): Promise<AgentDriveCon
   // Bundles written before drive-key origins were recorded bind their keys to the bundle's
   // own API — the same migration readConfig applies to saved configs.
   const bundleOrigin = originOf(bundle.apiUrl);
-  if (bundleOrigin)
-    for (const id of Object.keys(bundle.driveKeys))
-      if (driveKeyOrigins[id] === undefined) driveKeyOrigins[id] = bundleOrigin;
+  for (const [id, bundleKey] of Object.entries(bundle.driveKeys)) {
+    const savedKey = saved.driveKeys?.[id];
+    // Keys and origins are one record. The saved key wins, so never leave the bundle's
+    // origin attached to a different saved value that has no origin of its own.
+    if (
+      savedKey !== undefined &&
+      savedKey !== bundleKey &&
+      saved.driveKeyOrigins?.[id] === undefined
+    )
+      delete driveKeyOrigins[id];
+    if (bundleOrigin)
+      if (driveKeyOrigins[id] === undefined && (savedKey === undefined || savedKey === bundleKey))
+        driveKeyOrigins[id] = bundleOrigin;
+  }
   const keyBackup: Record<string, KeyBackup> = { ...saved.keyBackup };
   for (const id of Object.keys(bundle.driveKeys))
     if (
@@ -269,7 +280,9 @@ export async function issueCredentials(
       apiUrl,
       apiKey: key.token,
       driveKeys: { [drive]: driveKey },
-      driveKeyOrigins: { [drive]: config.driveKeyOrigins?.[drive] ?? new URL(apiUrl).origin },
+      // resolveDriveKey only returns a saved key for this origin; explicit environment and
+      // key-file values are intentionally unbound until issued into this bundle.
+      driveKeyOrigins: { [drive]: new URL(apiUrl).origin },
     },
     [drive],
   );
@@ -446,13 +459,14 @@ export async function reportEnvBackups(
   if (!bundle || reportedEnv) return;
   reportedEnv = true;
   if (bundle.apiKey !== apiKey || originOf(bundle.apiUrl) !== originOf(apiUrl)) return;
-  const config = await loadConfig();
   const origin = originOf(apiUrl);
+  const effectiveConfig = await loadConfig(apiUrl);
   const ids: string[] = [];
   for (const [id, key] of Object.entries(bundle.driveKeys))
     if (
-      bundle.driveKeyOrigins[id] === origin &&
-      (await resolveDriveKey(id, apiUrl, undefined, config)) === key
+      effectiveConfig.driveKeyOrigins?.[id] === origin &&
+      effectiveConfig.driveKeys?.[id] === key &&
+      (await resolveDriveKey(id, apiUrl, undefined, effectiveConfig)) === key
     )
       ids.push(id);
   await reportKeyBackup(apiUrl, apiKey, ids, 'env', deps);

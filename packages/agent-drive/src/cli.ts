@@ -220,11 +220,12 @@ let missingDrive: string | undefined;
 let defaultDrive: string | undefined;
 
 /** Forced account-key seal after login/grant/import put drive keys on this machine. */
-function sealAfterKeyChange() {
+function sealAfterKeyChange(connection?: Awaited<ReturnType<typeof resolveConnection>>) {
   scheduledSeals.push(async () => {
-    const config = await loadConfig();
-    if (!config.apiUrl || !config.apiKey) return;
-    const seal = sealClientWithDeadline(config.apiUrl, config.apiKey, machineName());
+    const resolved = connection ?? (await resolveConnection());
+    const { config } = resolved;
+    if (!resolved.apiUrl || !resolved.apiKey) return;
+    const seal = sealClientWithDeadline(resolved.apiUrl, resolved.apiKey, machineName());
     await autoSealHeldKeys({
       client: seal.client,
       config,
@@ -496,7 +497,7 @@ async function run(command: string, raw: string[]) {
       config: connection.config,
       log: (line) => process.stdout.write(`${line}\n`),
     });
-    sealAfterKeyChange();
+    sealAfterKeyChange(connection);
     return;
   }
   if (command === 'account' && args.positionals[0] === 'seal') {
