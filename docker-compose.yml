@@ -2,7 +2,8 @@ name: agent-drive
 
 services:
   postgres:
-    image: public.ecr.aws/docker/library/postgres:17.11-bookworm
+    # Set DOCKER_OFFICIAL_REGISTRY=docker.io/library if ECR Public is rate-limited.
+    image: ${DOCKER_OFFICIAL_REGISTRY:-public.ecr.aws/docker/library}/postgres:17.11-bookworm
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agent_drive}
       POSTGRES_USER: ${POSTGRES_USER:-agent_drive}
@@ -23,6 +24,8 @@ services:
     build:
       context: ./docker/minio
       dockerfile: Dockerfile
+      args:
+        DOCKER_OFFICIAL_REGISTRY: ${DOCKER_OFFICIAL_REGISTRY:-public.ecr.aws/docker/library}
     command: server /data --console-address ':9001'
     environment:
       MINIO_ROOT_USER: '${S3_ACCESS_KEY_ID:-agent_drive_local}'
