@@ -2094,6 +2094,15 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
   const description = optionalString(body, 'description', 2_048);
   const userId = optionalString(body, 'userId', 256);
   const fileTags = tags(body);
+  const hasAllowTrashedCreate = Object.hasOwn(body, 'allowTrashedCreate');
+  if (hasAllowTrashedCreate && typeof body.allowTrashedCreate !== 'boolean')
+    throw new ApiError('validation_error', 'allowTrashedCreate must be a boolean.');
+  const allowTrashedCreate = body.allowTrashedCreate === true;
+  if (allowTrashedCreate && (!Object.hasOwn(body, 'ifVersionId') || body.ifVersionId !== null))
+    throw new ApiError(
+      'validation_error',
+      'allowTrashedCreate requires an explicit ifVersionId:null create.',
+    );
   const mode = !Object.prototype.hasOwnProperty.call(body, 'ifVersionId')
     ? 'unconditional'
     : body.ifVersionId === null
@@ -2116,6 +2125,26 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
     );
     if (!lockedDrive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
     await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
+    let intentBaseVersionId = baseVersionId;
+    if (allowTrashedCreate) {
+      const existing = await client.query(
+        `SELECT current_version_id, deleted_at FROM files
+          WHERE drive_id = $1 AND path = $2 FOR UPDATE`,
+        [driveId, path],
+      );
+      const file = existing.rows[0] as Row | undefined;
+      if (file && !file.deleted_at)
+        throw new ApiError('conflict', 'The file already exists.', 409, {
+          state: 'exists',
+          currentVersionId: file.current_version_id as string | null,
+        });
+      if (file && !file.current_version_id)
+        throw new ApiError('conflict', 'The trashed file has no current version.', 409, {
+          state: 'changed',
+          currentVersionId: null,
+        });
+      intentBaseVersionId = (file?.current_version_id as string | undefined) ?? null;
+    }
     await enforceWriteBudget(client, auth.accountId, {
       bytes: BigInt(ciphertextSize),
       reserveOnly: true,
@@ -2152,7 +2181,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
         ciphertextSize,
         wrappedKey,
         mode,
-        baseVersionId,
+        intentBaseVersionId,
         userId ?? null,
         fileTags,
         description ?? null,
@@ -2192,7 +2221,9 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
     throw new ApiError('conflict', 'The upload intent has expired.');
   const intentMode = (row: Row): PutMode =>
     row.conditional_mode === 'create'
-      ? 'create'
+      ? row.base_version_id
+        ? { allowTrashedCreate: true, baseVersionId: row.base_version_id as string }
+        : 'create'
       : row.conditional_mode === 'version'
         ? { baseVersionId: row.base_version_id as string }
         : 'unconditional';

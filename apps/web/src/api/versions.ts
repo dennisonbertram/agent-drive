@@ -7,7 +7,11 @@ import { assertNoExplicitDirectoryAtFilePath } from './directories';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
 
-export type PutMode = 'unconditional' | 'create' | { baseVersionId: string };
+export type PutMode =
+  | 'unconditional'
+  | 'create'
+  | { baseVersionId: string }
+  | { allowTrashedCreate: true; baseVersionId: string };
 
 export type CommitPutInput = {
   accountId: string;
@@ -48,6 +52,29 @@ export async function putConflict(
   );
   const file = fileResult.rows[0] as Row | undefined;
   const currentVersionId = (file?.current_version_id as string | undefined) ?? null;
+  if (typeof mode === 'object' && 'allowTrashedCreate' in mode) {
+    if (!file)
+      throw new ApiError('conflict', 'The trashed file is no longer at this path.', 409, {
+        state: 'absent',
+        currentVersionId: null,
+      });
+    if (!file.deleted_at)
+      throw new ApiError('conflict', 'A live file now exists at this path.', 409, {
+        state: 'exists',
+        currentVersionId,
+      });
+    if (file.current_version_id !== mode.baseVersionId)
+      throw new ApiError(
+        'conflict',
+        'The trashed file changed since the intent was created.',
+        409,
+        {
+          state: 'changed',
+          currentVersionId,
+        },
+      );
+    return file;
+  }
   if (mode === 'create' && file) {
     if (file.deleted_at)
       throw new ApiError('conflict', trashedMessage, 409, { state: 'trashed', currentVersionId });
