@@ -308,7 +308,7 @@ async function run(command: string, raw: string[]) {
   if (args.values['token-stdin'] && command !== 'login')
     throw new Error('--token-stdin is only supported by `login`.');
   if (args.values['read-only'] && command !== 'mount' && command !== 'grant')
-    throw new Error('--read-only is only supported by `mount`.');
+    throw new Error('--read-only is only supported by `mount` and `grant`.');
   if (command === 'put') {
     if (args.values.overwrite && args.values['if-version'] !== undefined)
       throw new Error('--overwrite and --if-version are mutually exclusive.');
