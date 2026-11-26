@@ -113,6 +113,8 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 
 For shell pipelines in Bash or zsh, use `set -o pipefail` so a failed transfer is reflected in the pipeline status. Treat `get --output -` output as complete only after the command exits successfully; prefer `--output FILE` when the next step must receive only a complete verified file.
 
+An upstream producer can fail after writing bytes that `put -` commits. `pipefail` reports the producer's failure but cannot undo that upload; stage producer output privately and run `put` only after the producer succeeds when publication must depend on its exit status.
+
 ## MCP tools
 
 `whoami`, `put` (text or `localPath`), `get` (small text inline), `download` (new local file at `outputPath`, never overwrites), `list`, `move`,

@@ -40,6 +40,14 @@ cat ./archive.bin | agent-drive put - /work/archive.bin --size "$(wc -c < ./arch
 producer-command | agent-drive put - /work/generated.bin
 ```
 
+Both pipe examples require the producer to finish successfully before treating the command as successful. With `set -o pipefail`, the shell reports a producer failure, but `agent-drive put` may already have committed the bytes it received, including a prefix or an empty file. `--size N` checks only that exactly N bytes arrived; it cannot tell whether a producer that emitted N bytes then failed exited successfully. If committing the upload must depend on producer success, stage the output privately and run `put` only after the producer succeeds:
+
+```sh
+tmp=$(mktemp) || exit
+trap 'rm -f "$tmp"' EXIT
+producer-command > "$tmp" && agent-drive put "$tmp" /work/generated.bin
+```
+
 `--size` is optional and is checked before stdin is read. When supplied, stdin must contain exactly that many bytes; `--size 0` is valid. Existing `--overwrite` and `--if-version` guards work the same way as for a local file. The unknown-size path uses temporary disk space for the input.
 
 To replace a file, choose one of two flags. They cannot be combined.
@@ -194,6 +202,7 @@ Rules:
 - Manifests live in `<config path>.state` (by default `~/.config/agent-drive/config.json.state`), outside the uploaded folder. The directory must be private to your user; an unsafe directory is rejected.
 - A corrupt manifest stops the sync with an error. It does not reset the history.
 - Before starting transfers, sync lists remote versions and checks all local paths for known conflicts. If a file with sync history is missing remotely or has a different version, sync stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1 without uploading files. Writes use conditional version guards, so a remote change that races after this check still fails safely; other independent uploads may already have completed.
+- On the first SIGINT or SIGTERM, sync stops starting new file transfers, lets in-flight transfers finish, and checkpoints completed uploads before exiting with status 130 or 143. A later run skips checkpointed files whose local hash and remote version still match. A second signal or hard kill can stop sync before an in-flight remote commit and its manifest checkpoint both finish; the next run may then report a conflict because the remote version was not recorded.
 - `sync` takes no filter or preview flags. `--dry-run`, `--exclude` and `--gitignore` belong to `backup`; `sync` rejects them with a suggestion to use `backup` before it touches keys or the network, rather than ignoring them and uploading the whole folder.
 
 ### First adoption of a non-empty prefix
