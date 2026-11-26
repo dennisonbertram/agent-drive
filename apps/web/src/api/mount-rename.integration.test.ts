@@ -113,6 +113,27 @@ async function uploadCommit(
   };
 }
 
+async function seedLegacyFile(
+  driveId: string,
+  agentId: string,
+  path: string,
+): Promise<{ fileId: string; versionId: string }> {
+  const fileId = randomUUID();
+  const versionId = randomUUID();
+  await pool.query('INSERT INTO files (id,drive_id,path) VALUES ($1,$2,$3)', [
+    fileId,
+    driveId,
+    path,
+  ]);
+  await pool.query(
+    `INSERT INTO versions (id,file_id,drive_id,object_key,ciphertext_size,wrapped_key,agent_id)
+     VALUES ($1,$2,$3,$4,13,'synthetic-wrapped-key',$5)`,
+    [versionId, fileId, driveId, `objects/mount-rename-legacy/${versionId}`, agentId],
+  );
+  await pool.query('UPDATE files SET current_version_id=$2 WHERE id=$1', [fileId, versionId]);
+  return { fileId, versionId };
+}
+
 async function getBytes(token: string, driveId: string, path: string, versionId?: string) {
   const query = new URLSearchParams({ path, ...(versionId ? { versionId } : {}) });
   const response = await handleApiRequest(
@@ -565,6 +586,171 @@ describe('mount editor rename API', () => {
     );
   });
 
+  it('does not rename a file onto an implicit folder made by live descendants', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-implicit',
+      Buffer.from('source'),
+    );
+    await uploadCommit(f.token, f.driveId, '/notes/child.txt', Buffer.from('child'));
+
+    const response = await rename(f.driveId, f.token, {
+      path: '/.editor-tmp-implicit',
+      destinationPath: '/notes',
+      ifSourceVersionId: source.id,
+      ifDestinationVersionId: null,
+      operationId: randomUUID(),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await getBytes(f.token, f.driveId, '/.editor-tmp-implicit')).bytes).toEqual(
+      Buffer.from('source'),
+    );
+    expect((await getBytes(f.token, f.driveId, '/notes/child.txt')).bytes).toEqual(
+      Buffer.from('child'),
+    );
+  });
+
+  it('does not replace a file that is also an implicit folder', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-replace',
+      Buffer.from('source'),
+    );
+    const target = await uploadCommit(f.token, f.driveId, '/notes', Buffer.from('target'));
+    await uploadCommit(f.token, f.driveId, '/notes/child.txt', Buffer.from('child'));
+
+    const response = await rename(f.driveId, f.token, {
+      path: '/.editor-tmp-replace',
+      destinationPath: '/notes',
+      ifSourceVersionId: source.id,
+      ifDestinationVersionId: target.id,
+      operationId: randomUUID(),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await getBytes(f.token, f.driveId, '/.editor-tmp-replace')).bytes).toEqual(
+      Buffer.from('source'),
+    );
+    expect((await getBytes(f.token, f.driveId, '/notes')).bytes).toEqual(Buffer.from('target'));
+    expect((await getBytes(f.token, f.driveId, '/notes/child.txt')).bytes).toEqual(
+      Buffer.from('child'),
+    );
+  });
+
+  it('rechecks live file namespace conflicts before committing a staged replacement', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-race',
+      Buffer.from('source'),
+    );
+    const target = await uploadCommit(f.token, f.driveId, '/notes', Buffer.from('target'));
+    const actual = await vi.importActual<typeof import('../db/client')>('../db/client');
+    vi.mocked(withTransaction).mockImplementationOnce(async (callback) => {
+      const prepared = await actual.withTransaction(callback);
+      await pool.query('INSERT INTO files (drive_id,path) VALUES ($1,$2)', [
+        f.driveId,
+        '/notes/created-during-copy.txt',
+      ]);
+      return prepared;
+    });
+    try {
+      const response = await rename(f.driveId, f.token, {
+        path: '/.editor-tmp-race',
+        destinationPath: '/notes',
+        ifSourceVersionId: source.id,
+        ifDestinationVersionId: target.id,
+        operationId: randomUUID(),
+      });
+
+      expect(response.status).toBe(409);
+      expect((await getBytes(f.token, f.driveId, '/.editor-tmp-race')).bytes).toEqual(
+        Buffer.from('source'),
+      );
+      expect((await getBytes(f.token, f.driveId, '/notes')).bytes).toEqual(Buffer.from('target'));
+    } finally {
+      vi.mocked(withTransaction).mockImplementation(actual.withTransaction);
+    }
+  });
+
+  it('does not rename a file beneath another live file and escapes literal path wildcards', async () => {
+    const f = await fixture();
+    const source = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-ancestor',
+      Buffer.from('source'),
+    );
+    await uploadCommit(f.token, f.driveId, '/notes', Buffer.from('parent file'));
+
+    const beneathFile = await rename(f.driveId, f.token, {
+      path: '/.editor-tmp-ancestor',
+      destinationPath: '/notes/child.txt',
+      ifSourceVersionId: source.id,
+      ifDestinationVersionId: null,
+      operationId: randomUUID(),
+    });
+    expect(beneathFile.status).toBe(409);
+
+    const wildcardSource = await uploadCommit(
+      f.token,
+      f.driveId,
+      '/.editor-tmp-wildcard',
+      Buffer.from('wildcard source'),
+    );
+    await uploadCommit(f.token, f.driveId, '/notesXdraftY/child.txt', Buffer.from('other folder'));
+    const literalPath = await rename(f.driveId, f.token, {
+      path: '/.editor-tmp-wildcard',
+      destinationPath: '/notes_draft%',
+      ifSourceVersionId: wildcardSource.id,
+      ifDestinationVersionId: null,
+      operationId: randomUUID(),
+    });
+    expect(literalPath.status).toBe(200);
+  });
+
+  it('moves a legacy collided file away while allowing a file inside an explicit folder', async () => {
+    const f = await fixture();
+    await pool.query('INSERT INTO drive_directories (drive_id,path) VALUES ($1,$2)', [
+      f.driveId,
+      '/notes',
+    ]);
+    const collided = await seedLegacyFile(f.driveId, f.agentId, '/notes');
+    const nested = await seedLegacyFile(f.driveId, f.agentId, '/notes/legacy.txt');
+
+    const moveCollided = await rename(f.driveId, f.token, {
+      path: '/notes',
+      destinationPath: '/moved-notes',
+      ifSourceVersionId: collided.versionId,
+      ifDestinationVersionId: null,
+      operationId: randomUUID(),
+    });
+    expect(moveCollided.status).toBe(200);
+    expect(await json(moveCollided)).toMatchObject({ id: collided.fileId, path: '/moved-notes' });
+
+    const moveNested = await rename(f.driveId, f.token, {
+      path: '/notes/legacy.txt',
+      destinationPath: '/moved-child.txt',
+      ifSourceVersionId: nested.versionId,
+      ifDestinationVersionId: null,
+      operationId: randomUUID(),
+    });
+    expect(moveNested.status).toBe(200);
+    expect(await json(moveNested)).toMatchObject({ id: nested.fileId, path: '/moved-child.txt' });
+
+    const paths = await pool.query<{ path: string }>(
+      'SELECT path FROM files WHERE drive_id=$1 AND id = ANY($2::uuid[]) ORDER BY path',
+      [f.driveId, [collided.fileId, nested.fileId]],
+    );
+    expect(paths.rows.map((row) => row.path)).toEqual(['/moved-child.txt', '/moved-notes']);
+  });
+
   it('keeps the existing move route write-only and create-only at an occupied destination', async () => {
     const f = await fixture();
     const writeOnly = await scopedToken(f, ['write'], ['/legacy']);
@@ -602,5 +788,79 @@ describe('mount editor rename API', () => {
       Buffer.from('legacy move'),
     );
     expect(first.id).not.toBe(conflictSource.id);
+  });
+
+  it('guards opted-in mount creates at intent and commit while preserving flat create-only clients', async () => {
+    const f = await fixture();
+
+    const child = await seedLegacyFile(f.driveId, f.agentId, '/implicit/child.txt');
+    const trashedParent = await seedLegacyFile(f.driveId, f.agentId, '/implicit');
+    await pool.query('UPDATE files SET deleted_at=now() WHERE id=$1', [trashedParent.fileId]);
+    const aboveImplicit = await request(`/drives/${f.driveId}/put`, f.token, {
+      path: '/implicit',
+      ciphertextSize: 3,
+      wrappedKey: 'synthetic-wrapped-key',
+      ifVersionId: null,
+      allowTrashedCreate: true,
+    });
+    expect(aboveImplicit.status).toBe(409);
+    expect((await json(aboveImplicit)).error.code).toBe('conflict');
+    expect(child.versionId).toBeTruthy();
+
+    const ancestor = await seedLegacyFile(f.driveId, f.agentId, '/blocked');
+    const trashedChild = await seedLegacyFile(f.driveId, f.agentId, '/blocked/child.txt');
+    await pool.query('UPDATE files SET deleted_at=now() WHERE id=$1', [trashedChild.fileId]);
+    const belowFile = await request(`/drives/${f.driveId}/put`, f.token, {
+      path: '/blocked/child.txt',
+      ciphertextSize: 3,
+      wrappedKey: 'synthetic-wrapped-key',
+      ifVersionId: null,
+      allowTrashedCreate: true,
+    });
+    expect(belowFile.status).toBe(409);
+    expect((await json(belowFile)).error.code).toBe('conflict');
+
+    const raceIntent = await request(`/drives/${f.driveId}/put`, f.token, {
+      path: '/late/child.txt',
+      ciphertextSize: 4,
+      wrappedKey: 'synthetic-wrapped-key',
+      ifVersionId: null,
+      allowTrashedCreate: true,
+    });
+    expect(raceIntent.status).toBe(201);
+    const race = await json(raceIntent);
+    const storedMarker = await pool.query<{ base_version_id: string }>(
+      'SELECT base_version_id FROM upload_intents WHERE id=$1',
+      [race.intentId],
+    );
+    expect(storedMarker.rows[0]?.base_version_id).toBe('00000000-0000-0000-0000-000000000000');
+    const uploaded = await fetch(race.uploadUrl, { method: 'PUT', body: Buffer.from('race') });
+    expect(uploaded.ok).toBe(true);
+    await seedLegacyFile(f.driveId, f.agentId, '/late');
+    const racedCommit = await request(`/drives/${f.driveId}/commit`, f.token, {
+      intentId: race.intentId,
+    });
+    expect(racedCommit.status).toBe(409);
+    const racedVersion = await pool.query<{ id: string }>(
+      'SELECT id FROM versions WHERE drive_id=$1 AND file_id=(SELECT id FROM files WHERE drive_id=$1 AND path=$2)',
+      [f.driveId, '/late/child.txt'],
+    );
+    expect(racedVersion.rows).toEqual([]);
+
+    const flatIntent = await request(`/drives/${f.driveId}/put`, f.token, {
+      path: '/blocked/legacy-flat.txt',
+      ciphertextSize: 4,
+      wrappedKey: 'synthetic-wrapped-key',
+      ifVersionId: null,
+    });
+    expect(flatIntent.status).toBe(201);
+    const flat = await json(flatIntent);
+    const flatUpload = await fetch(flat.uploadUrl, { method: 'PUT', body: Buffer.from('flat') });
+    expect(flatUpload.ok).toBe(true);
+    const flatCommit = await request(`/drives/${f.driveId}/commit`, f.token, {
+      intentId: flat.intentId,
+    });
+    expect(flatCommit.status).toBe(201);
+    expect(ancestor.versionId).toBeTruthy();
   });
 });

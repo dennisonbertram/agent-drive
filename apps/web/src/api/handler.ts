@@ -52,7 +52,10 @@ import {
   putConflict,
   type PutMode,
 } from './versions';
-import { assertNoExplicitDirectoryAtFilePath } from './directories';
+import {
+  assertNoExplicitDirectoryAtFilePath,
+  assertNoLiveFileNamespaceCollision,
+} from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { renameFile } from './mount-rename';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
@@ -97,6 +100,9 @@ type RequestContext = {
 // Database rows are intentionally untyped at this boundary; all externally visible fields are selected explicitly.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = QueryResultRow & Record<string, any>;
+// API-generated version ids are UUIDv4 values, so this sentinel cannot be a real version id.
+// upload_intents.base_version_id has no foreign key and external clients cannot set new version ids.
+const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
@@ -2140,6 +2146,7 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
     await assertNoExplicitDirectoryAtFilePath(client, driveId, path);
     let intentBaseVersionId = baseVersionId;
     if (allowTrashedCreate) {
+      await assertNoLiveFileNamespaceCollision(client, driveId, path, null);
       const existing = await client.query(
         `SELECT current_version_id, deleted_at FROM files
           WHERE drive_id = $1 AND path = $2 FOR UPDATE`,
@@ -2156,7 +2163,8 @@ async function putIntent(request: Request, auth: Auth, driveId: string) {
           state: 'changed',
           currentVersionId: null,
         });
-      intentBaseVersionId = (file?.current_version_id as string | undefined) ?? null;
+      intentBaseVersionId =
+        (file?.current_version_id as string | undefined) ?? ABSENT_VERSION_MARKER;
     }
     await enforceWriteBudget(client, auth.accountId, {
       bytes: BigInt(ciphertextSize),
@@ -2221,14 +2229,22 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   }
   if (new Date(source.expires_at).getTime() < Date.now())
     throw new ApiError('conflict', 'The upload intent has expired.');
-  const intentMode = (row: Row): PutMode =>
-    row.conditional_mode === 'create'
-      ? row.base_version_id
-        ? { allowTrashedCreate: true, baseVersionId: row.base_version_id as string }
-        : 'create'
+  // A missing base id on older create intents remains ordinary flat create mode. Only the
+  // sentinel means the opted-in create observed an absent path and must be rechecked as such.
+  const intentMode = (row: Row): PutMode => {
+    if (row.conditional_mode === 'create' && row.base_version_id) {
+      const baseVersionId = String(row.base_version_id);
+      return {
+        allowTrashedCreate: true,
+        baseVersionId: baseVersionId === ABSENT_VERSION_MARKER ? null : baseVersionId,
+      };
+    }
+    return row.conditional_mode === 'create'
+      ? 'create'
       : row.conditional_mode === 'version'
         ? { baseVersionId: row.base_version_id as string }
         : 'unconditional';
+  };
   // Cheap unlocked reads reject the common conflict and quota failures before the S3 copy,
   // so a rejected commit leaves nothing in objects/ to clean up. The FOR UPDATE in putConflict
   // is only a statement-scoped lock here; lockAndCheck re-runs the same checks under the

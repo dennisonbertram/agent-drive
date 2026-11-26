@@ -5,6 +5,10 @@ import { checkDriveQuotaWithReservations } from './versions';
 import { enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
 import { copyObject, deleteObject } from './storage';
 import { ApiError } from './errors';
+import {
+  assertNoExplicitDirectoryAtFilePath,
+  assertNoLiveFileNamespaceCollision,
+} from './directories';
 import { canonicalPath, jsonBody, onlyFields, uuid, withinWritePaths } from './validation';
 
 // Database rows are intentionally untyped at this boundary, like in handler.ts.
@@ -138,26 +142,6 @@ async function lockDrive(client: PoolClient, accountId: string, driveId: string)
   return row;
 }
 
-async function explicitDirectoryCollision(
-  client: PoolClient,
-  driveId: string,
-  sourcePath: string,
-  destinationPath: string,
-) {
-  const result = await client.query(
-    `SELECT path FROM drive_directories
-      WHERE drive_id = $1
-        AND (path = $2 OR path = $3 OR left(path, char_length($3) + 1) = $3 || '/')
-      FOR UPDATE`,
-    [driveId, sourcePath, destinationPath],
-  );
-  if (result.rowCount)
-    throw new ApiError(
-      'conflict',
-      'The source or destination conflicts with an explicit directory.',
-    );
-}
-
 async function currentSource(client: PoolClient, driveId: string, path: string) {
   const result = await client.query(
     `SELECT f.id AS file_id, f.current_version_id, f.deleted_at,
@@ -247,9 +231,15 @@ async function moveToAbsentDestination(
     const prior = await findReceipt(client, driveId, auth, input);
     if (prior) return { result: prior, replay: true };
     await enforceWriteBudget(client, auth.accountId);
-    await explicitDirectoryCollision(client, driveId, input.path, input.destinationPath);
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, input.destinationPath);
     const source = await currentSource(client, driveId, input.path);
     assertSourceVersion(source, input.ifSourceVersionId);
+    await assertNoLiveFileNamespaceCollision(
+      client,
+      driveId,
+      input.destinationPath,
+      source!.file_id as string,
+    );
     const destination = await currentDestination(client, driveId, input.destinationPath);
     assertDestinationVersion(destination, null);
     const changed = await client.query(
@@ -293,9 +283,15 @@ async function prepareReplacement(auth: RenameAuth, driveId: string, input: Rena
     const drive = await lockDrive(client, auth.accountId, driveId);
     const prior = await findReceipt(client, driveId, auth, input);
     if (prior) return { result: prior };
-    await explicitDirectoryCollision(client, driveId, input.path, input.destinationPath);
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, input.destinationPath);
     const source = await currentSource(client, driveId, input.path);
     assertSourceVersion(source, input.ifSourceVersionId);
+    await assertNoLiveFileNamespaceCollision(
+      client,
+      driveId,
+      input.destinationPath,
+      source!.file_id as string,
+    );
     const destination = await currentDestination(client, driveId, input.destinationPath);
     assertDestinationVersion(destination, input.ifDestinationVersionId);
     const size = Number(source!.ciphertext_size);
@@ -340,9 +336,10 @@ async function commitReplacement(
     const drive = await lockDrive(client, auth.accountId, driveId);
     const prior = await findReceipt(client, driveId, auth, input);
     if (prior) return { result: prior, replay: true };
-    await explicitDirectoryCollision(client, driveId, input.path, input.destinationPath);
+    await assertNoExplicitDirectoryAtFilePath(client, driveId, input.destinationPath);
     const currentSourceRow = await currentSource(client, driveId, input.path);
     assertSourceVersion(currentSourceRow, input.ifSourceVersionId);
+    await assertNoLiveFileNamespaceCollision(client, driveId, input.destinationPath, source.fileId);
     const destination = await currentDestination(client, driveId, input.destinationPath);
     assertDestinationVersion(destination, input.ifDestinationVersionId);
     if (currentSourceRow!.file_id !== source.fileId || destination!.id !== destinationFileId)
