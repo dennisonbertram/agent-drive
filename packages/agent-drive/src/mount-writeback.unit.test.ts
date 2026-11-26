@@ -729,7 +729,7 @@ describe('mount writeback journal protocol', () => {
     const waitForOutput = async (getOutput: () => string, marker: string) => {
       await vi.waitFor(() => expect(getOutput()).toContain(marker), { timeout: 5_000 });
     };
-    let contenderOutputs = ['', ''];
+    const contenderOutputs = ['', ''];
     let contenders: ChildProcessByStdio<Writable, Readable, Readable>[] = [];
     try {
       await waitForOutput(() => oldOwnerOutput, 'held');

@@ -601,11 +601,6 @@ export async function createMountBridge(
     };
   }
 
-  let dispatchRequest: (
-    input: unknown,
-    requestSignal?: AbortSignal,
-    progress?: { mutationSubmitted: boolean },
-  ) => Promise<MountResponse>;
   let closePromise: Promise<void> | undefined;
   const bridge = {
     dispatch: async (
@@ -1107,7 +1102,7 @@ export async function createMountBridge(
       return closePromise;
     },
   };
-  dispatchRequest = bridge.dispatch;
+  const dispatchRequest = bridge.dispatch;
   return bridge;
 }
 
