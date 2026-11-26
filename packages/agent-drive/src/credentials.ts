@@ -124,9 +124,13 @@ export function envBundle(): Bundle | undefined {
  * Never write the result back: writeConfig re-reads the file itself.
  * A stored bearer is emitted only for the origin it was recorded with — an explicitly
  * selected --api/AGENT_DRIVE_API_URL at another origin never inherits it. The emitted
- * apiUrl is the effective URL, so apiUrl and apiKey always describe one connection.
+ * apiUrl is the effective URL, so apiUrl and apiKey always describe one connection. Callers
+ * that already resolved a connection may provide both overrides to pin it during the merge.
  */
-export async function loadConfig(apiUrlOverride?: string): Promise<AgentDriveConfig> {
+export async function loadConfig(
+  apiUrlOverride?: string,
+  apiKeyOverride?: string,
+): Promise<AgentDriveConfig> {
   const saved = await readConfig();
   const bundle = envBundle();
   const effectiveUrl =
@@ -139,6 +143,7 @@ export async function loadConfig(apiUrlOverride?: string): Promise<AgentDriveCon
   // A bearer recorded for one origin is never served at another. A config written before
   // apiUrl existed binds its apiKey to the default API.
   const apiKey =
+    apiKeyOverride ??
     (process.env.AGENT_DRIVE_API_KEY || undefined) ??
     (originOf(saved.apiUrl ?? DEFAULT_API_URL) === effectiveOrigin ? saved.apiKey : undefined) ??
     (bundle !== undefined && originOf(bundle.apiUrl) === effectiveOrigin

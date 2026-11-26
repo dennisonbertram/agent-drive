@@ -23,6 +23,25 @@ function cliEnv(baseURL: string, root: string, name: string, machine: string): N
   };
 }
 
+function proxyApiEnv(env: NodeJS.ProcessEnv, proxyUrl: string, apiKey: string): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    AGENT_DRIVE_API_URL: `${proxyUrl}/api`,
+    // Explicit test credentials let the CLI use this same-service capture proxy without
+    // weakening the origin binding applied to credentials saved for the base API URL.
+    AGENT_DRIVE_API_KEY: apiKey,
+  };
+}
+
+function proxyCliEnv(
+  env: NodeJS.ProcessEnv,
+  proxyUrl: string,
+  apiKey: string,
+  driveKey: string,
+): NodeJS.ProcessEnv {
+  return { ...proxyApiEnv(env, proxyUrl, apiKey), AGENT_DRIVE_KEY: driveKey };
+}
+
 /**
  * A loopback HTTP proxy that records every request (method, path, body) and forwards it to
  * `target`. Point a CLI at `url` with AGENT_DRIVE_API_URL to assert what it sends. Shared by
@@ -356,21 +375,30 @@ test.describe('agent device login', () => {
 
     // Issue through a capturing proxy; the issuer's own config is untouched.
     const proxy = await startCaptureProxy(baseURL!);
-    const issued = await cli(
-      // --drive: the proxy is another origin, so the saved key is not a default for it.
-      [
-        'credentials',
-        'issue',
-        '--name',
-        'sandbox-b',
-        '--drive',
-        driveId,
-        '--write-path',
-        '/outputs',
-        '--stdout',
-      ],
-      { ...envA, AGENT_DRIVE_API_URL: `${proxy.url}/api` },
-    );
+    const issueArgs = [
+      'credentials',
+      'issue',
+      '--name',
+      'sandbox-b',
+      '--drive',
+      driveId,
+      '--write-path',
+      '/outputs',
+      '--stdout',
+    ];
+    const refused = await cli(issueArgs, {
+      ...envA,
+      AGENT_DRIVE_API_URL: `${proxy.url}/api`,
+    });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('API configuration is missing');
+    expect(proxy.requests).toHaveLength(0);
+    const missingDriveKey = await cli(issueArgs, proxyApiEnv(envA, proxy.url, configA.apiKey!));
+    expect(missingDriveKey.status).not.toBe(0);
+    expect(missingDriveKey.stderr).toContain(`There is no drive key for ${driveId}`);
+    expect(proxy.requests).toHaveLength(0);
+
+    const issued = await cli(issueArgs, proxyCliEnv(envA, proxy.url, configA.apiKey!, driveKey));
     await proxy.close();
     expect(issued.status, issued.stderr).toBe(0);
     expect(issued.stdout.trim().split('\n')).toHaveLength(1);
@@ -378,7 +406,13 @@ test.describe('agent device login', () => {
     expect(line.startsWith('AGENT_DRIVE_CREDENTIALS=adcred1.')).toBe(true);
     const bundle = JSON.parse(
       Buffer.from(line.slice('AGENT_DRIVE_CREDENTIALS=adcred1.'.length), 'base64url').toString(),
-    ) as { v: number; apiKey: string; driveKeys: Record<string, string>; apiUrl: string };
+    ) as {
+      v: number;
+      apiKey: string;
+      driveKeys: Record<string, string>;
+      driveKeyOrigins: Record<string, string>;
+      apiUrl: string;
+    };
     expect(bundle.v).toBe(1);
     expect(bundle.apiUrl).toBe(`${proxy.url}/api`);
     expect(bundle.apiKey).toMatch(/^adk_/);
@@ -400,7 +434,16 @@ test.describe('agent device login', () => {
       // server, as a real issuer's line would already do.
       AGENT_DRIVE_CREDENTIALS:
         'adcred1.' +
-        Buffer.from(JSON.stringify({ ...bundle, apiUrl: `${baseURL}/api` })).toString('base64url'),
+        Buffer.from(
+          JSON.stringify({
+            ...bundle,
+            apiUrl: `${baseURL}/api`,
+            driveKeyOrigins: {
+              ...bundle.driveKeyOrigins,
+              [driveId]: new URL(`${baseURL}/api`).origin,
+            },
+          }),
+        ).toString('base64url'),
     };
     const who = JSON.parse((await cli(['whoami'], envB)).stdout) as {
       agentId: string;
@@ -897,18 +940,44 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'grantee', 'm-grantee');
     const b = await startLogin(envB, 'grantee-bot');
     const proxy = await startCaptureProxy(baseURL!);
-    // grant offers only a key saved for the API origin in use; record the proxy as that origin.
-    const savedA = JSON.parse(await readFile(envA.AGENT_DRIVE_CONFIG!, 'utf8')) as {
-      driveKeyOrigins: Record<string, string>;
-    };
-    savedA.driveKeyOrigins[driveId!] = proxy.url;
-    await writeFile(envA.AGENT_DRIVE_CONFIG!, JSON.stringify(savedA));
-    const granted = await cli(['grant', b.code, '--write-path', '/inbox/b'], {
+    const grantArgs = ['grant', b.code, '--write-path', '/inbox/b'];
+    const refused = await cli(grantArgs, {
       ...envA,
       AGENT_DRIVE_API_URL: `${proxy.url}/api`,
     });
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain('API configuration is missing');
+    expect(proxy.requests).toHaveLength(0);
+    const missingDriveKey = await cli(grantArgs, proxyApiEnv(envA, proxy.url, configA.apiKey!));
+    expect(missingDriveKey.status).not.toBe(0);
+    expect(missingDriveKey.stderr).toContain('this machine holds no single default drive key');
+    expect(proxy.requests).toHaveLength(0);
+
+    // `grant` only seals saved keys. Bind a cloned synthetic fixture to the proxy origin rather
+    // than changing the issuer's config or teaching grant to accept an unbound env key.
+    const proxyApiUrl = `${proxy.url}/api`;
+    const proxyConfigPath = join(root, 'granter-proxy.json');
+    await writeFile(
+      proxyConfigPath,
+      JSON.stringify({
+        ...configA,
+        apiUrl: proxyApiUrl,
+        driveKeyOrigins: {
+          ...configA.driveKeyOrigins,
+          [driveId]: new URL(proxyApiUrl).origin,
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const proxyEnv = {
+      ...proxyApiEnv(envA, proxy.url, configA.apiKey!),
+      AGENT_DRIVE_CONFIG: proxyConfigPath,
+    };
+
+    const granted = await cli(grantArgs, proxyEnv);
     await proxy.close();
     expect(granted.status, granted.stderr).toBe(0);
+    expect(await readConfig(envA)).toEqual(configA);
     expect(granted.stdout).toContain('Request from grantee-bot on m-grantee');
     expect(granted.stdout).toContain(
       `Offered drive ${driveId} to grantee-bot (read write; writes under /inbox/b)`,
