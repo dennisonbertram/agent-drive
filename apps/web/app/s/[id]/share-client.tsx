@@ -259,7 +259,7 @@ export default function ShareClient({ id }: { id: string }) {
         (reason instanceof DOMException && reason.name === 'AbortError') ||
         (reason instanceof DownloadSaveError && reason.code === 'aborted')
       ) {
-        setErrorCode('unavailable');
+        setErrorCode('download-canceled');
         setError('The download was canceled.');
       } else if (
         (reason instanceof DownloadSaveError && reason.code === 'unsupported-large-download') ||

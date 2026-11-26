@@ -562,10 +562,19 @@ test('share page: streams and verifies a 34 MiB download through OPFS', async ({
     let resolveRoute!: () => void;
     const requestSeen = new Promise<void>((resolve) => (resolveRequest = resolve));
     const routeFinished = new Promise<void>((resolve) => (resolveRoute = resolve));
+    let routeStarted = false;
+    let releaseRoute = () => {};
     await page.route(`${s3Origin}/**`, async (route) => {
+      routeStarted = true;
       resolveRequest();
       try {
-        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(resolve, 10_000);
+          releaseRoute = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+        });
         await route.abort().catch(() => undefined);
       } finally {
         resolveRoute();
@@ -574,17 +583,22 @@ test('share page: streams and verifies a 34 MiB download through OPFS', async ({
     let downloads = 0;
     page.on('download', () => (downloads += 1));
     const cancelStarted = Date.now();
-    await page.getByRole('button', { name: 'Download', exact: true }).click();
-    await requestSeen;
-    await page.getByRole('button', { name: 'Cancel download' }).click();
-    await expect(page.getByTestId('share-error')).toBeVisible();
-    await expect(page.getByTestId('share-error-download-canceled')).toBeVisible();
-    await expect(page.getByTestId('share-error')).toContainText('No file was saved');
-    await expect(page.getByTestId('share-error-decryption-failed')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Download again' })).toBeVisible();
-    await expect.poll(scratchCount).toBe(0);
-    await routeFinished;
-    await page.unroute(`${s3Origin}/**`);
+    try {
+      await page.getByRole('button', { name: 'Download', exact: true }).click();
+      await requestSeen;
+      await page.getByRole('button', { name: 'Cancel download' }).click();
+      releaseRoute();
+      await expect.poll(scratchCount).toBe(0);
+      await routeFinished;
+      await expect(page.getByTestId('share-error-download-canceled')).toBeVisible();
+      await expect(page.getByTestId('share-error')).toContainText('No file was saved');
+      await expect(page.getByTestId('share-error-decryption-failed')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Download again' })).toBeVisible();
+    } finally {
+      releaseRoute();
+      if (routeStarted) await routeFinished;
+      await page.unroute(`${s3Origin}/**`);
+    }
     expect(downloads).toBe(0);
     mark('cancel and scratch cleanup', cancelStarted);
     await page.reload();
