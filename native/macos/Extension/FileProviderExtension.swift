@@ -230,20 +230,23 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
                 try Task.checkCancellation()
                 let mountCapabilities = try await capabilityTask.value
                 guard mountCapabilities.allowsReading(path) else { throw BridgeClientError.rejected }
-                let current = try await client.stat(path: path)
-                guard current.kind == "file", let versionId = current.versionId else {
-                    throw BridgeClientError.invalidPath
+                guard let requestedVersionId = String(data: requestedVersion.contentVersion, encoding: .utf8),
+                      let requestedUUID = UUID(uuidString: requestedVersionId)
+                else {
+                    throw BridgeClientError.invalidRead
                 }
-                let isStrict = options.contains(.strictVersioning)
-                let requestedVersionId = String(data: requestedVersion.contentVersion, encoding: .utf8)
-                if isStrict && requestedVersionId != versionId {
-                    throw NSError(domain: NSFileProviderErrorDomain, code: -2009)
+                let versionId = requestedUUID.uuidString.lowercased()
+                let entry = try await client.stat(path: path, versionId: versionId)
+                guard entry.kind == "file", let entryVersionId = entry.versionId,
+                      UUID(uuidString: entryVersionId) == requestedUUID
+                else {
+                    throw BridgeClientError.malformedResponse
                 }
                 let range = try AlignedByteRange.covering(
                     offset: Int64(requestedRange.location),
                     length: Int64(requestedRange.length),
                     alignment: alignment,
-                    fileSize: current.size
+                    fileSize: entry.size
                 )
                 progress.totalUnitCount = range.length
                 let manager = NSFileProviderManager(for: domain)
@@ -278,7 +281,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
                     throw BridgeClientError.unavailable
                 }
                 fileOpen = false
-                let item = FileProviderItem(path: path, entry: current, capabilities: mountCapabilities)
+                let item = FileProviderItem(path: path, entry: entry, capabilities: mountCapabilities)
                 let fetched = NSRange(location: Int(range.offset), length: Int(range.length))
                 completionHandler(target, item, fetched, [], nil)
                 temporaryURL = nil
@@ -660,8 +663,8 @@ private final class FileProviderItem: NSObject, NSFileProviderItem {
     init(path: String, entry: BridgeEntry, capabilities mountCapabilities: MountCapabilities) {
         itemIdentifier = path == "/"
             ? .rootContainer : NSFileProviderItemIdentifier(ItemPath.identifier(for: path))
-        let parent = (path as NSString).deletingLastPathComponent
-        parentItemIdentifier = path == "/" || parent.isEmpty || parent == path
+        let parent = ItemPath.parentPath(for: path)
+        parentItemIdentifier = path == "/" || parent == "/"
             ? .rootContainer : NSFileProviderItemIdentifier(ItemPath.identifier(for: parent))
         filename = entry.name
         contentType = entry.kind == "directory"

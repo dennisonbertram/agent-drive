@@ -71,8 +71,11 @@ enum AgentDriveFinder {
             guard !temporaryDomain else { throw BootstrapError.temporaryDomainAlreadyExists }
             guard existing.userEnabled else { throw BootstrapError.domainDisabled }
             if existing.isDisconnected {
-                try await NSFileProviderManager.add(proposed)
-                selected = proposed
+                guard let existingManager = NSFileProviderManager(for: existing) else {
+                    throw BootstrapError.domainUnavailable
+                }
+                try await existingManager.reconnect()
+                selected = existing
                 createdByCurrentSession = false
             } else {
                 selected = existing
@@ -254,6 +257,7 @@ private enum BootstrapError: Error {
 private final class SignalWaiter: @unchecked Sendable {
     private let continuation: CheckedContinuation<Void, Never>
     private var sources: [DispatchSourceSignal] = []
+    private var inputSource: DispatchSourceRead?
     private var didFinish = false
 
     init(_ continuation: CheckedContinuation<Void, Never>) {
@@ -268,12 +272,17 @@ private final class SignalWaiter: @unchecked Sendable {
             sources.append(source)
             source.resume()
         }
+        let inputSource = DispatchSource.makeReadSource(fileDescriptor: STDIN_FILENO, queue: .main)
+        inputSource.setEventHandler { [self] in finish() }
+        self.inputSource = inputSource
+        inputSource.resume()
     }
 
     private func finish() {
         guard !didFinish else { return }
         didFinish = true
         for source in sources { source.cancel() }
+        inputSource?.cancel()
         continuation.resume()
     }
 }

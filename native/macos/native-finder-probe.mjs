@@ -142,7 +142,7 @@ const output = new Promise((resolve, reject) => {
 let result;
 let failure;
 try {
-  helper.stdin.end(`${JSON.stringify({ driveId, port: address.port, token, temporaryDomain: true })}\n`);
+  helper.stdin.write(`${JSON.stringify({ driveId, port: address.port, token, temporaryDomain: true })}\n`);
   const mounted = JSON.parse(await output);
   if (typeof mounted.path !== 'string' || !mounted.path.startsWith('/')) {
     throw new Error('helper returned an invalid Finder path');
@@ -181,14 +181,16 @@ try {
   failure = error instanceof Error ? error.message : 'unknown probe failure';
 } finally {
   clearTimeout(timer);
+  if (!helper.stdin.destroyed && !helper.stdin.writableEnded) helper.stdin.end();
   if (helper.exitCode === null && helper.signalCode === null) {
     await new Promise((resolve) => {
+      const terminateTimer = setTimeout(() => helper.kill('SIGTERM'), 5_000);
       const killTimer = setTimeout(() => helper.kill('SIGKILL'), 10_000);
       helper.once('exit', (...status) => {
+        clearTimeout(terminateTimer);
         clearTimeout(killTimer);
         resolve(status);
       });
-      helper.kill('SIGTERM');
     });
   }
   await new Promise((resolve) => server.close(resolve));

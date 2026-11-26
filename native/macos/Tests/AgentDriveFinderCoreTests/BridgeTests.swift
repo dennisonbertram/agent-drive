@@ -113,8 +113,62 @@ final class BridgeTests: XCTestCase {
         XCTAssertTrue(capabilities.allowsWrite("/work/notes.txt"))
         XCTAssertFalse(capabilities.allowsWrite("/worker/notes.txt"))
         XCTAssertTrue(capabilities.allowsDelete("/work/notes.txt"))
+        XCTAssertTrue(capabilities.allowsCreatingChildren(of: "/"))
         XCTAssertTrue(capabilities.allowsCreatingChildren(of: "/work"))
+        XCTAssertTrue(capabilities.allowsCreatingChildren(of: "/work/sub"))
         XCTAssertFalse(capabilities.allowsCreatingChildren(of: "/outside"))
+    }
+
+    func testDefaultRenameOperationIdsAreFreshPerLogicalCall() async throws {
+        let operationIds = LockedList<String>()
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            operationIds.append(try XCTUnwrap(sent["operationId"] as? String))
+            return try MockURLProtocol.response(json: [
+                "id": id,
+                "ok": true,
+                "entry": ["id": "11111111-1111-4111-8111-111111111111", "path": "/work/new.txt", "versionId": "22222222-2222-4222-8222-222222222222"],
+            ])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+        for _ in 0..<2 {
+            _ = try await client.rename(
+                path: "/work/old.txt",
+                destinationPath: "/work/new.txt",
+                ifSourceVersionId: "33333333-3333-4333-8333-333333333333"
+            )
+        }
+        XCTAssertEqual(operationIds.values.count, 2)
+        XCTAssertNotEqual(operationIds.values[0], operationIds.values[1])
+    }
+
+    func testStatCanRequestMetadataForPinnedHistoricalVersion() async throws {
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            XCTAssertEqual(sent["op"] as? String, "stat")
+            XCTAssertEqual(sent["path"] as? String, "/work/file.txt")
+            XCTAssertEqual(sent["versionId"] as? String, "33333333-3333-4333-8333-333333333333")
+            return try MockURLProtocol.response(json: [
+                "id": id,
+                "ok": true,
+                "entry": ["name": "file.txt", "kind": "file", "size": 31, "mtimeMs": 10, "versionId": "33333333-3333-4333-8333-333333333333"],
+            ])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+        let entry = try await client.stat(
+            path: "/work/file.txt",
+            versionId: "33333333-3333-4333-8333-333333333333"
+        )
+        XCTAssertEqual(entry.size, 31)
+        XCTAssertEqual(entry.versionId, "33333333-3333-4333-8333-333333333333")
     }
 
     func testWriteProtocolUsesExplicitCreateOnlyNullAndPreservesConflictRecoveryDetails() async throws {

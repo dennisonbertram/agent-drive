@@ -526,7 +526,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     });
   });
   const startup = JSON.stringify({ driveId: options.driveId, port: address.port, token }) + '\n';
-  child.stdin?.end(startup);
+  child.stdin?.write(startup);
 
   let actualPath: string;
   let alias: AliasOwnership | undefined;

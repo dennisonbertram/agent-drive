@@ -48,6 +48,35 @@ const hold = setInterval(() => {}, 1000);
 `;
 
 describe('macOS Finder mount bridge', () => {
+  it('keeps the helper control pipe open after the startup line', async () => {
+    const directory = await fixture();
+    const actualPath = join(directory, 'finder-root');
+    await mkdir(actualPath);
+    const helper = await writeHelper(
+      directory,
+      `
+const { createInterface } = await import('node:readline');
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const line = await new Promise((resolve) => input.once('line', resolve));
+input.close();
+JSON.parse(line);
+await new Promise((resolve) => setTimeout(resolve, 30));
+if (process.stdin.readableEnded) process.exit(41);
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+${waitForSignal}
+`,
+    );
+    vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+    const handle = await startMacMount({
+      driveId: 'synthetic-drive',
+      requestedMountpoint: join(directory, 'requested-mount'),
+      dispatch: async () => ({}),
+    });
+
+    await handle.close();
+    expect(await handle.waitForExit()).toMatchObject({ code: 0 });
+  }, 20_000);
+
   it('uses a private helper handshake and serves only authenticated loopback POST /rpc', async () => {
     const directory = await fixture();
     const actualPath = join(directory, 'finder-root');
@@ -58,8 +87,18 @@ describe('macOS Finder mount bridge', () => {
       `
 import { request as helperRequest } from 'node:http';
 let input = '';
-for await (const chunk of process.stdin) input += chunk;
-const startup = JSON.parse(input);
+const startup = await new Promise((resolve, reject) => {
+  const onData = (chunk) => {
+    input += chunk.toString();
+    const newline = input.indexOf('\\n');
+    if (newline >= 0) {
+      process.stdin.off('data', onData);
+      resolve(JSON.parse(input.slice(0, newline)));
+    }
+  };
+  process.stdin.on('data', onData);
+  process.stdin.on('error', reject);
+});
 if (Object.keys(startup).sort().join(',') !== 'driveId,port,token') process.exit(20);
 if (startup.driveId !== 'synthetic-drive' || !Number.isInteger(startup.port) || typeof startup.token !== 'string') process.exit(21);
 if (process.argv.includes(startup.token)) process.exit(22);
@@ -172,8 +211,10 @@ ${waitForSignal}
       directory,
       `
 let input = '';
-for await (const chunk of process.stdin) input += chunk;
-JSON.parse(input);
+await new Promise((resolve) => process.stdin.once('data', (chunk) => {
+  input += chunk.toString();
+  resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
+}));
 process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
 `,
@@ -208,8 +249,10 @@ ${waitForSignal}
       directory,
       `
 let input = '';
-for await (const chunk of process.stdin) input += chunk;
-JSON.parse(input);
+await new Promise((resolve) => process.stdin.once('data', (chunk) => {
+  input += chunk.toString();
+  resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
+}));
 process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 ${waitForSignal}
 `,
@@ -238,8 +281,18 @@ ${waitForSignal}
       `
 import { request as helperRequest } from 'node:http';
 let input = '';
-for await (const chunk of process.stdin) input += chunk;
-const startup = JSON.parse(input);
+const startup = await new Promise((resolve, reject) => {
+  const onData = (chunk) => {
+    input += chunk.toString();
+    const newline = input.indexOf('\\n');
+    if (newline >= 0) {
+      process.stdin.off('data', onData);
+      resolve(JSON.parse(input.slice(0, newline)));
+    }
+  };
+  process.stdin.on('data', onData);
+  process.stdin.on('error', reject);
+});
 process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
 setTimeout(() => {
   const request = helperRequest({ host: '127.0.0.1', port: startup.port, method: 'POST', path: '/rpc', headers: { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' } });

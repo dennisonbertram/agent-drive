@@ -18,4 +18,10 @@ final class ProviderEnumerationTests: XCTestCase {
             expected: ProviderEnumerationState.initialSyncAnchor
         ))
     }
+
+    func testRootLevelItemUsesRootContainerAsItsParentPath() {
+        XCTAssertEqual(ItemPath.parentPath(for: "/notes.txt"), "/")
+        XCTAssertEqual(ItemPath.parentPath(for: "/docs/notes.txt"), "/docs")
+        XCTAssertEqual(ItemPath.parentPath(for: "/"), "/")
+    }
 }

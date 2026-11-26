@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 
 public enum BridgeClientError: Error, Equatable {
     case invalidConnection
@@ -61,6 +60,12 @@ public struct ItemPath: Equatable {
 
     public static func identifier(for path: String) -> String {
         "p:" + Data(path.utf8).base64URLString
+    }
+
+    public static func parentPath(for path: String) -> String {
+        guard path != "/" else { return "/" }
+        let parent = (path as NSString).deletingLastPathComponent
+        return parent.isEmpty ? "/" : parent
     }
 
     public static func isCanonical(_ path: String) -> Bool {
@@ -193,7 +198,7 @@ public struct MountCapabilities: Decodable, Equatable {
     public func allowsCreatingChildren(of path: String) -> Bool {
         guard !readOnly, write, ops.contains("mkdir"), ItemPath.isCanonical(path) else { return false }
         return writePaths.isEmpty || writePaths.contains(where: { root in
-            contains(path, path: root) || (path == "/" && root.hasPrefix("/"))
+            contains(root, path: path) || contains(path, path: root)
         })
     }
 
@@ -241,6 +246,19 @@ public struct DriveBridge {
         let payload = try await request(op: "stat", path: path)
         let response = try JSONDecoder().decode(EntryResponse.self, from: payload)
         try response.entry.validate()
+        return response.entry
+    }
+
+    public func stat(path: String, versionId: String) async throws -> BridgeEntry {
+        guard ItemPath.isCanonical(path), UUID(uuidString: versionId) != nil else {
+            throw BridgeClientError.invalidPath
+        }
+        let payload = try await request(op: "stat", path: path, versionId: versionId)
+        let response = try JSONDecoder().decode(EntryResponse.self, from: payload)
+        try response.entry.validate()
+        guard let returnedVersionId = response.entry.versionId,
+              UUID(uuidString: returnedVersionId) == UUID(uuidString: versionId)
+        else { throw BridgeClientError.malformedResponse }
         return response.entry
     }
 
@@ -348,12 +366,7 @@ public struct DriveBridge {
         ifDestinationVersionId: String? = nil,
         operationId: String? = nil
     ) async throws -> RenameResult {
-        let resolvedOperationId = operationId ?? stableOperationId(
-            path: path,
-            destinationPath: destinationPath,
-            sourceVersionId: ifSourceVersionId,
-            destinationVersionId: ifDestinationVersionId
-        )
+        let resolvedOperationId = operationId ?? UUID().uuidString.lowercased()
         guard ItemPath.isCanonical(path), path != "/", ItemPath.isCanonical(destinationPath),
               destinationPath != "/", UUID(uuidString: ifSourceVersionId) != nil,
               ifDestinationVersionId.map({ UUID(uuidString: $0) != nil }) ?? true,
@@ -455,23 +468,6 @@ public struct DriveBridge {
             handleId.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
     }
 
-    private func stableOperationId(
-        path: String,
-        destinationPath: String,
-        sourceVersionId: String,
-        destinationVersionId: String?
-    ) -> String {
-        let value = [path, destinationPath, sourceVersionId, destinationVersionId ?? "<absent>"]
-            .joined(separator: "\u{0}")
-        var bytes = Array(Insecure.SHA1.hash(data: Data(value.utf8)).prefix(16))
-        bytes[6] = (bytes[6] & 0x0f) | 0x50
-        bytes[8] = (bytes[8] & 0x3f) | 0x80
-        let uuid = UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
-        return uuid.uuidString.lowercased()
-    }
 }
 
 private struct RPCRequest: Encodable {
