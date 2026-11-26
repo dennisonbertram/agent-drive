@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   symlink,
@@ -140,6 +141,97 @@ describe('Node file transfer helpers', () => {
     expect(modeWhileWriting).toBe(0o600);
     expect(await readFile(destination, 'utf8')).toBe('new contents');
     expect((await stat(destination)).mode & 0o777).toBe(0o644);
+  });
+
+  it('refuses publication when destination permissions change during download', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    await writeFile(destination, 'old contents');
+    await chmod(destination, 0o644);
+    const client = {
+      getStream: async () => ({
+        plaintext: (async function* () {
+          await chmod(destination, 0o600);
+          yield new TextEncoder().encode('new contents');
+        })(),
+        plaintextBytes: 12,
+        version,
+        cancel: async () => {},
+      }),
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 }),
+    ).rejects.toThrow('Output path changed during download.');
+    expect(await readFile(destination, 'utf8')).toBe('old contents');
+    expect((await stat(destination)).mode & 0o777).toBe(0o600);
+    expect((await readdir(directory)).sort()).toEqual(['output']);
+  });
+
+  it('refuses publication when destination identity changes during download', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    const movedOriginal = join(directory, 'original-output');
+    await writeFile(destination, 'old contents');
+    const client = {
+      getStream: async () => ({
+        plaintext: (async function* () {
+          await rename(destination, movedOriginal);
+          await writeFile(destination, 'replacement created during download');
+          yield new TextEncoder().encode('new contents');
+        })(),
+        plaintextBytes: 12,
+        version,
+        cancel: async () => {},
+      }),
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { overwrite: true, retries: 0 }),
+    ).rejects.toThrow('Output path changed during download.');
+    expect(await readFile(destination, 'utf8')).toBe('replacement created during download');
+    expect(await readFile(movedOriginal, 'utf8')).toBe('old contents');
+  });
+
+  it('forwards the plaintext cap to getStream before downloading', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'output');
+    let receivedOptions: { maxPlaintextBytes?: number } | undefined;
+    const client = {
+      getStream: async (
+        _drive: string,
+        _path: string,
+        options?: { maxPlaintextBytes?: number },
+      ) => {
+        receivedOptions = options;
+        throw new Error('size cap rejected before transfer');
+      },
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await expect(
+      getFile(client, 'drive', '/remote', destination, { maxPlaintextBytes: 8 }),
+    ).rejects.toThrow('size cap rejected before transfer');
+    expect(receivedOptions).toEqual({ maxPlaintextBytes: 8 });
+    expect((await readdir(directory)).sort()).toEqual([]);
+  });
+
+  it('uses a short temporary basename for a valid near-limit destination name', async () => {
+    const directory = await fixture();
+    const destination = join(directory, 'x'.repeat(240));
+    const client = {
+      getStream: async () => ({
+        plaintext: (async function* () {
+          yield new TextEncoder().encode('new contents');
+        })(),
+        plaintextBytes: 12,
+        version,
+        cancel: async () => {},
+      }),
+    } as unknown as Pick<AgentDriveClient, 'getStream'>;
+
+    await getFile(client, 'drive', '/remote', destination, { retries: 0 });
+    expect(await readFile(destination, 'utf8')).toBe('new contents');
+    expect(await readdir(directory)).toEqual(['x'.repeat(240)]);
   });
 
   it('pins a retry to the version selected by the first stream', async () => {

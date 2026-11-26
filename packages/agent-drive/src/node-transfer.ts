@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { lstat, open, link, rename, rm } from 'node:fs/promises';
-import { dirname, basename, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   AgentDriveApiError,
@@ -87,16 +87,13 @@ export async function getFile(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (options.signal?.aborted) throw abortError(options.signal);
-    const temporaryPath = join(
-      outputDirectory,
-      `.${basename(outputPath)}.${process.pid}.${randomUUID()}.tmp`,
-    );
+    const temporaryPath = join(outputDirectory, `.${randomUUID()}.tmp`);
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let created = false;
     let stream: Awaited<ReturnType<GetClient['getStream']>> | undefined;
     let abortListener: (() => void) | undefined;
     try {
-      let existingMode: number | undefined;
+      let existingDestination: { dev: number; ino: number; mode: number } | undefined;
       try {
         const existing = await lstat(outputPath);
         if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
@@ -106,13 +103,20 @@ export async function getFile(
           error.code = 'EEXIST';
           throw error;
         }
-        existingMode = existing.mode & 0o777;
+        existingDestination = {
+          dev: existing.dev,
+          ino: existing.ino,
+          mode: existing.mode & 0o777,
+        };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
 
       stream = await client.getStream(driveId, remotePath, {
         ...(versionId ? { versionId } : {}),
+        ...(options.maxPlaintextBytes !== undefined
+          ? { maxPlaintextBytes: options.maxPlaintextBytes }
+          : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       });
       versionId ??= stream.version.id;
@@ -146,26 +150,46 @@ export async function getFile(
       if (written !== stream.plaintextBytes) throw new Error('Downloaded file was truncated.');
       await handle.sync();
       if (options.signal?.aborted) throw abortError(options.signal);
-      // Keep the temporary plaintext owner-only throughout the stream. Broaden its mode only
-      // after the stream has reached authenticated EOF and before publication.
-      if (overwrite && existingMode !== undefined) await handle.chmod(existingMode);
-      await handle.sync();
+
+      const assertDestinationUnchanged = async () => {
+        if (!existingDestination) throw new Error('Output path changed during download.');
+        let existing;
+        try {
+          existing = await lstat(outputPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+            throw new Error('Output path changed during download.');
+          throw error;
+        }
+        if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
+        if (!existing.isFile()) throw new Error('Output path must be a regular file.');
+        if (
+          existing.dev !== existingDestination.dev ||
+          existing.ino !== existingDestination.ino ||
+          (existing.mode & 0o777) !== existingDestination.mode
+        ) {
+          throw new Error('Output path changed during download.');
+        }
+      };
+
+      if (overwrite && existingDestination) {
+        // Keep the temporary plaintext owner-only through the stream, and don't restore stale
+        // permissions if the destination was replaced or chmodded while downloading.
+        await assertDestinationUnchanged();
+        await handle.chmod(existingDestination.mode);
+        await handle.sync();
+      }
+
       await handle.close();
       handle = undefined;
       if (options.signal?.aborted) throw abortError(options.signal);
 
-      if (overwrite) {
-        // Check the destination again after the download, since it may have changed while the
-        // stream was in progress. Do not replace a symlink or any other non-file path.
-        try {
-          const existing = await lstat(outputPath);
-          if (existing.isSymbolicLink()) throw new Error('Refusing to write through a symlink.');
-          if (!existing.isFile()) throw new Error('Output path must be a regular file.');
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        }
+      if (overwrite && existingDestination) {
+        // Recheck immediately before the atomic replacement.
+        await assertDestinationUnchanged();
         await rename(temporaryPath, outputPath);
       } else {
+        // A hard link publishes a new file without replacing a path created during the download.
         await link(temporaryPath, outputPath);
         await rm(temporaryPath);
       }
