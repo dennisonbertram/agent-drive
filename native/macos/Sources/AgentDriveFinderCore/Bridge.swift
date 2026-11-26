@@ -342,7 +342,13 @@ public struct DriveBridge {
     public func flush(handleId: String) async throws -> FlushResult {
         guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
         let payload = try await request(op: "flush", handleId: handleId)
-        return try JSONDecoder().decode(FlushResult.self, from: payload).validated()
+        let response = try JSONDecoder().decode(FlushResponse.self, from: payload)
+        guard !response.version.id.isEmpty, response.version.id.utf8.count <= 512,
+              response.version.id.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              response.version.path.hasPrefix("/"), response.version.path.utf8.count <= 4_096,
+              response.version.path.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { throw BridgeClientError.malformedResponse }
+        return try FlushResult(version: response.version.id, recoveryPath: response.recoveryPath).validated()
     }
 
     public func release(handleId: String) async throws {
@@ -560,6 +566,11 @@ public struct OpenWriteResult: Decodable, Equatable {
 private struct WriteResponse: Decodable { let bytesWritten: Int }
 private struct SizeResponse: Decodable { let size: Int64 }
 private struct StagedDataResponse: Decodable { let data: String; let eof: Bool }
+private struct FlushResponse: Decodable {
+    struct Version: Decodable { let id: String; let path: String }
+    let version: Version
+    let recoveryPath: String?
+}
 public struct FlushResult: Decodable, Equatable {
     public let version: String
     public let recoveryPath: String?

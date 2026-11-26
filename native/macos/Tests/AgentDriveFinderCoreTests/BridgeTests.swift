@@ -292,6 +292,25 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(operations.values, ["mkdir", "unlink", "rename"])
     }
 
+    func testFlushDecodesCanonicalNestedCommittedVersion() async throws {
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            XCTAssertEqual(sent["op"] as? String, "flush")
+            return try MockURLProtocol.response(json: [
+                "id": id,
+                "ok": true,
+                "version": ["id": "22222222-2222-4222-8222-222222222222", "path": "/work/new.txt"],
+            ])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+        let result = try await client.flush(handleId: "interop-stage")
+        XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
+    }
+
     func testMaximumWriteChunkFitsTheNegotiatedLoopbackBodyLimit() async throws {
         MockURLProtocol.handler = { request in
             let body = try XCTUnwrap(MockURLProtocol.bodyData(request))
