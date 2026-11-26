@@ -801,6 +801,269 @@ describe('mount bridge', () => {
     }
   });
 
+  it('does not flush a newer staged edit for an unlink pinned to an older version', async () => {
+    const writeback = {
+      openWrite: vi.fn(),
+      write: vi.fn(),
+      truncate: vi.fn(),
+      readStaged: vi.fn(),
+      flush: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
+      release: vi.fn(),
+      listStaged: vi.fn(async () => [
+        {
+          path: '/docs/file.txt',
+          size: 12,
+          handleId: 'newer-edit',
+          recoveryPath: '/private/newer-edit',
+          state: 'dirty',
+        },
+      ]),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const unlink = vi.fn();
+    const bridge = await createMountBridge(
+      { browse: vi.fn(), openRangeReader: vi.fn(), unlink },
+      DRIVE,
+      {
+        capabilities: {
+          readOnly: false,
+          write: true,
+          delete: true,
+          writePaths: ['/docs'],
+          maxReadBytes: 1024 * 1024,
+          maxWriteBytes: 1024 * 1024,
+          ops: [],
+        },
+        writeback,
+      },
+    );
+
+    try {
+      await expect(
+        bridge.request({ id: 1, op: 'unlink', path: '/docs/file.txt', ifVersionId: VERSION }),
+      ).resolves.toMatchObject({ id: 1, ok: false, errno: 'ESTALE' });
+      expect(writeback.flush).not.toHaveBeenCalled();
+      expect(unlink).not.toHaveBeenCalled();
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('rejects rename while the source has an active staged writer', async () => {
+    const writeback = {
+      openWrite: vi.fn(async () => ({
+        handleId: 'active-writer',
+        recoveryPath: '/private/stage',
+        size: 0,
+      })),
+      write: vi.fn(),
+      truncate: vi.fn(),
+      readStaged: vi.fn(),
+      flush: vi.fn(async () => ({ id: VERSION, path: '/docs/temp.txt' })),
+      release: vi.fn(async () => ({})),
+      listStaged: vi.fn(async () => [
+        {
+          path: '/docs/temp.txt',
+          size: 0,
+          handleId: 'active-writer',
+          recoveryPath: '/private/stage',
+          state: 'dirty',
+        },
+      ]),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const rename = vi.fn();
+    const bridge = await createMountBridge(
+      { browse: vi.fn(), openRangeReader: vi.fn(), rename },
+      DRIVE,
+      {
+        capabilities: {
+          readOnly: false,
+          write: true,
+          delete: false,
+          writePaths: ['/docs'],
+          maxReadBytes: 1024 * 1024,
+          maxWriteBytes: 1024 * 1024,
+          ops: [],
+        },
+        writeback,
+      },
+    );
+
+    try {
+      await bridge.request({ id: 1, op: 'openWrite', path: '/docs/temp.txt', baseVersionId: null });
+      await expect(
+        bridge.request({
+          id: 2,
+          op: 'rename',
+          path: '/docs/temp.txt',
+          destinationPath: '/docs/final.txt',
+          ifSourceVersionId: 'staged:active-writer',
+          ifDestinationVersionId: null,
+          operationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        }),
+      ).resolves.toMatchObject({ id: 2, ok: false, errno: 'EBUSY' });
+      expect(writeback.flush).not.toHaveBeenCalled();
+      expect(rename).not.toHaveBeenCalled();
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('does not execute a destructive RPC that was canceled while waiting in the queue', async () => {
+    let finishMkdir!: () => void;
+    const mkdir = vi.fn(
+      () =>
+        new Promise<void>((resolveMkdir) => {
+          finishMkdir = resolveMkdir;
+        }),
+    );
+    const unlink = vi.fn(async () => ({ id: 'file', path: '/docs/file.txt' }));
+    const writeback = {
+      openWrite: vi.fn(),
+      write: vi.fn(),
+      truncate: vi.fn(),
+      readStaged: vi.fn(),
+      flush: vi.fn(),
+      release: vi.fn(),
+      listStaged: vi.fn(async () => []),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const bridge = await createMountBridge(
+      { browse: vi.fn(), openRangeReader: vi.fn(), mkdir, unlink },
+      DRIVE,
+      {
+        capabilities: {
+          readOnly: false,
+          write: true,
+          delete: true,
+          writePaths: ['/docs'],
+          maxReadBytes: 1024 * 1024,
+          maxWriteBytes: 1024 * 1024,
+          ops: [],
+        },
+        writeback,
+      },
+    );
+    const controller = new AbortController();
+
+    try {
+      const first = bridge.request({ id: 1, op: 'mkdir', path: '/docs/first' });
+      await vi.waitFor(() => expect(mkdir).toHaveBeenCalledTimes(1));
+      const queued = bridge.request(
+        { id: 2, op: 'unlink', path: '/docs/file.txt', ifVersionId: VERSION },
+        controller.signal,
+      );
+      controller.abort();
+      await expect(queued).resolves.toMatchObject({
+        id: 2,
+        ok: false,
+        errno: 'EIO',
+        mutationOutcome: 'notSubmitted',
+      });
+      expect(unlink).not.toHaveBeenCalled();
+      finishMkdir();
+      await first;
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('marks a canceled in-flight mutation as having an unknown outcome', async () => {
+    let failUnlink!: (error: Error) => void;
+    const unlink = vi.fn(
+      () =>
+        new Promise<never>((_resolveUnlink, rejectUnlink) => {
+          failUnlink = rejectUnlink;
+        }),
+    );
+    const writeback = {
+      openWrite: vi.fn(),
+      write: vi.fn(),
+      truncate: vi.fn(),
+      readStaged: vi.fn(),
+      flush: vi.fn(),
+      release: vi.fn(),
+      listStaged: vi.fn(async () => []),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const bridge = await createMountBridge(
+      { browse: vi.fn(), openRangeReader: vi.fn(), unlink },
+      DRIVE,
+      {
+        capabilities: {
+          readOnly: false,
+          write: true,
+          delete: true,
+          writePaths: ['/docs'],
+          maxReadBytes: 1024 * 1024,
+          maxWriteBytes: 1024 * 1024,
+          ops: [],
+        },
+        writeback,
+      },
+    );
+    const controller = new AbortController();
+
+    try {
+      const request = bridge.request(
+        { id: 1, op: 'unlink', path: '/docs/file.txt', ifVersionId: VERSION },
+        controller.signal,
+      );
+      await vi.waitFor(() => expect(unlink).toHaveBeenCalledTimes(1));
+      controller.abort();
+      failUnlink(new Error('synthetic lost mutation response'));
+      await expect(request).resolves.toMatchObject({
+        id: 1,
+        ok: false,
+        errno: 'EIO',
+        mutationOutcome: 'unknown',
+      });
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('returns metadata for the requested historical version from pinned stat', async () => {
+    const getVersionMetadata = vi.fn(async () => ({
+      ...mountedVersion(VERSION, 7),
+      path: '/docs/file.txt',
+    }));
+    const bridge = await createMountBridge(
+      {
+        browse: vi.fn().mockResolvedValue({
+          items: [
+            entry('/docs/file.txt', encryptedSize(100), '33333333-3333-4333-8333-333333333333'),
+          ],
+          nextCursor: null,
+        }),
+        getVersionMetadata,
+        openRangeReader: vi.fn(),
+      },
+      DRIVE,
+    );
+
+    try {
+      await expect(
+        bridge.request({ id: 1, op: 'stat', path: '/docs/file.txt', versionId: VERSION }),
+      ).resolves.toMatchObject({
+        id: 1,
+        ok: true,
+        entry: { name: 'file.txt', kind: 'file', size: 7, versionId: VERSION },
+      });
+      expect(getVersionMetadata).toHaveBeenCalledWith(DRIVE, '/docs/file.txt', {
+        versionId: VERSION,
+        signal: expect.any(AbortSignal),
+      });
+    } finally {
+      await bridge.close();
+    }
+  });
+
   it('flushes a saved temporary file before guarded replacement rename and preserves conflicts', async () => {
     let released = false;
     let destination = 'original destination bytes';
@@ -1524,6 +1787,7 @@ setInterval(() => {}, 1000);
       () => 'resolved',
       () => 'rejected',
     );
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     try {
       const startupDeadline = Date.now() + 5000;
@@ -1548,13 +1812,15 @@ setInterval(() => {}, 1000);
       controller.abort();
       await expect(mounting).resolves.toBeUndefined();
       await expect(readFile(terminated, 'utf8')).resolves.toBe('graceful');
+      expect(stderr).not.toHaveBeenCalled();
     } finally {
       controller.abort();
       await mounting.catch(() => undefined);
+      stderr.mockRestore();
     }
   });
 
-  it('force-kills a helper that ignores SIGTERM only after explicit abort', async () => {
+  it('force-kills a helper that ignores SIGTERM after an internal protocol failure', async () => {
     const root = await scratch();
     const helper = join(root, 'stubborn-helper');
     const pidFile = join(root, 'pid');
@@ -1564,17 +1830,17 @@ setInterval(() => {}, 1000);
 const fs = require('node:fs');
 fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 process.on('SIGTERM', () => {});
+process.stdout.write('not-json\\n');
 setInterval(() => {}, 1000);
 `,
       { mode: 0o700 },
     );
     await chmod(helper, 0o700);
-    const controller = new AbortController();
     const mounting = runLinuxMount(
       { browse: vi.fn(), openRangeReader: vi.fn() },
       DRIVE,
       join(root, 'mountpoint'),
-      { helperPath: helper, signal: controller.signal },
+      { helperPath: helper },
     );
     const result = mounting.then(
       () => 'resolved',
@@ -1593,22 +1859,134 @@ setInterval(() => {}, 1000);
         }
       }
       expect(Number.isInteger(helperPid)).toBe(true);
-      await new Promise((resolveWait) => setTimeout(resolveWait, 2200));
+      await expect(mounting).rejects.toThrow('Mount helper sent malformed protocol data.');
+      expect(await result).toBe('rejected');
+      expect(() => process.kill(helperPid!, 0)).toThrow();
+    } finally {
+      await mounting.catch(() => undefined);
+    }
+  });
+
+  it('keeps the bridge available to flush open handles during a user-signal unmount', async () => {
+    const root = await scratch();
+    const helper = join(root, 'busy-unmount-helper');
+    const started = join(root, 'started');
+    const released = join(root, 'released');
+    await writeFile(
+      helper,
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+let input = '';
+let nextId = 1;
+const waiters = new Map();
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  for (;;) {
+    const newline = input.indexOf('\\n');
+    if (newline < 0) break;
+    const response = JSON.parse(input.slice(0, newline));
+    input = input.slice(newline + 1);
+    waiters.get(response.id)?.(response);
+    waiters.delete(response.id);
+  }
+});
+function rpc(request) {
+  return new Promise((resolve) => {
+    waiters.set(request.id, resolve);
+    process.stdout.write(JSON.stringify(request) + '\\n');
+  });
+}
+(async () => {
+  const opened = await rpc({ id: nextId++, op: 'openWrite', path: '/docs/file.txt', baseVersionId: null, truncateOnOpen: true });
+  if (!opened.ok || !opened.handleId) process.exit(81);
+  fs.writeFileSync(${JSON.stringify(started)}, 'ready');
+  process.on('SIGTERM', () => {
+    setTimeout(async () => {
+      const response = await rpc({ id: nextId++, op: 'release', handleId: opened.handleId });
+      if (!response.ok) process.exit(82);
+      fs.writeFileSync(${JSON.stringify(released)}, 'flushed');
+      process.exit(0);
+    }, 2300);
+  });
+})().catch(() => process.exit(83));
+setInterval(() => {}, 1000);
+`,
+      { mode: 0o700 },
+    );
+    await chmod(helper, 0o700);
+    const writeback = {
+      openWrite: vi.fn(async () => ({
+        handleId: 'busy-handle',
+        recoveryPath: '/private/busy-stage',
+        size: 0,
+      })),
+      write: vi.fn(),
+      truncate: vi.fn(),
+      readStaged: vi.fn(),
+      flush: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
+      release: vi.fn(async () => ({})),
+      listStaged: vi.fn(async () => []),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const controller = new AbortController();
+    const mounting = runLinuxMount(
+      { browse: vi.fn(), openRangeReader: vi.fn() },
+      DRIVE,
+      join(root, 'mountpoint'),
+      {
+        helperPath: helper,
+        signal: controller.signal,
+        readWrite: true,
+        capabilities: {
+          readOnly: false,
+          write: true,
+          delete: false,
+          writePaths: ['/docs'],
+          maxReadBytes: 1024 * 1024,
+          maxWriteBytes: 1024 * 1024,
+          ops: ['openWrite', 'flush', 'release'],
+        },
+        writeback,
+      },
+    );
+    const result = mounting.then(
+      () => 'resolved',
+      () => 'rejected',
+    );
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      const startupDeadline = Date.now() + 5000;
+      while (Date.now() < startupDeadline) {
+        try {
+          await readFile(started, 'utf8');
+          break;
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+        }
+      }
+      await expect(readFile(started, 'utf8')).resolves.toBe('ready');
+      controller.abort('SIGTERM');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 2100));
       expect(
         await Promise.race([
           result,
           new Promise((resolveWait) => setTimeout(() => resolveWait('running'), 0)),
         ]),
       ).toBe('running');
-
-      controller.abort();
-      await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-      expect(() => process.kill(helperPid!, 0)).not.toThrow();
       await expect(mounting).resolves.toBeUndefined();
-      expect(() => process.kill(helperPid!, 0)).toThrow();
+      await expect(readFile(released, 'utf8')).resolves.toBe('flushed');
+      expect(writeback.flush).toHaveBeenCalledWith('busy-handle');
+      expect(writeback.release).toHaveBeenCalledWith('busy-handle');
+      expect(stderr).toHaveBeenCalledWith(
+        'Agent Drive mount shutdown is waiting for open files. Close files and leave the mounted directory to finish unmounting.\n',
+      );
     } finally {
-      controller.abort();
+      controller.abort('SIGTERM');
       await mounting.catch(() => undefined);
+      stderr.mockRestore();
     }
   });
 

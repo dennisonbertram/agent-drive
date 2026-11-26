@@ -62,6 +62,7 @@ export type MountResponse =
       errno: string;
       recoveryPath?: string;
       currentVersionId?: string;
+      mutationOutcome?: 'notSubmitted' | 'unknown';
     };
 
 export type MountCapabilities = {
@@ -87,6 +88,11 @@ type MountClient = Pick<AgentDriveClient, 'browse'> & {
     versionId: string,
     options?: { signal?: AbortSignal },
   ): Promise<MountReader>;
+  getVersionMetadata?: (
+    driveId: string,
+    path: string,
+    options?: { versionId?: string; signal?: AbortSignal },
+  ) => Promise<Version>;
   mkdir?: (driveId: string, path: string) => Promise<unknown>;
   rmdir?: (driveId: string, path: string) => Promise<unknown>;
   unlink?: (driveId: string, path: string, ifVersionId: string) => Promise<unknown>;
@@ -267,6 +273,7 @@ export async function createMountBridge(
 ) {
   let activeReader: { key: string; reader: MountReader } | undefined;
   const stagedHandles = new Map<string, { path: string; size: number; recoveryPath: string }>();
+  const activeWriteHandles = new Set<string>();
   const stagedTokenVersions = new Map<string, { path: string; versionId: string; size: number }>();
   const metadataCache = new Map<string, { entry: MountEntry; expiresAt: number }>();
   const listingStates = new Map<
@@ -361,7 +368,11 @@ export async function createMountBridge(
     return values.find((entry) => entry.path === path);
   }
 
-  async function resolveMutationVersion(path: string, requestedVersion: unknown) {
+  async function resolveMutationVersion(
+    path: string,
+    requestedVersion: unknown,
+    ensureActive: () => void = () => {},
+  ) {
     if (!validVersion(requestedVersion))
       throw Object.assign(new Error('A pinned file version is required.'), { code: 'EINVAL' });
     const requestedHandleId = requestedVersion.startsWith(STAGED_VERSION_PREFIX)
@@ -369,10 +380,11 @@ export async function createMountBridge(
       : undefined;
     const staged = await stagedForPath(path);
     if (staged) {
-      if (!staged.handleId || (requestedHandleId && staged.handleId !== requestedHandleId))
+      if (!requestedHandleId || !staged.handleId || staged.handleId !== requestedHandleId)
         throw Object.assign(new Error('The staged file is no longer available.'), {
           code: 'ESTALE',
         });
+      ensureActive();
       stagedHandles.set(staged.handleId, {
         path,
         size: staged.size,
@@ -569,10 +581,38 @@ export async function createMountBridge(
     throw Object.assign(new Error('Path not found.'), { code: 'ENOENT' });
   }
 
-  let dispatchRequest: (input: unknown) => Promise<MountResponse>;
+  async function statVersion(path: string, versionId: string, requestSignal?: AbortSignal) {
+    if (!client.getVersionMetadata)
+      throw Object.assign(new Error('Pinned version metadata is unavailable.'), { code: 'EIO' });
+    const metadata = await client.getVersionMetadata(driveId, path, {
+      versionId,
+      signal: requestSignal ? AbortSignal.any([signal, requestSignal]) : signal,
+    });
+    if (metadata.id !== versionId || metadata.path !== path)
+      throw Object.assign(new Error('The requested version metadata did not match.'), {
+        code: 'ESTALE',
+      });
+    return {
+      name: entryName(path, parentPath(path)),
+      kind: 'file' as const,
+      size: plaintextSize(metadata.ciphertextSize),
+      mtimeMs: mtime(metadata.createdAt),
+      versionId: metadata.id,
+    };
+  }
+
+  let dispatchRequest: (
+    input: unknown,
+    requestSignal?: AbortSignal,
+    progress?: { mutationSubmitted: boolean },
+  ) => Promise<MountResponse>;
   let closePromise: Promise<void> | undefined;
   const bridge = {
-    dispatch: async (input: unknown): Promise<MountResponse> => {
+    dispatch: async (
+      input: unknown,
+      requestSignal?: AbortSignal,
+      progress = { mutationSubmitted: false },
+    ): Promise<MountResponse> => {
       const fallbackId =
         input &&
         typeof input === 'object' &&
@@ -581,6 +621,7 @@ export async function createMountBridge(
           (typeof input.id === 'number' && Number.isSafeInteger(input.id)))
           ? (input.id as string | number)
           : '';
+      let isMutation = false;
       try {
         if (closed) throw Object.assign(new Error('Mount bridge is closed.'), { code: 'EIO' });
         if (!input || typeof input !== 'object' || Array.isArray(input))
@@ -592,6 +633,14 @@ export async function createMountBridge(
             : Number.isSafeInteger(request.id) && (request.id as number) >= 0)
         )
           throw Object.assign(new Error('Invalid request id.'), { code: 'EINVAL' });
+        isMutation = ['mkdir', 'rmdir', 'unlink', 'rename'].includes(request.op);
+        const ensureRequestActive = () => {
+          if (requestSignal?.aborted)
+            throw Object.assign(new Error('The request was canceled before submission.'), {
+              code: 'ECANCELED',
+            });
+        };
+        ensureRequestActive();
         if (request.op === 'capabilities') return { id: request.id, ok: true, capabilities };
         const path = ['list', 'stat', 'read'].includes(request.op)
           ? requestPath(request)
@@ -600,7 +649,17 @@ export async function createMountBridge(
           const response = await list(path!, request.cursor as string | undefined);
           return { ...response, id: request.id } as MountResponse;
         }
-        if (request.op === 'stat') return { id: request.id, ok: true, entry: await stat(path!) };
+        if (request.op === 'stat') {
+          if (request.versionId === undefined)
+            return { id: request.id, ok: true, entry: await stat(path!) };
+          if (!validUuid(request.versionId) || path === '/')
+            throw Object.assign(new Error('Invalid pinned stat request.'), { code: 'EINVAL' });
+          return {
+            id: request.id,
+            ok: true,
+            entry: await statVersion(path!, request.versionId, requestSignal),
+          };
+        }
         if (request.op === 'read') {
           if (
             path === '/' ||
@@ -726,6 +785,7 @@ export async function createMountBridge(
             size: opened.size,
             recoveryPath: opened.recoveryPath,
           });
+          activeWriteHandles.add(opened.handleId);
           return { id: request.id, ok: true, ...opened } as MountResponse;
         }
         if (request.op === 'write') {
@@ -848,7 +908,12 @@ export async function createMountBridge(
           } catch (error) {
             failure = error;
           }
-          const result = await requireWriteback().release(request.handleId);
+          let result: { recoveryPath?: string };
+          try {
+            result = await requireWriteback().release(request.handleId);
+          } finally {
+            activeWriteHandles.delete(request.handleId);
+          }
           if (failure) throw failure;
           if (result.recoveryPath)
             return { id: request.id, ok: false, errno: 'EIO', recoveryPath: result.recoveryPath };
@@ -859,6 +924,8 @@ export async function createMountBridge(
           canWrite(target);
           if (!client.mkdir)
             throw Object.assign(new Error('Directory creation is unavailable.'), { code: 'EIO' });
+          ensureRequestActive();
+          progress.mutationSubmitted = true;
           const entry = await client.mkdir(driveId, target);
           invalidateMetadata(target);
           return { id: request.id, ok: true, entry } as MountResponse;
@@ -868,6 +935,8 @@ export async function createMountBridge(
           canDelete(target);
           if (!client.rmdir)
             throw Object.assign(new Error('Directory removal is unavailable.'), { code: 'EIO' });
+          ensureRequestActive();
+          progress.mutationSubmitted = true;
           const entry = await client.rmdir(driveId, target);
           invalidateMetadata(target);
           return { id: request.id, ok: true, entry } as MountResponse;
@@ -881,7 +950,13 @@ export async function createMountBridge(
             });
           if (!client.unlink)
             throw Object.assign(new Error('File deletion is unavailable.'), { code: 'EIO' });
-          const ifVersionId = await resolveMutationVersion(target, request.ifVersionId);
+          const ifVersionId = await resolveMutationVersion(
+            target,
+            request.ifVersionId,
+            ensureRequestActive,
+          );
+          ensureRequestActive();
+          progress.mutationSubmitted = true;
           const entry = await client.unlink(driveId, target, ifVersionId);
           invalidateMetadata(target);
           return { id: request.id, ok: true, entry } as MountResponse;
@@ -915,11 +990,30 @@ export async function createMountBridge(
           }
           if (!client.rename)
             throw Object.assign(new Error('Rename is unavailable.'), { code: 'EIO' });
-          const ifSourceVersionId = await resolveMutationVersion(source, request.ifSourceVersionId);
+          if (
+            [...activeWriteHandles].some(
+              (handleId) => stagedHandles.get(handleId)?.path === source,
+            ) ||
+            [...activeWriteHandles].some((handleId) => stagedHandles.get(handleId)?.path === target)
+          )
+            throw Object.assign(new Error('An open write handle prevents rename.'), {
+              code: 'EBUSY',
+            });
+          const ifSourceVersionId = await resolveMutationVersion(
+            source,
+            request.ifSourceVersionId,
+            ensureRequestActive,
+          );
           const ifDestinationVersionId =
             request.ifDestinationVersionId === null
               ? null
-              : await resolveMutationVersion(target, request.ifDestinationVersionId);
+              : await resolveMutationVersion(
+                  target,
+                  request.ifDestinationVersionId,
+                  ensureRequestActive,
+                );
+          ensureRequestActive();
+          progress.mutationSubmitted = true;
           const entry = await client.rename(driveId, source, target, {
             ifSourceVersionId,
             ifDestinationVersionId,
@@ -933,16 +1027,61 @@ export async function createMountBridge(
           throw Object.assign(new Error('Unsupported operation.'), { code: 'EINVAL' });
         throw Object.assign(new Error('Unsupported operation.'), { code: 'EINVAL' });
       } catch (error) {
-        return { id: fallbackId, ok: false, errno: mountErrno(error), ...mountErrorDetails(error) };
+        return {
+          id: fallbackId,
+          ok: false,
+          errno: mountErrno(error),
+          ...mountErrorDetails(error),
+          ...(requestSignal?.aborted && isMutation
+            ? { mutationOutcome: progress.mutationSubmitted ? 'unknown' : 'notSubmitted' }
+            : {}),
+        };
       }
     },
-    request(input: unknown): Promise<MountResponse> {
-      const pending = requestTail.then(() => dispatchRequest(input));
+    request(input: unknown, requestSignal?: AbortSignal): Promise<MountResponse> {
+      const requestId =
+        input &&
+        typeof input === 'object' &&
+        'id' in input &&
+        (typeof input.id === 'string' ||
+          (typeof input.id === 'number' && Number.isSafeInteger(input.id)))
+          ? (input.id as string | number)
+          : '';
+      const isMutation =
+        input &&
+        typeof input === 'object' &&
+        'op' in input &&
+        ['mkdir', 'rmdir', 'unlink', 'rename'].includes(String(input.op));
+      const progress = { mutationSubmitted: false };
+      const canceled = (): MountResponse => ({
+        id: requestId,
+        ok: false,
+        errno: 'EIO',
+        ...(isMutation
+          ? { mutationOutcome: progress.mutationSubmitted ? 'unknown' : 'notSubmitted' }
+          : {}),
+      });
+      if (requestSignal?.aborted) return Promise.resolve(canceled());
+      const pending = requestTail.then(() => dispatchRequest(input, requestSignal, progress));
       requestTail = pending.then(
         () => undefined,
         () => undefined,
       );
-      return pending;
+      if (!requestSignal) return pending;
+      return new Promise<MountResponse>((resolveRequest, rejectRequest) => {
+        const onAbort = () => resolveRequest(canceled());
+        requestSignal.addEventListener('abort', onAbort, { once: true });
+        pending.then(
+          (response) => {
+            requestSignal.removeEventListener('abort', onAbort);
+            resolveRequest(response);
+          },
+          (error) => {
+            requestSignal.removeEventListener('abort', onAbort);
+            rejectRequest(error);
+          },
+        );
+      });
     },
     async close() {
       if (closePromise) return closePromise;
@@ -960,6 +1099,7 @@ export async function createMountBridge(
             await writeback?.close();
           } finally {
             stagedHandles.clear();
+            activeWriteHandles.clear();
             stagedTokenVersions.clear();
           }
         }
@@ -1019,15 +1159,40 @@ export async function runLinuxMount(
   }
   if (options.signal?.aborted) return;
   const abortController = new AbortController();
-  const abort = () => abortController.abort(options.signal?.reason);
-  if (options.signal?.aborted) abort();
-  else options.signal?.addEventListener('abort', abort, { once: true });
+  let child: ChildProcess | undefined;
+  let shutdownNotice: NodeJS.Timeout | undefined;
+  const clearShutdownNotice = () => {
+    if (shutdownNotice) {
+      clearTimeout(shutdownNotice);
+      shutdownNotice = undefined;
+    }
+  };
+  const requestStop = () => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    child.kill('SIGTERM');
+    if (!shutdownNotice) {
+      shutdownNotice = setTimeout(() => {
+        shutdownNotice = undefined;
+        if (
+          options.signal?.aborted &&
+          !abortController.signal.aborted &&
+          child &&
+          child.exitCode === null &&
+          child.signalCode === null
+        )
+          process.stderr.write(
+            'Agent Drive mount shutdown is waiting for open files. Close files and leave the mounted directory to finish unmounting.\n',
+          );
+      }, 2000);
+      shutdownNotice.unref();
+    }
+  };
   const bridge = await createMountBridge(client, driveId, {
     signal: abortController.signal,
     ...(options.capabilities ? { capabilities: options.capabilities } : {}),
     ...(options.writeback ? { writeback: options.writeback } : {}),
   });
-  let child: ChildProcess | undefined;
+  options.signal?.addEventListener('abort', requestStop, { once: true });
   let closed = false;
   let mountPointCleanup: (() => Promise<void>) | undefined;
   const fail = (error: Error) => {
@@ -1039,9 +1204,10 @@ export async function runLinuxMount(
     return error;
   };
   try {
-    if (abortController.signal.aborted) return;
+    if (options.signal?.aborted || abortController.signal.aborted) return;
     const prepared = await prepareMountPoint(mountPoint);
     mountPointCleanup = prepared.cleanup;
+    if (options.signal?.aborted || abortController.signal.aborted) return;
     const runningChild = spawn(
       helperPath,
       [prepared.path, ...(options.readWrite ? ['--read-write'] : [])],
@@ -1134,7 +1300,7 @@ export async function runLinuxMount(
           forceKill = undefined;
         }
       };
-      const onAbort = () => {
+      const onInternalAbort = () => {
         if (processError || runningChild.exitCode !== null || runningChild.signalCode !== null)
           return;
         runningChild.kill('SIGTERM');
@@ -1147,15 +1313,18 @@ export async function runLinuxMount(
           forceKill.unref();
         }
       };
-      if (abortController.signal.aborted) onAbort();
-      else abortController.signal.addEventListener('abort', onAbort, { once: true });
+      if (abortController.signal.aborted) onInternalAbort();
+      else abortController.signal.addEventListener('abort', onInternalAbort, { once: true });
+      if (options.signal?.aborted) requestStop();
       runningChild.once('error', (error) => {
         processError = error;
         clearForceKill();
+        clearShutdownNotice();
       });
       runningChild.once('close', (code, signal) => {
         clearForceKill();
-        abortController.signal.removeEventListener('abort', onAbort);
+        clearShutdownNotice();
+        abortController.signal.removeEventListener('abort', onInternalAbort);
         resolveExit({ code, signal, ...(processError ? { error: processError } : {}) });
       });
     });
@@ -1172,8 +1341,9 @@ export async function runLinuxMount(
       );
   } finally {
     closed = true;
+    clearShutdownNotice();
     if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-    options.signal?.removeEventListener('abort', abort);
+    options.signal?.removeEventListener('abort', requestStop);
     abortController.abort(new Error('Mount bridge closed.'));
     try {
       await bridge.close();

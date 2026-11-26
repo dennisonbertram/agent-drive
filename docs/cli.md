@@ -135,8 +135,9 @@ the final directory does not exist, the CLI creates it with mode `0700` when its
 removes that directory on exit only if it created it; an existing mountpoint is left in place.
 
 The command stays in the foreground. Press Ctrl+C once and wait for the CLI to exit; it stops the
-helper and flushes dirty staged files during shutdown. If the mount remains attached after the CLI
-has stopped, unmount it with:
+helper and flushes dirty staged files during shutdown. If shutdown waits for open handles, close
+files using the mount and wait for them to flush. A second Ctrl+C forces the CLI to exit and can
+interrupt pending writes. If the mount remains attached after the CLI has stopped, unmount it with:
 
 ```sh
 fusermount3 -u "$HOME/AgentDrive"
