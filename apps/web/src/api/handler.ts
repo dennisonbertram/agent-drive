@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PoolClient, QueryResultRow } from 'pg';
 import { getPool, TransactionCommitUnknownError, withTransaction } from '../db/client';
 import { reverificationErrorResponse } from '@clerk/nextjs/server';
+import { plaintextSize } from '../../../../packages/agent-drive/src/crypto-format.ts';
 import { ApiError, errorFromDatabase, responseForError } from './errors';
 import {
   boundedSize,
@@ -2306,6 +2307,21 @@ async function fileEndpoint(
     const path = canonicalPath(url.searchParams.get('path'));
     const versionParam = url.searchParams.get('versionId');
     const versionId = versionParam ? uuid(versionParam, 'versionId') : undefined;
+    const capParam = queryValue(url, 'maxPlaintextBytes', 16);
+    let maxPlaintextBytes: number | undefined;
+    if (capParam !== null) {
+      if (!/^\d+$/u.test(capParam))
+        throw new ApiError(
+          'validation_error',
+          'maxPlaintextBytes must be a non-negative safe integer.',
+        );
+      maxPlaintextBytes = Number(capParam);
+      if (!Number.isSafeInteger(maxPlaintextBytes))
+        throw new ApiError(
+          'validation_error',
+          'maxPlaintextBytes must be a non-negative safe integer.',
+        );
+    }
     const result = await getPool().query(
       `SELECT v.*, f.path FROM files f JOIN versions v ON v.id = COALESCE($3::uuid, f.current_version_id)
        WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL AND v.file_id = f.id`,
@@ -2314,6 +2330,11 @@ async function fileEndpoint(
     const row = result.rows[0] as Row | undefined;
     if (!row) throw new ApiError('not_found', 'File not found.');
     if (url.searchParams.get('metadataOnly') === '1') return response(rowVersion(row));
+    if (
+      maxPlaintextBytes !== undefined &&
+      plaintextSize(Number(row.ciphertext_size)) > maxPlaintextBytes
+    )
+      return response(rowVersion(row));
     const downloadUrl = await authorizeDownload(auth.accountId, BigInt(row.ciphertext_size), () =>
       presignedDownload(row.object_key),
     );

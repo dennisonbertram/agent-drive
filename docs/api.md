@@ -247,6 +247,7 @@ A version object:
 
 - `versionId=<uuid>` selects an older version.
 - `metadataOnly=1` returns the version object without `downloadUrl`, and does not count as a download.
+- `maxPlaintextBytes=<integer>` optionally caps the selected version's plaintext size (a non-negative safe integer). If the file exceeds the cap, the API returns that version's metadata without a `downloadUrl`, before signing a storage request. The bounded GET still uses one `drive.get` operation. Clients should still check the returned size before fetching ciphertext because older servers may ignore this option.
 - A path that does not exist or is in the trash returns 404 `not_found`.
 - The plan's download allowance can return 402 `payment_required`.
 

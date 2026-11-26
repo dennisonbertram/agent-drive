@@ -375,10 +375,53 @@ describe('AgentDriveClient streaming transfers', () => {
     expect(calls.some((url) => url.includes('/commit'))).toBe(false);
   });
 
-  it('does not request a signed URL or download when the metadata size exceeds the cap', async () => {
+  it('uses one bounded API request for an in-limit read', async () => {
+    const plaintext = new Uint8Array([1, 2, 3]);
+    const encrypted = await encryptFile(plaintext, driveKey);
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
-      void input;
-      return new Response(JSON.stringify({ ...version, ciphertextSize: 1024 }), { status: 200 });
+      if (String(input).startsWith('http://localhost:3000'))
+        return new Response(
+          JSON.stringify({
+            ...version,
+            ciphertextSize: encrypted.ciphertext.byteLength,
+            wrappedKey: encrypted.wrappedKey,
+            downloadUrl: 'http://localhost:9000/download',
+          }),
+          { status: 200 },
+        );
+      return new Response(new Uint8Array(encrypted.ciphertext));
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const stream = await client.getStream('d', '/x', {
+      versionId: version.id,
+      maxPlaintextBytes: 3,
+    });
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('maxPlaintextBytes=3');
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain(`versionId=${version.id}`);
+    expect(String(fetcher.mock.calls[0]?.[0])).not.toContain('metadataOnly=1');
+    expect(
+      fetcher.mock.calls.filter(([url]) => String(url).startsWith('http://localhost:3000')),
+    ).toHaveLength(1);
+    await stream.cancel();
+  });
+
+  it('checks an oversized response from an older server before fetching ciphertext', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith('http://localhost:3000'))
+        return new Response(
+          JSON.stringify({
+            ...version,
+            ciphertextSize: 1024,
+            downloadUrl: 'http://localhost:9000/signed-secret',
+          }),
+          { status: 200 },
+        );
+      throw new Error('ciphertext must not be fetched');
     });
     const client = new AgentDriveClient({
       apiUrl: 'http://localhost:3000',
@@ -389,7 +432,7 @@ describe('AgentDriveClient streaming transfers', () => {
     await expect(client.getStream('d', '/x', { maxPlaintextBytes: 10 })).rejects.toBeInstanceOf(
       StreamSizeLimitError,
     );
-    expect(String(fetcher.mock.calls[0]?.[0])).toContain('metadataOnly=1');
+    expect(String(fetcher.mock.calls[0]?.[0])).toContain('maxPlaintextBytes=10');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -564,7 +607,7 @@ describe('AgentDriveClient streaming transfers', () => {
 
     expect(result.bytes).toEqual(new Uint8Array([1, 2, 3]));
     expect(result.version.id).toBe(version.id);
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(4);
     expect(fetcher.mock.calls.every((call) => call[1]?.signal === controller.signal)).toBe(true);
   });
 });

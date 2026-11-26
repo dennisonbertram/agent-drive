@@ -35,7 +35,12 @@ export type PutOptions = {
   signal?: AbortSignal;
 };
 
-export type GetOptions = { versionId?: string; maxPlaintextBytes?: number; signal?: AbortSignal };
+export type GetOptions = {
+  versionId?: string;
+  /** Reject this plaintext size limit before requesting ciphertext. */
+  maxPlaintextBytes?: number;
+  signal?: AbortSignal;
+};
 
 export type Version = {
   id: string;
@@ -873,33 +878,20 @@ export class AgentDriveClient {
   async getStream(driveId: string, path: string, options: GetOptions = {}) {
     const query = new URLSearchParams({ path });
     if (options.versionId) query.set('versionId', options.versionId);
-    let metadata: Version & { downloadUrl?: string };
     if (options.maxPlaintextBytes !== undefined) {
       if (!Number.isSafeInteger(options.maxPlaintextBytes) || options.maxPlaintextBytes < 0)
         throw new TypeError('maxPlaintextBytes must be a non-negative safe integer.');
-      const preflight = await this.request<Version>(
-        `drives/${encode(driveId)}/get?${query.toString()}&metadataOnly=1`,
-        options.signal ? { signal: options.signal } : {},
-      );
-      const declaredBytes = plaintextSize(preflight.ciphertextSize);
-      if (declaredBytes > options.maxPlaintextBytes)
-        throw new StreamSizeLimitError(declaredBytes, options.maxPlaintextBytes);
-      const pinnedQuery = new URLSearchParams({ path, versionId: preflight.id });
-      metadata = await this.request<Version & { downloadUrl: string }>(
-        `drives/${encode(driveId)}/get?${pinnedQuery.toString()}`,
-        options.signal ? { signal: options.signal } : {},
-      );
-      if (metadata.id !== preflight.id || metadata.ciphertextSize !== preflight.ciphertextSize)
-        throw new AgentDriveApiError('internal_error', 502, 'The pinned file metadata changed.');
-    } else {
-      metadata = await this.request<Version & { downloadUrl: string }>(
-        `drives/${encode(driveId)}/get?${query.toString()}`,
-        options.signal ? { signal: options.signal } : {},
-      );
+      query.set('maxPlaintextBytes', String(options.maxPlaintextBytes));
     }
+    const metadata = await this.request<Version & { downloadUrl?: string }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+      options.signal ? { signal: options.signal } : {},
+    );
+    const plaintextBytes = plaintextSize(metadata.ciphertextSize);
+    if (options.maxPlaintextBytes !== undefined && plaintextBytes > options.maxPlaintextBytes)
+      throw new StreamSizeLimitError(plaintextBytes, options.maxPlaintextBytes);
     if (!metadata.downloadUrl)
       throw new AgentDriveApiError('internal_error', 502, 'The download URL is missing.');
-    const plaintextBytes = plaintextSize(metadata.ciphertextSize);
     const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey, options.signal).then(
       (inbox) => unwrapFileKey(metadata.wrappedKey, this.keyFor(driveId), inbox),
     );

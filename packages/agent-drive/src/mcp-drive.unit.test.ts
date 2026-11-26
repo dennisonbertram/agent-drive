@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { describe, expect, it } from 'vitest';
-import { AgentDriveClient } from './client.js';
+import { AgentDriveClient, StreamSizeLimitError } from './client.js';
 import { createMcpServer } from './mcp.js';
 import { resolveDriveId } from './config.js';
 
@@ -193,6 +193,17 @@ describe('MCP streaming file tools', () => {
     expect(denied.isError).toBe(true);
     expect(denied.content[0]!.text).toContain('download tool');
     expect(cancelled).toBe(true);
+
+    const capped = {
+      getStream: async () => {
+        throw new StreamSizeLimitError(64 * 1024 + 1, 64 * 1024);
+      },
+    } as unknown as AgentDriveClient;
+    const preflightDenied = await callTool(capped, 'get', { driveId: 'd', path: '/file' });
+    expect(preflightDenied.isError).toBe(true);
+    expect(preflightDenied.content[0]!.text).toContain(
+      'Large or binary files require the download tool.',
+    );
   });
 
   it('streams local uploads and atomically writes downloads', async () => {
