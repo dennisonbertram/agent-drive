@@ -1,5 +1,43 @@
 const meterRetryWindowMs = 23 * 60 * 60 * 1000;
 const checkoutRecoveryWindowSeconds = 23 * 60 * 60;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export type CheckoutPlan = 'developer' | 'team';
+export type CheckoutReservation = {
+  plan: CheckoutPlan;
+  requiresExactSessionMetadata: boolean;
+};
+
+/** Parse only reservation formats actually emitted by this application. */
+export function checkoutReservationFromKey(
+  key: string,
+  accountId: string,
+): CheckoutReservation | null {
+  const parts = key.split('/');
+  let version: 'legacy' | 'v2' | 'v3' | 'v4';
+  let keyAccountId: string | undefined;
+  let plan: string | undefined;
+  let nonce: string | undefined;
+  if (parts.length === 4 && parts[0] === 'checkout') {
+    version = 'legacy';
+    [, keyAccountId, plan, nonce] = parts;
+  } else if (
+    parts.length === 5 &&
+    parts[0] === 'checkout' &&
+    (parts[1] === 'v2' || parts[1] === 'v3' || parts[1] === 'v4')
+  ) {
+    version = parts[1];
+    [, , keyAccountId, plan, nonce] = parts;
+  } else return null;
+  if (
+    keyAccountId !== accountId ||
+    (plan !== 'developer' && plan !== 'team') ||
+    !nonce ||
+    !uuid.test(nonce)
+  )
+    return null;
+  return { plan, requiresExactSessionMetadata: version === 'v4' };
+}
 
 export type MeterDeliveryRow = {
   reported_at: Date | null;
@@ -74,11 +112,17 @@ export function uniqueCheckoutSession(
     );
   });
   if (expected.idempotencyKey) {
+    const reservation = checkoutReservationFromKey(expected.idempotencyKey, expected.accountId);
+    if (!reservation) return null;
     const exact = matches.filter(
       (session) => session.checkoutIdempotencyKey === expected.idempotencyKey,
     );
     if (exact.length) return exact.length === 1 ? exact[0]! : null;
-    const legacy = matches.filter((session) => !session.checkoutIdempotencyKey);
+    if (reservation.requiresExactSessionMetadata) return null;
+    const legacy = matches.filter(
+      (session) =>
+        session.checkoutIdempotencyKey === undefined || session.checkoutIdempotencyKey === null,
+    );
     return legacy.length === 1 ? legacy[0]! : null;
   }
   return matches.length === 1 ? matches[0]! : null;

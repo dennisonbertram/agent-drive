@@ -1,6 +1,7 @@
 import { getPool } from '../db/client';
 import {
   attestMeterReportAccepted,
+  checkoutReservationFromKey,
   inspectBillingReconciliation,
   inspectMeterReport,
   recoverCheckoutSession,
@@ -10,6 +11,7 @@ import { findCheckoutRecoverySession } from './providers';
 
 type Options = {
   accountId?: string;
+  cursor?: string;
   reportId?: string;
   retryReport: boolean;
   attestAccepted: boolean;
@@ -37,7 +39,11 @@ function parseArgs(args: string[]): Options {
     else if (arg === '--attest-accepted') options.attestAccepted = true;
     else if (arg === '--provider-log-verified') options.providerLogVerified = true;
     else if (arg === '--recover-checkout') options.recoverCheckout = true;
-    else if (arg === '--apply') options.apply = true;
+    else if (arg === '--cursor') {
+      const value = args[++index];
+      if (!value || value.startsWith('--')) throw new Error('--cursor requires a report UUID.');
+      options.cursor = value;
+    } else if (arg === '--apply') options.apply = true;
     else if (
       ['--account-id', '--report-id', '--provider-request-id', '--operator-id'].includes(arg)
     ) {
@@ -56,7 +62,7 @@ function help() {
   console.log(`Billing reconciliation (dry-run by default)
 
 List blocked work:
-  pnpm --filter @agent-drive/web billing:reconcile -- [--account-id <uuid>]
+  pnpm --filter @agent-drive/web billing:reconcile -- [--account-id <uuid>] [--cursor <report-uuid>]
 
 Replay one report while it remains inside the 23-hour Stripe idempotency window:
   pnpm --filter @agent-drive/web billing:reconcile -- --report-id <uuid> --retry-report [--apply]
@@ -89,6 +95,11 @@ async function run() {
     Boolean,
   ).length;
   if (actions > 1) throw new Error('Choose one reconciliation action at a time.');
+  if (
+    options.cursor &&
+    (options.reportId || options.retryReport || options.attestAccepted || options.recoverCheckout)
+  )
+    throw new Error('--cursor is only valid when listing reconciliation work.');
   if (options.attestAccepted && (!options.providerRequestId || !options.providerLogVerified))
     throw new Error(
       '--attest-accepted requires --provider-request-id and --provider-log-verified.',
@@ -176,15 +187,16 @@ async function run() {
     const checkout = state.checkouts[0];
     if (!checkout)
       throw new Error('No unresolved checkout reservation was found for that account.');
+    const reservation = checkoutReservationFromKey(checkout.idempotencyKey, accountId);
+    if (!reservation)
+      throw new Error(
+        'The checkout reservation key is malformed or unsupported; leave erasure blocked for manual investigation.',
+      );
     const candidate = await findCheckoutRecoverySession({
       accountId,
       customerId: checkout.stripeCustomerId ?? '',
       idempotencyKey: checkout.idempotencyKey,
-      plan: await getPool()
-        .query<{ plan: string }>('SELECT plan FROM billing_accounts WHERE account_id=$1', [
-          accountId,
-        ])
-        .then((result) => result.rows[0]?.plan ?? ''),
+      plan: reservation.plan,
       reservedAt: checkout.reservedAt ?? new Date(0),
     });
     if (!options.apply) {
@@ -193,6 +205,7 @@ async function run() {
           {
             mode: 'dry-run',
             action: 'recover checkout reservation',
+            requestedPlan: reservation.plan,
             operatorId: operatorId ?? '(set BILLING_OPERATOR_ID before applying)',
             checkout,
             matchingSession: candidate
@@ -215,7 +228,7 @@ async function run() {
   }
 
   const accountId = options.accountId ? requireUuid(options.accountId, '--account-id') : undefined;
-  const state = await inspectBillingReconciliation(accountId);
+  const state = await inspectBillingReconciliation(accountId, options.cursor);
   console.log(JSON.stringify({ mode: 'read-only', ...state }, null, 2));
 }
 

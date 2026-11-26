@@ -81,7 +81,7 @@ it('shows reported, retry-safe, and expired reports as different operator states
   );
 });
 
-it('loads a targeted report directly even when it falls outside the bounded account list', async () => {
+it('surfaces older unresolved reports after newer completed reports', async () => {
   const accountId = await createDeletingAccount();
   const older = (
     await pool.query<{ id: string }>(
@@ -95,18 +95,45 @@ it('loads a targeted report directly even when it falls outside the bounded acco
   ).rows[0]!.id;
   await pool.query(
     `INSERT INTO billing_meter_reports
-       (account_id,period_start,stripe_customer_id,cents,created_at)
-     SELECT $1,date_trunc('month',now()),'cus_reconcile_fixture',1,now()+(n*interval '1 millisecond')
+         (account_id,period_start,stripe_customer_id,cents,created_at,reported_at)
+       SELECT $1,date_trunc('month',now()),'cus_reconcile_fixture',1,
+              now()+(n*interval '1 millisecond'),now()
        FROM generate_series(1,100) AS n`,
     [accountId],
   );
 
   const listing = await inspectBillingReconciliation(accountId);
-  expect(listing.meterReports.some(({ id }) => id === older)).toBe(false);
+  expect(
+    listing.meterReports.some(({ id, status }) => id === older && status === 'unresolved'),
+  ).toBe(true);
   await expect(inspectMeterReport(older)).resolves.toMatchObject({
     id: older,
     status: 'unresolved',
   });
+});
+
+it('continues through every unresolved report in bounded pages', async () => {
+  const accountId = await createDeletingAccount();
+  await pool.query(
+    `INSERT INTO billing_meter_reports
+       (account_id,period_start,stripe_customer_id,cents,created_at)
+     SELECT $1,date_trunc('month',now()),'cus_reconcile_fixture',1,
+            now()-interval '60 days'-(n*interval '1 millisecond')
+       FROM generate_series(1,205) AS n`,
+    [accountId],
+  );
+
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await inspectBillingReconciliation(accountId, cursor);
+    expect(page.meterReports.length).toBeLessThanOrEqual(100);
+    seen.push(...page.meterReports.map((report) => report.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+
+  expect(seen).toHaveLength(205);
+  expect(new Set(seen).size).toBe(205);
 });
 
 it('keeps an expired unverified report pending and records a verified operator attestation once', async () => {
@@ -234,13 +261,13 @@ it('replays a report with its original UUID and commits provider success plus au
 
 it('recovers only a provider matched checkout and serializes racing operators', async () => {
   const accountId = await createDeletingAccount();
-  const key = `checkout/v3/${accountId}/developer/fixture`;
+  const key = `checkout/v3/${accountId}/developer/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`;
   const customerId = `cus_reconcile_${accountId.replaceAll('-', '')}`;
   const reservedAt = new Date();
   await pool.query(
     `INSERT INTO billing_accounts
        (account_id,plan,stripe_customer_id,checkout_idempotency_key,checkout_created_at)
-     VALUES ($1,'developer',$4,$2,$3)`,
+       VALUES ($1,'free',$4,$2,$3)`,
     [accountId, key, reservedAt, customerId],
   );
   providerMocks.findCheckoutRecoverySession.mockResolvedValue({
@@ -258,6 +285,9 @@ it('recovers only a provider matched checkout and serializes racing operators', 
   ]);
   expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
   expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  expect(providerMocks.findCheckoutRecoverySession).toHaveBeenCalledWith(
+    expect.objectContaining({ plan: 'developer' }),
+  );
   const recovered = await pool.query<{
     checkout_session_id: string | null;
     action: string;
@@ -278,9 +308,34 @@ it('recovers only a provider matched checkout and serializes racing operators', 
   ]);
 });
 
+it('keeps a malformed checkout reservation blocked without querying Stripe', async () => {
+  const accountId = await createDeletingAccount();
+  const key = `checkout/v4/${accountId}/free/cccccccc-cccc-4ccc-8ccc-cccccccccccc`;
+  const customerId = `cus_reconcile_${accountId.replaceAll('-', '')}`;
+  await pool.query(
+    `INSERT INTO billing_accounts
+       (account_id,plan,stripe_customer_id,checkout_idempotency_key,checkout_created_at)
+     VALUES ($1,'free',$2,$3,now())`,
+    [accountId, customerId, key],
+  );
+
+  await expect(recoverCheckoutSession(accountId, 'operator-fixture')).rejects.toThrow(
+    'malformed or unsupported',
+  );
+  expect(providerMocks.findCheckoutRecoverySession).not.toHaveBeenCalled();
+  expect(
+    (
+      await pool.query<{ checkout_session_id: string | null }>(
+        'SELECT checkout_session_id FROM billing_accounts WHERE account_id=$1',
+        [accountId],
+      )
+    ).rows[0],
+  ).toEqual({ checkout_session_id: null });
+});
+
 it('leaves an ambiguous checkout reservation unchanged and without a recovery audit', async () => {
   const accountId = await createDeletingAccount();
-  const key = `checkout/v3/${accountId}/developer/ambiguous`;
+  const key = `checkout/v3/${accountId}/developer/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`;
   const customerId = `cus_reconcile_${accountId.replaceAll('-', '')}`;
   await pool.query(
     `INSERT INTO billing_accounts

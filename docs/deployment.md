@@ -182,6 +182,14 @@ configuration as the worker. It is read-only by default. Start by listing one ac
 pnpm --filter @agent-drive/web billing:reconcile -- --account-id <account-uuid>
 ```
 
+The listing prioritizes unresolved reports and returns at most 100 meter reports per page. If
+`nextCursor` is present, pass that report UUID with `--cursor` to continue through older pending
+reports. Completed reports are included after pending reports when the first page has room.
+
+```sh
+pnpm --filter @agent-drive/web billing:reconcile -- --account-id <account-uuid> --cursor <report-uuid>
+```
+
 For a report still inside the existing 23-hour retry window, the operator can request a replay. It
 uses the original report UUID as both Stripe's meter event identifier and idempotency key, and
 records the Stripe request ID when Stripe returns success:

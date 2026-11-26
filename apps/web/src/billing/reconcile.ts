@@ -1,13 +1,22 @@
 import type Stripe from 'stripe';
 import { getPool, withTransaction } from '../db/client';
 import { findCheckoutRecoverySession, sendMeterReportWithResponse } from './providers';
-import { classifyMeterDelivery } from './reconcile-policy';
+import {
+  checkoutReservationFromKey,
+  classifyMeterDelivery,
+  type CheckoutPlan,
+} from './reconcile-policy';
 
-export { classifyMeterDelivery, uniqueCheckoutSession } from './reconcile-policy';
+export {
+  checkoutReservationFromKey,
+  classifyMeterDelivery,
+  uniqueCheckoutSession,
+} from './reconcile-policy';
 export type {
   CheckoutCandidate,
   CheckoutExpectation,
   CheckoutLineItem,
+  CheckoutPlan,
   MeterDeliveryRow,
   MeterDeliveryStatus,
 } from './reconcile-policy';
@@ -40,6 +49,8 @@ function requireReportId(value: string) {
     throw new Error('A valid meter report UUID is required.');
 }
 
+const reconciliationPageSize = 100;
+
 function meterTimestamp(report: Pick<PendingReport, 'created_at'>, periodStart: Date) {
   return Math.min(
     Math.floor(report.created_at.getTime() / 1000),
@@ -68,16 +79,43 @@ function presentMeterReport(row: PendingReport) {
   };
 }
 
-export async function inspectBillingReconciliation(accountId?: string) {
-  const reports = await getPool().query<PendingReport>(
+export async function inspectBillingReconciliation(accountId?: string, cursor?: string) {
+  if (cursor) {
+    requireReportId(cursor);
+    const anchor = await getPool().query(
+      `SELECT 1 FROM billing_meter_reports r JOIN accounts a ON a.id=r.account_id
+        WHERE r.id=$1 AND a.deleting_at IS NOT NULL AND ($2::uuid IS NULL OR r.account_id=$2)`,
+      [cursor, accountId ?? null],
+    );
+    if (!anchor.rowCount)
+      throw new Error('The report cursor is not available in this reconciliation scope.');
+  }
+  const unresolvedReports = await getPool().query<PendingReport>(
     `SELECT r.id,r.account_id,r.stripe_customer_id,r.cents::text,r.created_at,r.period_start,
             r.first_attempt_at,r.lease_until,r.reported_at,a.deleting_at
        FROM billing_meter_reports r JOIN accounts a ON a.id=r.account_id
       WHERE ($1::uuid IS NULL OR r.account_id=$1)
         AND a.deleting_at IS NOT NULL
-      ORDER BY r.created_at DESC,r.id DESC LIMIT 100`,
-    [accountId ?? null],
+        AND r.reported_at IS NULL
+        AND ($2::uuid IS NULL OR (r.created_at,r.id) <
+          (SELECT created_at,id FROM billing_meter_reports WHERE id=$2))
+      ORDER BY r.created_at DESC,r.id DESC LIMIT $3`,
+    [accountId ?? null, cursor ?? null, reconciliationPageSize + 1],
   );
+  const hasMoreReports = unresolvedReports.rows.length > reconciliationPageSize;
+  const pageReports = unresolvedReports.rows.slice(0, reconciliationPageSize);
+  if (!cursor && !hasMoreReports && pageReports.length < reconciliationPageSize) {
+    const completedReports = await getPool().query<PendingReport>(
+      `SELECT r.id,r.account_id,r.stripe_customer_id,r.cents::text,r.created_at,r.period_start,
+              r.first_attempt_at,r.lease_until,r.reported_at,a.deleting_at
+         FROM billing_meter_reports r JOIN accounts a ON a.id=r.account_id
+        WHERE ($1::uuid IS NULL OR r.account_id=$1)
+          AND a.deleting_at IS NOT NULL AND r.reported_at IS NOT NULL
+        ORDER BY r.created_at DESC,r.id DESC LIMIT $2`,
+      [accountId ?? null, reconciliationPageSize - pageReports.length],
+    );
+    pageReports.push(...completedReports.rows);
+  }
   const checkouts = await getPool().query<{
     account_id: string;
     stripe_customer_id: string | null;
@@ -95,7 +133,8 @@ export async function inspectBillingReconciliation(accountId?: string) {
     [accountId ?? null],
   );
   return {
-    meterReports: reports.rows.map(presentMeterReport),
+    meterReports: pageReports.map(presentMeterReport),
+    ...(hasMoreReports ? { nextCursor: pageReports.at(-1)!.id } : {}),
     checkouts: checkouts.rows.map((row) => ({
       accountId: row.account_id,
       stripeCustomerId: row.stripe_customer_id,
@@ -283,11 +322,10 @@ export async function recoverCheckoutSession(accountId: string, operatorId: stri
     stripe_customer_id: string | null;
     checkout_idempotency_key: string | null;
     checkout_created_at: Date | null;
-    plan: 'developer' | 'team' | string;
     checkout_session_id: string | null;
     deleting_at: Date | null;
   }>(
-    `SELECT b.stripe_customer_id,b.checkout_idempotency_key,b.checkout_created_at,b.plan,
+    `SELECT b.stripe_customer_id,b.checkout_idempotency_key,b.checkout_created_at,
             b.checkout_session_id,a.deleting_at
        FROM billing_accounts b JOIN accounts a ON a.id=b.account_id
       WHERE b.account_id=$1`,
@@ -302,10 +340,15 @@ export async function recoverCheckoutSession(accountId: string, operatorId: stri
     throw new Error(
       'The checkout reservation lacks a customer or creation time; leave erasure blocked for manual investigation.',
     );
+  const reservation = checkoutReservationFromKey(row.checkout_idempotency_key, accountId);
+  if (!reservation)
+    throw new Error(
+      'The checkout reservation key is malformed or unsupported; leave erasure blocked for manual investigation.',
+    );
   const recovered = await findCheckoutRecoverySession({
     accountId,
     customerId: row.stripe_customer_id,
-    plan: row.plan,
+    plan: reservation.plan,
     reservedAt: row.checkout_created_at,
     idempotencyKey: row.checkout_idempotency_key,
   });
@@ -365,7 +408,7 @@ export async function recoverCheckoutSession(accountId: string, operatorId: stri
           liveMode: recovered.livemode,
           created: recovered.created,
           planPriceId:
-            row.plan === 'developer'
+            reservation.plan === 'developer'
               ? process.env.STRIPE_DEVELOPER_PRICE_ID
               : process.env.STRIPE_TEAM_PRICE_ID,
           usagePriceId: process.env.STRIPE_USAGE_PRICE_ID,
