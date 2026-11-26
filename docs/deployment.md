@@ -166,12 +166,60 @@ then purges objects and metadata. Direct S3 links/in-flight requests cannot be r
 Repeated prefix sweeps and staging lifecycle rules remove late uploads. Minimal deletion IDs
 and hashed revoked identity records remain for cleanup and stale-session protection.
 
-Account deletion settles known usage, drains pending metering, closes open Checkout Sessions,
+Account deletion reports known usage, drains pending metering, closes open Checkout Sessions,
 and cancels subscriptions before final metadata removal. Ambiguous Checkout/meter delivery or
 provider failures require retry/reconciliation, not a false success. External invoices, provider
 records, backups, and access logs have separate retention. Delayed storage logs mean a final
 invoice cannot be promised to contain every late transfer. Never manually drop a blocked job
 or its billing rows merely to make the console show completion.
+
+### Reconciling blocked billing before account erasure
+
+Use `billing:reconcile` from a trusted operator environment with the same database and Stripe
+configuration as the worker. It is read-only by default. Start by listing one account:
+
+```sh
+pnpm --filter @agent-drive/web billing:reconcile -- --account-id <account-uuid>
+```
+
+For a report still inside the existing 23-hour retry window, the operator can request a replay. It
+uses the original report UUID as both Stripe's meter event identifier and idempotency key, and
+records the Stripe request ID when Stripe returns success:
+
+```sh
+pnpm --filter @agent-drive/web billing:reconcile -- --report-id <report-uuid> --retry-report
+pnpm --filter @agent-drive/web billing:reconcile -- --report-id <report-uuid> --retry-report --apply --operator-id <operator-id>
+```
+
+For a report paused after 23 hours, Stripe does not provide an API to retrieve a meter event by its
+identifier. The operator must inspect Stripe request logs and verify the successful request matches
+the exact report UUID, customer ID, cents, and event timestamp printed by the dry run. An aggregate
+meter summary or a request ID without that verification is not proof. Then record an operator
+attestation tied to the Stripe request ID:
+
+```sh
+pnpm --filter @agent-drive/web billing:reconcile -- --report-id <report-uuid> --attest-accepted --provider-request-id <req-id> --provider-log-verified
+pnpm --filter @agent-drive/web billing:reconcile -- --report-id <report-uuid> --attest-accepted --provider-request-id <req-id> --provider-log-verified --apply --operator-id <operator-id>
+```
+
+This records an operator attestation, not an independently API-verified acceptance. If the request
+log is missing or does not match the exact report, leave the report pending and account erasure
+blocked; do not clear `reported_at` manually.
+
+For a checkout reservation without a session ID, the command lists Stripe sessions and their line
+items. Applying recovery requires exactly one session matching the account, customer, live/test
+mode, plan and usage prices, and reservation time. Zero or multiple matches produce no database
+change and leave erasure blocked:
+
+```sh
+pnpm --filter @agent-drive/web billing:reconcile -- --account-id <account-uuid> --recover-checkout
+pnpm --filter @agent-drive/web billing:reconcile -- --account-id <account-uuid> --recover-checkout --apply --operator-id <operator-id>
+```
+
+Every applied replay, operator attestation, or recovered session writes an audit record. The record
+is removed with its account during erasure. A meter-event replay can affect a future usage invoice;
+it does not create a card charge directly. These commands do not cancel a subscription, delete
+customer data, or bypass the deletion worker's normal billing checks.
 
 ## API notes for operators
 

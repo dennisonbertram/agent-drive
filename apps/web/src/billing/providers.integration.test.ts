@@ -562,6 +562,12 @@ it('uses a persisted checkout idempotency key for concurrent session creation', 
       { price: 'price_developer_fixture', quantity: 1 },
       { price: 'price_usage_fixture' },
     ],
+    metadata: {
+      accountId: checkoutAccountId,
+      checkoutIdempotencyKey: expect.stringMatching(/^checkout\/v4\//u),
+      plan: 'developer',
+      app: 'agent-drive',
+    },
     subscription_data: {
       proration_behavior: 'create_prorations',
       metadata: { accountId: checkoutAccountId, plan: 'developer', app: 'agent-drive' },
@@ -576,7 +582,7 @@ it('uses a persisted checkout idempotency key for concurrent session creation', 
     },
   });
   expect(secondParams).toEqual(firstParams);
-  expect(firstOptions.idempotencyKey).toMatch(/^checkout\/v3\//u);
+  expect(firstOptions.idempotencyKey).toMatch(/^checkout\/v4\//u);
   expect(secondOptions.idempotencyKey).toBe(firstOptions.idempotencyKey);
   expect(
     (
@@ -727,6 +733,8 @@ it('recovers a month-boundary anchor validation error with the same checkout key
     );
     expect(firstOptions.idempotencyKey).toBe(idempotencyKey);
     expect(secondOptions.idempotencyKey).toBe(idempotencyKey);
+    expect(firstParams).not.toHaveProperty('metadata');
+    expect(secondParams).not.toHaveProperty('metadata');
 
     const recovered = await pool.query<{
       checkout_idempotency_key: string;

@@ -303,7 +303,7 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
   expect(await createCheckout(accountId, 'developer')).toEqual({ url: checkout().url });
   const checkouts = posts('/v1/checkout/sessions');
   expect(checkouts).toHaveLength(2);
-  expect(checkouts[0]!.idempotency).toMatch(/^checkout\/v3\//u);
+  expect(checkouts[0]!.idempotency).toMatch(/^checkout\/v4\//u);
   expect(checkouts[1]!.idempotency).toBe(checkouts[0]!.idempotency);
   for (const checkout of checkouts) expect(checkout.stripeVersion).toBe('2025-09-30.clover');
   expect(posts('/v1/customers')[0]!.stripeVersion).toBe('2025-08-27.basil');
@@ -317,6 +317,10 @@ it('runs checkout recovery, signed activation, decline/recovery, metering, email
     customer: customerId,
     mode: 'subscription',
     client_reference_id: accountId,
+    'metadata[accountId]': accountId,
+    'metadata[checkoutIdempotencyKey]': checkouts[0]!.idempotency,
+    'metadata[plan]': 'developer',
+    'metadata[app]': 'agent-drive',
     'line_items[0][price]': 'price_developer_http',
     'line_items[0][quantity]': '1',
     'line_items[1][price]': 'price_usage_http',
