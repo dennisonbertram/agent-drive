@@ -282,6 +282,16 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const args = parse(raw);
+  // One flag set is parsed for every command, so backup-only flags parse for sync
+  // too — and would be silently ignored, turning `sync --dry-run` into a real
+  // upload. Reject them before connect() performs any key or network lookup.
+  if (command === 'sync') {
+    const backupOnly = (['dry-run', 'exclude', 'gitignore'] as const)
+      .filter((name) => args.values[name] !== undefined)
+      .map((name) => `--${name}`);
+    if (backupOnly.length)
+      throw new Error(`sync does not support ${backupOnly.join(' ')}; use backup instead.`);
+  }
   if (command === 'login') {
     const apiUrl = await resolveLoginApiUrl(args.values.api);
     const apiKey =
@@ -902,8 +912,11 @@ Commands:
   share list --drive ID
   share revoke SHARE_ID --drive ID
   sync LOCAL_DIRECTORY --drive ID [--prefix PATH] [--overwrite-existing]
+                                        sync takes no filter or preview flags; the backup-only flags below are rejected, not ignored.
   backup LOCAL_DIRECTORY [--drive ID] [--prefix PATH] [--exclude GLOB]... [--gitignore] [--dry-run] [--yes]
-                                        Scans the folder first, then uploads. --gitignore skips paths the folder's .gitignore excludes.
+                                        Scans the folder first, then uploads. --gitignore skips paths the folder's .gitignore excludes
+                                        and .git control metadata (a .git directory or a linked worktree's .git file). Without it or
+                                        --exclude, everything is uploaded, .git included.
                                         --exclude GLOB matches the root-relative path: 'build/**' skips everything under build/,
                                         '**/node_modules' skips node_modules at any depth, a bare 'node_modules' only the top-level one.
                                         Over 5000 files or 1 GiB needs --yes (or preview with --dry-run). One backup per prefix at a time.

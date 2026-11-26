@@ -393,4 +393,100 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
     const { client } = setup(file, other.record, key);
     await expect(client.get(driveA, '/t')).rejects.toMatchObject({ code: 'decryption_failed' });
   });
+
+  it('requests the trace inbox while the ciphertext is still downloading', async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    const requested: string[] = [];
+    let finishDownload!: (response: Response) => void;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      requested.push(url.pathname);
+      if (url.pathname.endsWith('/trace-inbox')) return Response.json({ inbox: file.record });
+      if (url.pathname.endsWith('/get'))
+        return Response.json({
+          id: 'v',
+          wrappedKey: file.wrappedKey,
+          downloadUrl: 'http://127.0.0.1:9000/o',
+        });
+      return new Promise<Response>((resolve) => {
+        finishDownload = resolve;
+      });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      driveKey: key,
+      fetch: fetcher,
+    });
+    const pending = client.get(driveA, '/t');
+    await vi.waitFor(
+      () => expect(requested.some((path) => path.endsWith('/trace-inbox'))).toBe(true),
+      { timeout: 10_000 },
+    );
+    // The inbox request arrived while the download was still in flight; finish it.
+    finishDownload(new Response(file.ciphertext as unknown as BodyInit));
+    expect((await pending).bytes).toEqual(plaintext);
+  });
+
+  it('keeps the storage error when the overlapped inbox lookup fails too', async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    let rejectInbox!: (error: unknown) => void;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/trace-inbox'))
+        return new Promise<Response>((_resolve, reject) => {
+          rejectInbox = reject;
+        });
+      if (url.pathname.endsWith('/get'))
+        return Response.json({
+          id: 'v',
+          wrappedKey: file.wrappedKey,
+          downloadUrl: 'http://127.0.0.1:9000/o',
+        });
+      return new Response('down', { status: 500 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      driveKey: key,
+      fetch: fetcher,
+    });
+    await expect(client.get(driveA, '/t')).rejects.toMatchObject({ code: 'storage_error' });
+    // The abandoned lookup settles later; its rejection must not escape unhandled.
+    rejectInbox(new Error('inbox down'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it('does not cache a failed trace-inbox request', async () => {
+    const key = generateDriveKey();
+    const file = await v2File(driveA, key);
+    let inboxCalls = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/trace-inbox')) {
+        inboxCalls += 1;
+        return inboxCalls === 1
+          ? new Response('down', { status: 500 })
+          : Response.json({ inbox: file.record });
+      }
+      if (url.pathname.endsWith('/get'))
+        return Response.json({
+          id: 'v',
+          wrappedKey: file.wrappedKey,
+          downloadUrl: 'http://127.0.0.1:9000/o',
+        });
+      return new Response(file.ciphertext as unknown as BodyInit);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      driveKey: key,
+      fetch: fetcher,
+    });
+    await expect(client.get(driveA, '/t')).rejects.toMatchObject({ code: 'internal_error' });
+    expect((await client.get(driveA, '/t')).bytes).toEqual(plaintext);
+    expect(inboxCalls).toBe(2);
+  });
 });

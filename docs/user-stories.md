@@ -175,6 +175,20 @@ Exposed identically as MCP tools, CLI commands, and a client library.
 - **S8.3** As an operator, I want usage per agent and per drive (storage,
   egress, operations, cost).
 - **S8.4** As an operator, I want to restore deleted files and old versions.
+- **S8.5** As an operator, I want to unlock the console with a passkey in
+  addition to my passphrase, so that I can browse and download files on any
+  browser where my synced passkey or security key is present, and save a fresh
+  recovery file, without typing the passphrase or pasting a key.
+  *Accept:* enrollment is optional and follows passphrase setup; it asks for
+  the current passphrase and a fresh sign-in check; the passkey's WebAuthn PRF
+  output wraps the same account private key, and the service stores only the
+  public credential ID, an IV and the wrapped key; agent-only drives still need
+  their recovery file. *(Accepted 2026-11-26.)*
+- **S8.6** As an agent holding an existing drive key, I can run
+  `agent-drive account seal --drive <drive id>` after the owner sets up dashboard
+  access. The owner can open a file or save a recovery file in the dashboard
+  without copying a secret from my machine or reloading the page.
+
 
 ## Epic 9 — Paying for it
 

@@ -68,6 +68,53 @@ describe('openVersion', () => {
     expect(calls).not.toHaveBeenCalled();
   });
 
+  it('starts the inbox lookup while the ciphertext is still downloading', async () => {
+    let finishDownload!: (response: Response) => void;
+    const fetching = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishDownload = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetching);
+    const api = vi.fn(async () => ({ inbox: record })) as never;
+    const pending = openVersion(api, DRIVE, meta(v2), driveKey, new Map());
+    // Both transfers were issued and neither has settled.
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(fetching).toHaveBeenCalledTimes(1);
+    finishDownload(new Response(ciphertext as BodyInit));
+    expect(new TextDecoder().decode(await pending)).toBe('trace body');
+  });
+
+  it('keeps the download error when the overlapped inbox lookup fails too', async () => {
+    vi.stubGlobal('fetch', async () => new Response('nope', { status: 500 }));
+    let rejectInbox!: (error: Error) => void;
+    const api = (() =>
+      new Promise((_, fail) => {
+        rejectInbox = fail;
+      })) as never;
+    await expect(openVersion(api, DRIVE, meta(v2), driveKey, new Map())).rejects.toThrow(
+      'The encrypted file could not be downloaded.',
+    );
+    // The abandoned lookup settles later; its rejection must not escape unhandled.
+    rejectInbox(new Error('inbox lookup failed'));
+  });
+
+  it('retries the inbox lookup after the overlapped request fails', async () => {
+    vi.stubGlobal('fetch', async () => new Response(ciphertext as BodyInit));
+    let attempts = 0;
+    const api = (async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('lookup down');
+      return { inbox: record };
+    }) as never;
+    const cache: InboxCache = new Map();
+    await expect(openVersion(api, DRIVE, meta(v2), driveKey, cache)).rejects.toThrow('lookup down');
+    const out = await openVersion(api, DRIVE, meta(v2), driveKey, cache);
+    expect(new TextDecoder().decode(out)).toBe('trace body');
+    expect(attempts).toBe(2);
+  });
+
   it('v2 version decrypts via the inbox, fetched once for two opens', async () => {
     const { api, calls } = setup(record);
     const cache: InboxCache = new Map();

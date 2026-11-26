@@ -363,7 +363,13 @@ export async function importCredentials(text: string, method: 'file' | 'stdout')
   return Object.keys(bundle.driveKeys);
 }
 
-/** Tells the service a key was backed up (never the key). A failure is only a warning. */
+export const REPORT_CONCURRENCY = 4;
+
+/**
+ * Tells the service a key was backed up (never the key). Reports run a few at a time under one
+ * shared 5s deadline, so a bundle of many drives cannot hold the calling command for a round
+ * trip per drive. A failure is only a warning.
+ */
 export async function reportKeyBackup(
   apiUrl: string,
   apiKey: string,
@@ -371,26 +377,34 @@ export async function reportKeyBackup(
   method: 'file' | 'stdout' | 'env',
   deps: { fetch?: typeof fetch; warn?: (message: string) => void } = {},
 ) {
+  if (!driveIds.length) return;
   const doFetch = deps.fetch ?? globalThis.fetch.bind(globalThis);
   const warn = deps.warn ?? ((m: string) => process.stderr.write(`${m}\n`));
-  for (const id of driveIds) {
-    try {
-      // Same HTTPS/loopback rule as the client, checked before the token is attached.
-      const base = validateUrl(apiUrl, true).toString().replace(/\/+$/u, '');
-      const response = await doFetch(`${base}/v1/drives/${encodeURIComponent(id)}/key-backup`, {
-        method: 'POST',
-        redirect: 'error',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ method }),
-        signal: AbortSignal.timeout(5000),
-      });
-      // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
-      if (response.status === 403) continue;
-      if (!response.ok) throw new Error(String(response.status));
-    } catch {
-      warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);
+  const deadline = AbortSignal.timeout(5000);
+  let next = 0;
+  const worker = async () => {
+    while (next < driveIds.length) {
+      const id = driveIds[next++]!;
+      try {
+        if (deadline.aborted) throw new Error('deadline');
+        // Same HTTPS/loopback rule as the client, checked before the token is attached.
+        const base = validateUrl(apiUrl, true).toString().replace(/\/+$/u, '');
+        const response = await doFetch(`${base}/v1/drives/${encodeURIComponent(id)}/key-backup`, {
+          method: 'POST',
+          redirect: 'error',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ method }),
+          signal: deadline,
+        });
+        // 403: a read-only key may not report (the endpoint needs write). Expected, so no warning.
+        if (response.status === 403) continue;
+        if (!response.ok) throw new Error(String(response.status));
+      } catch {
+        warn(`Warning: could not report the key backup for drive ${id} to Agent Drive.`);
+      }
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(REPORT_CONCURRENCY, driveIds.length) }, worker));
 }
 
 let reportedEnv = false;

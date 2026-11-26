@@ -962,6 +962,109 @@ test('a slot that holds the wrong key never opens a preview or share', async ({
   });
 });
 
+test('a fresh recovery file downloads from the key menu — account slot and locked tab', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    // A reload drops the tab-held drive key; the persisted account key restores the vault.
+    await page.reload();
+    await page.goto(`/console?drive=${seeded.a.id}`);
+
+    // Metadata browses with no drive key loaded: the row renders before any key or file open.
+    await expect(nameButton(page, 'note.txt')).toBeVisible();
+    await expect(chip(page)).toContainText('Unlocked');
+    await expect(await openMenu(page)).not.toContainText('key is loaded in this tab');
+
+    // The account slot writes the same key into a fresh recovery file — no file asked for,
+    // and no file had to be opened first.
+    let recoveryDownload = page.waitForEvent('download');
+    await (await openMenu(page))
+      .getByRole('button', { name: /^Download recovery file(?: again)?$/ })
+      .click();
+    let written = JSON.parse(await readFile((await (await recoveryDownload).path())!, 'utf8')) as {
+      format?: string;
+      driveId: string;
+      key: string;
+    };
+    expect(written.format).toBe('agent-drive-key-v1');
+    expect(written.driveId).toBe(seeded.a.id);
+    expect(written.key === seeded.a.key).toBe(true);
+    // The usual "did it save?" confirmation records the backup.
+    await (await openMenu(page)).getByRole('button', { name: 'I saved it' }).click();
+    await expect(chip(page)).not.toContainText('Not backed up');
+    // The slot's key is now cached in this tab.
+    await expect(await openMenu(page)).toContainText('key is loaded in this tab');
+
+    // A locked tab: the same menu action asks for the passphrase, then downloads.
+    await lockBrowser(page);
+    await (await openMenu(page))
+      .getByRole('button', { name: /^Download recovery file(?: again)?$/ })
+      .click();
+    const dialog = page.getByRole('dialog', { name: 'Unlock with your passphrase' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('a fresh recovery file downloads');
+    recoveryDownload = page.waitForEvent('download');
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    written = JSON.parse(await readFile((await (await recoveryDownload).path())!, 'utf8'));
+    expect(written.driveId).toBe(seeded.a.id);
+    expect(written.key === seeded.a.key).toBe(true);
+    await expect(chip(page)).toContainText('Unlocked');
+
+    // A drive with no usable account copy says so honestly instead of writing nothing.
+    await page.goto(`/console?drive=${seeded.b.id}`);
+    let wrongDownloads = 0;
+    page.on('download', () => (wrongDownloads += 1));
+    await (await openMenu(page))
+      .getByRole('button', { name: /^Download recovery file(?: again)?$/ })
+      .click();
+    await expect(
+      page.getByText('No usable copy of this key is in your account.', { exact: false }),
+    ).toBeVisible();
+    expect(wrongDownloads).toBe(0);
+    // The recovery dialog includes the scoped command for the agent that holds this drive.
+    await expect(page.getByText('agent-drive account seal')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    // An agent-only drive has no account copy: the menu cannot offer a fresh file.
+    const agentOnly = (await (
+      await context.request.post('/api/console/drives', {
+        data: { name: 'Sealed drive', agentOnly: true },
+        headers: { Origin: baseURL! },
+      })
+    ).json()) as { id: string };
+    await page.goto(`/console?drive=${agentOnly.id}`);
+    const sealedMenu = await openMenu(page);
+    await expect(sealedMenu.getByRole('button', { name: /Download recovery file/ })).toHaveCount(0);
+    await expect(sealedMenu).toContainText('agent-only');
+  });
+});
+
+test('no passphrase yet: the key prompt offers the automatic account handoff', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  await withSeed(context, baseURL!, async (seeded) => {
+    await page.goto(`/console?drive=${seeded.a.id}`);
+    // Metadata shows with no key; opening a file asks for the key.
+    await expect(nameButton(page, 'note.txt')).toBeVisible();
+    await nameButton(page, 'note.txt').click();
+    const dialog = page.getByRole('dialog', { name: 'Load the key for Vault drive A' });
+    await expect(dialog).toBeVisible();
+    // The handoff is offered before any file: an agent can seal this drive to the account,
+    // and passphrase setup is one click inside the same prompt.
+    await expect(dialog.getByText('agent-drive account seal')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Set up passphrase unlock' }).click();
+    await expect(page.getByTestId('generated-passphrase')).toBeVisible();
+  });
+});
+
 // Screenshots for review; only when VAULT_SHOTS names a folder.
 test('screenshots of setup, unlock, unlocked chip, change and reset', async ({
   page,
@@ -1019,5 +1122,67 @@ test('screenshots of setup, unlock, unlocked chip, change and reset', async ({
       await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toBeVisible();
       await page.getByRole('button', { name: 'Close dialog' }).click();
     }
+  });
+});
+
+test('device unlock opens a file and downloads a fresh recovery copy from a locked dashboard', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const session = await context.newCDPSession(page);
+  await session.send('WebAuthn.enable');
+  await session.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      hasPrf: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  await withSeed(context, baseURL!, async (seeded) => {
+    const { raw } = await setUpPassphrase(page, seeded);
+    await page.getByTestId('passkey-offer').click();
+    const add = page.getByRole('dialog', { name: 'Add a passkey' });
+    await add.getByLabel('Confirm with your passphrase').fill(raw);
+    await add.getByRole('button', { name: 'Add a passkey', exact: true }).click();
+    await expect(
+      page.getByText('Passkey added. Use it to unlock this account on this device.'),
+    ).toBeVisible();
+    await lockBrowser(page);
+    await page.reload();
+    await nameButton(page, 'note.txt').click();
+    const unlock = page.getByRole('dialog', { name: 'Unlock with your passkey' });
+    await unlock.getByLabel('Keep this browser unlocked').uncheck();
+    await unlock.getByRole('button', { name: 'Unlock with passkey' }).click();
+    await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText(
+      `NOTE ${seeded.sentinel}`,
+    );
+    await page.reload();
+    await expect(chip(page)).toContainText('Locked');
+    await (await openMenu(page))
+      .getByRole('button', { name: /^Download recovery file(?: again)?$/ })
+      .click();
+    const downloading = page.waitForEvent('download');
+    await unlock.getByRole('button', { name: 'Unlock with passkey' }).click();
+    const copy = JSON.parse(await readFile((await (await downloading).path())!, 'utf8'));
+    expect(copy.driveId === seeded.a.id && copy.key === seeded.a.key).toBe(true);
+    await page.getByRole('button', { name: 'I saved it' }).click();
+    await lockBrowser(page);
+    await page.addInitScript(() =>
+      Object.defineProperty(navigator, 'credentials', { value: undefined }),
+    );
+    await page.reload();
+    await nameButton(page, 'note.txt').click();
+    await dialogPassphrase(page).fill(raw);
+    await page.getByRole('button', { name: 'Unlock', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'note.txt' })).toContainText(
+      `NOTE ${seeded.sentinel}`,
+    );
   });
 });

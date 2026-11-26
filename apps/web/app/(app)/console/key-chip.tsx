@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { MenuButton } from './menu-button';
 import type { VaultStatus } from '@/src/console/vault';
 
@@ -17,6 +18,7 @@ export function KeyChip({
   vault,
   fingerprint,
   agentOnly,
+  passkey,
   vaultActions,
 }: {
   hasKey: boolean;
@@ -25,15 +27,20 @@ export function KeyChip({
   confirming: boolean;
   onLoad: () => void;
   onDownload: () => void;
+  /** Records the backup after the owner confirms that the download succeeded. */
   onSaved: () => void;
   onForget: () => void;
   busy: boolean;
   vault: VaultStatus;
   fingerprint: string;
   agentOnly?: boolean;
+  /** 'use' = a passkey exists and this browser can run it; 'add' = it could enroll one. */
+  passkey?: 'use' | 'add' | undefined;
   vaultActions: {
     onSetup: () => void;
     onUnlock: () => void;
+    onPasskeyUnlock?: () => void;
+    onAddPasskey?: () => void;
     onLock: () => void;
     onLockBrowser: () => void;
     onChange: () => void;
@@ -41,7 +48,14 @@ export function KeyChip({
     onRetry: () => void;
   };
 }) {
+  const confirmation = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (confirming) confirmation.current?.closest<HTMLElement>('[popover]')?.showPopover();
+  }, [confirming]);
   const hasVault = vault === 'locked' || vault === 'unlocked';
+  // A fresh recovery file can be written without a file whenever the account holds a copy
+  // (agent-only drives never get one). A locked vault asks for the passphrase first.
+  const canReproduce = !agentOnly && hasVault;
   const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
@@ -86,10 +100,14 @@ export function KeyChip({
           {vault === 'locked'
             ? hasKey
               ? 'Locked, but this drive’s key is loaded in this tab.'
-              : 'Locked. Your passphrase opens the drives you added to your account.'
+              : agentOnly
+                ? 'Locked. This drive is agent-only — only its recovery file opens it.'
+                : 'Locked. Your passphrase opens the drives you added to your account.'
             : hasKey
               ? 'Unlocked. This drive’s key is loaded in this tab.'
-              : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
+              : agentOnly
+                ? 'Unlocked. This drive is agent-only — only its recovery file opens it.'
+                : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
           <small data-testid="vault-fingerprint">Fingerprint {fingerprint}</small>
         </p>
       )}
@@ -98,7 +116,7 @@ export function KeyChip({
           {hasKey
             ? 'Key loaded in this tab.'
             : agentOnly
-              ? 'Agent-only: open with a recovery file.'
+              ? 'Agent-only: open with a recovery file. A fresh file needs the key loaded here first.'
               : 'Key not loaded. Downloads ask for your recovery file.'}
         </p>
       )}
@@ -107,10 +125,22 @@ export function KeyChip({
           ? backupText
           : 'Not backed up. If the agent’s machine is lost, these files can’t be opened.'}
       </p>
-      {vault === 'locked' && (
+      {vault === 'locked' && passkey === 'use' && vaultActions.onPasskeyUnlock && (
         <button
           type="button"
           className="button primary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onPasskeyUnlock?.();
+          }}
+        >
+          Unlock with passkey
+        </button>
+      )}
+      {vault === 'locked' && (
+        <button
+          type="button"
+          className={passkey === 'use' ? 'button secondary' : 'button primary'}
           onClick={(event) => {
             closeMenu(event);
             vaultActions.onUnlock();
@@ -131,13 +161,13 @@ export function KeyChip({
           Load key
         </button>
       )}
-      {hasKey && !confirming && (
-        <button type="button" className="button secondary" onClick={onDownload}>
+      {(hasKey || canReproduce) && !confirming && (
+        <button type="button" className="button secondary" disabled={busy} onClick={onDownload}>
           {backedUp ? 'Download recovery file again' : 'Download recovery file'}
         </button>
       )}
       {hasKey && confirming && (
-        <div className="key-confirm" role="group" aria-label="Confirm save">
+        <div ref={confirmation} className="key-confirm" role="group" aria-label="Confirm save">
           Did the file save?
           <button type="button" className="button primary" disabled={busy} onClick={onSaved}>
             I saved it
@@ -194,6 +224,18 @@ export function KeyChip({
           }}
         >
           Lock this browser
+        </button>
+      )}
+      {vault === 'unlocked' && passkey === 'add' && vaultActions.onAddPasskey && (
+        <button
+          type="button"
+          className="button secondary"
+          onClick={(event) => {
+            closeMenu(event);
+            vaultActions.onAddPasskey?.();
+          }}
+        >
+          Add a passkey
         </button>
       )}
       {vault === 'unlocked' && (

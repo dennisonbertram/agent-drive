@@ -149,8 +149,9 @@ export async function ingestOpenRouterTrace(input: {
         [driveId, token.account_id],
       );
       if (!drive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      let conflictFile: Awaited<ReturnType<typeof putConflict>>;
       try {
-        await putConflict(client, driveId, path, 'create');
+        conflictFile = await putConflict(client, driveId, path, 'create');
       } catch (error) {
         if (error instanceof ApiError && error.details.state === 'exists')
           return json({ ok: true, stored: 0, duplicate: true });
@@ -197,6 +198,8 @@ export async function ingestOpenRouterTrace(input: {
         description: null,
         mode: 'create',
         versionId,
+        // putConflict and checkDriveQuota already ran under this transaction's locks above.
+        prechecked: { file: conflictFile },
       });
       await auditWebhook(client, token.account_id, token.agent_id);
       return json({ ok: true, stored: 1, path }, 201);

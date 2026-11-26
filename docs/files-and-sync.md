@@ -166,6 +166,7 @@ Rules:
 - Manifests live in `<config path>.state` (by default `~/.config/agent-drive/config.json.state`), outside the uploaded folder. The directory must be private to your user; an unsafe directory is rejected.
 - A corrupt manifest stops the sync with an error. It does not reset the history.
 - If a remote file changed since your last sync, the command stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1. Files uploaded before that point stay uploaded.
+- `sync` takes no filter or preview flags. `--dry-run`, `--exclude` and `--gitignore` belong to `backup`; `sync` rejects them with a suggestion to use `backup` before it touches keys or the network, rather than ignoring them and uploading the whole folder.
 
 ### First adoption of a non-empty prefix
 
@@ -185,10 +186,15 @@ The overwrite still checks the current remote version. After the first run, a fi
 agent-drive backup ./workdir
 agent-drive backup ./workdir --prefix /backups/my-project
 agent-drive backup ./workdir --dry-run
+agent-drive backup ./workdir --gitignore --exclude 'build/**'
 ```
 
 - The default prefix is `/backups/<machine>`. The machine name is `AGENT_DRIVE_MACHINE` if set, otherwise the host name.
 - `--prefix` must be an absolute path.
+- Nothing is filtered unless you ask: without `--gitignore` or `--exclude`, every regular file under the folder is uploaded, including `.git` and ignored files such as `.env`.
+- `--gitignore` skips the paths the folder's git rules ignore. Git never traverses its own control metadata, so `.git` is skipped too — a `.git` directory or the `.git` file of a linked worktree or submodule, at any depth.
+- `--exclude GLOB` skips paths matching the root-relative path: `build/**` skips everything under `build/`, `**/node_modules` skips `node_modules` at any depth, a bare `node_modules` only the top-level one. Repeat it for more patterns.
+- More than 5000 files or 1 GiB is refused unless `--yes` is passed.
 - Unchanged files are skipped (SHA-256 manifest in `<config path>.state`).
 - Symlinks are skipped. The CLI config file, its lock and state, and the `--key-file` file are never uploaded.
 - A file over 5 GiB fails. One failing file does not stop the rest; each failure prints `failed <path>: <reason>` on stderr.

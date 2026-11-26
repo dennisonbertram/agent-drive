@@ -20,7 +20,9 @@ import {
   unsealFromAccount,
   type AccountKeyRecord,
   type AccountSlot,
+  type PasskeyWrap,
 } from './account-key';
+import { enrollAccountPasskey, unlockWithAccountPasskey } from './passkey';
 import type { PersistedStore } from './persisted-key';
 
 export type VaultStatus = 'loading' | 'none' | 'locked' | 'unlocked' | 'error';
@@ -114,8 +116,12 @@ export class Vault {
   private unlockSeq = 0;
   private recordSeq = 0;
   private seen = new Map<string, number>();
+  /** Scoped slot reads still in flight, by drive: concurrent ensureSlot calls share one read. */
+  private ensuring = new Map<string, Promise<boolean>>();
   /** Status before the pending load began; cancelUnlock() puts it back. */
   private beforeLoad: { status: VaultStatus; loadError: string } | null = null;
+  /** Live passkey ceremonies — every epoch/seq bump aborts them with the work they serve. */
+  private ceremonies = new Set<AbortController>();
 
   constructor(private deps: VaultDeps) {
     // A "Lock this browser" in any other tab drops this tab's in-memory key immediately.
@@ -137,10 +143,22 @@ export class Vault {
     this.deps.onChange?.();
   }
 
+  private ceremony() {
+    const controller = new AbortController();
+    this.ceremonies.add(controller);
+    return controller;
+  }
+
+  private abortCeremonies() {
+    for (const controller of this.ceremonies) controller.abort();
+    this.ceremonies.clear();
+  }
+
   /** Reads the session account and the stored record. Never needs the passphrase. */
   async load() {
     const epoch = this.epoch;
     const seq = ++this.unlockSeq;
+    this.abortCeremonies();
     this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
     // A first-ever load has nothing to go back to, so it falls back to a retryable error.
@@ -249,6 +267,7 @@ export class Vault {
   async unlock(passphrase: string, persist = false): Promise<boolean> {
     const epoch = this.epoch;
     const seq = ++this.unlockSeq;
+    this.abortCeremonies();
     const startedAt = Date.now();
     this.fetchingSlots = false;
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
@@ -269,6 +288,124 @@ export class Vault {
       unlockAccountKey(record, this.accountId, p),
     );
     if (!live()) return false;
+    return this.installUnlock(record, privateKey, persist, generation, startedAt, live);
+  }
+
+  /**
+   * Unlocks via the passkey wrap on the record instead of the passphrase. The credential's own
+   * browser prompt — never an assertion the server sees — supplies the key; everything after
+   * it (slots fetch, the "Keep this browser unlocked" write and its lock race) is the shared
+   * install path of unlock(). Cancel/lock/reset abort the ceremony with the attempt.
+   */
+  async unlockWithPasskey(persist = false): Promise<boolean> {
+    const epoch = this.epoch;
+    const seq = ++this.unlockSeq;
+    this.abortCeremonies();
+    const startedAt = Date.now();
+    this.fetchingSlots = false;
+    const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    const generation = persist
+      ? await this.deps.persisted?.readLockGeneration().catch(() => undefined)
+      : undefined;
+    if (!(await this.refreshRecord(live))) return false;
+    const record = this.record;
+    if (!record) {
+      this.status = 'none';
+      this.emit();
+      throw new Error('No passphrase is set up.');
+    }
+    if (!record.passkey) throw new Error('This account key has no passkey.');
+    const ceremony = this.ceremony();
+    let privateKey: CryptoKey;
+    try {
+      privateKey = await unlockWithAccountPasskey(record, ceremony.signal);
+    } finally {
+      this.ceremonies.delete(ceremony);
+    }
+    if (!live()) return false;
+    return this.installUnlock(record, privateKey, persist, generation, startedAt, live);
+  }
+
+  /**
+   * Wraps the account private key under a new passkey and stores the wrap through the strict
+   * route. `passphrase` proves the caller holds the key once; `userName` only labels the
+   * credential. A stored wrapper makes this a no-op — the server refuses a second one anyway.
+   */
+  async addPasskey(passphrase: string, userName: string): Promise<boolean> {
+    const epoch = this.epoch;
+    const seq = ++this.unlockSeq;
+    this.abortCeremonies();
+    const live = () => epoch === this.epoch && seq === this.unlockSeq;
+    if (!(await this.refreshRecord(live))) return false;
+    const record = this.record;
+    if (!record) {
+      this.status = 'none';
+      this.emit();
+      throw new Error('No passphrase is set up.');
+    }
+    if (record.passkey) return true;
+    const normalized = normalizeGeneratedPassphrase(passphrase);
+    const ceremony = this.ceremony();
+    let wrap: PasskeyWrap;
+    try {
+      wrap = await enrollAccountPasskey(
+        record,
+        normalized === passphrase ? passphrase : normalized,
+        userName,
+        ceremony.signal,
+      );
+    } catch (first) {
+      // Only a wrong passphrase earns a retry — the generated form retyped with its
+      // separators. Retrying any other failure would run a second credential ceremony and
+      // bury the real error behind the retry's.
+      if (
+        normalized === passphrase ||
+        !/passphrase is not correct/u.test(String((first as Error)?.message))
+      )
+        throw first;
+      wrap = await enrollAccountPasskey(record, passphrase, userName, ceremony.signal);
+    } finally {
+      this.ceremonies.delete(ceremony);
+    }
+    if (!live()) return false;
+    try {
+      const result = (await this.deps.strict('account-key/passkey', 'POST', {
+        expectedKeyId: record.id,
+        expectedGeneration: record.wrapGeneration,
+        passkey: wrap,
+      })) as { accountKey: unknown };
+      const saved = await parseAccountKeyRecord(result.accountKey, this.accountId);
+      if (!live()) return false;
+      this.record = saved;
+      this.seen.set(saved.id, saved.wrapGeneration);
+      this.emit();
+      return true;
+    } catch (reason) {
+      if (
+        live() &&
+        statusOf(reason) === 409 &&
+        /passphrase was changed/u.test(String((reason as Error).message))
+      ) {
+        this.lock('stale');
+        throw new Error(CHANGED);
+      }
+      throw reason;
+    }
+  }
+
+  /**
+   * The tail every unlock shares once a private key exists: fetch the slots, commit or remove
+   * the browser-held key under its lock-generation snapshot, then expose 'unlocked' — in that
+   * order, and refused the moment `live` dies.
+   */
+  private async installUnlock(
+    record: AccountKeyRecord,
+    privateKey: CryptoKey,
+    persist: boolean,
+    generation: number | undefined,
+    startedAt: number,
+    live: () => boolean,
+  ): Promise<boolean> {
     this.fetchingSlots = true;
     let loaded: { slots: Map<string, AccountSlot>; revisions: Map<string, number> };
     try {
@@ -315,16 +452,22 @@ export class Vault {
     return true;
   }
 
-  private async fetchSlots(keyId: string) {
+  private async fetchSlots(keyId: string, driveId?: string) {
     const slots = new Map<string, AccountSlot>();
     const revisions = new Map<string, number>();
     let cursor: string | null = null;
     try {
       for (let page = 0; page < MAX_SLOT_PAGES; page += 1) {
-        const result = (await this.deps.request(
-          `account-key/slots?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        )) as { items: unknown[]; nextCursor: string | null };
+        const query = driveId
+          ? `driveId=${encodeURIComponent(driveId)}&limit=1`
+          : `limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+        const result = (await this.deps.request(`account-key/slots?${query}`)) as {
+          items: unknown[];
+          nextCursor: string | null;
+        };
         for (const item of result.items) {
+          if (!item || typeof item !== 'object') continue;
+          if (driveId && (!('driveId' in item) || item.driveId !== driveId)) continue;
           // A malformed slot is skipped; it can only hide one drive, never open one.
           const slot = await parseSlot(item).catch(() => null);
           if (slot) {
@@ -344,7 +487,7 @@ export class Vault {
             revisions.set(raw.driveId, raw.revision);
         }
         cursor = result.nextCursor;
-        if (!cursor) return { slots, revisions };
+        if (!cursor || driveId) return { slots, revisions };
       }
     } catch {
       throw new Error(SLOTS_FAILED);
@@ -352,9 +495,40 @@ export class Vault {
     return { slots, revisions };
   }
 
+  /** An agent may have enrolled this drive since the browser unlocked. Retry misses on demand. */
+  async ensureSlot(driveId: string): Promise<boolean> {
+    if (this.hasSlot(driveId)) return true;
+    const record = this.record;
+    if (!record || !this.privateKey) return false;
+    const seq = this.unlockSeq;
+    const epoch = this.epoch;
+    const pendingKey = `${epoch}/${seq}/${driveId}`;
+    const pending = this.ensuring.get(pendingKey);
+    if (pending) return pending;
+    const request = this.fetchSlots(record.id, driveId).then(({ slots, revisions }) => {
+      if (record !== this.record || epoch !== this.epoch || seq !== this.unlockSeq) return false;
+      // A key loaded or repaired in this tab while the request was in flight wins.
+      if (this.hasSlot(driveId)) return true;
+      const revision = revisions.get(driveId);
+      if (revision !== undefined) this.slotRevisions.set(driveId, revision);
+      const slot = slots.get(driveId);
+      if (!slot) return false;
+      this.slots.set(driveId, slot);
+      this.emit();
+      return true;
+    });
+    this.ensuring.set(pendingKey, request);
+    try {
+      return await request;
+    } finally {
+      this.ensuring.delete(pendingKey);
+    }
+  }
+
   /** Stops an unlock attempt that is still running (its dialog was closed). */
   cancelUnlock() {
     this.unlockSeq += 1;
+    this.abortCeremonies();
     this.fetchingSlots = false;
     if (this.beforeLoad && this.status === 'loading') {
       ({ status: this.status, loadError: this.loadError } = this.beforeLoad);
@@ -521,6 +695,7 @@ export class Vault {
   ): Promise<{ added: number; total: number } | null> {
     const epoch = this.epoch;
     const seq = ++this.unlockSeq;
+    this.abortCeremonies();
     const startedAt = Date.now();
     // Checked after every await: Lock, idle, reset or a closed dialog cancel the whole setup.
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
@@ -578,6 +753,7 @@ export class Vault {
   async change(oldPassphrase: string, newPassphrase: string): Promise<boolean> {
     const epoch = this.epoch;
     const seq = ++this.unlockSeq;
+    this.abortCeremonies();
     const live = () => epoch === this.epoch && seq === this.unlockSeq;
     const record = this.record;
     if (!record) throw new Error('No passphrase is set up.');
@@ -612,6 +788,7 @@ export class Vault {
     const record = this.record;
     if (!record) throw new Error('No passphrase is set up.');
     this.epoch += 1;
+    this.abortCeremonies();
     const epoch = this.epoch;
     this.privateKey = null;
     this.slots = new Map();
@@ -649,6 +826,7 @@ export class Vault {
   /** Synchronous: bumps the epoch first so every in-flight step becomes a no-op. */
   lock(reason: LockReason) {
     this.epoch += 1;
+    this.abortCeremonies();
     this.privateKey = null;
     this.slots = new Map();
     this.slotRevisions = new Map();
@@ -681,6 +859,7 @@ export class Vault {
   /** Unmount: drop account state, keeping the callbacks and the browser-held key. */
   clear() {
     this.epoch += 1;
+    this.abortCeremonies();
     this.privateKey = null;
     this.slots = new Map();
     this.slotRevisions = new Map();

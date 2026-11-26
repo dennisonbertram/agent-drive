@@ -183,6 +183,13 @@
       "when": 1795624476158,
       "tag": "0025_hot_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795670890939,
+      "tag": "0026_oval_killraven",
+      "breakpoints": true
     }
   ]
 }

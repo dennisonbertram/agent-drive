@@ -762,13 +762,18 @@ export class AgentDriveClient {
     const metadata = await this.request<Version & { downloadUrl: string }>(
       `drives/${encode(driveId)}/get?${query.toString()}`,
     );
+    // A v2 envelope starts its trace-inbox request now so it overlaps the ciphertext
+    // download; for v1 this resolves immediately without contacting the server.
+    const inbox = this.inboxFor(driveId, metadata.wrappedKey);
+    // If the download fails the lookup is never awaited; observe its rejection anyway.
+    inbox.catch(() => {});
     const response = await this.storage(metadata.downloadUrl);
     const ciphertext = new Uint8Array(await response.arrayBuffer());
     const bytes = await decryptFile(
       ciphertext,
       metadata.wrappedKey,
       this.keyFor(driveId),
-      await this.inboxFor(driveId, metadata.wrappedKey),
+      await inbox,
     );
     return { bytes, version: metadata };
   }

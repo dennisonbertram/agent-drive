@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -204,6 +205,45 @@ describe('drive default at the command level', () => {
       origins: { [B]: 'https://other.test' },
     });
     expect(foreign.err).toContain('--drive ID is required');
+  });
+});
+
+describe('sync flag validation', () => {
+  it('rejects backup-only flags before any key or network lookup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncf-'));
+    dirs.push(dir);
+    await writeFile(join(dir, 'f.txt'), 'x');
+    for (const flags of [['--dry-run'], ['--exclude', 'build/**'], ['--gitignore']]) {
+      const r = await cli(['sync', dir, ...flags], one);
+      expect(r.err).toContain(`sync does not support ${flags[0]}`);
+      expect(r.err).toContain('use backup');
+      // No connect() ran: no drive key lookup, no API call of any kind.
+      expect(r.paths).toEqual([]);
+    }
+  });
+
+  it('still syncs a folder normally', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-syncok-'));
+    dirs.push(dir);
+    await writeFile(join(dir, 'f.txt'), 'x');
+    const r = await cli(['sync', dir], one, (path) => {
+      if (path === 'whoami')
+        return {
+          accountId: 'a',
+          agentId: 'g',
+          keyId: 'k',
+          scopes: ['read', 'write'],
+          driveIds: [A],
+        };
+      if (path === 'drives' || path.endsWith('/list')) return { items: [], nextCursor: null };
+      if (path.endsWith('/put'))
+        return { intentId: 'i1', uploadUrl: 'https://s3.test/x', ciphertextSize: 1 };
+      if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/f.txt' } };
+      return {};
+    });
+    expect(r.err).toBe('');
+    expect(r.out).toContain('"uploaded":1');
+    expect(r.paths.some((p) => p.includes(`drives/${A}/commit`))).toBe(true);
   });
 });
 

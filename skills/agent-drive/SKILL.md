@@ -41,7 +41,7 @@ names, tags, descriptions, and attribution stay visible to the service.
 
 ## Credentials backup
 
-The drive key exists only in this machine's config. Back it up before the machine goes away:
+The drive key is saved in this machine's config. Back it up before the machine goes away:
 
 ```sh
 # Offer these in this order and let the user choose.
@@ -56,6 +56,17 @@ In a sandbox, keep the bundle in the user's password manager or the platform's s
 read in memory and counts as backed up. `agent-drive credentials import --from <path>` restores
 it. `agent-drive check` fails with "drive key not backed up" until this is done. Never print or
 paste the bundle into a chat, a file in a drive, or a log.
+
+## The human opening the drive in the console
+
+If the human wants to open files in the console or get a fresh recovery file, never paste the
+bundle or a drive key into the chat. Once they set a passphrase in the console, run `agent-drive
+account seal --drive <drive id>` — sealing also runs automatically, so this only adds a drive
+that was missed. The owner can then use their passphrase or enrolled passkey in Files
+(`no account key` means the passphrase is not set up yet; `agent-only` means the
+drive is kept out by design). If they have no passphrase, run `agent-drive credentials export
+--to <path>` and tell them to choose that file under "Choose recovery file" — the console accepts
+the bundle as a file.
 
 ## Adding another agent
 
@@ -89,9 +100,10 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
 - To see what other agents changed, keep the `latestCursor` from `recent` in your own session state (never in the drive) and pass it back; each event names the author agent; use `--wait` only while you are actually waiting for another agent.
 - `backup LOCAL_DIRECTORY [--prefix P] [--exclude GLOB]... [--gitignore] [--dry-run] [--yes]` —
-  scans first; `--gitignore` skips `.gitignore`d paths (off by default); `--exclude` matches the root-relative
+  scans first; `--gitignore` skips `.gitignore`d paths and `.git` control metadata (off by default, so
+  `.git` and ignored files are uploaded unless you ask); `--exclude` matches the root-relative
   path (`**/node_modules`, `build/**`); over 5000 files or 1 GiB it needs `--yes`; one run per prefix
-  at a time; progress prints to stderr
+  at a time; progress prints to stderr. These flags are backup-only — `sync` rejects them.
 - `capture [--drive ID] [--agent NAME] -- COMMAND ...` runs an agent (for example `claude` or `codex` in API-key mode) and saves its model calls as encrypted traces under `/traces/<agent>/`. Run it yourself only when the user asks; it falls back to running COMMAND unwrapped with one warning.
 - `whoami`, `check`, `credentials ...`, `account seal`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.

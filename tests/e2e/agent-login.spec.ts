@@ -632,6 +632,90 @@ test.describe('agent device login', () => {
     expect(Number(count.rows[0]!.n)).toBe(1);
   });
 
+  test('second agent: a valid key for another drive is rejected locally; an empty drive still enrolls unchecked', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(300_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'vk-a', 'm-vk-a');
+    const first = await startLogin(envA, 'vk-a-bot');
+    await approve(page, first.path, 'vk-a-bot', first.code);
+    expect((await first.login.done).status).toBe(0);
+    const configA = await readConfig(envA);
+    const [driveA, keyA] = Object.entries(configA.driveKeys)[0]!;
+    const local = join(root, 'vk-probe.txt');
+    await writeFile(local, 'probe');
+    const put = await cli(['put', local, '/probe.txt', '--drive', driveA], envA);
+    expect(put.status, put.stderr).toBe(0);
+
+    // A second drive, left empty: no file and no trace inbox for a key check to run against.
+    const envB = cliEnv(baseURL!, root, 'vk-b', 'm-vk-b');
+    const second = await startLogin(envB, 'vk-b-bot');
+    await approve(page, second.path, 'vk-b-bot', second.code);
+    expect((await second.login.done).status).toBe(0);
+    const [driveB, keyB] = Object.entries((await readConfig(envB)).driveKeys)[0]!;
+
+    const envC = cliEnv(baseURL!, root, 'vk-c', 'm-vk-c');
+    const third = await startLogin(envC, 'vk-c-bot');
+    const assertPrivate = recordRequests(page);
+    await page.goto(third.path);
+    await chooseExistingDrive(page);
+    const password = page.locator('input[type="password"]');
+    const keyError = page.locator('#connect-key-error');
+    // Armed before any approve attempt: a locally rejected key must never produce a POST.
+    const posts: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().includes('/approve')) posts.push(r.postData() ?? '');
+    });
+
+    // Well-formed but another drive's key: the browser checks it against a real file
+    // envelope and refuses — nothing is sent.
+    await page.locator('select').selectOption(driveA);
+    await password.fill(keyB);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await expect(keyError).toBeVisible();
+    await expect(keyError).toContainText('does not open the selected drive');
+    expect(posts).toHaveLength(0);
+
+    // The drive's own key passes the same check and the approval goes through.
+    const approved = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await password.fill(keyA);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = (await approved).postData() ?? '';
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    expect(sent).toContain('sealedDriveKeys');
+    expect(sent).not.toContain(keyA);
+    expect(JSON.parse(sent).driveIds).toEqual([driveA]);
+    expect((await third.login.done).status).toBe(0);
+    expect((await readConfig(envC)).driveKeys[driveA]).toBe(keyA);
+
+    // An empty drive has nothing to check a key against, so a well-formed key still enrolls —
+    // and the receipt says plainly that it went unchecked.
+    const envD = cliEnv(baseURL!, root, 'vk-d', 'm-vk-d');
+    const fourth = await startLogin(envD, 'vk-d-bot');
+    await page.goto(fourth.path);
+    await chooseExistingDrive(page);
+    await page.locator('select').selectOption(driveB);
+    await page.locator('input[type="password"]').fill(keyB);
+    const emptyApprove = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sentEmpty = (await emptyApprove).postData() ?? '';
+    const status = page.getByRole('status');
+    await expect(status).toContainText('Approval saved');
+    await expect(status).toContainText('could not be checked');
+    expect(JSON.parse(sentEmpty).driveIds).toEqual([driveB]);
+    expect(sentEmpty).not.toContain(keyB);
+    expect((await fourth.login.done).status).toBe(0);
+    expect((await readConfig(envD)).driveKeys[driveB]).toBe(keyB);
+    await assertPrivate([keyA, keyB, configA.apiKey]);
+  });
+
   test('second agent: credentials bundle file and Read only give a read-only key; the bundle token never reaches the service', async ({
     page,
     context,

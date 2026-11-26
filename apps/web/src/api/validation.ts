@@ -312,8 +312,8 @@ export function queryValue(url: URL, name: string, max = 256) {
   return value;
 }
 
-function canonicalBytes(value: unknown, name: string): Buffer {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 1024)
+function canonicalBytes(value: unknown, name: string, maxChars = 1024): Buffer {
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxChars)
     throw new ApiError('validation_error', `${name} must be unpadded base64url.`);
   const bytes = Buffer.from(value, 'base64url');
   if (!/^[A-Za-z0-9_-]+$/u.test(value) || bytes.toString('base64url') !== value)
@@ -395,6 +395,31 @@ export function sealedSlotField(value: unknown) {
     epk: ecPointField(sealed.epk, 'sealed.epk'),
     iv: fixedBytesField(sealed.iv, 'sealed.iv', 12),
     ct: fixedBytesField(sealed.ct, 'sealed.ct', 59),
+  };
+}
+
+export type PasskeyWrap = { credentialId: string; iv: string; ciphertext: string };
+
+/**
+ * Account private key wrapped under a WebAuthn PRF passkey: { credentialId (1..1023 bytes,
+ * the WebAuthn credential-id bound), iv (12), ciphertext (AES-GCM-wrapped PKCS8, 48..272) }.
+ * The server stores the wrap opaquely; the credential and key material never leave the browser.
+ */
+export function passkeyWrapField(value: unknown): PasskeyWrap {
+  const passkey = objectBody(value);
+  onlyFields(passkey, ['credentialId', 'iv', 'ciphertext'], 'passkey');
+  // 1023 bytes is 1364 canonical base64url characters; the byte bound below is what counts.
+  const credentialId = canonicalBytes(passkey.credentialId, 'passkey.credentialId', 1364);
+  if (credentialId.length > 1023)
+    throw new ApiError('validation_error', 'passkey.credentialId must be at most 1023 bytes.');
+  // 272 bytes is 363 canonical base64url characters; 48 is the shortest wrapped PKCS8.
+  const ciphertext = canonicalBytes(passkey.ciphertext, 'passkey.ciphertext', 363);
+  if (ciphertext.length < 48)
+    throw new ApiError('validation_error', 'passkey.ciphertext must be at least 48 bytes.');
+  return {
+    credentialId: passkey.credentialId as string,
+    iv: fixedBytesField(passkey.iv, 'passkey.iv', 12),
+    ciphertext: passkey.ciphertext as string,
   };
 }
 

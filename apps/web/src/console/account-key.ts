@@ -18,6 +18,13 @@ const enc = new TextEncoder();
 const EC = { name: 'ECDH', namedCurve: 'P-256' } as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
+/**
+ * The optional passkey wrapper stored on the account key record (passkey.ts). All values are
+ * canonical unpadded base64url: `credentialId` decodes to 1..1023 bytes, `iv` to exactly 12, and
+ * `ciphertext` is the PKCS#8 wrapped under the passkey's PRF output — 48..272 bytes.
+ */
+export type PasskeyWrap = { credentialId: string; iv: string; ciphertext: string };
+
 export type AccountKeyRecord = {
   id: string;
   accountId: string;
@@ -26,6 +33,7 @@ export type AccountKeyRecord = {
   wrappedPrivateKey: string;
   wrapGeneration: number;
   kdf: { name: typeof KDF_NAME; iterations: number; salt: string };
+  passkey?: PasskeyWrap | null;
 };
 export type AccountSlot = {
   driveId: string;
@@ -35,14 +43,14 @@ export type AccountSlot = {
   revision: number;
 };
 
-function b64u(bytes: Uint8Array): string {
+export function b64u(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
 }
 
 /** Canonical unpadded base64url only: re-encodes and compares. Throws on anything else. */
-function unb64u(value: unknown): Uint8Array<ArrayBuffer> {
+export function unb64u(value: unknown): Uint8Array<ArrayBuffer> {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error('b64');
   const binary = atob(value.replaceAll('-', '+').replaceAll('_', '/'));
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
@@ -52,6 +60,31 @@ function unb64u(value: unknown): Uint8Array<ArrayBuffer> {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates one passkey wrap as stored on the record. Encoded lengths are checked before any
+ * decode so a huge stored value is never decoded. Throws one generic message.
+ */
+export function parsePasskeyWrap(value: unknown): PasskeyWrap {
+  try {
+    if (!isObject(value)) throw new Error('shape');
+    const { credentialId, iv, ciphertext } = value;
+    if (typeof credentialId !== 'string' || credentialId.length < 2 || credentialId.length > 1364)
+      throw new Error('credentialId');
+    const credId = unb64u(credentialId);
+    if (credId.length < 1 || credId.length > 1023) throw new Error('credentialId');
+    if (typeof iv !== 'string' || iv.length !== 16 || unb64u(iv).length !== 12)
+      throw new Error('iv');
+    // 48..272 decoded bytes is 64..363 base64url characters.
+    if (typeof ciphertext !== 'string' || ciphertext.length < 64 || ciphertext.length > 363)
+      throw new Error('ciphertext');
+    const ct = unb64u(ciphertext);
+    if (ct.length < 48 || ct.length > 272) throw new Error('ciphertext');
+    return { credentialId, iv, ciphertext };
+  } catch {
+    throw new Error('The passkey record is not valid.');
+  }
 }
 const isUuid = (v: unknown): v is string => typeof v === 'string' && UUID.test(v);
 const isIterations = (v: unknown): v is number =>
@@ -101,6 +134,9 @@ export async function parseAccountKeyRecord(
     if (wrapped[0] !== 1 || wrapped.length < 1 + 12 + 16 + 32 || wrapped.length > 1 + 12 + 16 + 256)
       throw new Error('wrapped');
     await importPublicPoint(publicKey, 87);
+    // Absent and null both mean "no passkey" — a legacy record keeps that meaning instead of
+    // losing the field. Anything else must parse or the whole record is rejected.
+    const passkey = raw.passkey == null ? null : parsePasskeyWrap(raw.passkey);
     return {
       id,
       accountId,
@@ -109,6 +145,7 @@ export async function parseAccountKeyRecord(
       wrappedPrivateKey: wrappedPrivateKey as string,
       wrapGeneration,
       kdf: { name: KDF_NAME, iterations: kdf.iterations, salt: kdf.salt as string },
+      passkey,
     };
   } catch {
     throw new Error(NEWER_VERSION);
@@ -185,7 +222,8 @@ async function wrapPrivateKey(
   };
 }
 
-async function unwrapPrivateKey(
+/** Unwraps the record's private key. `extractable: true` is only for re-wrapping it. */
+export async function unwrapPrivateKey(
   record: AccountKeyRecord,
   passphrase: string,
   extractable: boolean,

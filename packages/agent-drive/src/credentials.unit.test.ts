@@ -15,6 +15,7 @@ import {
   reportEnvBackups,
   loadConfig,
   reportKeyBackup,
+  REPORT_CONCURRENCY,
   unbackedUp,
 } from './credentials.js';
 import { backupCandidates, runCheck } from './check.js';
@@ -373,6 +374,104 @@ describe('enforcement and reporting', () => {
     });
     expect(denied).toHaveBeenCalledTimes(1);
     expect(warn).toEqual([]);
+  });
+
+  it('reports a few drives at a time under one shared deadline', async () => {
+    const ids = [IA, IB, IC, ID, E1, D1, D2];
+    const slots: { signal: AbortSignal | null; resolve: (r: Response) => void }[] = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetcher = vi.fn((_url: string, init?: RequestInit) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise<Response>((resolve) => {
+        slots.push({
+          signal: (init?.signal as AbortSignal | undefined) ?? null,
+          resolve: (r) => {
+            inFlight -= 1;
+            resolve(r);
+          },
+        });
+      });
+    });
+    const warn: string[] = [];
+    const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+      fetch: fetcher as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    // Bounded workers: only REPORT_CONCURRENCY requests start before any response arrives.
+    expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY);
+    expect(maxInFlight).toBe(REPORT_CONCURRENCY);
+    // One shared deadline: every request carries the same AbortSignal.
+    expect(slots[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(new Set(slots.map((s) => s.signal)).size).toBe(1);
+    // Overlap: resolving one frees a lane, and the next drive goes out in order.
+    for (let i = REPORT_CONCURRENCY; i < ids.length; i += 1) {
+      slots[i - REPORT_CONCURRENCY]!.resolve(new Response('{}', { status: 200 }));
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(i + 1));
+    }
+    for (const slot of slots.splice(0)) slot.resolve(new Response('{}', { status: 200 }));
+    await done;
+    expect(fetcher).toHaveBeenCalledTimes(ids.length);
+    expect(warn).toEqual([]);
+    expect(fetcher.mock.calls.map((c) => (c as unknown as [string])[0])).toEqual(
+      ids.map((id) => `https://x.test/api/v1/drives/${id}/key-backup`),
+    );
+  });
+
+  it('cuts every unreported drive when the shared deadline aborts', async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    try {
+      const fetcher = vi.fn((_url: string, init?: RequestInit) => {
+        const signal = init?.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          const fail = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal.aborted) fail();
+          else signal.addEventListener('abort', fail, { once: true });
+        });
+      });
+      const warn: string[] = [];
+      const ids = [IA, IB, IC, ID, E1, D1];
+      const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+        fetch: fetcher as unknown as typeof fetch,
+        warn: (m) => warn.push(m),
+      });
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY));
+      controller.abort();
+      await done;
+      // The deadline never let the queued drives start a request.
+      expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY);
+      // Every unreported drive is a warning; none is silently dropped or claimed.
+      expect(warn).toHaveLength(ids.length);
+      for (const id of ids) expect(warn.join('\n')).toContain(id);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('warns only for reports that fail while the rest succeed', async () => {
+    const resolveBy = new Map<string, (r: Response) => void>();
+    const fetcher = vi.fn(
+      (url: string) => new Promise<Response>((resolve) => resolveBy.set(url, resolve)),
+    );
+    const warn: string[] = [];
+    const ids = [IA, IB, IC, ID, E1];
+    const done = reportKeyBackup('https://x.test/api', 'tok', ids, 'env', {
+      fetch: fetcher as unknown as typeof fetch,
+      warn: (m) => warn.push(m),
+    });
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(REPORT_CONCURRENCY));
+    const at = (id: string) => `https://x.test/api/v1/drives/${id}/key-backup`;
+    resolveBy.get(at(IA))!(new Response('{}', { status: 500 }));
+    resolveBy.get(at(IB))!(new Response('{}', { status: 200 }));
+    resolveBy.get(at(IC))!(new Response('{}', { status: 403 }));
+    resolveBy.get(at(ID))!(new Response('{}', { status: 200 }));
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(ids.length));
+    resolveBy.get(at(E1))!(new Response('{}', { status: 200 }));
+    await done;
+    expect(warn).toHaveLength(1);
+    expect(warn[0]).toContain(IA);
   });
 });
 

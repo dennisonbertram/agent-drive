@@ -184,6 +184,63 @@ describe('Phase 4 console API', () => {
     ).toHaveLength(0);
   });
 
+  it('resolves existing console identities read-only and keeps tenant isolation', async () => {
+    const browseUserId = `e2e_browse_${suffix}`;
+    const peerUserId = `e2e_peer_${suffix}`;
+    const browseSession = await json(await consoleRequest(browseUserId, '/session'));
+    const peerSession = await json(await consoleRequest(peerUserId, '/session'));
+    const browseAccountId = browseSession.account.id as string;
+    accountIds.push(browseAccountId, peerSession.account.id as string);
+    const browseDrive = await json(
+      await consoleRequest(browseUserId, '/drives', 'POST', { name: `browse-${suffix}` }),
+    );
+    const peerDrive = await json(
+      await consoleRequest(peerUserId, '/drives', 'POST', { name: `peer-${suffix}` }),
+    );
+    const rowVersions = async () => ({
+      account: (
+        await pool.query('SELECT xmin::text AS xmin FROM accounts WHERE id = $1', [browseAccountId])
+      ).rows[0].xmin as string,
+      agent: (
+        await pool.query(
+          "SELECT xmin::text AS xmin FROM agents WHERE account_id = $1 AND name = '__console__'",
+          [browseAccountId],
+        )
+      ).rows[0].xmin as string,
+    });
+    const browse = async () => ({
+      session: (await json(await consoleRequest(browseUserId, '/session'))).account,
+      whoami: await json(await consoleRequest(browseUserId, '/whoami')),
+      driveIds: (
+        (await json(await consoleRequest(browseUserId, '/drives'))).items as { id: string }[]
+      ).map((drive) => drive.id),
+      ownList: (await consoleRequest(browseUserId, `/drives/${browseDrive.id}/list`)).status,
+      foreignList: (await consoleRequest(browseUserId, `/drives/${peerDrive.id}/list`)).status,
+      peerDriveIds: (
+        (await json(await consoleRequest(peerUserId, '/drives'))).items as { id: string }[]
+      ).map((drive) => drive.id),
+    });
+    const before = await rowVersions();
+    const first = await browse();
+    expect(first.session).toEqual({ id: browseAccountId, name: 'Personal workspace' });
+    expect(first.whoami).toMatchObject({
+      accountId: browseAccountId,
+      scopes: ['read', 'write', 'delete', 'share', 'manage', 'delegate'],
+      writePaths: [],
+      driveIds: null,
+    });
+    expect(first.driveIds).toEqual([browseDrive.id]);
+    expect(first.peerDriveIds).toEqual([peerDrive.id]);
+    expect(first.ownList).toBe(200);
+    expect(first.foreignList).toBe(403);
+    for (let i = 0; i < 4; i++) expect(await browse()).toEqual(first);
+    expect(await rowVersions()).toEqual(before);
+    const accounts = await pool.query('SELECT id FROM accounts WHERE external_clerk_user_id = $1', [
+      browseUserId,
+    ]);
+    expect(accounts.rows).toHaveLength(1);
+  });
+
   it('revokes only the owner agent keys and preserves read-only bearer behavior', async () => {
     const created = await json(
       await consoleRequest(ownerUserId, '/keys', 'POST', {
