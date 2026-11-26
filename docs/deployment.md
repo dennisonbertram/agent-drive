@@ -256,82 +256,51 @@ current value.
 The Vercel project is connected to GitHub with `prod` as its production branch.
 `apps/web/vercel.json` turns Git deploys off for every branch except `prod`
 (`"deploymentEnabled": { "**": false, "prod": true }`), so merges to `main`, task branches and
-pull requests never deploy. Pushing to `prod` builds and deploys to production. Both production
-paths require the exact CLI artifact named by `packages/agent-drive/package.json` to be published
-on npm first. The production web build runs `apps/web/scripts/prepare-cli-tarball.mjs`, which reads
-that exact package version from npm, verifies the downloaded tarball against npm's SHA-512
-integrity, checks the package identity and both Linux helpers, and fails without falling back to an
-older version. Use this same script as the operator preflight after pinning the release SHA below
-and before starting either production path.
-
-After a PR merges to `main` and its CI passes, work from a clean checkout at the exact fetched
-`origin/main` commit. Record and verify that SHA before reading the local package manifest or
-running the artifact preflight, and keep using this checkout for the remaining release steps:
+pull requests never deploy. Pushing to `prod` builds and deploys to production. After `main` CI
+passes, pin its SHA and use that clean checkout for the manifest, preflight and release. The
+production build verifies the exact `@dennisonbertram/agent-drive` version against npm's SHA-512
+integrity, package manifest and Linux helpers; it fails closed without an older-version fallback.
 
 ```sh
-git fetch origin
-RELEASE_SHA=$(git rev-parse origin/main)
-verify_release_checkout() {
-  test -n "$RELEASE_SHA" || { echo "RELEASE_SHA is not set." >&2; return 1; }
-  test -z "$(git status --porcelain)" || {
-    echo "Release checkout is not clean." >&2
-    return 1
-  }
-  test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || {
-    echo "Release checkout HEAD does not match the pinned SHA $RELEASE_SHA." >&2
-    return 1
-  }
-}
-verify_release_checkout
+unset RELEASE_SHA
+git fetch origin &&
+test -z "$(git status --porcelain)" &&
+RELEASE_SHA=$(git rev-parse origin/main) &&
+git switch --detach "$RELEASE_SHA" &&
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 ```
 
-Compare `packages/agent-drive/package.json` at `origin/prod` and this verified `origin/main`
-checkout. If its `version` changed, get approval to publish that npm version, then create and push
-the matching tag at `RELEASE_SHA`. The `release-cli.yml` workflow builds and publishes the CLI for
-that tag. Run the following commands in the same shell so the manifest and tag stay tied to the
-verified SHA:
+If `packages/agent-drive/package.json` changed version from `origin/prod`, get npm release approval,
+then run this in the same shell and wait for the `release-cli.yml` workflow to succeed. Skip the tag
+when the version is unchanged:
 
 ```sh
-verify_release_checkout
-CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version")
-git tag "cli-v${CLI_VERSION}" "$RELEASE_SHA"
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version") &&
+git tag "cli-v${CLI_VERSION}" "$RELEASE_SHA" &&
 git push origin "cli-v${CLI_VERSION}"
 ```
 
-Wait for the `cli-v${CLI_VERSION}` workflow to finish successfully. Immediately before the
-production-mode preflight, call `verify_release_checkout` again to ensure the local manifest is
-still from `RELEASE_SHA`. If the manifest version did not change, do not create another CLI tag;
-use the already published version. This keeps web-only releases on the same CLI version working
-while still checking the exact artifact before deployment.
+Choose one production path below. Each command stops on a failed SHA or clean-checkout guard, or
+if the exact npm artifact preflight fails. The preflight uses the verified CLI version and writes
+the tarball under ignored `apps/web/public/cli/`.
 
-Run the production-mode preflight from the repository root, in the same clean checkout at
-`RELEASE_SHA`:
+Direct fast-forward (does not run staged smoke checks):
 
 ```sh
-verify_release_checkout
-VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs
-```
-
-This preflight downloads and checks the package; it does not build or deploy the web app. It writes
-the verified tarball under the ignored `apps/web/public/cli/` directory. Do not proceed if the
-command fails. A missing npm version, registry error, integrity mismatch, or invalid package means
-the CLI release is not ready.
-
-To use the direct `prod` branch path, call `verify_release_checkout` again and fast-forward the
-exact verified SHA only after the preflight succeeds:
-
-```sh
-verify_release_checkout
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs &&
 git push origin "$RELEASE_SHA:refs/heads/prod"
 ```
 
-That path does not run the staged smoke checks. For a staged release, run the same preflight first,
-then use the repository's release entry point (after linking the project and authenticating an
-approved Vercel CLI). Call `verify_release_checkout` immediately before starting it so Vercel
-builds the same SHA whose artifact was preflighted:
+Staged release (after linking the project and authenticating an approved Vercel CLI):
 
 ```sh
-verify_release_checkout
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs &&
 pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
 ```
 
@@ -348,10 +317,8 @@ Deployment protection that requires interactive Vercel login prevents CLI smoke 
 blocks promotion; arrange approved candidate access rather than disabling organization-wide
 protection or claiming the test passed. Production-environment staging may use production resources:
 only synthetic payloads and a disposable isolated workspace are created.
-
-If the CLI preflight fails or a production build cannot verify the exact npm artifact, do not deploy
-or promote. The existing healthy production deployment remains live until a later deployment
-passes its build gate and, for a staged release, its smoke checks.
+If a preflight or build fails, do not retry around the gate; the existing healthy production
+deployment remains live. A staged release promotes only after its candidate smoke succeeds.
 
 To run smoke independently against a deployed preview:
 
