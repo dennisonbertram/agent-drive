@@ -74,7 +74,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "openWorldHint": true,
       "readOnlyHint": false,
     },
-    "description": "Download and fully decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.",
+    "description": "Stream and decrypt a file into a new local file at outputPath (any size, binary allowed). Refuses to overwrite an existing file.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -107,7 +107,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "openWorldHint": true,
       "readOnlyHint": true,
     },
-    "description": "Download and fully decrypt a file and return it inline. Returns small printable UTF-8 text only; use the download tool for large or binary data.",
+    "description": "Decrypt and return printable UTF-8 text up to 64 KiB inline. Use the download tool for larger or binary files.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -221,7 +221,7 @@ exports[`MCP tool contract > keeps the sorted tool names, descriptions, schemas,
       "openWorldHint": true,
       "readOnlyHint": false,
     },
-    "description": "Encrypt and upload a text or local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.",
+    "description": "Encrypt and upload text or stream a local file. Defaults to create-only; provide overwrite or ifVersionId for replacement.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
