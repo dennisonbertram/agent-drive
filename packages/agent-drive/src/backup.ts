@@ -167,28 +167,13 @@ async function takeBackupLock(path: string, prefix: string) {
   }
 }
 
-/** Reads a regular file through a no-follow descriptor, refusing if it moved outside root. */
-export async function readFileInside(path: string, root: string, expected: Stats) {
-  const changed = () => new Error('file changed during backup; refusing to read it');
-  const same = (a: Stats) => a.isFile() && a.dev === expected.dev && a.ino === expected.ino;
-  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  try {
-    if (!same(await handle.stat())) throw changed();
-    if (!within(root, await realpath(dirname(path)))) throw changed();
-    const bytes = new Uint8Array(await handle.readFile());
-    if (!same(await lstat(path)) || !within(root, await realpath(dirname(path)))) throw changed();
-    return bytes;
-  } finally {
-    await handle.close();
-  }
-}
-
 /** Read a backup file in bounded chunks and verify its identity and content at EOF. */
 async function* streamFileInside(
   path: string,
   root: string,
   expected: Stats,
   expectedDigest?: string,
+  onDigest?: (digest: string) => void,
 ): AsyncGenerator<Uint8Array> {
   const changed = () => new Error('file changed since the scan; refusing to read it');
   const same = (a: Stats) =>
@@ -216,16 +201,24 @@ async function* streamFileInside(
     ) {
       throw changed();
     }
-    if (expectedDigest !== undefined && hash.digest('hex') !== expectedDigest) throw changed();
+    const digest = hash.digest('hex');
+    if (expectedDigest !== undefined && digest !== expectedDigest) throw changed();
+    onDigest?.(digest);
   } finally {
     await handle.close();
   }
 }
 
 async function hashFileInside(path: string, root: string, expected: Stats) {
-  const hash = createHash('sha256');
-  for await (const chunk of streamFileInside(path, root, expected)) hash.update(chunk);
-  return hash.digest('hex');
+  let digest: string | undefined;
+  const stream = streamFileInside(path, root, expected, undefined, (value) => {
+    digest = value;
+  })[Symbol.asyncIterator]();
+  while (!(await stream.next()).done) {
+    // The stream computes the digest while yielding bounded chunks; discard them on this pass.
+  }
+  if (digest === undefined) throw new Error('file changed during backup; refusing to read it');
+  return digest;
 }
 
 async function loadManifest(path: string): Promise<Manifest> {
