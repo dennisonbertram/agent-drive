@@ -431,6 +431,7 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     'GET:get': 'drive.get',
     'GET:list': 'drive.list',
     'POST:move': 'drive.move',
+    'POST:unlink': 'drive.delete',
     'POST:copy': 'drive.copy',
     'POST:delete': 'drive.delete',
     'POST:restore': 'drive.restore',
@@ -2586,10 +2587,17 @@ async function fileEndpoint(
     });
     return response(moved);
   }
-  if (operation === 'delete' && request.method === 'POST') {
+  if ((operation === 'delete' || operation === 'unlink') && request.method === 'POST') {
+    const guarded = operation === 'unlink';
     need(auth, 'delete', driveId);
     const body = await jsonBody(request);
     const path = canonicalPath(body.path);
+    const ifVersionId = guarded
+      ? uuid(
+          typeof body.ifVersionId === 'string' ? body.ifVersionId : undefined,
+          'ifVersionId',
+        )
+      : undefined;
     needWritePath(auth, path);
     const userId = auth.userId ?? optionalString(body, 'userId', 256) ?? null;
     const deleted = await withTransaction(async (client) => {
@@ -2600,14 +2608,33 @@ async function fileEndpoint(
       );
       if (!lockedDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
       const machine = await machineId(client, auth, request);
+      if (ifVersionId) {
+        const selected = await client.query(
+          `SELECT id, current_version_id, deleted_at
+             FROM files WHERE drive_id = $1 AND path = $2 FOR UPDATE`,
+          [driveId, path],
+        );
+        const current = selected.rows[0] as Row | undefined;
+        if (!current || current.deleted_at) throw new ApiError('not_found', 'File not found.');
+        if (current.current_version_id !== ifVersionId)
+          throw new ApiError('conflict', 'The file changed since it was opened.', 409, {
+            state: 'changed',
+            currentVersionId: String(current.current_version_id),
+          });
+      }
       const result = await client.query(
         `UPDATE files SET deleted_at = now()
           WHERE drive_id = $1 AND path = $2 AND deleted_at IS NULL
+            AND ($3::uuid IS NULL OR current_version_id = $3::uuid)
           RETURNING id, path, current_version_id, deleted_at`,
-        [driveId, path],
+        [driveId, path, ifVersionId ?? null],
       );
       const file = result.rows[0] as Row | undefined;
-      if (!file) throw new ApiError('not_found', 'File not found.');
+      if (!file) {
+        if (ifVersionId)
+          throw new ApiError('conflict', 'The file changed before unlink completed.');
+        throw new ApiError('not_found', 'File not found.');
+      }
       await client.query(
         `INSERT INTO file_events
           (drive_id, file_id, operation, path, version_id, agent_id, machine_id, user_id)
