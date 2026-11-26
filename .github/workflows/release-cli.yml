@@ -6,11 +6,66 @@ on:
 
 permissions:
   contents: read
-  id-token: write # npm provenance
 
 jobs:
+  mount-helper:
+    name: mount-helper (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            linker: musl-gcc
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            linker: musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @dennisonbertram/agent-drive build
+      - name: Install FUSE and musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse3 kmod musl-tools
+          if [[ ! -e /dev/fuse ]]; then sudo modprobe fuse; fi
+          if [[ ! -c /dev/fuse ]]; then echo "/dev/fuse is not a character device" >&2; exit 1; fi
+          if [[ ! -r /dev/fuse || ! -w /dev/fuse ]]; then sudo chmod 666 /dev/fuse; fi
+          test -r /dev/fuse && test -w /dev/fuse
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.87.0 --profile minimal --target "${{ matrix.target }}"
+      - name: Test mount helper
+        run: cargo +1.87.0 test --locked --manifest-path native/mount/Cargo.toml
+      - name: Build static mount helper
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.arch == 'x64' && matrix.linker || '' }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.arch == 'arm64' && matrix.linker || '' }}
+        run: scripts/build-linux-mount.sh "${{ matrix.target }}"
+      - run: node scripts/mount-smoke.mjs "packages/agent-drive/native/linux-${{ matrix.arch }}/agent-drive-mount" "packages/agent-drive/dist/cli.js"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mount-helper-${{ matrix.arch }}
+          path: packages/agent-drive/native/linux-${{ matrix.arch }}/agent-drive-mount
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     runs-on: ubuntu-latest
+    needs: mount-helper
+    permissions:
+      contents: read
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -24,6 +79,26 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @dennisonbertram/agent-drive build
+      - uses: actions/download-artifact@v4
+        with:
+          name: mount-helper-x64
+          path: packages/agent-drive/native/linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: mount-helper-arm64
+          path: packages/agent-drive/native/linux-arm64
+      - run: chmod +x packages/agent-drive/native/linux-{x64,arm64}/agent-drive-mount
+      - run: node packages/agent-drive/scripts/check-native-mount.mjs packages/agent-drive
+      - name: Verify package contains both helpers
+        run: |
+          npm pack --dry-run --json ./packages/agent-drive > /tmp/agent-drive-pack.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const [{ files }] = JSON.parse(fs.readFileSync("/tmp/agent-drive-pack.json", "utf8"));
+            for (const path of ["native/linux-x64/agent-drive-mount", "native/linux-arm64/agent-drive-mount"]) {
+              if (!files.some(file => file.path === path && (file.mode & 0o111) !== 0)) throw new Error(`missing or non-executable packed helper: ${path}`);
+            }
+          '
       - run: pnpm exec vitest run --config vitest.unit.config.ts packages/agent-drive
       - name: Tag matches package version
         run: |

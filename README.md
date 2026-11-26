@@ -52,6 +52,17 @@ pnpm agent-drive get /sample.txt --drive DRIVE_ID --output ./sample.downloaded.t
 
 The CLI encrypts bytes before uploading. Drive keys never go to the API or object storage.
 
+## Mount a drive
+
+On Linux and macOS, the CLI can mount a drive in a local directory. A key with `write` scope
+enables edits by default; pass `--read-only` to force a browse-only mount. Deletes and replacing
+an existing file also require the `delete` scope. See the [mount guide](docs/cli.md#mount-a-drive)
+for platform requirements, saving behavior, and recovery details.
+
+```sh
+pnpm agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
+```
+
 ## MCP server
 
 Install the CLI, then add it to your MCP host. Agent Drive reads API credentials and drive keys

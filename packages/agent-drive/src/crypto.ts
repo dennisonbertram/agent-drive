@@ -2,6 +2,7 @@ import {
   CryptoStreamSourceError,
   encryptedSize,
   open,
+  openFrameRange as openCiphertextFrameRange,
   openStream,
   owned,
   seal,
@@ -212,6 +213,39 @@ export function decryptWithFileKeyStream(
         keyBytes.fill(0);
       }
       yield* openStream(source, key, expectedCiphertextBytes);
+    } catch (error) {
+      if (error instanceof CryptoStreamSourceError) throw error.sourceError;
+      throw failedDecryption();
+    }
+  })();
+}
+
+/** Open selected contiguous ADRv1 frames with a base64url-encoded file key. */
+export function openFrameRange(
+  source: AsyncIterable<Uint8Array>,
+  fileKey: string,
+  header: Uint8Array,
+  firstFrameIndex: number,
+  frameCount: number,
+  expectedCiphertextBytes?: number,
+): AsyncIterable<Uint8Array> {
+  return (async function* () {
+    try {
+      const keyBytes = decodeDriveKey(fileKey);
+      let key: CryptoKey;
+      try {
+        key = await importDriveKey(keyBytes);
+      } finally {
+        keyBytes.fill(0);
+      }
+      yield* openCiphertextFrameRange(
+        source,
+        key,
+        header,
+        firstFrameIndex,
+        frameCount,
+        expectedCiphertextBytes,
+      );
     } catch (error) {
       if (error instanceof CryptoStreamSourceError) throw error.sourceError;
       throw failedDecryption();

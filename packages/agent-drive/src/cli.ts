@@ -307,6 +307,8 @@ async function run(command: string, raw: string[]) {
   const args = parse(raw);
   if (args.values['token-stdin'] && command !== 'login')
     throw new Error('--token-stdin is only supported by `login`.');
+  if (args.values['read-only'] && command !== 'mount')
+    throw new Error('--read-only is only supported by `mount`.');
   if (command === 'put') {
     if (args.values.overwrite && args.values['if-version'] !== undefined)
       throw new Error('--overwrite and --if-version are mutually exclusive.');
@@ -315,6 +317,8 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'get' && args.values.version !== undefined && !args.values.version.trim())
     throw new Error('--version must not be empty.');
+  if (command === 'mount' && (args.positionals.length !== 1 || !args.positionals[0]?.trim()))
+    throw new Error('Usage: mount MOUNTPOINT [--drive ID] [--read-only]');
   let stdinSize: number | undefined;
   if (args.values.size !== undefined) {
     if (command !== 'put' || args.positionals[0] !== '-')
@@ -612,8 +616,134 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const { client, connection } = await connect(args, {
-    requireDriveKey: command === 'put' && args.positionals[0] === '-',
+    requireDriveKey: (command === 'put' && args.positionals[0] === '-') || command === 'mount',
   });
+  if (command === 'mount') {
+    const driveId = requiredDrive(args);
+    const mountPoint = args.positionals[0]!;
+    const mountIdentity = await client.whoami();
+    if (
+      !Array.isArray(mountIdentity.scopes) ||
+      mountIdentity.scopes.some((scope) => typeof scope !== 'string')
+    )
+      throw new Error('The mount permissions returned by the API are invalid.');
+    if (!mountIdentity.scopes.includes('read')) {
+      throw new Error(
+        'This API key lacks read access. Use a key with read access to the selected drive.',
+      );
+    }
+    if (
+      mountIdentity.driveIds !== null &&
+      (!Array.isArray(mountIdentity.driveIds) ||
+        mountIdentity.driveIds.some((id) => typeof id !== 'string'))
+    ) {
+      throw new Error('The mount drive permissions returned by the API are invalid.');
+    }
+    if (mountIdentity.driveIds === null && !mountIdentity.scopes.includes('manage')) {
+      throw new Error('The mount drive permissions returned by the API are invalid.');
+    }
+    if (mountIdentity.driveIds !== null && !mountIdentity.driveIds.includes(driveId)) {
+      throw new Error(
+        'This API key is not scoped to the selected drive. Use a key with read access to the selected drive.',
+      );
+    }
+    const writePaths = mountIdentity.writePaths ?? [];
+    if (
+      !Array.isArray(writePaths) ||
+      writePaths.some(
+        (path) =>
+          typeof path !== 'string' ||
+          !path.startsWith('/') ||
+          path.includes('\\') ||
+          path.includes('//') ||
+          (path !== '/' && path.endsWith('/')) ||
+          path.split('/').some((part) => part === '.' || part === '..'),
+      )
+    )
+      throw new Error('The mount write-path permissions returned by the API are invalid.');
+    const {
+      createMountBridge,
+      resolveMountHelper,
+      runLinuxMount,
+      MOUNT_MAX_READ_BYTES,
+      MOUNT_MAX_WRITE_BYTES,
+    } = await import('./mount.js');
+    const hasWriteScope = mountIdentity.scopes.includes('write');
+    const writeEnabled = hasWriteScope && args.values['read-only'] !== true;
+    const deleteEnabled = writeEnabled && mountIdentity.scopes.includes('delete');
+    const mountCapabilities = {
+      readOnly: !writeEnabled,
+      write: writeEnabled,
+      delete: deleteEnabled,
+      writePaths,
+      maxReadBytes: MOUNT_MAX_READ_BYTES,
+      maxWriteBytes: MOUNT_MAX_WRITE_BYTES,
+      ops: [
+        'capabilities',
+        'stat',
+        'list',
+        'read',
+        ...(writeEnabled
+          ? ['openWrite', 'write', 'truncate', 'readStaged', 'flush', 'release', 'mkdir', 'rename']
+          : []),
+        ...(deleteEnabled ? ['unlink', 'rmdir'] : []),
+      ],
+    };
+    const controller = new AbortController();
+    let interruptedBy: 'SIGINT' | 'SIGTERM' | undefined;
+    let closeMacMount: (() => Promise<void>) | undefined;
+    const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+      if (interruptedBy) {
+        process.exit(signal === 'SIGINT' ? 130 : 143);
+        return;
+      }
+      interruptedBy = signal;
+      controller.abort(signal);
+      void closeMacMount?.();
+    };
+    const onSigint = () => onSignal('SIGINT');
+    const onSigterm = () => onSignal('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    try {
+      if (process.platform === 'darwin') {
+        const bridge = await createMountBridge(client, driveId, {
+          signal: controller.signal,
+          capabilities: mountCapabilities,
+        });
+        try {
+          if (controller.signal.aborted) return;
+          const { startMacMount } = await import('./mount-mac.js');
+          const mount = await startMacMount({
+            driveId,
+            requestedMountpoint: mountPoint,
+            dispatch: bridge.request,
+          });
+          closeMacMount = () => mount.close();
+          if (controller.signal.aborted) await closeMacMount();
+          await mount.waitForExit();
+        } finally {
+          try {
+            await closeMacMount?.();
+          } finally {
+            await bridge.close();
+          }
+        }
+      } else {
+        await runLinuxMount(client, driveId, mountPoint, {
+          helperPath: resolveMountHelper(),
+          signal: controller.signal,
+          readWrite: writeEnabled,
+          capabilities: mountCapabilities,
+        });
+      }
+      if (interruptedBy) process.exitCode = interruptedBy === 'SIGINT' ? 130 : 143;
+    } finally {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+    }
+    return;
+  }
   if (command === 'whoami') {
     const who = await client.whoami();
     const config = connection.config;
@@ -1023,6 +1153,7 @@ Commands:
                                         --size starts the 10-minute upload intent before stdin; input, upload and commit must fit.
                                         Without it, stdin is spooled first; upload and commit then have 10 minutes.
   get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
+  mount MOUNTPOINT --drive ID [--read-only]  Mount a drive; write scope enables edits
   ls --drive ID [--prefix PATH | --folder PATH] [--sort path|modified] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   mv SOURCE DESTINATION --drive ID
   cp SOURCE DESTINATION --drive ID

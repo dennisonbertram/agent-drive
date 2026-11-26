@@ -96,6 +96,7 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
 - `put - REMOTE [--size N] [--overwrite | --if-version ID]` reads bytes from stdin; `--size` enables direct streaming but starts the 10-minute upload-intent window before stdin, while omitting it uses a private temporary spool before that window
 - `get REMOTE [--version ID] [--output FILE|-]`; use `--output FILE` for an atomic, fully verified result. `--output -` writes raw bytes to stdout without JSON or a newline, but can send partial bytes before a later verification error
+- `mount MOUNTPOINT [--drive ID] [--read-only]` mounts on Linux or macOS. Use a key with read access to the drive. Omit `--drive` only when one drive key is saved for the API. A `write` scope enables edits unless `--read-only` is passed; `delete` is also needed to delete or replace files. Linux needs FUSE and the matching helper. macOS needs the signed Agent Drive app installed on the same Mac and its Finder extension enabled if requested.
 - `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO] [--cursor C] [--wait S]`
 - `versions PATH`, `restore PATH [--version ID]`, `mv`, `cp`, `rm`
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
@@ -108,6 +109,14 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `capture [--drive ID] [--agent NAME] -- COMMAND ...` runs an agent (for example `claude` or `codex` in API-key mode) and saves its model calls as encrypted traces under `/traces/<agent>/`. Run it yourself only when the user asks; it falls back to running COMMAND unwrapped with one warning.
 - `whoami`, `check`, `credentials ...`, `account seal`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
+
+The mount runs in the foreground. Press Ctrl+C once and wait for it to exit cleanly; Linux can be
+unmounted with `fusermount3 -u MOUNTPOINT` if needed. Reads are authenticated ranges pinned to a
+file version, so existing ADRV v1 files remain readable. Saves are version-checked; `fsync` waits
+for the remote commit. Local plaintext staging is protected by owner-only directory/file modes
+`0700`/`0600` under `~/.config/agent-drive/mount-writeback/` (next to a custom config path). Keep
+the journal if a save conflicts. An unlink `EIO` may be ambiguous, so refresh before retrying.
+Directory rename is unavailable.
 
 `whoami` shows `writePaths`. If your writes are limited, write only under those folders (pass `--prefix` to `backup`).
 
