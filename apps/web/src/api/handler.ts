@@ -2843,6 +2843,7 @@ const shareIdPattern = /^[A-Za-z0-9_-]{22}$/u;
 
 export async function handlePublicShareRequest(shareId: string, metadataOnly = false) {
   const context: RequestContext = { action: 'share.access', status: 500 };
+  let auditEligible = false;
   let output: Response;
   try {
     if (!shareIdPattern.test(shareId))
@@ -2866,6 +2867,10 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
+    // Record attempts against an active share, including operation-budget failures. Unknown,
+    // revoked, expired and unavailable links are public failures and must not create unbounded
+    // per-request audit rows.
+    auditEligible = true;
     await reserveOperation(context);
     if (metadataOnly) {
       output = response({
@@ -2898,12 +2903,14 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
     context.status = mapped.status;
     context.errorCode = mapped.code;
   }
-  try {
-    await audit(context);
-  } catch {
-    return responseForError(
-      new ApiError('internal_error', 'The audit record could not be written.'),
-    );
+  if (auditEligible) {
+    try {
+      await audit(context);
+    } catch {
+      return responseForError(
+        new ApiError('internal_error', 'The audit record could not be written.'),
+      );
+    }
   }
   return output;
 }
