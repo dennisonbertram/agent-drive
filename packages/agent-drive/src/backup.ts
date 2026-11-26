@@ -241,6 +241,10 @@ export async function backupDirectory(
   const builtinSkip = (path: string) =>
     path === config ||
     path === `${config}.lock` ||
+    path === `${config}.lock.sqlite` ||
+    path === `${config}.lock.sqlite-journal` ||
+    path === `${config}.lock.sqlite-wal` ||
+    path === `${config}.lock.sqlite-shm` ||
     path === keyFile ||
     within(stateDirectory, path) ||
     (dirname(path) === dirname(config) && tempPattern.test(basename(path)));

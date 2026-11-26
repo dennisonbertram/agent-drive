@@ -1,4 +1,5 @@
-import { chmod, mkdir, open, readFile, rename, rm, rmdir } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, open, readFile, rename, rm, unlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { hostname, homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -137,27 +138,28 @@ export async function writeConfig(config: AgentDriveConfig) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const lockPath = `${path}.lock`;
   const timeoutAt = Date.now() + 10_000;
-  while (true) {
-    try {
-      await mkdir(lockPath, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (!isCode(error, 'EEXIST')) {
-        throw new Error(`Unable to acquire configuration lock at ${lockPath}.`);
-      }
-      if (Date.now() >= timeoutAt) {
-        throw new Error(
-          `Timed out waiting for configuration lock at ${lockPath}. If no Agent Drive command is running, remove the stale lock directory manually.`,
-        );
-      }
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
-    }
+  const lockDbPath = `${path}.lock.sqlite`;
+  const database = await openConfigLockDatabase(lockDbPath);
+  let databaseInfo: Awaited<ReturnType<typeof lstat>>;
+  try {
+    databaseInfo = await lstat(lockDbPath);
+    if (!databaseInfo.isFile())
+      throw new Error(`Configuration lock database must be a regular file: ${lockDbPath}`);
+  } catch (error) {
+    database.close();
+    throw error;
   }
-
+  let databaseLocked = false;
+  let lockOwned = false;
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let temporaryCreated = false;
   let backupsCleared = false;
   try {
+    await acquireConfigLockDatabase(database, timeoutAt, lockDbPath);
+    databaseLocked = true;
+    await acquireConfigFileLock(lockPath, lockDbPath, databaseInfo, timeoutAt);
+    lockOwned = true;
+
     const current = await readConfig();
     // A new API key invalidates every exported bundle, so earlier backup records are stale.
     const keyChanged = config.apiKey !== undefined && config.apiKey !== current.apiKey;
@@ -193,15 +195,152 @@ export async function writeConfig(config: AgentDriveConfig) {
       if (temporaryCreated) await rm(temporary, { force: true });
     } finally {
       try {
-        await rmdir(lockPath);
-      } catch (error) {
-        if (!isCode(error, 'ENOENT')) {
-          throw new Error(`Unable to release configuration lock at ${lockPath}.`);
+        if (lockOwned) await releaseConfigFileLock(lockPath, databaseInfo);
+      } finally {
+        try {
+          if (databaseLocked && database.isTransaction) database.exec('ROLLBACK');
+        } finally {
+          database.close();
         }
       }
     }
   }
   return { backupsCleared };
+}
+
+let sqliteImport: Promise<typeof import('node:sqlite')> | undefined;
+
+async function openConfigLockDatabase(path: string) {
+  let handle;
+  let created = false;
+  try {
+    handle = await open(path, 'wx', 0o600);
+    created = true;
+  } catch (error) {
+    if (!isCode(error, 'EEXIST')) throw error;
+    const existing = await lstat(path).catch((statError: unknown) => {
+      throw new Error(`Unable to inspect configuration lock database at ${path}.`, {
+        cause: statError,
+      });
+    });
+    if (!existing.isFile())
+      throw new Error(`Configuration lock database must be a regular file: ${path}`);
+    if ((existing.mode & 0o077) !== 0 || (existing.mode & 0o200) === 0)
+      throw new Error(`Configuration lock database has unsafe permissions: ${path}`);
+    handle = await open(path, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+  }
+  try {
+    if (created) await handle.chmod(0o600);
+  } finally {
+    await handle.close();
+  }
+  try {
+    const info = await lstat(path);
+    if (!info.isFile())
+      throw new Error(`Configuration lock database must be a regular file: ${path}`);
+  } catch (error) {
+    throw new Error(`Unable to access configuration lock database at ${path}.`, { cause: error });
+  }
+  const { DatabaseSync } = await getSqlite();
+  try {
+    return new DatabaseSync(path);
+  } catch (error) {
+    throw new Error(`Unable to open configuration lock database at ${path}.`, { cause: error });
+  }
+}
+
+function getSqlite() {
+  return (sqliteImport ??= import('node:sqlite'));
+}
+
+async function acquireConfigLockDatabase(
+  database: import('node:sqlite').DatabaseSync,
+  timeoutAt: number,
+  path: string,
+) {
+  while (true) {
+    try {
+      database.exec('BEGIN IMMEDIATE');
+      return;
+    } catch (error) {
+      if (!isSqliteBusy(error))
+        throw new Error(`Unable to acquire configuration lock database at ${path}.`, {
+          cause: error,
+        });
+      if (Date.now() >= timeoutAt)
+        throw new Error(`Timed out waiting for configuration lock database at ${path}.`);
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    }
+  }
+}
+
+async function acquireConfigFileLock(
+  lockPath: string,
+  lockDbPath: string,
+  databaseInfo: Awaited<ReturnType<typeof lstat>>,
+  timeoutAt: number,
+) {
+  while (true) {
+    try {
+      await link(lockDbPath, lockPath);
+      return;
+    } catch (error) {
+      if (!isCode(error, 'EEXIST'))
+        throw new Error(`Unable to acquire configuration lock at ${lockPath}.`, { cause: error });
+    }
+
+    const info = await lstat(lockPath).catch((error: unknown) => {
+      if (isCode(error, 'ENOENT')) return undefined;
+      throw new Error(`Unable to inspect configuration lock at ${lockPath}.`, { cause: error });
+    });
+    if (info?.isFile()) {
+      if (info.dev === databaseInfo.dev && info.ino === databaseInfo.ino) {
+        // This marker is a hard link to the lock database. Only a writer holding the SQLite
+        // transaction can remove it; older clients can only create a directory at this path.
+        await unlink(lockPath).catch((error: unknown) => {
+          if (!isCode(error, 'ENOENT')) throw error;
+        });
+        continue;
+      }
+      throw new Error(`Configuration lock path is occupied by an unrelated file: ${lockPath}`);
+    }
+    if (info && !info.isDirectory())
+      throw new Error(
+        `Configuration lock path is not a regular file or legacy directory: ${lockPath}`,
+      );
+    if (Date.now() >= timeoutAt) {
+      const legacy = info?.isDirectory()
+        ? ` The lock is a legacy directory; confirm no Agent Drive command is running, then remove ${lockPath} manually.`
+        : '';
+      throw new Error(`Timed out waiting for configuration lock at ${lockPath}.${legacy}`);
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+}
+
+async function releaseConfigFileLock(
+  lockPath: string,
+  databaseInfo: Awaited<ReturnType<typeof lstat>>,
+) {
+  const info = await lstat(lockPath).catch((error: unknown) => {
+    if (isCode(error, 'ENOENT')) return undefined;
+    throw error;
+  });
+  if (!info || !info.isFile() || info.dev !== databaseInfo.dev || info.ino !== databaseInfo.ino)
+    return;
+  await unlink(lockPath).catch((error: unknown) => {
+    if (!isCode(error, 'ENOENT'))
+      throw new Error(`Unable to release configuration lock at ${lockPath}.`, { cause: error });
+  });
+}
+
+function isSqliteBusy(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'errcode' in error &&
+    (error.errcode === 5 || error.errcode === 6)
+  );
 }
 
 function isCode(error: unknown, code: string): boolean {

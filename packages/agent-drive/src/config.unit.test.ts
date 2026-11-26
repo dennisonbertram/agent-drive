@@ -1,4 +1,6 @@
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, rmdir, stat, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -73,6 +75,55 @@ describe('private CLI configuration', () => {
         driveB: 'key-b',
       },
     });
+  });
+
+  it('recovers a config lock left by a process killed with SIGKILL', async () => {
+    await isolatedConfig();
+    const childScript = [
+      "import { DatabaseSync } from 'node:sqlite';",
+      "import { link, open } from 'node:fs/promises';",
+      'const path = process.env.AGENT_DRIVE_CONFIG;',
+      'const dbPath = `${path}.lock.sqlite`;',
+      "const lockFile = await open(dbPath, 'wx', 0o600);",
+      'await lockFile.close();',
+      'const db = new DatabaseSync(dbPath);',
+      "db.exec('BEGIN IMMEDIATE');",
+      'await link(`${path}.lock.sqlite`, `${path}.lock`);',
+      "process.stdout.write('ready\\n');",
+      'setInterval(() => {}, 1000);',
+    ].join('\n');
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childScript], {
+      env: { ...process.env, AGENT_DRIVE_CONFIG: configPath() },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      output += chunk;
+    });
+    await vi.waitFor(() => expect(output).toContain('ready'), { timeout: 10_000 });
+    child.kill('SIGKILL');
+    const [code, signal] = (await once(child, 'exit')) as [number | null, NodeJS.Signals | null];
+    expect(code).toBeNull();
+    expect(signal).toBe('SIGKILL');
+
+    await expect(writeConfig({ apiKey: 'after-crash' })).resolves.toEqual({
+      backupsCleared: false,
+    });
+    await expect(readConfig()).resolves.toMatchObject({ apiKey: 'after-crash' });
+  }, 20_000);
+
+  it('waits for an older CLI lock directory to be released', async () => {
+    await isolatedConfig();
+    const legacyLock = `${configPath()}.lock`;
+    await mkdir(legacyLock, { mode: 0o700 });
+    const pendingWrite = writeConfig({ apiKey: 'after-legacy-writer' });
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 75));
+    expect((await stat(legacyLock)).isDirectory()).toBe(true);
+    await rmdir(legacyLock);
+
+    await expect(pendingWrite).resolves.toEqual({ backupsCleared: false });
+    await expect(readConfig()).resolves.toMatchObject({ apiKey: 'after-legacy-writer' });
   });
 
   it('preserves an existing config parent mode while keeping the file private', async () => {

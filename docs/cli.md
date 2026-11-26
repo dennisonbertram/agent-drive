@@ -25,7 +25,7 @@ The CLI keeps the API key and drive keys in `~/.config/agent-drive/config.json`,
 
 - The directory has mode `0700` and the file has mode `0600`. Updates are atomic (write to a temp file, then rename).
 - Private state for `sync`, `backup`, `capture` and account-key sealing is stored in `<config path>.state`. An existing state directory with unsafe permissions is rejected without changing its mode.
-- Config updates take an exclusive lock, the directory `<config path>.lock`. If a CLI process crashes it may leave the lock behind. Remove it manually only after you confirm no Agent Drive process is running. A command that waits more than 10 seconds for the lock fails with a message naming the stale lock.
+- Config updates use a SQLite transaction at `<config path>.lock.sqlite` and a hard-link marker at `<config path>.lock` so current and older CLI versions serialize on the same config. The SQLite file contains no config data. SQLite releases its lock if a process exits or is killed; a later current-version CLI removes the abandoned marker while holding the SQLite transaction. Older CLI versions used an empty lock directory, which cannot identify its owner safely. A current CLI waits up to 10 seconds for such a directory, then reports the path; remove it only after confirming no Agent Drive command is running. Keep the config and lock files on a local filesystem shared by the CLI processes; network and sync filesystems are not supported for locking.
 - Drive keys never leave your machine. They are not sent to the API or to storage.
 
 ### Environment variables

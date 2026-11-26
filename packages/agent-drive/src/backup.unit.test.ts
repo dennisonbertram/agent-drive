@@ -115,6 +115,10 @@ describe('backupDirectory', () => {
     await mkdir(join(real, 'cfg'), { recursive: true });
     await writeFile(join(real, 'a.txt'), 'A');
     await writeFile(join(real, 'cfg', 'config.json'), '{"apiKey":"x"}');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite'), 'lock metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-journal'), 'journal metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-wal'), 'WAL metadata');
+    await writeFile(join(real, 'cfg', 'config.json.lock.sqlite-shm'), 'shared memory metadata');
     await mkdir(join(real, 'cfg', 'config.json.state'), { mode: 0o700 });
     await writeFile(join(real, 'cfg', 'config.json.state', 'm.json'), '{}');
     const link = join(dir, 'link');
