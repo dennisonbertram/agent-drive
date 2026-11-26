@@ -16,6 +16,8 @@ const MAX_PROTOCOL_WRITE_LINE_BYTES = 1536 * 1024;
 const MAX_PROTOCOL_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_METADATA_CACHE_ENTRIES = 4096;
 const METADATA_CACHE_TTL_MS = 2000;
+const MAX_ACTIVE_LISTING_STATES = 256;
+const LISTING_STATE_TTL_MS = 5 * 60 * 1000;
 
 export type MountEntry = {
   name: string;
@@ -234,6 +236,16 @@ function folderMountEntry(item: FolderEntry, parent: string): MountEntry {
   };
 }
 
+function stagedMountEntry(staged: MountStagedEntry, parent: string): MountEntry {
+  return {
+    name: entryName(staged.path, parent),
+    kind: 'file',
+    size: staged.size,
+    mtimeMs: Date.now(),
+    versionId: `${STAGED_VERSION_PREFIX}${staged.handleId}`,
+  };
+}
+
 function parentPath(path: string) {
   if (path === '/') return '/';
   const slash = path.lastIndexOf('/');
@@ -254,6 +266,10 @@ export async function createMountBridge(
   const stagedHandles = new Map<string, { path: string; size: number; recoveryPath: string }>();
   const stagedTokenVersions = new Map<string, { path: string; versionId: string; size: number }>();
   const metadataCache = new Map<string, { entry: MountEntry; expiresAt: number }>();
+  const listingStates = new Map<
+    string,
+    { candidates: Map<string, MountStagedEntry>; expiresAt: number }
+  >();
   const shutdownController = new AbortController();
   const signal = options.signal
     ? AbortSignal.any([options.signal, shutdownController.signal])
@@ -279,7 +295,20 @@ export async function createMountBridge(
       driveId,
       journalRoot: join(dirname(configPath()), 'mount-writeback'),
     });
-    await writeback.recover();
+  }
+  if (writeback) {
+    for (const result of await writeback.recover()) {
+      if (!result || typeof result !== 'object') continue;
+      const recovery = result as { path?: unknown; state?: unknown; recoveryPath?: unknown };
+      if (
+        (recovery.state === 'conflict' || recovery.state === 'pending') &&
+        typeof recovery.recoveryPath === 'string'
+      ) {
+        process.stderr.write(
+          `Agent Drive mount recovery: ${recovery.state} for ${typeof recovery.path === 'string' && recovery.path ? recovery.path : '(unknown remote path)'}; local recovery file: ${recovery.recoveryPath}\n`,
+        );
+      }
+    }
   }
 
   function canWrite(path: string) {
@@ -397,12 +426,42 @@ export async function createMountBridge(
       folder: path,
       ...(cursor ? { cursor } : {}),
     });
+    const cursorKey = cursor === undefined ? undefined : `${path}\0${cursor}`;
+    const listing = cursorKey ? listingStates.get(cursorKey) : undefined;
+    if (cursorKey) listingStates.delete(cursorKey);
+    const candidates = new Map<string, MountStagedEntry>();
+    if (cursor === undefined && capabilities.write && !capabilities.readOnly && writeback) {
+      for (const staged of await writeback.listStaged(path)) {
+        if (
+          !validPath(staged.path) ||
+          parentPath(staged.path) !== path ||
+          !Number.isSafeInteger(staged.size) ||
+          staged.size < 0 ||
+          !staged.handleId
+        )
+          continue;
+        candidates.set(entryName(staged.path, path), staged);
+        stagedHandles.set(staged.handleId, {
+          path: staged.path,
+          size: staged.size,
+          recoveryPath: staged.recoveryPath,
+        });
+      }
+    } else if (listing && listing.expiresAt > Date.now()) {
+      for (const [name, staged] of listing.candidates) candidates.set(name, staged);
+    }
     const entriesByName = new Map<string, MountEntry>();
     for (const item of page.items) {
-      const entry =
+      let entry =
         'kind' in item && item.kind === 'folder'
           ? folderMountEntry(item, path)
           : fileMountEntry(item as FileEntry, path);
+      const staged = candidates.get(entry.name);
+      if (staged) {
+        candidates.delete(entry.name);
+        if (entry.kind === 'file' && staged.versionId === entry.versionId)
+          entry = stagedMountEntry(staged, path);
+      }
       const childPath = path === '/' ? `/${entry.name}` : `${path}/${entry.name}`;
       const previous = entriesByName.get(entry.name);
       if (!previous || entry.kind === 'directory') entriesByName.set(entry.name, entry);
@@ -410,28 +469,25 @@ export async function createMountBridge(
       if (!cachedEntry || cachedEntry.kind !== 'directory' || entry.kind === 'directory')
         metadataCache.set(childPath, { entry, expiresAt: Date.now() + METADATA_CACHE_TTL_MS });
     }
-    if (writeback) {
-      for (const staged of await writeback.listStaged(path)) {
-        if (!validPath(staged.path) || parentPath(staged.path) !== path) continue;
-        if (!Number.isSafeInteger(staged.size) || staged.size < 0 || !staged.handleId) continue;
-        const entry: MountEntry = {
-          name: entryName(staged.path, path),
-          kind: 'file',
-          size: staged.size,
-          mtimeMs: Date.now(),
-          versionId: `${STAGED_VERSION_PREFIX}${staged.handleId}`,
-        };
-        stagedHandles.set(staged.handleId, {
-          path: staged.path,
-          size: staged.size,
-          recoveryPath: staged.recoveryPath,
-        });
-        const existing = entriesByName.get(entry.name);
-        if (!existing || existing.kind === 'file') {
-          entriesByName.set(entry.name, entry);
-          const childPath = path === '/' ? `/${entry.name}` : `${path}/${entry.name}`;
-          metadataCache.set(childPath, { entry, expiresAt: Date.now() + METADATA_CACHE_TTL_MS });
-        }
+    if (page.nextCursor && candidates.size > 0) {
+      const now = Date.now();
+      for (const [key, value] of listingStates) {
+        if (value.expiresAt <= now) listingStates.delete(key);
+      }
+      const nextKey = `${path}\0${page.nextCursor}`;
+      listingStates.delete(nextKey);
+      listingStates.set(nextKey, { candidates, expiresAt: now + LISTING_STATE_TTL_MS });
+      while (listingStates.size > MAX_ACTIVE_LISTING_STATES) {
+        const oldest = listingStates.keys().next().value;
+        if (oldest === undefined) break;
+        listingStates.delete(oldest);
+      }
+    } else if (!page.nextCursor) {
+      for (const [name, staged] of candidates) {
+        const entry = stagedMountEntry(staged, path);
+        entriesByName.set(name, entry);
+        const childPath = path === '/' ? `/${name}` : `${path}/${name}`;
+        metadataCache.set(childPath, { entry, expiresAt: Date.now() + METADATA_CACHE_TTL_MS });
       }
     }
     while (metadataCache.size > MAX_METADATA_CACHE_ENTRIES) {
@@ -618,6 +674,7 @@ export async function createMountBridge(
             0,
             Math.min(requestedSize, reader.plaintextBytes - (request.offset as number)),
           );
+          if (expectedBytes === 0) return { id: request.id, ok: true, data: '' };
           let bytes: Uint8Array;
           try {
             bytes = await reader.read(request.offset as number, requestedSize);

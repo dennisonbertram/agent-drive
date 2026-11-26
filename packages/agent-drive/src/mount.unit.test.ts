@@ -176,6 +176,242 @@ describe('mount bridge', () => {
     expect(reader.close).toHaveBeenCalledTimes(1);
   });
 
+  it('returns zero bytes for a pinned read at or past EOF without reading the range', async () => {
+    const reader = {
+      plaintextBytes: 3,
+      version: mountedVersion(VERSION, 3),
+      read: vi.fn(async (offset: number, size: number) => {
+        if (offset >= 3) throw Object.assign(new Error('offset past EOF'), { code: 'EINVAL' });
+        return new Uint8Array([1, 2, 3]).subarray(offset, offset + size);
+      }),
+      close: vi.fn(async () => {}),
+    };
+    const bridge = await createMountBridge(
+      { browse: vi.fn(), openRangeReader: vi.fn(async () => reader) },
+      DRIVE,
+    );
+    try {
+      await expect(
+        bridge.request({
+          id: 1,
+          op: 'read',
+          path: '/file',
+          versionId: VERSION,
+          offset: 3,
+          size: 4,
+        }),
+      ).resolves.toEqual({ id: 1, ok: true, data: '' });
+      await expect(
+        bridge.request({
+          id: 2,
+          op: 'read',
+          path: '/file',
+          versionId: VERSION,
+          offset: 8,
+          size: 4,
+        }),
+      ).resolves.toEqual({ id: 2, ok: true, data: '' });
+      expect(reader.read).not.toHaveBeenCalled();
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('lists a staged-only file once after all remote pages and keeps remote collisions authoritative', async () => {
+    const staged = [
+      {
+        path: '/docs/first.txt',
+        size: 8,
+        handleId: 'first-1',
+        recoveryPath: '/private/first',
+        state: 'dirty',
+        versionId: VERSION,
+      },
+      {
+        path: '/docs/dirty',
+        size: 9,
+        handleId: 'dirty-1',
+        recoveryPath: '/private/stage',
+        state: 'dirty',
+        versionId: VERSION,
+      },
+      {
+        path: '/docs/new.txt',
+        size: 3,
+        handleId: 'new-1',
+        recoveryPath: '/private/new',
+        state: 'dirty',
+      },
+    ];
+    const client = {
+      browse: vi
+        .fn()
+        .mockResolvedValueOnce({
+          items: [entry('/docs/a', encryptedSize(1)), entry('/docs/first.txt', encryptedSize(2))],
+          nextCursor: 'p2',
+        })
+        .mockResolvedValueOnce({
+          items: [
+            entry('/docs/dirty', encryptedSize(2), '33333333-3333-4333-8333-333333333333'),
+            entry('/docs/z', encryptedSize(1)),
+          ],
+          nextCursor: null,
+        }),
+      openRangeReader: vi.fn(),
+    };
+    const writeback = {
+      listStaged: vi.fn(async () => staged),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const bridge = await createMountBridge(client, DRIVE, {
+      capabilities: {
+        readOnly: false,
+        write: true,
+        delete: false,
+        writePaths: [],
+        maxReadBytes: 1024,
+        maxWriteBytes: 1024,
+        ops: [],
+      },
+      writeback: writeback as never,
+    });
+    try {
+      const first = await bridge.request({ id: 1, op: 'list', path: '/docs' });
+      const second = await bridge.request({ id: 2, op: 'list', path: '/docs', cursor: 'p2' });
+      expect(first).toMatchObject({
+        entries: [{ name: 'a' }, { name: 'first.txt', size: 8, versionId: 'staged:first-1' }],
+        nextCursor: 'p2',
+      });
+      expect(second).toMatchObject({
+        entries: [
+          { name: 'dirty', size: 2, versionId: '33333333-3333-4333-8333-333333333333' },
+          { name: 'z' },
+          { name: 'new.txt', size: 3, versionId: 'staged:new-1' },
+        ],
+        nextCursor: null,
+      });
+      const allNames = [
+        ...(first as { entries: { name: string }[] }).entries,
+        ...(second as { entries: { name: string }[] }).entries,
+      ].map((item) => item.name);
+      expect(allNames.filter((name) => name === 'dirty')).toHaveLength(1);
+      expect(allNames.filter((name) => name === 'new.txt')).toHaveLength(1);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('keeps staged candidates isolated across interleaved listing cursors', async () => {
+    const client = {
+      browse: vi
+        .fn()
+        .mockResolvedValueOnce({
+          items: [entry('/docs/a', encryptedSize(1))],
+          nextCursor: 'cursor-a',
+        })
+        .mockResolvedValueOnce({
+          items: [entry('/docs/b', encryptedSize(1))],
+          nextCursor: 'cursor-b',
+        })
+        .mockResolvedValueOnce({
+          items: [entry('/docs/dirty', encryptedSize(2), '33333333-3333-4333-8333-333333333333')],
+          nextCursor: null,
+        })
+        .mockResolvedValueOnce({
+          items: [entry('/docs/dirty', encryptedSize(2), '33333333-3333-4333-8333-333333333333')],
+          nextCursor: null,
+        }),
+      openRangeReader: vi.fn(),
+    };
+    const writeback = {
+      listStaged: vi.fn(async () => [
+        {
+          path: '/docs/dirty',
+          size: 9,
+          handleId: 'dirty-1',
+          recoveryPath: '/private/stage',
+          state: 'dirty',
+          versionId: VERSION,
+        },
+        {
+          path: '/docs/local.txt',
+          size: 3,
+          handleId: 'local-1',
+          recoveryPath: '/private/local',
+          state: 'dirty',
+        },
+      ]),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const bridge = await createMountBridge(client, DRIVE, {
+      capabilities: {
+        readOnly: false,
+        write: true,
+        delete: false,
+        writePaths: [],
+        maxReadBytes: 1024,
+        maxWriteBytes: 1024,
+        ops: [],
+      },
+      writeback: writeback as never,
+    });
+    try {
+      const firstA = await bridge.request({ id: 1, op: 'list', path: '/docs' });
+      const firstB = await bridge.request({ id: 2, op: 'list', path: '/docs' });
+      const lastA = await bridge.request({ id: 3, op: 'list', path: '/docs', cursor: 'cursor-a' });
+      const lastB = await bridge.request({ id: 4, op: 'list', path: '/docs', cursor: 'cursor-b' });
+      expect(firstA).toMatchObject({ entries: [{ name: 'a' }] });
+      expect(firstB).toMatchObject({ entries: [{ name: 'b' }] });
+      const lastAEntries = (
+        lastA as { entries: { name: string; size: number; versionId?: string }[] }
+      ).entries;
+      const lastBEntries = (
+        lastB as { entries: { name: string; size: number; versionId?: string }[] }
+      ).entries;
+      expect(lastAEntries.find((item) => item.name === 'dirty')).toMatchObject({
+        size: 2,
+        versionId: '33333333-3333-4333-8333-333333333333',
+      });
+      expect(lastBEntries.find((item) => item.name === 'dirty')).toMatchObject({
+        size: 2,
+        versionId: '33333333-3333-4333-8333-333333333333',
+      });
+      expect(lastAEntries.filter((item) => item.name === 'local.txt')).toHaveLength(1);
+      expect(lastBEntries.filter((item) => item.name === 'local.txt')).toHaveLength(1);
+      expect(writeback.listStaged).toHaveBeenCalledTimes(2);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('reports unresolved startup recovery on stderr with remote and local paths', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const root = await scratch();
+    const helper = join(root, 'exit-helper');
+    await writeFile(helper, '#!/usr/bin/env node\nprocess.exit(0);\n', { mode: 0o700 });
+    await chmod(helper, 0o700);
+    const writeback = {
+      recover: vi.fn(async () => [
+        { path: '/docs/report.txt', state: 'conflict', recoveryPath: '/private/local-stage' },
+      ]),
+      close: vi.fn(async () => {}),
+    };
+    try {
+      await runLinuxMount(
+        { browse: vi.fn(), openRangeReader: vi.fn() },
+        DRIVE,
+        join(root, 'mountpoint'),
+        { helperPath: helper, writeback: writeback as never },
+      );
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining('/docs/report.txt'));
+      expect(stderr).toHaveBeenCalledWith(expect.stringContaining('/private/local-stage'));
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it('negotiates capabilities, stages bytes, and keeps a pinned read available after release', async () => {
     const payload = Buffer.from([0, 255, 17, 128]);
     let released = false;
