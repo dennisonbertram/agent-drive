@@ -234,9 +234,9 @@ export function driveKeyEnvironmentName(driveId: string) {
   return `AGENT_DRIVE_KEY_${driveId.toUpperCase().replace(/[^A-Z0-9]/gu, '_')}`;
 }
 
-export async function resolveConnection() {
-  const saved = await loadConfig();
-  const apiUrl = process.env.AGENT_DRIVE_API_URL || saved.apiUrl || DEFAULT_API_URL;
+export async function resolveConnection(apiUrlFlag?: string) {
+  const saved = await loadConfig(apiUrlFlag);
+  const apiUrl = apiUrlFlag || process.env.AGENT_DRIVE_API_URL || saved.apiUrl || DEFAULT_API_URL;
   const apiKey = process.env.AGENT_DRIVE_API_KEY || saved.apiKey;
   if (!apiUrl || !apiKey) {
     throw new Error(
@@ -248,6 +248,7 @@ export async function resolveConnection() {
 
 export async function resolveDriveKey(
   driveId: string,
+  apiUrl: string,
   keyFile?: string,
   config?: AgentDriveConfig,
 ) {
@@ -255,5 +256,8 @@ export async function resolveDriveKey(
   if (fromDriveEnvironment) return fromDriveEnvironment.trim();
   if (process.env.AGENT_DRIVE_KEY) return process.env.AGENT_DRIVE_KEY.trim();
   if (keyFile) return (await readFile(keyFile, 'utf8')).trim();
-  return config?.driveKeys?.[driveId];
+  // A saved drive key goes only to the origin it was recorded for; explicit env and
+  // --key-file keys keep their precedence at any origin.
+  const origin = originOf(apiUrl);
+  return origin === undefined ? undefined : keysForOrigin(config ?? {}, origin)[driveId];
 }

@@ -23,7 +23,12 @@ afterEach(async () => {
 type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 
 /** Runs the real CLI entry point in-process against a stubbed API. */
-async function cli(argv: string[], saved: Saved, respond: (path: string) => unknown = () => ({})) {
+async function cli(
+  argv: string[],
+  saved: Saved,
+  respond: (path: string) => unknown = () => ({}),
+  env: Record<string, string> = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cmd-'));
   dirs.push(dir);
   vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
@@ -31,6 +36,7 @@ async function cli(argv: string[], saved: Saved, respond: (path: string) => unkn
   vi.stubEnv('AGENT_DRIVE_API_URL', '');
   vi.stubEnv('AGENT_DRIVE_API_KEY', '');
   vi.stubEnv('AGENT_DRIVE_KEY', '');
+  for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
   await writeConfig({
     apiUrl: 'https://x.test/api',
     apiKey: 'tok',
@@ -247,6 +253,48 @@ describe('sync flag validation', () => {
   });
 });
 
+describe('credential origin binding at the command level', () => {
+  const whoami = { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read', 'write'] };
+
+  it('sends no request — never the saved bearer — when env or --api selects another origin', async () => {
+    const viaEnv = await cli(['whoami'], one, () => whoami, {
+      AGENT_DRIVE_API_URL: 'https://other.test/api',
+    });
+    expect(viaEnv.err).toContain('API configuration is missing');
+    expect(viaEnv.paths).toEqual([]);
+    const viaFlag = await cli(['whoami', '--api', 'https://other.test/api'], one, () => whoami);
+    expect(viaFlag.err).toContain('API configuration is missing');
+    expect(viaFlag.paths).toEqual([]);
+  });
+
+  it('keeps the saved bearer when the selected URL stays on the saved origin', async () => {
+    const r = await cli(['whoami'], one, () => ({ ...whoami, driveIds: [A] }), {
+      AGENT_DRIVE_API_URL: 'https://x.test/other/path',
+    });
+    expect(r.err).toBe('');
+    expect(r.paths.some((p) => p.includes('whoami'))).toBe(true);
+  });
+
+  it('connects to another origin only with an explicit environment key', async () => {
+    const r = await cli(['whoami'], one, () => ({ ...whoami, driveIds: [] }), {
+      AGENT_DRIVE_API_URL: 'https://other.test/api',
+      AGENT_DRIVE_API_KEY: 'envtok',
+    });
+    expect(r.err).toBe('');
+    expect(r.paths.some((p) => p.includes('whoami'))).toBe(true);
+  });
+
+  it('whoami reports a foreign-origin saved drive key as not held', async () => {
+    const r = await cli(
+      ['whoami'],
+      { keys: one.keys, origins: { [A]: 'https://other.test' } },
+      () => ({ ...whoami, driveIds: [A] }),
+    );
+    expect(r.err).toBe('');
+    expect(r.out).toContain(`"${A}":false`);
+  });
+});
+
 describe('credentials issue drive default', () => {
   const sink = { isTTY: false, write: async () => {} };
   async function prepare(origins: Record<string, string>, keys: string[]) {
@@ -277,6 +325,15 @@ describe('credentials issue drive default', () => {
     await prepare({ [A]: 'https://x.test', [B]: 'https://other.test' }, [A, B]);
     await issueCredentials({ name: 'n', stdout: true }, sink, createKey as never);
     expect((createKey.mock.calls as unknown[][])[0]?.[2]).toEqual([A]);
+  });
+
+  it('refuses to seal an explicitly named foreign-origin drive key into the bundle', async () => {
+    await prepare({ [B]: 'https://other.test' }, [B]);
+    const issued = createKey.mock.calls.length;
+    await expect(
+      issueCredentials({ name: 'n', drive: B, stdout: true }, sink, createKey as never),
+    ).rejects.toThrow(/no drive key/);
+    expect(createKey.mock.calls.length).toBe(issued);
   });
 });
 

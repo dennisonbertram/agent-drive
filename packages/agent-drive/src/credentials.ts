@@ -122,32 +122,58 @@ export function envBundle(): Bundle | undefined {
  * The saved config with the environment bundle merged in memory. Saved values win over the
  * bundle (a later login is newer than a stored backup); bundle drives count as backed up.
  * Never write the result back: writeConfig re-reads the file itself.
+ * A stored bearer is emitted only for the origin it was recorded with — an explicitly
+ * selected --api/AGENT_DRIVE_API_URL at another origin never inherits it. The emitted
+ * apiUrl is the effective URL, so apiUrl and apiKey always describe one connection.
  */
-export async function loadConfig(): Promise<AgentDriveConfig> {
+export async function loadConfig(apiUrlOverride?: string): Promise<AgentDriveConfig> {
   const saved = await readConfig();
   const bundle = envBundle();
-  if (!bundle) return saved;
-  const at = new Date().toISOString();
-  const effectiveUrl = process.env.AGENT_DRIVE_API_URL || saved.apiUrl || bundle.apiUrl;
+  const effectiveUrl =
+    apiUrlOverride ||
+    process.env.AGENT_DRIVE_API_URL ||
+    saved.apiUrl ||
+    bundle?.apiUrl ||
+    DEFAULT_API_URL;
   const effectiveOrigin = originOf(effectiveUrl);
+  // A bearer recorded for one origin is never served at another. A config written before
+  // apiUrl existed binds its apiKey to the default API.
+  const apiKey =
+    (process.env.AGENT_DRIVE_API_KEY || undefined) ??
+    (originOf(saved.apiUrl ?? DEFAULT_API_URL) === effectiveOrigin ? saved.apiKey : undefined) ??
+    (bundle !== undefined && originOf(bundle.apiUrl) === effectiveOrigin
+      ? bundle.apiKey
+      : undefined);
+  if (!bundle) {
+    const withoutBundle: AgentDriveConfig = { ...saved, apiUrl: effectiveUrl };
+    if (apiKey === undefined) delete withoutBundle.apiKey;
+    else withoutBundle.apiKey = apiKey;
+    return withoutBundle;
+  }
+  const at = new Date().toISOString();
   // A bundle is a backup only of the connection it holds: same API key and origin.
-  const sameConnection =
-    (process.env.AGENT_DRIVE_API_KEY || saved.apiKey || bundle.apiKey) === bundle.apiKey &&
-    originOf(bundle.apiUrl) === effectiveOrigin;
+  const sameConnection = apiKey === bundle.apiKey && originOf(bundle.apiUrl) === effectiveOrigin;
   const driveKeys = { ...bundle.driveKeys, ...saved.driveKeys };
+  const driveKeyOrigins = { ...bundle.driveKeyOrigins, ...saved.driveKeyOrigins };
+  // Bundles written before drive-key origins were recorded bind their keys to the bundle's
+  // own API — the same migration readConfig applies to saved configs.
+  const bundleOrigin = originOf(bundle.apiUrl);
+  if (bundleOrigin)
+    for (const id of Object.keys(bundle.driveKeys))
+      if (driveKeyOrigins[id] === undefined) driveKeyOrigins[id] = bundleOrigin;
   const keyBackup: Record<string, KeyBackup> = { ...saved.keyBackup };
   for (const id of Object.keys(bundle.driveKeys))
     if (
       sameConnection &&
       driveKeys[id] === bundle.driveKeys[id] &&
-      bundle.driveKeyOrigins[id] === effectiveOrigin
+      driveKeyOrigins[id] === effectiveOrigin
     )
       keyBackup[id] = { at, method: 'env' };
   return {
-    apiUrl: saved.apiUrl ?? bundle.apiUrl,
-    apiKey: saved.apiKey ?? bundle.apiKey,
+    apiUrl: effectiveUrl,
+    ...(apiKey === undefined ? {} : { apiKey }),
     driveKeys,
-    driveKeyOrigins: { ...bundle.driveKeyOrigins, ...saved.driveKeyOrigins },
+    driveKeyOrigins,
     keyBackup,
     // Pins were read from config.json by the first version of auto-sealing; keep the legacy
     // read as a fallback. New pins only ever live in `<config>.state/account-seal.json`.
@@ -197,6 +223,7 @@ export async function issueCredentials(
     writePaths?: string[];
     label?: string;
     machine?: string;
+    apiUrl?: string;
     to?: string;
     force?: boolean;
     stdout?: boolean;
@@ -221,10 +248,11 @@ export async function issueCredentials(
     );
     if (present) throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
   }
-  const config = await loadConfig();
-  const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
+  const config = await loadConfig(options.apiUrl);
+  const apiUrl =
+    options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   const drive = resolveDriveId(options.drive, config, apiUrl);
-  const driveKey = await resolveDriveKey(drive, undefined, config);
+  const driveKey = await resolveDriveKey(drive, apiUrl, undefined, config);
   if (!driveKey) throw new Error(`There is no drive key for ${drive} on this machine.`);
   try {
     decodeDriveKey(driveKey);
@@ -424,7 +452,7 @@ export async function reportEnvBackups(
   for (const [id, key] of Object.entries(bundle.driveKeys))
     if (
       bundle.driveKeyOrigins[id] === origin &&
-      (await resolveDriveKey(id, undefined, config)) === key
+      (await resolveDriveKey(id, apiUrl, undefined, config)) === key
     )
       ids.push(id);
   await reportKeyBackup(apiUrl, apiKey, ids, 'env', deps);

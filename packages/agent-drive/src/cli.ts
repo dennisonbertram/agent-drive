@@ -184,7 +184,7 @@ function sealHook(
 }
 
 async function connect(args: ReturnType<typeof parse>) {
-  const connection = await resolveConnection();
+  const connection = await resolveConnection(args.values.api);
   await reportEnvBackups(connection.apiUrl, connection.apiKey);
   // Kept apart from args.values.drive: `check` has its own selection when --drive is omitted.
   try {
@@ -194,7 +194,7 @@ async function connect(args: ReturnType<typeof parse>) {
   }
   const drive = args.values.drive?.[0] ?? defaultDrive;
   const driveKey = drive
-    ? await resolveDriveKey(drive, args.values['key-file'], connection.config)
+    ? await resolveDriveKey(drive, connection.apiUrl, args.values['key-file'], connection.config)
     : undefined;
   const client = new AgentDriveClient({
     apiUrl: connection.apiUrl,
@@ -278,6 +278,7 @@ async function run(command: string, raw: string[]) {
       command: wrapped,
       ...(flags.values.agent ? { agent: flags.values.agent } : {}),
       ...(flags.values.drive?.[0] ? { drive: flags.values.drive[0] } : {}),
+      ...(flags.values.api ? { apiUrl: flags.values.api } : {}),
     });
     return;
   }
@@ -316,10 +317,15 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'backup') {
     if (!args.positionals[0]) throw new Error('backup requires LOCAL_DIRECTORY.');
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     await reportEnvBackups(connection.apiUrl, connection.apiKey);
     const driveId = resolveDriveId(args.values.drive?.[0], connection.config, connection.apiUrl);
-    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const key = await resolveDriveKey(
+      driveId,
+      connection.apiUrl,
+      args.values['key-file'],
+      connection.config,
+    );
     const dryRun = args.values['dry-run'] ?? false;
     // Throttled account-key sealing, same as the generic connect() path (backup bypasses it).
     // A dry run previews the upload and must not seal — it neither creates nor holds anything.
@@ -412,10 +418,11 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'issue') {
       if (!args.values.name) throw new Error('--name is required.');
-      const { client } = await connect(args);
+      const { client, connection } = await connect(args);
       const result = await issueCredentials(
         {
           name: args.values.name,
+          apiUrl: connection.apiUrl,
           ...(args.values.drive?.[0] ? { drive: args.values.drive[0] } : {}),
           ...(args.values.scope ? { scopes: args.values.scope } : {}),
           ...(args.values['write-path'] ? { writePaths: args.values['write-path'] } : {}),
@@ -473,7 +480,7 @@ async function run(command: string, raw: string[]) {
   if (command === 'grant') {
     const code = args.positionals[0];
     if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     const drive = args.values.drive?.[0];
     await grantLogin({
       code,
@@ -493,7 +500,7 @@ async function run(command: string, raw: string[]) {
     return;
   }
   if (command === 'account' && args.positionals[0] === 'seal') {
-    const connection = await resolveConnection();
+    const connection = await resolveConnection(args.values.api);
     const client = new AgentDriveClient({
       apiUrl: connection.apiUrl,
       apiKey: connection.apiKey,
@@ -569,11 +576,11 @@ async function run(command: string, raw: string[]) {
   const { client, connection } = await connect(args);
   if (command === 'whoami') {
     const who = await client.whoami();
-    const config = await loadConfig();
+    const config = connection.config;
     return output({
       ...who,
       localDriveKeys: await localKeyMap(who.driveIds, (id) =>
-        resolveDriveKey(id, args.values['key-file'], config),
+        resolveDriveKey(id, connection.apiUrl, args.values['key-file'], config),
       ),
       keyBackup: Object.fromEntries(
         Object.keys(config.driveKeys ?? {})
@@ -583,12 +590,11 @@ async function run(command: string, raw: string[]) {
     });
   }
   if (command === 'check') {
-    const connection = await resolveConnection();
     const who = await client.whoami();
     const candidates = who.driveIds ?? Object.keys(connection.config.driveKeys ?? {});
     const explicit = args.values.drive?.[0];
     const keys = await localKeyMap([...candidates, ...(explicit ? [explicit] : [])], (id) =>
-      resolveDriveKey(id, args.values['key-file'], connection.config),
+      resolveDriveKey(id, connection.apiUrl, args.values['key-file'], connection.config),
     );
     const driveId = pickCheckDrive(explicit, candidates, keys);
     const unbacked = unbackedUp(
@@ -596,7 +602,12 @@ async function run(command: string, raw: string[]) {
       backupCandidates(keys, driveId, args.values['key-file']),
     );
     if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
-    const key = await resolveDriveKey(driveId, args.values['key-file'], connection.config);
+    const key = await resolveDriveKey(
+      driveId,
+      connection.apiUrl,
+      args.values['key-file'],
+      connection.config,
+    );
     const checker = new AgentDriveClient({
       apiUrl: connection.apiUrl,
       apiKey: connection.apiKey,
@@ -622,7 +633,12 @@ async function run(command: string, raw: string[]) {
     // Seal through the same connection that created the drive — a second resolveConnection
     // could pick up an account or origin another process just changed.
     const saved = await loadConfig();
-    const existingKey = await resolveDriveKey(drive.id, args.values['key-file'], saved);
+    const existingKey = await resolveDriveKey(
+      drive.id,
+      connection.apiUrl,
+      args.values['key-file'],
+      saved,
+    );
     let sealedKey = existingKey;
     if (drive.created) {
       const key = generateDriveKey();

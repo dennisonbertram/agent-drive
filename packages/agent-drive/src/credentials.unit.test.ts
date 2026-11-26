@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
-import { readConfig, resolveConnection, writeConfig } from './config.js';
+import { readConfig, resolveConnection, resolveDriveKey, writeConfig } from './config.js';
 import {
   decodeBundle,
   encodeBundle,
@@ -186,6 +186,54 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
       }),
     );
     expect((await resolveConnection()).apiKey).toBe('explicit');
+  });
+
+  it('never grafts a bundle bearer onto a saved URL of another origin', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    await writeConfig({ apiUrl: 'https://a.test/api' });
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://b.test/api',
+        apiKey: 'bundle-key',
+        driveKeys: {},
+        driveKeyOrigins: {},
+      }),
+    );
+    // The effective URL is the saved origin; the bundle key must not attach to it.
+    expect((await loadConfig()).apiKey).toBeUndefined();
+    // Selecting the bundle origin serves the bundle key.
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://b.test/api');
+    expect((await loadConfig()).apiKey).toBe('bundle-key');
+  });
+
+  it('backfills missing bundle drive-key origins with the bundle origin (legacy bundles)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    const key = generateDriveKey();
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://env.test/api',
+        apiKey: 'envtok',
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: {},
+      }),
+    );
+    const config = await loadConfig();
+    expect(config.driveKeyOrigins?.[E1]).toBe('https://env.test');
+    expect(await resolveDriveKey(E1, 'https://env.test/api', undefined, config)).toBe(key);
+    expect(await resolveDriveKey(E1, 'https://other.test/api', undefined, config)).toBeUndefined();
+    expect(unbackedUp(config, [E1])).toEqual([]);
   });
 });
 
