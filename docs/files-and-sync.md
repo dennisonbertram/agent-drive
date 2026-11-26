@@ -28,6 +28,30 @@ agent-drive put ./notes.md /work/report/notes.md --tag report --description "Dra
 
 `--tag` can be repeated. `--description` and `--user ID` are optional. The command prints the new version as JSON, including its `id`.
 
+For a producer that writes to standard input, use `-` in place of the local path:
+
+```sh
+# Bash and zsh. Supplying --size lets the CLI upload stdin directly as it arrives.
+set -o pipefail
+cat ./archive.bin | agent-drive put - /work/archive.bin --size "$(wc -c < ./archive.bin)"
+
+# If the byte count is not known, omit --size. The CLI spools stdin to a private
+# temporary file with bounded memory use, then uploads it.
+producer-command | agent-drive put - /work/generated.bin
+```
+
+Both pipe examples require the producer to finish successfully before treating the command as successful. With `set -o pipefail`, the shell reports a producer failure, but `agent-drive put` may already have committed the bytes it received, including a prefix or an empty file. `--size N` checks only that exactly N bytes arrived; it cannot tell whether a producer that emitted N bytes then failed exited successfully. If committing the upload must depend on producer success, stage the output privately and run `put` only after the producer succeeds:
+
+```sh
+tmp=$(mktemp) || exit
+trap 'rm -f "$tmp"' EXIT
+producer-command > "$tmp" && agent-drive put "$tmp" /work/generated.bin
+```
+
+`--size` is optional and is checked before stdin is read. When supplied, stdin must contain exactly that many bytes; `--size 0` is valid. Existing `--overwrite` and `--if-version` guards work the same way as for a local file. The unknown-size path uses temporary disk space for the input.
+
+With `--size`, the CLI creates the upload intent before it reads stdin. The intent expires 10 minutes after creation, so producing the input, uploading it, and committing it must all finish within that window. Without `--size`, stdin is fully spooled before the intent is created; a slow producer does not use the 10-minute window, but the storage upload and commit still must finish before it expires.
+
 To replace a file, choose one of two flags. They cannot be combined.
 
 ```sh
@@ -72,7 +96,17 @@ agent-drive get /work/report/notes.md --output ./notes.md
 agent-drive get /work/report/notes.md --version <version id> --output ./notes.old.md
 ```
 
-With `--output`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key.
+With `--output FILE`, `get` streams the decrypted file to a temporary file in the output directory. It publishes that file only after every chunk verifies and the declared size matches. If a transfer fails, the temporary file is removed and an existing output is left untouched. A new output has mode `0600`; replacing an existing regular file keeps that file's mode. Symlink and non-file destinations are refused. The CLI replaces an existing regular output by default. The command then prints the version metadata. It never prints the download URL or the wrapped file key. `--output -` writes to stdout as bytes are verified; a later failure can leave earlier bytes with the consumer, as described above.
+
+To send the decrypted bytes to another command, pass `--output -`:
+
+```sh
+# Bash and zsh: pipefail preserves a failed download's exit status.
+set -o pipefail
+agent-drive get /work/archive.bin --output - | consumer-command
+```
+
+This mode writes raw bytes to stdout with no JSON, text conversion, or added newline. Diagnostics stay on stderr. Bytes can reach the consumer before the entire file has been verified, so check that `agent-drive get` exits successfully before treating the stream as a complete file. If the destination needs a complete verified file, use `--output ./archive.bin`; that path publishes atomically after verification. If the downstream command fails, the pipeline should fail as well when run in Bash or zsh with `set -o pipefail`.
 
 The client library also exposes `getStream`. It yields each authenticated 1 MiB plaintext frame as it is verified; if a later frame fails, earlier frames have already been yielded. A caller that writes those frames directly to stdout can produce partial output. Use `getFile` when a complete verified file must appear atomically.
 
@@ -166,15 +200,16 @@ Rules:
 - The default prefix is `/`.
 - Symlinks are skipped. The local root must be a real directory, not a symlink.
 - It never deletes remote files.
-- Unchanged files are skipped, using a SHA-256 hash and the version id recorded in a private manifest. Hashing and upload read files in bounded chunks, and the upload pass verifies it is sending the content that was hashed.
+- Files with sync history are hashed before upload to determine whether they are unchanged; unchanged files are skipped when the SHA-256 hash and remote version id still match the private manifest. If a file with sync history changes and must be uploaded, the upload stream is checked against that hash. New files are hashed as they upload. File reads use bounded chunks, and a bounded number of transfers can run at once.
 - Manifests live in `<config path>.state` (by default `~/.config/agent-drive/config.json.state`), outside the uploaded folder. The directory must be private to your user; an unsafe directory is rejected.
 - A corrupt manifest stops the sync with an error. It does not reset the history.
-- If a remote file changed since your last sync, the command stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1. Files uploaded before that point stay uploaded.
+- Before starting transfers, sync lists remote versions and checks all local paths for known conflicts. If a file with sync history is missing remotely or has a different version, sync stops with `Remote conflict for <path>; refusing to overwrite.` and exits with code 1 without uploading files. Writes use conditional version guards, so a remote change that races after this check still fails safely; other independent uploads may already have completed.
+- On the first SIGINT or SIGTERM, sync stops starting new file transfers, lets in-flight transfers finish, and checkpoints completed uploads before exiting with status 130 or 143. A later run skips checkpointed files whose local hash and remote version still match. A second signal or hard kill can stop sync before an in-flight remote commit and its manifest checkpoint both finish; the next run may then report a conflict because the remote version was not recorded.
 - `sync` takes no filter or preview flags. `--dry-run`, `--exclude` and `--gitignore` belong to `backup`; `sync` rejects them with a suggestion to use `backup` before it touches keys or the network, rather than ignoring them and uploading the whole folder.
 
 ### First adoption of a non-empty prefix
 
-If the prefix already holds files that this machine never synced, sync stops with `Remote file <path> has no local sync history; use --overwrite-existing to replace it.` Use the flag once, on purpose:
+If the prefix already holds files that this machine never synced, the preflight stops before any uploads with `Remote file <path> has no local sync history; use --overwrite-existing to replace it.` Use the flag once, on purpose:
 
 ```sh
 agent-drive sync ./project --prefix /work/project --overwrite-existing

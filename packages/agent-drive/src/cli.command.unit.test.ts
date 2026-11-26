@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { randomUUID, webcrypto } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -346,6 +347,234 @@ describe('sync flag validation', () => {
     expect(r.err).toBe('');
     expect(r.out).toContain('"uploaded":1');
     expect(r.paths.some((p) => p.includes(`drives/${A}/commit`))).toBe(true);
+  });
+});
+
+describe('sync interruption handling', () => {
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+  ] as const)('maps %s to its conventional exit status after sync drains', async (signal, code) => {
+    class TestSyncInterruptedError extends Error {
+      constructor(readonly signalName: 'SIGINT' | 'SIGTERM') {
+        super('sync interrupted');
+        this.name = 'SyncInterruptedError';
+      }
+    }
+    let observedSignal: AbortSignal | undefined;
+    const syncDirectory = vi.fn(
+      async (
+        _client: unknown,
+        _driveId: string,
+        _localRoot: string,
+        _prefix: string | undefined,
+        options: { signal?: AbortSignal },
+      ) => {
+        observedSignal = options.signal;
+        process.emit(signal);
+        if (!options.signal?.aborted) throw new Error('CLI did not abort sync');
+        throw new TestSyncInterruptedError(signal);
+      },
+    );
+    vi.doMock('./sync.js', () => ({
+      syncDirectory,
+      SyncInterruptedError: TestSyncInterruptedError,
+    }));
+    const listenersBefore = process.listeners(signal);
+    try {
+      const result = await cli(['sync', '.', '--drive', A], one);
+      expect(result.exitCode).toBe(code);
+      expect(result.out).toBe('');
+      expect(result.err).toContain(`Sync interrupted by ${signal}`);
+      expect(observedSignal?.aborted).toBe(true);
+      expect(process.listeners(signal)).toEqual(listenersBefore);
+    } finally {
+      vi.doUnmock('./sync.js');
+      vi.resetModules();
+    }
+  });
+
+  it('forces exit on a second termination signal', async () => {
+    class TestSyncInterruptedError extends Error {
+      constructor(readonly signalName: 'SIGINT' | 'SIGTERM') {
+        super('sync interrupted');
+        this.name = 'SyncInterruptedError';
+      }
+    }
+    const syncDirectory = vi.fn(
+      async (
+        _client: unknown,
+        _driveId: string,
+        _localRoot: string,
+        _prefix: string | undefined,
+        options: { signal?: AbortSignal },
+      ) => {
+        process.emit('SIGINT');
+        process.emit('SIGTERM');
+        if (!options.signal?.aborted) throw new Error('CLI did not abort sync');
+        throw new TestSyncInterruptedError('SIGINT');
+      },
+    );
+    vi.doMock('./sync.js', () => ({
+      syncDirectory,
+      SyncInterruptedError: TestSyncInterruptedError,
+    }));
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    try {
+      await cli(['sync', '.', '--drive', A], one);
+      expect(exit).toHaveBeenCalledWith(143);
+    } finally {
+      vi.doUnmock('./sync.js');
+      vi.resetModules();
+    }
+  });
+});
+
+describe('binary stdin size validation', () => {
+  it('rejects invalid or misplaced --size before loading a drive key or making a request', async () => {
+    for (const [args, expected] of [
+      [['put', '-', '/x', '--size=-1'], 'non-negative safe integer'],
+      [['put', 'file.bin', '/x', '--size', '4'], 'only supported by `put -`'],
+      [['whoami', '--size', '4'], 'only supported by `put -`'],
+    ] as const) {
+      const result = await cli([...args], one);
+      expect(result.err).toContain(expected);
+      expect(result.paths).toEqual([]);
+    }
+  });
+});
+
+describe('pipe command guard validation', () => {
+  it('rejects --token-stdin outside login before connecting or consuming put stdin', async () => {
+    const input = Readable.from([Buffer.from('synthetic-api-token')]);
+    const stdinIterator = vi
+      .spyOn(process.stdin, Symbol.asyncIterator)
+      .mockReturnValue(input[Symbol.asyncIterator]());
+    const result = await cli(
+      ['put', '-', '/token.txt', '--drive', A, '--token-stdin'],
+      one,
+      (path, init) => {
+        if (path.endsWith('/put'))
+          return {
+            intentId: 'i1',
+            uploadUrl: 'https://s3.test/x',
+            ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+              .ciphertextSize,
+          };
+        if (path.endsWith('/commit')) return { version: { id: 'v1', path: '/token.txt' } };
+        return {};
+      },
+    );
+
+    expect(result.err).toContain('--token-stdin is only supported by `login`');
+    expect(result.paths).toEqual([]);
+    expect(stdinIterator).not.toHaveBeenCalled();
+
+    const whoami = await cli(['whoami', '--token-stdin'], one);
+    expect(whoami.err).toContain('--token-stdin is only supported by `login`');
+    expect(whoami.paths).toEqual([]);
+    expect(stdinIterator).not.toHaveBeenCalled();
+  });
+
+  it('rejects --token-stdin for capture before loading the wrapped-command runner', async () => {
+    const captureLoaded = vi.fn();
+    vi.doMock('./capture.js', () => {
+      captureLoaded();
+      return { runCapture: vi.fn(async () => 0) };
+    });
+    try {
+      const result = await cli(['capture', '--token-stdin', '--', 'echo', 'ignored'], one);
+      expect(result.err).toContain('--token-stdin is only supported by `login`');
+      expect(captureLoaded).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('./capture.js');
+      vi.resetModules();
+    }
+  });
+
+  it('keeps --token-stdin available to login', async () => {
+    const result = await cli(
+      ['login', '--api', 'https://x.test/api', '--token-stdin'],
+      one,
+      (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
+      { AGENT_DRIVE_API_KEY: 'login-token-fixture' },
+    );
+    expect(result.err).toContain('credential backups are out of date');
+    expect(result.paths).toContain('whoami');
+  });
+
+  it('rejects empty and whitespace version guards before connecting', async () => {
+    for (const value of ['', '   ']) {
+      const put = await cli(
+        ['put', '-', '/x', '--drive', A, '--size', '0', '--if-version', value],
+        one,
+      );
+      expect(put.err).toContain('--if-version must not be empty');
+      expect(put.paths).toEqual([]);
+
+      const get = await cli(['get', '/x', '--drive', A, '--output', '-', '--version', value], one);
+      expect(get.err).toContain('--version must not be empty');
+      expect(get.paths).toEqual([]);
+    }
+  });
+
+  it('keeps overwrite mutually exclusive with an explicit version and preserves restore versions', async () => {
+    const conflict = await cli(
+      ['put', '-', '/x', '--drive', A, '--size', '0', '--overwrite', '--if-version', 'v1'],
+      one,
+    );
+    expect(conflict.err).toContain('--overwrite and --if-version are mutually exclusive');
+    expect(conflict.paths).toEqual([]);
+
+    const restored = await cli(['restore', '/x', '--drive', A, '--version', 'v1'], one, (path) => {
+      if (path.endsWith('/restore')) return { version: { id: 'v2', path: '/x' } };
+      return {};
+    });
+    const restoreCall = restored.calls.find(({ path }) => path.endsWith('/restore'));
+    expect(restoreCall).toMatchObject({
+      body: JSON.stringify({ path: '/x', versionId: 'v1' }),
+    });
+  });
+
+  it('rejects a malformed selected drive key before spooling unknown-size stdin', async () => {
+    const input = Readable.from([Buffer.from('synthetic-upload')]);
+    const stdinIterator = vi
+      .spyOn(process.stdin, Symbol.asyncIterator)
+      .mockReturnValue(input[Symbol.asyncIterator]());
+    const result = await cli(['put', '-', '/x', '--drive', A], one, undefined, {
+      AGENT_DRIVE_KEY: 'not-a-drive-key',
+    });
+
+    expect(result.err).toContain('Invalid drive key');
+    expect(result.paths).toEqual([]);
+    expect(stdinIterator).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing selected drive key before spooling unknown-size stdin', async () => {
+    const input = Readable.from([Buffer.from('synthetic-upload')]);
+    const stdinIterator = vi
+      .spyOn(process.stdin, Symbol.asyncIterator)
+      .mockReturnValue(input[Symbol.asyncIterator]());
+    const result = await cli(['put', '-', '/x', '--drive', A], { keys: {}, origins: {} });
+
+    expect(result.err).toContain('Missing drive key');
+    expect(result.paths).toEqual([]);
+    expect(stdinIterator).not.toHaveBeenCalled();
+  });
+
+  it('validates the selected drive key before a known-size stdin upload too', async () => {
+    const input = Readable.from([Buffer.from('synthetic-upload')]);
+    const stdinIterator = vi
+      .spyOn(process.stdin, Symbol.asyncIterator)
+      .mockReturnValue(input[Symbol.asyncIterator]());
+    const result = await cli(['put', '-', '/x', '--drive', A, '--size', '15'], {
+      keys: {},
+      origins: {},
+    });
+
+    expect(result.err).toContain('Missing drive key');
+    expect(result.paths).toEqual([]);
+    expect(stdinIterator).not.toHaveBeenCalled();
   });
 });
 
@@ -756,5 +985,43 @@ describe('version', () => {
     const command = await cli(['version'], one);
     expect(command.out).toBe(`${version}\n`);
     expect(command.err).toBe('');
+  });
+});
+
+describe('CLI startup import isolation', () => {
+  it('loads the MCP module only for mcp, not version or get commands', async () => {
+    const loadMcp = vi.fn();
+    const runMcp = vi.fn(async () => {});
+    vi.doMock('./mcp.js', () => {
+      loadMcp();
+      return { runMcp };
+    });
+    vi.doMock('./capture.js', () => {
+      throw new Error('capture module was loaded outside the capture command');
+    });
+
+    try {
+      const version = await cli(['--version'], one);
+      const { version: expectedVersion } = createRequire(import.meta.url)('../package.json') as {
+        version: string;
+      };
+      expect(version.out.trim()).toBe(expectedVersion);
+      expect(version.exitCode).toBeUndefined();
+      expect(loadMcp).not.toHaveBeenCalled();
+
+      const get = await cli(['get', '/x', '--drive', A, '--output', '-'], one);
+      expect(get.exitCode).toBe(1);
+      expect(get.err).not.toContain('capture module was loaded');
+      expect(loadMcp).not.toHaveBeenCalled();
+
+      process.exitCode = undefined;
+      await cli(['mcp'], one);
+      expect(loadMcp).toHaveBeenCalledTimes(1);
+      expect(runMcp).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.doUnmock('./mcp.js');
+      vi.doUnmock('./capture.js');
+      vi.resetModules();
+    }
   });
 });
