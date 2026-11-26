@@ -1,6 +1,5 @@
 import {
   DriveCryptoError,
-  decryptFile,
   decryptWithFileKeyStream,
   encryptFile,
   encryptFileStream,
@@ -384,12 +383,12 @@ export class AgentDriveClient {
   private readonly inboxes = new Map<string, TraceInboxRecord>();
 
   /** The drive's trace inbox record, or null. Only a found record is cached (an inbox may be created later). */
-  async traceInbox(driveId: string): Promise<TraceInboxRecord | null> {
+  async traceInbox(driveId: string, signal?: AbortSignal): Promise<TraceInboxRecord | null> {
     const cached = this.inboxes.get(driveId);
     if (cached) return cached;
     const { inbox } = await this.request<{
       inbox: (TraceInboxRecord & { createdAt?: string }) | null;
-    }>(`drives/${encode(driveId)}/trace-inbox`);
+    }>(`drives/${encode(driveId)}/trace-inbox`, signal ? { signal } : {});
     if (!inbox) return null;
     const record = {
       keyId: inbox.keyId,
@@ -401,9 +400,13 @@ export class AgentDriveClient {
   }
 
   /** For a v2 envelope: the inbox record bound to the requested drive. v1 never calls the server. */
-  private async inboxFor(driveId: string, wrappedKey: string): Promise<TraceInbox | undefined> {
+  private async inboxFor(
+    driveId: string,
+    wrappedKey: string,
+    signal?: AbortSignal,
+  ): Promise<TraceInbox | undefined> {
     if (envelopeVersion(wrappedKey) !== 2) return undefined;
-    const record = await this.traceInbox(driveId);
+    const record = await this.traceInbox(driveId, signal);
     if (!record) {
       throw new DriveCryptoError(
         'inbox_key_required',
@@ -851,25 +854,19 @@ export class AgentDriveClient {
   }
 
   async get(driveId: string, path: string, options: GetOptions = {}) {
-    const query = new URLSearchParams({ path });
-    if (options.versionId) query.set('versionId', options.versionId);
-    const metadata = await this.request<Version & { downloadUrl: string }>(
-      `drives/${encode(driveId)}/get?${query.toString()}`,
-    );
-    // A v2 envelope starts its trace-inbox request now so it overlaps the ciphertext
-    // download; for v1 this resolves immediately without contacting the server.
-    const inbox = this.inboxFor(driveId, metadata.wrappedKey);
-    // If the download fails the lookup is never awaited; observe its rejection anyway.
-    inbox.catch(() => {});
-    const response = await this.storage(metadata.downloadUrl);
-    const ciphertext = new Uint8Array(await response.arrayBuffer());
-    const bytes = await decryptFile(
-      ciphertext,
-      metadata.wrappedKey,
-      this.keyFor(driveId),
-      await inbox,
-    );
-    return { bytes, version: metadata };
+    const stream = await this.getStream(driveId, path, options);
+    const bytes = new Uint8Array(stream.plaintextBytes);
+    let offset = 0;
+    try {
+      for await (const chunk of stream.plaintext) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return { bytes, version: stream.version };
+    } catch (error) {
+      bytes.fill(0);
+      throw error;
+    }
   }
 
   /** Open a metered download as authenticated plaintext chunks. */
@@ -903,7 +900,7 @@ export class AgentDriveClient {
     if (!metadata.downloadUrl)
       throw new AgentDriveApiError('internal_error', 502, 'The download URL is missing.');
     const plaintextBytes = plaintextSize(metadata.ciphertextSize);
-    const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey).then((inbox) =>
+    const fileKeyPromise = this.inboxFor(driveId, metadata.wrappedKey, options.signal).then((inbox) =>
       unwrapFileKey(metadata.wrappedKey, this.keyFor(driveId), inbox),
     );
     fileKeyPromise.catch(() => {});
@@ -915,16 +912,39 @@ export class AgentDriveClient {
       throw new AgentDriveApiError('storage_error', 502, 'The download body is missing.');
     const reader = response.body.getReader();
     let cancelled = false;
+    let sourceComplete = false;
+    let sourceReading = false;
+    let readerReleased = false;
+    const releaseReader = () => {
+      if (readerReleased) return;
+      readerReleased = true;
+      reader.releaseLock();
+    };
+    const cancelReader = async (reason?: unknown) => {
+      if (cancelled || sourceComplete) return;
+      cancelled = true;
+      try {
+        await reader.cancel(reason);
+      } finally {
+        if (!sourceReading) releaseReader();
+      }
+    };
     const ciphertext: AsyncIterable<Uint8Array> = {
       async *[Symbol.asyncIterator]() {
+        sourceReading = true;
         try {
           for (;;) {
             const result = await reader.read();
-            if (result.done) return;
+            if (result.done) {
+              sourceComplete = true;
+              return;
+            }
             yield result.value;
           }
         } finally {
-          reader.releaseLock();
+          sourceReading = false;
+          if (!sourceComplete) await cancelReader().catch(() => undefined);
+          releaseReader();
         }
       },
     };
@@ -932,7 +952,7 @@ export class AgentDriveClient {
     try {
       fileKey = await fileKeyPromise;
     } catch (error) {
-      await reader.cancel(error).catch(() => undefined);
+      await cancelReader(error).catch(() => undefined);
       throw error;
     }
     const decrypted = decryptWithFileKeyStream(ciphertext, fileKey, metadata.ciphertextSize);
@@ -964,10 +984,10 @@ export class AgentDriveClient {
           }
         } finally {
           if (!complete) {
-            await iterator.return?.();
-            if (!cancelled) {
-              cancelled = true;
-              await reader.cancel().catch(() => undefined);
+            try {
+              await iterator.return?.();
+            } finally {
+              await cancelReader().catch(() => undefined);
             }
           }
         }
@@ -978,9 +998,7 @@ export class AgentDriveClient {
       plaintextBytes,
       version: metadata,
       cancel: async (reason?: unknown) => {
-        if (cancelled) return;
-        cancelled = true;
-        await reader.cancel(reason).catch(() => undefined);
+        await cancelReader(reason).catch(() => undefined);
       },
     };
   }

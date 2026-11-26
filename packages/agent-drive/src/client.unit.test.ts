@@ -435,6 +435,134 @@ describe('AgentDriveClient streaming transfers', () => {
     await iterator.return?.();
     expect(reader.cancel).toHaveBeenCalledTimes(1);
   });
+
+  it('cancels the underlying response body when a real stream consumer stops early', async () => {
+    const encrypted = await encryptFile(new Uint8Array(1024 * 1024 + 1).fill(17), driveKey);
+    const cancelled = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encrypted.ciphertext.subarray(0, 25));
+        controller.enqueue(encrypted.ciphertext.subarray(25, 25 + 1024 * 1024 + 16));
+      },
+      cancel: cancelled,
+    });
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/get?'))
+        return new Response(
+          JSON.stringify({
+            ...version,
+            ciphertextSize: encrypted.ciphertext.byteLength,
+            wrappedKey: encrypted.wrappedKey,
+            downloadUrl: 'http://localhost:9000/d',
+          }),
+          { status: 200 },
+        );
+      return new Response(body, { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+
+    const result = await client.getStream('d', '/x');
+    const iterator = result.plaintext[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ done: false });
+    await iterator.return?.();
+
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a streamed download before its first plaintext read', async () => {
+    const encrypted = await encryptFile(new Uint8Array(1024 * 1024).fill(17), driveKey);
+    const cancelled = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encrypted.ciphertext.subarray(0, 25));
+      },
+      cancel: cancelled,
+    });
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/get?'))
+        return new Response(
+          JSON.stringify({
+            ...version,
+            ciphertextSize: encrypted.ciphertext.byteLength,
+            wrappedKey: encrypted.wrappedKey,
+            downloadUrl: 'http://localhost:9000/d',
+          }),
+          { status: 200 },
+        );
+      return new Response(body, { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+
+    const result = await client.getStream('d', '/x');
+    await expect(result.cancel()).resolves.toBeUndefined();
+
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps get byte results while honoring its plaintext cap and abort signal', async () => {
+    const driveId = '11111111-2222-4333-8444-555555555555';
+    const inbox = await createTraceInbox(driveId, driveKey);
+    const fileKey = generateDriveKey();
+    const ciphertext = await seal(
+      new Uint8Array([1, 2, 3]),
+      decodeDriveKey(fileKey),
+      new Uint8Array(8),
+    );
+    const wrappedKey = await sealFileKeyToInbox(fileKey, { driveId, ...inbox });
+    const controller = new AbortController();
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void init;
+      const url = String(input);
+      if (url.includes('/trace-inbox'))
+        return new Response(JSON.stringify({ inbox }), { status: 200 });
+      if (url.includes('/get?')) {
+        const metadata = {
+          ...version,
+          ciphertextSize: ciphertext.byteLength,
+          wrappedKey,
+        };
+        return new Response(
+          JSON.stringify(url.includes('metadataOnly=1') ? metadata : {
+            ...metadata,
+            downloadUrl: 'http://localhost:9000/d',
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(ciphertext, { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+
+    await expect(
+      client.get(driveId, '/x', { maxPlaintextBytes: 2, signal: controller.signal }),
+    ).rejects.toBeInstanceOf(StreamSizeLimitError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+
+    const result = await client.get(driveId, '/x', {
+      maxPlaintextBytes: 3,
+      signal: controller.signal,
+    });
+
+    expect(result.bytes).toEqual(new Uint8Array([1, 2, 3]));
+    expect(result.version.id).toBe(version.id);
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher.mock.calls.every((call) => call[1]?.signal === controller.signal)).toBe(true);
+  });
 });
 
 describe('AgentDriveClient.putEncrypted', () => {
@@ -504,6 +632,7 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
       if (url.pathname.endsWith('/get'))
         return Response.json({
           id: 'v',
+          ciphertextSize: file.ciphertext.byteLength,
           wrappedKey: file.wrappedKey,
           downloadUrl: 'http://127.0.0.1:9000/o',
         });
@@ -564,6 +693,7 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
       if (url.pathname.endsWith('/get'))
         return Response.json({
           id: 'v',
+          ciphertextSize: file.ciphertext.byteLength,
           wrappedKey: file.wrappedKey,
           downloadUrl: 'http://127.0.0.1:9000/o',
         });
@@ -600,6 +730,7 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
       if (url.pathname.endsWith('/get'))
         return Response.json({
           id: 'v',
+          ciphertextSize: file.ciphertext.byteLength,
           wrappedKey: file.wrappedKey,
           downloadUrl: 'http://127.0.0.1:9000/o',
         });
@@ -632,6 +763,7 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
       if (url.pathname.endsWith('/get'))
         return Response.json({
           id: 'v',
+          ciphertextSize: file.ciphertext.byteLength,
           wrappedKey: file.wrappedKey,
           downloadUrl: 'http://127.0.0.1:9000/o',
         });
