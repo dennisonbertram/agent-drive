@@ -13,6 +13,10 @@ const MAX_READ_BYTES = 1024 * 1024;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 8;
 const REQUEST_TIMEOUT_MS = 20_000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_PENDING_FLUSHES = 4;
+const MAX_FLUSH_OPERATIONS = 64;
+const FLUSH_OPERATION_TTL_MS = 20 * 60_000;
 const HELPER_START_TIMEOUT_MS = 15_000;
 const HELPER_STOP_TIMEOUT_MS = 5_000;
 
@@ -29,6 +33,14 @@ export type StartMacMountOptions = {
   driveId: string;
   requestedMountpoint: string;
   dispatch(request: unknown, signal?: AbortSignal): Promise<unknown>;
+};
+
+type FlushOperation = {
+  handleId: string;
+  operationId: string;
+  startedAt: number;
+  completedAt?: number;
+  result?: unknown;
 };
 
 type AliasOwnership = { path: string; target: string; dev: number; ino: number };
@@ -113,6 +125,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'truncate',
       'readStaged',
       'flush',
+      'flushStatus',
       'release',
       'completeWrite',
       'mkdir',
@@ -123,7 +136,17 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
   )
     return false;
   if (value.op === 'capabilities') return true;
-  if (['write', 'truncate', 'readStaged', 'flush', 'release', 'completeWrite'].includes(value.op)) {
+  if (
+    [
+      'write',
+      'truncate',
+      'readStaged',
+      'flush',
+      'flushStatus',
+      'release',
+      'completeWrite',
+    ].includes(value.op)
+  ) {
     if (
       typeof value.handleId !== 'string' ||
       value.handleId.length < 1 ||
@@ -131,6 +154,16 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
     )
       return false;
   }
+  if (
+    value.op === 'flushStatus' &&
+    (typeof value.operationId !== 'string' || !UUID_PATTERN.test(value.operationId))
+  )
+    return false;
+  if (
+    value.op === 'flush' &&
+    (typeof value.operationId !== 'string' || !UUID_PATTERN.test(value.operationId))
+  )
+    return false;
   if (
     ['stat', 'list', 'read', 'openWrite', 'mkdir', 'rmdir', 'unlink', 'rename'].includes(value.op)
   ) {
@@ -395,6 +428,96 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     });
   });
   let activeRequests = 0;
+  const flushOperations = new Map<string, FlushOperation>();
+  const latestFlushByHandle = new Map<string, string>();
+  const pruneFlushOperations = () => {
+    const now = Date.now();
+    for (const [operationId, operation] of flushOperations) {
+      if (
+        operation.result !== undefined &&
+        now - (operation.completedAt ?? operation.startedAt) > FLUSH_OPERATION_TTL_MS
+      ) {
+        flushOperations.delete(operationId);
+        if (latestFlushByHandle.get(operation.handleId) === operationId)
+          latestFlushByHandle.delete(operation.handleId);
+      }
+    }
+    while (flushOperations.size >= MAX_FLUSH_OPERATIONS) {
+      const completed = [...flushOperations].find(
+        ([, operation]) => operation.result !== undefined,
+      );
+      if (!completed) break;
+      const [operationId, operation] = completed;
+      flushOperations.delete(operationId);
+      if (latestFlushByHandle.get(operation.handleId) === operationId)
+        latestFlushByHandle.delete(operation.handleId);
+    }
+  };
+  const responseForFlushOperation = (id: string | number, operation: FlushOperation) => {
+    if (operation.result === undefined)
+      return { id, ok: true, pending: true, operationId: operation.operationId };
+    return { ...(operation.result as Record<string, unknown>), id };
+  };
+  const startFlushOperation = (rpc: Record<string, unknown>) => {
+    const handleId = rpc.handleId as string;
+    const requestedOperationId = rpc.operationId as string;
+    pruneFlushOperations();
+    const requested = flushOperations.get(requestedOperationId);
+    if (requested) {
+      if (requested.handleId !== handleId) return { id: rpc.id, ok: false, errno: 'EINVAL' };
+      return responseForFlushOperation(rpc.id as string | number, requested);
+    }
+    const currentId = latestFlushByHandle.get(handleId);
+    const current = currentId ? flushOperations.get(currentId) : undefined;
+    if (
+      current &&
+      (current.result === undefined || (current.result as { ok?: unknown }).ok === true)
+    )
+      return responseForFlushOperation(rpc.id as string | number, current);
+    if (current) latestFlushByHandle.delete(handleId);
+    if (
+      [...flushOperations.values()].filter((operation) => operation.result === undefined).length >=
+      MAX_PENDING_FLUSHES
+    )
+      return { id: rpc.id, ok: false, errno: 'EBUSY' };
+    pruneFlushOperations();
+    if (flushOperations.size >= MAX_FLUSH_OPERATIONS)
+      return { id: rpc.id, ok: false, errno: 'EBUSY' };
+
+    const operation: FlushOperation = {
+      handleId,
+      operationId: requestedOperationId,
+      startedAt: Date.now(),
+    };
+    flushOperations.set(operation.operationId, operation);
+    latestFlushByHandle.set(handleId, operation.operationId);
+    void Promise.resolve()
+      .then(() => options.dispatch(rpc))
+      .then(
+        (result) => {
+          const validResult =
+            isRecord(result) && result.id === rpc.id && typeof result.ok === 'boolean';
+          const encodedResult = validResult ? JSON.stringify(result) : '';
+          operation.result =
+            validResult && Buffer.byteLength(encodedResult) <= MAX_RESPONSE_BYTES
+              ? result
+              : { id: rpc.id, ok: false, errno: validResult ? 'EOVERFLOW' : 'EIO' };
+          operation.completedAt = Date.now();
+        },
+        () => {
+          operation.result = { id: rpc.id, ok: false, errno: 'EIO' };
+          operation.completedAt = Date.now();
+        },
+      );
+    return responseForFlushOperation(rpc.id as string | number, operation);
+  };
+  const flushStatus = (id: string | number, handleId: string, operationId: string) => {
+    pruneFlushOperations();
+    const operation = flushOperations.get(operationId);
+    if (!operation || operation.handleId !== handleId)
+      return { id, ok: false, errno: 'ESTALE', mutationOutcome: 'unknown', operationId };
+    return responseForFlushOperation(id, operation);
+  };
   const handleRequest = async (request: IncomingMessage, response: ServerResponse) => {
     const port = (server.address() as { port: number } | null)?.port;
     const expectedHost = port === undefined ? '' : `127.0.0.1:${port}`;
@@ -431,6 +554,19 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
         return jsonResponse(response, 413, { error: 'Request too large' });
       }
       rpcId = rpc.id as string | number;
+      if (rpc.op === 'flushStatus') {
+        return jsonResponse(
+          response,
+          200,
+          flushStatus(rpc.id as string | number, rpc.handleId as string, rpc.operationId as string),
+        );
+      }
+      if (rpc.op === 'flush') return jsonResponse(response, 200, startFlushOperation(rpc));
+      if (['write', 'truncate', 'completeWrite', 'release'].includes(rpc.op as string)) {
+        const currentId = latestFlushByHandle.get(rpc.handleId as string);
+        const current = currentId ? flushOperations.get(currentId) : undefined;
+        if (current) latestFlushByHandle.delete(rpc.handleId as string);
+      }
       const controller = new AbortController();
       const cancel = () =>
         controller.abort(

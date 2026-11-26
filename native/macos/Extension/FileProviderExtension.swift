@@ -578,19 +578,28 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
             try? await client.release(handleId: handle.handleId)
             return (result, size)
         } catch {
-            try? await client.release(handleId: handle.handleId)
             let errno: String
             if error is CancellationError {
                 errno = "ECANCELED"
             } else if let bridgeError = error as? BridgeClientError {
                 switch bridgeError {
                 case .remoteFailure(let failure):
+                    if failure.mutationOutcome == "unknown" {
+                        throw BridgeClientError.remoteFailure(RPCFailure(
+                            errno: failure.errno,
+                            recoveryPath: handle.recoveryPath,
+                            currentVersionId: failure.currentVersionId,
+                            mutationOutcome: "unknown",
+                            operationId: failure.operationId
+                        ))
+                    }
                     if failure.recoveryPath != nil { throw error }
                     errno = failure.errno
                 case .remote(let value): errno = value
                 default: errno = "EIO"
                 }
             } else { errno = "EIO" }
+            try? await client.release(handleId: handle.handleId)
             throw BridgeClientError.remoteFailure(RPCFailure(
                 errno: errno,
                 recoveryPath: handle.recoveryPath,
@@ -874,9 +883,16 @@ private func providerError(_ error: Error) -> NSError {
         case .remoteFailure(let failure):
             var userInfo: [String: Any] = [:]
             if let recoveryPath = failure.recoveryPath {
-                userInfo[NSLocalizedDescriptionKey] =
-                    "The change conflicted with a remote update. Your staged copy is preserved at \(recoveryPath)."
+                userInfo[NSLocalizedDescriptionKey] = failure.mutationOutcome == "unknown"
+                    ? "Agent Drive has not confirmed whether the save finished. The staged copy remains available at \(recoveryPath). Check this copy before retrying the save."
+                    : "The change conflicted with a remote update. Your staged copy is preserved at \(recoveryPath)."
                 userInfo["AgentDriveRecoveryPath"] = recoveryPath
+            }
+            if let mutationOutcome = failure.mutationOutcome {
+                userInfo["AgentDriveMutationOutcome"] = mutationOutcome
+            }
+            if let operationId = failure.operationId {
+                userInfo["AgentDriveFlushOperationId"] = operationId
             }
             if let currentVersionId = failure.currentVersionId {
                 userInfo["AgentDriveCurrentVersionId"] = currentVersionId

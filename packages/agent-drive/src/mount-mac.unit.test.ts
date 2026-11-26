@@ -387,4 +387,110 @@ ${waitForSignal}
     await expect(aborted).resolves.toBeUndefined();
     await handle.close();
   }, 20_000);
+
+  it('returns the committed result from a bounded flush operation after a slow upload', async () => {
+    const directory = await fixture();
+    const actualPath = join(directory, 'finder-root');
+    await mkdir(actualPath);
+    const startupPath = join(directory, 'startup.json');
+    const goPath = join(directory, 'start-flush');
+    const resultPath = join(directory, 'flush-result.json');
+    const helper = await writeHelper(
+      directory,
+      `
+import { createInterface } from 'node:readline';
+import { access, readFile, writeFile } from 'node:fs/promises';
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const line = await new Promise((resolve) => input.once('line', resolve));
+input.close();
+const startup = JSON.parse(line);
+await writeFile(${JSON.stringify(startupPath)}, JSON.stringify(startup));
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+while (true) {
+  try { await access(${JSON.stringify(goPath)}); break; } catch { await new Promise((resolve) => setTimeout(resolve, 10)); }
+}
+const endpoint = 'http://127.0.0.1:' + startup.port + '/rpc';
+const headers = { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' };
+const post = async (body) => await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
+const initial = await (await post({ id: 'flush-start', op: 'flush', handleId: 'slow-handle', operationId: '11111111-1111-4111-8111-111111111111' })).json();
+if (!initial.pending || typeof initial.operationId !== 'string') {
+  await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({ initial }));
+  process.exit(41);
+}
+const repeated = await (await post({ id: 'flush-retry', op: 'flush', handleId: 'slow-handle', operationId: initial.operationId })).json();
+if (!repeated.pending || repeated.operationId !== initial.operationId) process.exit(43);
+const unrelated = await (await post({ id: 'while-pending', op: 'stat', path: '/note.txt' })).json();
+if (!unrelated.ok) process.exit(44);
+let result;
+for (let count = 0; count < 200; count++) {
+  result = await (await post({ id: 'flush-status-' + count, op: 'flushStatus', handleId: 'slow-handle', operationId: initial.operationId })).json();
+  if (!result.pending) break;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+}
+await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({ initial, result }));
+process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
+`,
+    );
+    vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+    let startDispatch!: () => void;
+    const dispatchStarted = new Promise<void>((resolve) => {
+      startDispatch = resolve;
+    });
+    let finishUnrelated!: () => void;
+    const unrelatedDispatched = new Promise<void>((resolve) => {
+      finishUnrelated = resolve;
+    });
+    let finishDispatch!: (value: unknown) => void;
+    let dispatchCalls = 0;
+    const dispatchResult = new Promise<unknown>((resolve) => {
+      finishDispatch = resolve;
+    });
+    const handle = await startMacMount({
+      driveId: 'synthetic-drive',
+      requestedMountpoint: join(directory, 'requested-mount'),
+      dispatch: async (request) => {
+        if ((request as Record<string, unknown>).op === 'stat') {
+          finishUnrelated();
+          return { id: (request as Record<string, unknown>).id, ok: true, entry: {} };
+        }
+        dispatchCalls += 1;
+        expect(request).toMatchObject({ op: 'flush', handleId: 'slow-handle' });
+        startDispatch();
+        return await dispatchResult;
+      },
+    });
+    const startup = JSON.parse(await readFile(startupPath, 'utf8')) as {
+      port: number;
+      token: string;
+    };
+    vi.useFakeTimers();
+    try {
+      await writeFile(goPath, 'go');
+      await dispatchStarted;
+      await unrelatedDispatched;
+      await vi.advanceTimersByTimeAsync(20_001);
+      finishDispatch({
+        id: 'flush-start',
+        ok: true,
+        version: { id: 'committed-v1', path: '/slow.bin' },
+      });
+      await expect(handle.waitForExit()).resolves.toMatchObject({ code: 0 });
+      const result = JSON.parse(await readFile(resultPath, 'utf8')) as {
+        initial: Record<string, unknown>;
+        result: Record<string, unknown>;
+      };
+      expect(result.initial).toMatchObject({ id: 'flush-start', ok: true, pending: true });
+      expect(result.result).toMatchObject({
+        id: expect.stringMatching(/^flush-status-/),
+        ok: true,
+        version: { id: 'committed-v1', path: '/slow.bin' },
+      });
+      expect(startup.port).toBeGreaterThan(0);
+      expect(startup.token).toBeTruthy();
+      expect(dispatchCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+      await handle.close();
+    }
+  }, 20_000);
 });

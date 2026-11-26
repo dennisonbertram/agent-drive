@@ -286,6 +286,8 @@ export async function createMountBridge(
     : shutdownController.signal;
   let closed = false;
   let requestTail = Promise.resolve();
+  // Flush stays on the mutation tail, while immutable remote reads can bypass its wait.
+  let activeFlushes = 0;
   const capabilities =
     options.capabilities ??
     ({
@@ -1057,11 +1059,26 @@ export async function createMountBridge(
           : {}),
       });
       if (requestSignal?.aborted) return Promise.resolve(canceled());
-      const pending = requestTail.then(() => dispatchRequest(input, requestSignal, progress));
-      requestTail = pending.then(
-        () => undefined,
-        () => undefined,
-      );
+      const op = input && typeof input === 'object' && 'op' in input ? String(input.op) : undefined;
+      const independentRead = ['capabilities', 'stat', 'list', 'read'].includes(op ?? '');
+      const bypassFlushWait = independentRead && activeFlushes > 0;
+      const pending = bypassFlushWait
+        ? dispatchRequest(input, requestSignal, progress)
+        : requestTail.then(async () => {
+            if (op !== 'flush') return await dispatchRequest(input, requestSignal, progress);
+            activeFlushes += 1;
+            try {
+              return await dispatchRequest(input, requestSignal, progress);
+            } finally {
+              activeFlushes -= 1;
+            }
+          });
+      if (!bypassFlushWait) {
+        requestTail = pending.then(
+          () => undefined,
+          () => undefined,
+        );
+      }
       if (!requestSignal) return pending;
       return new Promise<MountResponse>((resolveRequest, rejectRequest) => {
         const onAbort = () => resolveRequest(canceled());

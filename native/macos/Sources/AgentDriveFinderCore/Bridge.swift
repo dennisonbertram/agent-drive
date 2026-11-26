@@ -15,6 +15,22 @@ public struct RPCFailure: Equatable, Error {
     public let errno: String
     public let recoveryPath: String?
     public let currentVersionId: String?
+    public let mutationOutcome: String?
+    public let operationId: String?
+
+    public init(
+        errno: String,
+        recoveryPath: String? = nil,
+        currentVersionId: String? = nil,
+        mutationOutcome: String? = nil,
+        operationId: String? = nil
+    ) {
+        self.errno = errno
+        self.recoveryPath = recoveryPath
+        self.currentVersionId = currentVersionId
+        self.mutationOutcome = mutationOutcome
+        self.operationId = operationId
+    }
 }
 
 public struct MountConnection: CustomStringConvertible, Equatable {
@@ -172,7 +188,7 @@ public struct MountCapabilities: Decodable, Equatable {
 
     public func allowsWrite(_ path: String) -> Bool {
         guard !readOnly, write, maxWriteBytes > 0,
-              ["openWrite", "write", "truncate", "flush", "release"].allSatisfy(ops.contains),
+              ["openWrite", "write", "truncate", "flush", "flushStatus", "release"].allSatisfy(ops.contains),
               ItemPath.isCanonical(path)
         else { return false }
         return writePaths.isEmpty || writePaths.contains(where: { contains($0, path: path) })
@@ -341,14 +357,111 @@ public struct DriveBridge {
 
     public func flush(handleId: String) async throws -> FlushResult {
         guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
-        let payload = try await request(op: "flush", handleId: handleId)
-        let response = try JSONDecoder().decode(FlushResponse.self, from: payload)
-        guard !response.version.id.isEmpty, response.version.id.utf8.count <= 512,
-              response.version.id.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
-              response.version.path.hasPrefix("/"), response.version.path.utf8.count <= 4_096,
-              response.version.path.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
-        else { throw BridgeClientError.malformedResponse }
-        return try FlushResult(version: response.version.id, recoveryPath: response.recoveryPath).validated()
+        let deadline = Date().addingTimeInterval(12 * 60)
+        let requestedOperationId = UUID().uuidString.lowercased()
+        var payload: Data
+        do {
+            payload = try await request(
+                op: "flush", handleId: handleId, operationId: requestedOperationId
+            )
+        } catch {
+            guard let bridgeError = error as? BridgeClientError,
+                  bridgeError == .unavailable || bridgeError == .malformedResponse
+            else { throw uncertainFlush(error, operationId: requestedOperationId) }
+            do {
+                payload = try await request(
+                    op: "flush", handleId: handleId, operationId: requestedOperationId
+                )
+            } catch {
+                throw uncertainFlush(error, operationId: requestedOperationId)
+            }
+        }
+        var response: FlushResponse
+        do {
+            response = try JSONDecoder().decode(FlushResponse.self, from: payload)
+        } catch {
+            throw uncertainFlush(error, operationId: requestedOperationId)
+        }
+        if response.pending == true {
+            guard let operationId = response.operationId, UUID(uuidString: operationId) != nil else {
+                throw uncertainFlush(BridgeClientError.malformedResponse, operationId: requestedOperationId)
+            }
+            var delay: UInt64 = 50_000_000
+            while Date() < deadline {
+                do {
+                    payload = try await request(
+                        op: "flushStatus", handleId: handleId, operationId: operationId
+                    )
+                } catch {
+                    if let bridgeError = error as? BridgeClientError,
+                       bridgeError == .unavailable || bridgeError == .malformedResponse {
+                        do {
+                            try await Task.sleep(nanoseconds: delay)
+                        } catch {
+                            throw uncertainFlush(error, operationId: operationId)
+                        }
+                        delay = min(delay * 2, 5_000_000_000)
+                        continue
+                    }
+                    throw uncertainFlush(error, operationId: operationId)
+                }
+                do {
+                    response = try JSONDecoder().decode(FlushResponse.self, from: payload)
+                } catch {
+                    throw uncertainFlush(error, operationId: operationId)
+                }
+                if response.pending != true { break }
+                do {
+                    try await Task.sleep(nanoseconds: delay)
+                } catch {
+                    throw uncertainFlush(error, operationId: operationId)
+                }
+                delay = min(delay * 2, 5_000_000_000)
+            }
+            if response.pending == true || response.version == nil {
+                throw BridgeClientError.remoteFailure(RPCFailure(
+                    errno: "ETIMEDOUT", mutationOutcome: "unknown", operationId: response.operationId
+                ))
+            }
+        }
+        guard let version = response.version else {
+            throw uncertainFlush(
+                BridgeClientError.malformedResponse,
+                operationId: response.operationId ?? requestedOperationId
+            )
+        }
+        guard !version.id.isEmpty, version.id.utf8.count <= 512,
+              version.id.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              version.path.hasPrefix("/"), version.path.utf8.count <= 4_096,
+              version.path.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { throw uncertainFlush(BridgeClientError.malformedResponse, operationId: response.operationId ?? requestedOperationId) }
+        return try FlushResult(version: version.id, recoveryPath: response.recoveryPath).validated()
+    }
+
+    private func uncertainFlush(_ error: Error, operationId: String? = nil) -> Error {
+        if let bridgeError = error as? BridgeClientError {
+            switch bridgeError {
+            case .remoteFailure(let failure):
+                guard failure.mutationOutcome == "unknown" else { return bridgeError }
+                if failure.operationId != nil { return error }
+                return BridgeClientError.remoteFailure(RPCFailure(
+                    errno: failure.errno,
+                    recoveryPath: failure.recoveryPath,
+                    currentVersionId: failure.currentVersionId,
+                    mutationOutcome: "unknown",
+                    operationId: operationId
+                ))
+            case .unavailable, .malformedResponse:
+                break
+            default:
+                return bridgeError
+            }
+        } else if !(error is CancellationError) && !(error is DecodingError) {
+            return error
+        }
+        return BridgeClientError.remoteFailure(RPCFailure(
+            errno: "ETIMEDOUT", mutationOutcome: "unknown", operationId: operationId
+        ))
     }
 
     public func release(handleId: String) async throws {
@@ -465,12 +578,16 @@ public struct DriveBridge {
                       }) ?? true,
                       envelope.currentVersionId.map({ !$0.isEmpty && $0.utf8.count <= 512 &&
                           $0.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
-                      }) ?? true
+                      }) ?? true,
+                      envelope.mutationOutcome.map({ $0 == "unknown" || $0 == "notSubmitted" }) ?? true,
+                      envelope.operationId.map({ UUID(uuidString: $0) != nil }) ?? true
                 else { throw BridgeClientError.malformedResponse }
                 throw BridgeClientError.remoteFailure(RPCFailure(
                     errno: errno,
                     recoveryPath: envelope.recoveryPath,
-                    currentVersionId: envelope.currentVersionId
+                    currentVersionId: envelope.currentVersionId,
+                    mutationOutcome: envelope.mutationOutcome,
+                    operationId: envelope.operationId
                 ))
             }
             throw BridgeClientError.remote("EIO")
@@ -543,6 +660,8 @@ private struct RPCEnvelope: Decodable {
     let errno: String?
     let recoveryPath: String?
     let currentVersionId: String?
+    let mutationOutcome: String?
+    let operationId: String?
 }
 
 private struct CapabilitiesResponse: Decodable { let capabilities: MountCapabilities }
@@ -568,8 +687,10 @@ private struct SizeResponse: Decodable { let size: Int64 }
 private struct StagedDataResponse: Decodable { let data: String; let eof: Bool }
 private struct FlushResponse: Decodable {
     struct Version: Decodable { let id: String; let path: String }
-    let version: Version
+    let version: Version?
     let recoveryPath: String?
+    let pending: Bool?
+    let operationId: String?
 }
 public struct FlushResult: Decodable, Equatable {
     public let version: String

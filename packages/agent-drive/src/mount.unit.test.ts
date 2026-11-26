@@ -475,7 +475,10 @@ describe('mount bridge', () => {
         'rename',
       ],
     };
-    const bridge = await createMountBridge(client, DRIVE, { capabilities, writeback });
+    const bridge = await createMountBridge(client, DRIVE, {
+      capabilities,
+      writeback: writeback as never,
+    });
     try {
       await expect(bridge.request({ id: 5, op: 'capabilities' })).resolves.toEqual({
         id: 5,
@@ -550,6 +553,87 @@ describe('mount bridge', () => {
         },
       );
       expect(Array.from(writtenBytes ?? [])).toEqual(Array.from(payload));
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it('lets immutable directory reads proceed during a flush while same-handle writes wait', async () => {
+    let finishFlush!: (version: { id: string; path: string }) => void;
+    let startFlush!: () => void;
+    const flushStarted = new Promise<void>((resolve) => {
+      startFlush = resolve;
+    });
+    const flushResult = new Promise<{ id: string; path: string }>((resolve) => {
+      finishFlush = resolve;
+    });
+    const writeback = {
+      openWrite: vi.fn(async () => ({
+        handleId: 'handle-1',
+        recoveryPath: '/private/stage',
+        size: 0,
+      })),
+      write: vi.fn(async (_handleId: string, _offset: number, data: Uint8Array) => ({
+        bytesWritten: data.byteLength,
+      })),
+      flush: vi.fn(async () => {
+        startFlush();
+        return await flushResult;
+      }),
+      release: vi.fn(async () => ({})),
+      listStaged: vi.fn(async () => []),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const client = {
+      browse: vi.fn(async () => ({
+        items: [entry('/docs/readme.txt', encryptedSize(3))],
+        nextCursor: null,
+      })),
+      openRangeReader: vi.fn(),
+    };
+    const capabilities = {
+      readOnly: false,
+      write: true,
+      delete: false,
+      writePaths: ['/docs'],
+      maxReadBytes: 1024 * 1024,
+      maxWriteBytes: 1024 * 1024,
+      ops: ['capabilities', 'stat', 'list', 'read', 'openWrite', 'write', 'flush', 'release'],
+    };
+    const bridge = await createMountBridge(client, DRIVE, {
+      capabilities,
+      writeback: writeback as never,
+    });
+    try {
+      await bridge.request({
+        id: 'open',
+        op: 'openWrite',
+        path: '/docs/new.txt',
+        baseVersionId: null,
+      });
+      const flush = bridge.request({ id: 'flush', op: 'flush', handleId: 'handle-1' });
+      await flushStarted;
+      await expect(
+        bridge.request({ id: 'list', op: 'list', path: '/docs' }),
+      ).resolves.toMatchObject({
+        id: 'list',
+        ok: true,
+      });
+      const write = bridge.request({
+        id: 'write',
+        op: 'write',
+        handleId: 'handle-1',
+        offset: 0,
+        data: Buffer.from('x').toString('base64'),
+      });
+      await Promise.resolve();
+      expect(writeback.write).not.toHaveBeenCalled();
+      finishFlush({ id: VERSION, path: '/docs/new.txt' });
+      await expect(flush).resolves.toMatchObject({ ok: true, version: { id: VERSION } });
+      await expect(write).resolves.toMatchObject({ ok: true, bytesWritten: 1 });
+      expect(writeback.write).toHaveBeenCalledTimes(1);
+      expect(client.browse).toHaveBeenCalledTimes(1);
     } finally {
       await bridge.close();
     }
