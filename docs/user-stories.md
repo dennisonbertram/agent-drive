@@ -84,6 +84,13 @@ These are deliberate and shape the stories below:
 - **S1.6** As an agent in a fresh sandbox, I want the machine identity attached
   automatically (hostname or an env var), so that my writes are labeled with
   where they came from.
+- **S1.7** As a developer, I want interrupted CLI config updates to preserve the
+  last complete credentials and allow a later write to recover, so that a killed
+  command does not corrupt my setup.
+  *Accept:* Config writes serialize merged updates through a private temporary
+  file and atomic rename. A killed writer's SQLite lock transaction can recover;
+  an older CLI's lock directory is waited on until released and is never treated
+  as stale while it may still be in use.
 
 ## Epic 2 — Encryption and keys
 
@@ -181,6 +188,11 @@ Available through MCP tools, CLI commands, and the Node client, with transfer mo
   *(Later.)* Write restrictions by folder were delivered at the API level
   (a key can be limited to writing certain folders); reads stay drive-wide, and
   sharing a folder with another agent was not delivered.
+- **S6.5** As an operator, I want valid share access to remain auditable without
+  allowing random invalid links to create unbounded audit rows.
+  *Accept:* Active-link attempts, including successful access and operation-limit
+  failures, are audited. Unknown, revoked, expired, and unavailable links return
+  their public errors without per-request audit rows.
 
 ## Epic 7 — Finding things
 
@@ -192,8 +204,11 @@ Available through MCP tools, CLI commands, and the Node client, with transfer mo
 
 ## Epic 8 — Human console
 
-- **S8.1** As an operator, I want a web console to browse drives and download
-  files. Downloads decrypt in the browser after I enter or load the drive key.
+- **S8.1** As an operator, I want to sign in, browse drive metadata, and unlock
+  a drive with my owner credentials before previewing or downloading files.
+  *Accept:* Passkey or passphrase unlocks drives sealed to the owner's account;
+  a recovery file remains available, and an existing credentials bundle or
+  recovery-file handoff can be used when account unlock is not available.
 - **S8.2** As an operator, I want to create, rotate, and revoke agents and API
   keys in the console.
 - **S8.3** As an operator, I want usage per agent and per drive (storage,
@@ -212,6 +227,13 @@ Available through MCP tools, CLI commands, and the Node client, with transfer mo
   `agent-drive account seal --drive <drive id>` after the owner sets up dashboard
   access. The owner can open a file or save a recovery file in the dashboard
   without copying a secret from my machine or reloading the page.
+- **S8.7** As an operator, I want large console collections to render promptly
+  and continue loading on demand, so that I can reach records without waiting
+  for every page.
+  *Accept:* Files, Trash, folder search, shared links, drives, agents, API keys,
+  and the `/connect` drive picker show an initial page with continuation and
+  retry. Deep links still reach later-page drives; API-key creation waits until
+  all agent and drive choices are loaded before enabling submission.
 
 
 ## Epic 9 — Paying for it
@@ -229,6 +251,13 @@ Available through MCP tools, CLI commands, and the Node client, with transfer mo
 - **S9.6** As a finance owner, I want monthly invoices with per-agent breakdown.
 - **S9.7** As an agent with no account, I want to pay for a drive myself through
   a machine-payment protocol (for example x402). *(Later.)*
+- **S9.8** As a finance owner, I want delayed storage access logs to update
+  observed egress without skipping ranges, so that usage reflects transfers as
+  logs arrive.
+  *Accept:* Scans resume from bounded checkpoints and handle empty or stale
+  ranges; delayed records retain their billing attribution through drive purge.
+  Authorized bytes and observed egress remain distinct, and late logs do not
+  guarantee a complete final invoice.
 
 ### Pricing sketch (proposal)
 
@@ -252,6 +281,16 @@ Standard is roughly $0.023 per GB-month in us-east-1 (to verify before pricing).
   objects and versions within a stated period.
 - **S10.4** As an admin, I want rate limits per API key and size limits per
   file.
+- **S10.5** As an operator, I want verifiable billing evidence for reports or
+  checkouts blocking account erasure, so that unresolved provider state does not
+  get recorded as complete.
+  *Accept:* Reports inside the retry window can be replayed idempotently; after
+  it, an operator may attest only after matching the report ID, customer, amount,
+  and event time to provider request logs. Checkout recovery requires exactly one
+  matching provider session. Reconciliation records the operator, external
+  reference, and verification basis. An attestation records operator-verified
+  acceptance, not API-verified acceptance or payment settlement. If evidence is
+  missing or ambiguous, erasure stays blocked.
 
 ## Epic 11 — The skill
 
