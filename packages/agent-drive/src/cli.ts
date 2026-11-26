@@ -684,7 +684,17 @@ async function run(command: string, raw: string[]) {
         'list',
         'read',
         ...(writeEnabled
-          ? ['openWrite', 'write', 'truncate', 'readStaged', 'flush', 'release', 'mkdir', 'rename']
+          ? [
+              'openWrite',
+              'write',
+              'truncate',
+              'readStaged',
+              'flush',
+              'release',
+              'completeWrite',
+              'mkdir',
+              'rename',
+            ]
           : []),
         ...(deleteEnabled ? ['unlink', 'rmdir'] : []),
       ],

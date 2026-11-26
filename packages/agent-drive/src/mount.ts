@@ -43,6 +43,7 @@ type MountRequest = {
   offset?: unknown;
   size?: unknown;
   truncateOnOpen?: unknown;
+  incomplete?: unknown;
 };
 export type MountResponse =
   | { id: string | number; ok: true; entries: MountEntry[]; nextCursor: string | null }
@@ -117,6 +118,7 @@ type MountWriteback = {
     sizeHint?: number,
     truncateOnOpen?: boolean,
     allowTrashedCreate?: boolean,
+    incomplete?: boolean,
   ): Promise<{
     handleId: string;
     recoveryPath: string;
@@ -124,6 +126,7 @@ type MountWriteback = {
   }>;
   write(handleId: string, offset: number, data: Uint8Array): Promise<{ bytesWritten: number }>;
   truncate(handleId: string, size: number): Promise<{ size: number }>;
+  completeWrite?(handleId: string): Promise<void>;
   readStaged(
     handleId: string,
     offset: number,
@@ -703,6 +706,7 @@ export async function createMountBridge(
           if (
             !(request.baseVersionId === null || validUuid(request.baseVersionId)) ||
             (request.truncateOnOpen !== undefined && typeof request.truncateOnOpen !== 'boolean') ||
+            (request.incomplete !== undefined && typeof request.incomplete !== 'boolean') ||
             (request.size !== undefined &&
               (!Number.isSafeInteger(request.size) ||
                 (request.size as number) < 0 ||
@@ -715,6 +719,7 @@ export async function createMountBridge(
             request.size as number | undefined,
             request.truncateOnOpen === true,
             request.baseVersionId === null,
+            request.incomplete === true,
           );
           stagedHandles.set(opened.handleId, {
             path: target,
@@ -769,6 +774,16 @@ export async function createMountBridge(
           );
           stage.size = result.size;
           return { id: request.id, ok: true, ...result } as MountResponse;
+        }
+        if (request.op === 'completeWrite') {
+          if (typeof request.handleId !== 'string')
+            throw Object.assign(new Error('Invalid complete-write request.'), { code: 'EINVAL' });
+          requireStagedHandle(request.handleId);
+          const writer = requireWriteback();
+          if (!writer.completeWrite)
+            throw Object.assign(new Error('Write completion is unavailable.'), { code: 'EIO' });
+          await writer.completeWrite(request.handleId);
+          return { id: request.id, ok: true } as MountResponse;
         }
         if (request.op === 'readStaged') {
           if (

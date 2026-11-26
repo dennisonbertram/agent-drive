@@ -3,6 +3,20 @@ import XCTest
 @testable import AgentDriveFinderCore
 
 final class BridgeTests: XCTestCase {
+    func testLegacyBridgeDoesNotAdvertiseProducerCompletion() {
+        let legacy = MountCapabilities(
+            readOnly: false,
+            write: true,
+            delete: false,
+            writePaths: [],
+            maxReadBytes: 1_048_576,
+            maxWriteBytes: 1_048_576,
+            ops: ["openWrite", "write", "truncate", "flush", "release"]
+        )
+
+        XCTAssertFalse(legacy.supportsIncompleteWrite)
+    }
+
     func testConnectionValidatesDrivePortAndCapabilityWithoutLoggingTheCapability() throws {
         let connection = try MountConnection(
             driveId: "D1ED8A9E-82E0-4F68-900E-50737A5A6B40",
@@ -101,7 +115,7 @@ final class BridgeTests: XCTestCase {
                     "writePaths": ["/work"],
                     "maxReadBytes": 1_048_576,
                     "maxWriteBytes": 1_048_576,
-                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "flush", "release", "mkdir", "unlink", "rmdir", "rename"],
+                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "flush", "release", "completeWrite", "mkdir", "unlink", "rmdir", "rename"],
                 ],
             ])
         }
@@ -117,6 +131,7 @@ final class BridgeTests: XCTestCase {
         XCTAssertTrue(capabilities.allowsCreatingChildren(of: "/work"))
         XCTAssertTrue(capabilities.allowsCreatingChildren(of: "/work/sub"))
         XCTAssertFalse(capabilities.allowsCreatingChildren(of: "/outside"))
+        XCTAssertTrue(capabilities.supportsIncompleteWrite)
     }
 
     func testDefaultRenameOperationIdsAreFreshPerLogicalCall() async throws {
@@ -183,6 +198,7 @@ final class BridgeTests: XCTestCase {
                 XCTAssertEqual(sent["path"] as? String, "/work/new.txt")
                 XCTAssertTrue(sent["baseVersionId"] is NSNull)
                 XCTAssertEqual(sent["truncateOnOpen"] as? Bool, true)
+                XCTAssertEqual(sent["incomplete"] as? Bool, true)
                 return try MockURLProtocol.response(json: [
                     "id": id, "ok": true, "handleId": "stage-1",
                     "recoveryPath": "/tmp/agent-drive-recovery/new.txt", "size": 0,
@@ -192,6 +208,9 @@ final class BridgeTests: XCTestCase {
                 XCTAssertEqual(sent["offset"] as? Int, 0)
                 XCTAssertEqual(sent["data"] as? String, "AQID")
                 return try MockURLProtocol.response(json: ["id": id, "ok": true, "bytesWritten": 3])
+            case "completeWrite":
+                XCTAssertEqual(sent["handleId"] as? String, "stage-1")
+                return try MockURLProtocol.response(json: ["id": id, "ok": true])
             case "flush":
                 return try MockURLProtocol.response(json: [
                     "id": id, "ok": false, "errno": "ESTALE",
@@ -207,11 +226,12 @@ final class BridgeTests: XCTestCase {
             session: MockURLProtocol.makeSession()
         )
         let handle = try await client.openWrite(
-            path: "/work/new.txt", baseVersionId: nil, truncateOnOpen: true
+            path: "/work/new.txt", baseVersionId: nil, truncateOnOpen: true, incomplete: true
         )
         XCTAssertEqual(handle.handleId, "stage-1")
         let bytesWritten = try await client.write(handleId: handle.handleId, offset: 0, data: Data([1, 2, 3]))
         XCTAssertEqual(bytesWritten, 3)
+        try await client.completeWrite(handleId: handle.handleId)
         do {
             _ = try await client.flush(handleId: handle.handleId)
             XCTFail("Expected stale base version to preserve recovery details.")
@@ -220,7 +240,7 @@ final class BridgeTests: XCTestCase {
             XCTAssertEqual(failure.recoveryPath, "/tmp/agent-drive-recovery/new.txt")
             XCTAssertEqual(failure.currentVersionId, "remote-v2")
         }
-        XCTAssertEqual(operations.values, ["openWrite", "write", "flush"])
+        XCTAssertEqual(operations.values, ["openWrite", "write", "completeWrite", "flush"])
     }
 
     func testDirectoryDeleteAndGuardedRenameUseExactMutationFields() async throws {

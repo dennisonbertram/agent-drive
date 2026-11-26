@@ -114,6 +114,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'readStaged',
       'flush',
       'release',
+      'completeWrite',
       'mkdir',
       'rmdir',
       'unlink',
@@ -122,7 +123,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
   )
     return false;
   if (value.op === 'capabilities') return true;
-  if (['write', 'truncate', 'readStaged', 'flush', 'release'].includes(value.op)) {
+  if (['write', 'truncate', 'readStaged', 'flush', 'release', 'completeWrite'].includes(value.op)) {
     if (
       typeof value.handleId !== 'string' ||
       value.handleId.length < 1 ||
@@ -192,6 +193,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       return false;
     if (value.truncateOnOpen !== undefined && typeof value.truncateOnOpen !== 'boolean')
       return false;
+    if (value.incomplete !== undefined && typeof value.incomplete !== 'boolean') return false;
   }
   if (value.op === 'rename') {
     if (

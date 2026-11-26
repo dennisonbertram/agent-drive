@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDriveClient, PutStreamOptions, Version } from './client.js';
+import * as config from './config.js';
 import { createMountWriteback, MountWritebackConflictError } from './mount-writeback.js';
 
 const roots: string[] = [];
@@ -173,6 +174,231 @@ async function crashFixture(
 }
 
 describe('mount writeback journal protocol', () => {
+  it('keeps an incomplete Finder copy local after a copy failure and process restart', async () => {
+    const root = await fixture();
+    const { client, uploads } = fakeClient();
+    const journal = await createMountWriteback({ client, driveId: 'drive-a', journalRoot: root });
+    const handle = await journal.openWrite(
+      '/doc.txt',
+      'base-version',
+      undefined,
+      true,
+      false,
+      true,
+    );
+    await journal.truncate(handle.handleId, 8);
+    await journal.write(handle.handleId, 0, new TextEncoder().encode('partial'));
+
+    await expect(journal.flush(handle.handleId)).rejects.toMatchObject({ code: 'EINPROGRESS' });
+    await expect(journal.release(handle.handleId)).resolves.toMatchObject({
+      recoveryPath: handle.recoveryPath,
+    });
+    expect(uploads).toHaveLength(0);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('partial\0');
+    await journal.close();
+
+    const restarted = await createMountWriteback({ client, driveId: 'drive-a', journalRoot: root });
+    await expect(restarted.recover()).resolves.toMatchObject([
+      { path: '/doc.txt', state: 'pending', recoveryPath: handle.recoveryPath },
+    ]);
+    expect(uploads).toHaveLength(0);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('partial\0');
+    await restarted.close();
+  });
+
+  it('preserves an incomplete copy when the writeback service closes', async () => {
+    const root = await fixture();
+    const { client, uploads } = fakeClient();
+    const journal = await createMountWriteback({ client, driveId: 'drive-a', journalRoot: root });
+    const handle = await journal.openWrite(
+      '/doc.txt',
+      'base-version',
+      undefined,
+      true,
+      false,
+      true,
+    );
+    await journal.truncate(handle.handleId, 6);
+    await journal.write(handle.handleId, 0, new TextEncoder().encode('partial'));
+
+    await expect(journal.close()).rejects.toMatchObject({ code: 'EIO' });
+    expect(uploads).toHaveLength(0);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('partial');
+  });
+
+  it('recovers a Finder copy after the producer persisted completion but before upload', async () => {
+    const root = await fixture();
+    const fake = fakeClient();
+    const persisted = await crashFixture(
+      root,
+      fake.client,
+      {
+        path: '/doc.txt',
+        baseVersionId: 'base-version',
+        state: 'dirty',
+        size: 8,
+        generation: 1,
+        committedGeneration: 0,
+        producerComplete: true,
+      },
+      'complete',
+    );
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+
+    await expect(journal.recover()).resolves.toMatchObject([
+      { path: '/doc.txt', state: 'committed', recoveryPath: persisted.recoveryPath },
+    ]);
+    expect(new TextDecoder().decode(fake.uploads[0]?.bytes)).toBe('complete');
+    await journal.close();
+  });
+
+  it('publishes a Finder copy only after completion is durably marked', async () => {
+    const root = await fixture();
+    const { client, uploads } = fakeClient();
+    const journal = await createMountWriteback({ client, driveId: 'drive-a', journalRoot: root });
+    const handle = await journal.openWrite(
+      '/doc.txt',
+      'base-version',
+      undefined,
+      true,
+      false,
+      true,
+    );
+    const contents = new TextEncoder().encode('complete');
+    await journal.truncate(handle.handleId, contents.byteLength);
+    await journal.write(handle.handleId, 0, contents);
+
+    await expect(journal.flush(handle.handleId)).rejects.toMatchObject({ code: 'EINPROGRESS' });
+    await journal.completeWrite(handle.handleId);
+    await expect(
+      readFile(join(journal.scopePath, `${handle.handleId}.json`), 'utf8').then((raw) =>
+        JSON.parse(raw),
+      ),
+    ).resolves.toMatchObject({ producerComplete: true });
+    await expect(journal.flush(handle.handleId)).resolves.toMatchObject({
+      id: 'committed-intent-1',
+      path: '/doc.txt',
+    });
+    expect(new TextDecoder().decode(uploads[0]?.bytes)).toBe('complete');
+    await journal.release(handle.handleId);
+    await journal.close();
+  });
+
+  it('re-reads the journal after locking and recovers the latest acknowledged bytes', async () => {
+    const root = await fixture();
+    const fake = fakeClient();
+    const persisted = await crashFixture(
+      root,
+      fake.client,
+      {
+        path: '/doc.txt',
+        baseVersionId: 'base-version',
+        state: 'dirty',
+        size: 5,
+        generation: 1,
+        committedGeneration: 0,
+      },
+      'stale',
+    );
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    const originalLock = config.withSqliteFileLock;
+    let changed = false;
+    vi.spyOn(config, 'withSqliteFileLock').mockImplementation(async (path, work, options) => {
+      if (!changed && String(path).includes('/.locks/')) {
+        changed = true;
+        await writeFile(persisted.recoveryPath, 'latest-bytes');
+        await writeFile(
+          join(
+            persisted.scopePath,
+            `${persisted.recoveryPath
+              .split('/')
+              .at(-1)!
+              .replace(/\.data$/u, '')}.json`,
+          ),
+          JSON.stringify({
+            format: 1,
+            scopeId: persisted.scopeId,
+            id: persisted.recoveryPath
+              .split('/')
+              .at(-1)!
+              .replace(/\.data$/u, ''),
+            path: '/doc.txt',
+            baseVersionId: 'base-version',
+            state: 'dirty',
+            size: 12,
+            generation: 2,
+            committedGeneration: 0,
+          }),
+        );
+      }
+      return await originalLock(path, work, options);
+    });
+
+    await expect(journal.recover()).resolves.toMatchObject([
+      { path: '/doc.txt', state: 'committed', recoveryPath: persisted.recoveryPath },
+    ]);
+    expect(changed).toBe(true);
+    expect(new TextDecoder().decode(fake.uploads[0]?.bytes)).toBe('latest-bytes');
+    await journal.close();
+  });
+
+  it('does not act under a stale path lock when the journal path changes before acquisition', async () => {
+    const root = await fixture();
+    const fake = fakeClient();
+    const persisted = await crashFixture(
+      root,
+      fake.client,
+      {
+        path: '/doc.txt',
+        baseVersionId: 'base-version',
+        state: 'dirty',
+        size: 6,
+        generation: 1,
+        committedGeneration: 0,
+      },
+      'staged',
+    );
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    const originalLock = config.withSqliteFileLock;
+    let changed = false;
+    vi.spyOn(config, 'withSqliteFileLock').mockImplementation(async (path, work, options) => {
+      if (!changed && String(path).includes('/.locks/')) {
+        changed = true;
+        const journalPath = join(
+          persisted.scopePath,
+          `${persisted.recoveryPath
+            .split('/')
+            .at(-1)!
+            .replace(/\.data$/u, '')}.json`,
+        );
+        const record = JSON.parse(await readFile(journalPath, 'utf8')) as Record<string, unknown>;
+        record.path = '/moved.txt';
+        await writeFile(journalPath, JSON.stringify(record));
+      }
+      return await originalLock(path, work, options);
+    });
+
+    await expect(journal.recover()).resolves.toMatchObject([
+      { path: '/moved.txt', state: 'pending', recoveryPath: persisted.recoveryPath },
+    ]);
+    expect(changed).toBe(true);
+    expect(fake.uploads).toHaveLength(0);
+    expect(await readFile(persisted.recoveryPath, 'utf8')).toBe('staged');
+    await journal.close();
+  });
+
   it('stages random writes, reads its own changes, and commits against the opened base version', async () => {
     const root = await fixture();
     const { client, uploads, streamReads } = fakeClient();

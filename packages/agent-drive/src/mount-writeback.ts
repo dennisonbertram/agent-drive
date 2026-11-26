@@ -18,9 +18,11 @@ export type MountWritebackRpcRequest =
       baseVersionId: string | null;
       size?: number;
       truncateOnOpen?: boolean;
+      incomplete?: boolean;
     }
   | { id: string; op: 'write'; handleId: string; offset: number; data: string }
   | { id: string; op: 'truncate'; handleId: string; size: number }
+  | { id: string; op: 'completeWrite'; handleId: string }
   | { id: string; op: 'readStaged'; handleId: string; offset: number; size: number }
   | { id: string; op: 'flush' | 'release'; handleId: string };
 
@@ -112,9 +114,11 @@ export type MountWriteback = {
     sizeHint?: number,
     truncateOnOpen?: boolean,
     allowTrashedCreate?: boolean,
+    incomplete?: boolean,
   ): Promise<MountWritebackOpenedFile>;
   write(handleId: string, offset: number, data: Uint8Array): Promise<{ bytesWritten: number }>;
   truncate(handleId: string, size: number): Promise<{ size: number }>;
+  completeWrite(handleId: string): Promise<void>;
   readStaged(handleId: string, offset: number, size: number): Promise<MountWritebackRead>;
   flush(handleId: string): Promise<WritebackVersion>;
   release(handleId: string): Promise<{ recoveryPath?: string }>;
@@ -138,6 +142,7 @@ type JournalRecord = {
   tags?: string[];
   description?: string | null;
   state: JournalState;
+  producerComplete?: boolean;
   size: number;
   generation: number;
   committedGeneration: number;
@@ -323,6 +328,7 @@ function parseJournal(raw: Buffer, expectedScopeId: string, expectedId?: string)
     'tags',
     'description',
     'state',
+    'producerComplete',
     'size',
     'generation',
     'committedGeneration',
@@ -345,6 +351,7 @@ function parseJournal(raw: Buffer, expectedScopeId: string, expectedId?: string)
     typeof record.path !== 'string' ||
     (typeof record.baseVersionId !== 'string' && record.baseVersionId !== null) ||
     !['hydrating', 'clean', 'dirty', 'uploading', 'uploaded', 'conflict'].includes(record.state) ||
+    (record.producerComplete !== undefined && typeof record.producerComplete !== 'boolean') ||
     !Number.isSafeInteger(record.size) ||
     record.size < 0 ||
     record.size > MOUNT_FILE_MAX_BYTES ||
@@ -777,6 +784,13 @@ export async function createMountWriteback(
   const commitSession = async (session: ActiveSession): Promise<WritebackVersion> => {
     const record = session.record;
     if (record.pendingMutation) await applyPendingMutation(session);
+    if (record.producerComplete === false) {
+      throw new MountWritebackError(
+        'EINPROGRESS',
+        'The staged copy is incomplete and cannot be published.',
+        { path: record.path, recoveryPath: session.dataPath },
+      );
+    }
     if (record.state === 'conflict') {
       throw new MountWritebackConflictError(
         record.path,
@@ -883,6 +897,7 @@ export async function createMountWriteback(
     sessions.delete(session.record.id);
     const pending =
       session.record.pendingMutation !== undefined ||
+      session.record.producerComplete === false ||
       session.record.state === 'conflict' ||
       session.record.state === 'uploading' ||
       session.record.state === 'uploaded' ||
@@ -921,6 +936,7 @@ export async function createMountWriteback(
       if (record.path !== path) continue;
       const hasPendingData =
         record.pendingMutation !== undefined ||
+        record.producerComplete === false ||
         record.state === 'dirty' ||
         record.state === 'uploading' ||
         record.state === 'uploaded' ||
@@ -949,6 +965,7 @@ export async function createMountWriteback(
       sizeHint,
       truncateOnOpen = false,
       allowTrashedCreate = false,
+      incomplete = false,
     ) {
       checkRemotePath(path);
       if (baseVersionId !== null && (!baseVersionId || baseVersionId.length > 128)) {
@@ -984,6 +1001,7 @@ export async function createMountWriteback(
           path,
           baseVersionId,
           ...(allowTrashedCreate ? { allowTrashedCreate: true } : {}),
+          ...(incomplete ? { producerComplete: false } : {}),
           state: 'hydrating',
           size: 0,
           generation: 0,
@@ -1031,6 +1049,31 @@ export async function createMountWriteback(
       checkSize(size, 'Truncate size');
       await serialized(session, async () => await mutate(session, { kind: 'truncate', size }));
       return { size };
+    },
+    async completeWrite(handleId) {
+      const session = requireSession(handleId);
+      await serialized(session, async () => {
+        if (session.record.producerComplete === undefined) {
+          throw new MountWritebackError(
+            'EINVAL',
+            'This write does not require producer completion.',
+          );
+        }
+        if (session.record.producerComplete) return;
+        if (session.record.pendingMutation) await applyPendingMutation(session);
+        const info = await session.data.stat();
+        if (!info.isFile() || info.size < session.record.size) {
+          throw new MountWritebackError(
+            'EIO',
+            'The staged copy does not contain its declared bytes.',
+            { path: session.record.path, recoveryPath: session.dataPath },
+          );
+        }
+        await session.data.sync();
+        session.record.producerComplete = true;
+        delete session.record.errorCode;
+        await persistRecord(scopePath, session.record);
+      });
     },
     async readStaged(handleId, offset, size) {
       const session = requireSession(handleId);
@@ -1135,7 +1178,27 @@ export async function createMountWriteback(
             }
             throw error;
           }
-          if (record.state === 'hydrating') {
+          try {
+            record = parseJournal(await readRegularFile(path, JOURNAL_MAX_BYTES), scopeId, id);
+          } catch {
+            await releasePathLock(lock);
+            results.push({ path: '', state: 'pending', recoveryPath: path, errorCode: 'EIO' });
+            continue;
+          }
+          const currentLockPath = resolve(
+            join(lockDirectory, `${createHash('sha256').update(record.path).digest('hex')}.sqlite`),
+          );
+          if (currentLockPath !== lock.key) {
+            await releasePathLock(lock);
+            results.push({
+              path: record.path,
+              state: 'pending',
+              recoveryPath: stagePath(scopePath, id),
+              errorCode: 'ESTALE',
+            });
+            continue;
+          }
+          if (record.state === 'hydrating' && record.producerComplete !== false) {
             await unlinkOwnedRegular(stagePath(scopePath, id)).catch(() => undefined);
             await unlinkJournalRecord(scopePath, scopeId, id).catch(() => undefined);
             await releasePathLock(lock);
@@ -1180,6 +1243,48 @@ export async function createMountWriteback(
             });
             continue;
           }
+        }
+        if (active) {
+          try {
+            const current = await serialized(active, async () =>
+              parseJournal(await readRegularFile(path, JOURNAL_MAX_BYTES), scopeId, id),
+            );
+            const currentLockPath = resolve(
+              join(
+                lockDirectory,
+                `${createHash('sha256').update(current.path).digest('hex')}.sqlite`,
+              ),
+            );
+            if (currentLockPath !== active.lock.key) {
+              results.push({
+                path: current.path,
+                state: 'pending',
+                recoveryPath: active.dataPath,
+                errorCode: 'ESTALE',
+              });
+              continue;
+            }
+            active.record = current;
+            session = active;
+          } catch {
+            results.push({
+              path: active.record.path,
+              state: 'pending',
+              recoveryPath: active.dataPath,
+              errorCode: 'EIO',
+            });
+            continue;
+          }
+        }
+        if (session?.record.producerComplete === false) {
+          results.push({
+            path: session.record.path,
+            state: 'pending',
+            recoveryPath: session.dataPath,
+            errorCode: 'EINPROGRESS',
+          });
+          if (!active) await releaseSession(session, false);
+          continue;
         }
         try {
           const version = await serialized(session, async () => await commitSession(session!));

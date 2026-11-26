@@ -178,6 +178,8 @@ public struct MountCapabilities: Decodable, Equatable {
         return writePaths.isEmpty || writePaths.contains(where: { contains($0, path: path) })
     }
 
+    public var supportsIncompleteWrite: Bool { ops.contains("completeWrite") }
+
     public func allowsDelete(_ path: String) -> Bool {
         guard !readOnly, delete, ops.contains("unlink"), ops.contains("rmdir"), ItemPath.isCanonical(path) else {
             return false
@@ -287,7 +289,8 @@ public struct DriveBridge {
         path: String,
         baseVersionId: String?,
         size: Int64? = nil,
-        truncateOnOpen: Bool = false
+        truncateOnOpen: Bool = false,
+        incomplete: Bool = false
     ) async throws -> OpenWriteResult {
         guard ItemPath.isCanonical(path), size.map({ $0 >= 0 }) ?? true,
               !(truncateOnOpen && (size ?? 0) > 0),
@@ -295,7 +298,7 @@ public struct DriveBridge {
         else { throw BridgeClientError.invalidPath }
         let payload = try await request(
             op: "openWrite", path: path, size: size, baseVersionId: baseVersionId,
-            explicitBaseVersion: true, truncateOnOpen: truncateOnOpen
+            explicitBaseVersion: true, truncateOnOpen: truncateOnOpen, incomplete: incomplete
         )
         return try JSONDecoder().decode(OpenWriteResult.self, from: payload).validated()
     }
@@ -317,6 +320,11 @@ public struct DriveBridge {
         let payload = try await request(op: "truncate", size: size, handleId: handleId)
         let response = try JSONDecoder().decode(SizeResponse.self, from: payload)
         guard response.size == size else { throw BridgeClientError.malformedResponse }
+    }
+
+    public func completeWrite(handleId: String) async throws {
+        guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
+        _ = try await request(op: "completeWrite", handleId: handleId)
     }
 
     public func readStaged(handleId: String, offset: Int64, size: Int) async throws -> (Data, Bool) {
@@ -397,7 +405,8 @@ public struct DriveBridge {
         destinationVersionId: String? = nil,
         operationId: String? = nil,
         explicitDestinationVersion: Bool = false,
-        truncateOnOpen: Bool = false
+        truncateOnOpen: Bool = false,
+        incomplete: Bool = false
     ) async throws -> Data {
         let id = UUID().uuidString.lowercased()
         var request = URLRequest(url: connection.endpoint)
@@ -412,7 +421,7 @@ public struct DriveBridge {
             destinationVersionId: destinationVersionId, operationId: operationId,
             ifVersionId: ifVersionId, ifSourceVersionId: ifSourceVersionId,
             explicitDestinationVersion: explicitDestinationVersion,
-            truncateOnOpen: truncateOnOpen
+            truncateOnOpen: truncateOnOpen, incomplete: incomplete
         ))
         let requestLimit = op == "write" ? 1_500_000 : 64_000
         guard (request.httpBody?.count ?? Int.max) <= requestLimit else {
@@ -489,12 +498,13 @@ private struct RPCRequest: Encodable {
     let ifSourceVersionId: String?
     let explicitDestinationVersion: Bool
     let truncateOnOpen: Bool
+    let incomplete: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, op, path, cursor, versionId, offset, size, handleId, data
         case baseVersionId, destinationPath
         case destinationVersionId = "ifDestinationVersionId"
-        case operationId, ifVersionId, ifSourceVersionId, truncateOnOpen
+        case operationId, ifVersionId, ifSourceVersionId, truncateOnOpen, incomplete
     }
 
     func encode(to encoder: Encoder) throws {
@@ -517,6 +527,7 @@ private struct RPCRequest: Encodable {
         try container.encodeIfPresent(ifVersionId, forKey: .ifVersionId)
         try container.encodeIfPresent(ifSourceVersionId, forKey: .ifSourceVersionId)
         if truncateOnOpen { try container.encode(true, forKey: .truncateOnOpen) }
+        if incomplete { try container.encode(true, forKey: .incomplete) }
     }
 }
 

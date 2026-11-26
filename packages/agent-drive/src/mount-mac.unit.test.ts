@@ -77,6 +77,67 @@ ${waitForSignal}
     expect(await handle.waitForExit()).toMatchObject({ code: 0 });
   }, 20_000);
 
+  it('validates and dispatches the producer-completion write protocol over authenticated loopback RPC', async () => {
+    const directory = await fixture();
+    const actualPath = join(directory, 'finder-root');
+    await mkdir(actualPath);
+    const requestedMountpoint = join(directory, 'requested-mount');
+    const helper = await writeHelper(
+      directory,
+      `
+const { createInterface } = await import('node:readline');
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const line = await new Promise((resolve) => input.once('line', resolve));
+input.close();
+const startup = JSON.parse(line);
+const endpoint = 'http://127.0.0.1:' + startup.port + '/rpc';
+const headers = { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' };
+const open = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ id: 'open-copy', op: 'openWrite', path: '/doc.txt', baseVersionId: 'base-v1', truncateOnOpen: true, incomplete: true }) });
+const opened = await open.json();
+if (open.status !== 200 || opened.handleId !== 'copy-handle') process.exit(41);
+const invalid = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ id: 'bad-open', op: 'openWrite', path: '/doc.txt', baseVersionId: 'base-v1', incomplete: 'yes' }) });
+if (invalid.status !== 400) process.exit(42);
+const complete = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ id: 'complete-copy', op: 'completeWrite', handleId: 'copy-handle' }) });
+if (complete.status !== 200 || (await complete.json()).id !== 'complete-copy') process.exit(43);
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+${waitForSignal}
+`,
+    );
+    vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+    const dispatched: Array<Record<string, unknown>> = [];
+    const handle = await startMacMount({
+      driveId: 'synthetic-drive',
+      requestedMountpoint,
+      dispatch: async (request) => {
+        const rpc = request as Record<string, unknown>;
+        dispatched.push(rpc);
+        if (rpc.op === 'openWrite')
+          return {
+            id: rpc.id,
+            ok: true,
+            handleId: 'copy-handle',
+            recoveryPath: '/tmp/synthetic-copy.data',
+            size: 0,
+          };
+        return { id: rpc.id, ok: true };
+      },
+    });
+
+    expect(dispatched).toEqual([
+      {
+        id: 'open-copy',
+        op: 'openWrite',
+        path: '/doc.txt',
+        baseVersionId: 'base-v1',
+        truncateOnOpen: true,
+        incomplete: true,
+      },
+      { id: 'complete-copy', op: 'completeWrite', handleId: 'copy-handle' },
+    ]);
+    await handle.close();
+    await expect(handle.waitForExit()).resolves.toMatchObject({ code: 0 });
+  }, 20_000);
+
   it('uses a private helper handshake and serves only authenticated loopback POST /rpc', async () => {
     const directory = await fixture();
     const actualPath = join(directory, 'finder-root');
