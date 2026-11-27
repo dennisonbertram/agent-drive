@@ -460,7 +460,8 @@ A successful `put` also prints `folderUrl`: a private link that opens the saved 
 
 ```sh
 agent-drive put video.mp4 /outputs/launch/video-draft.mp4 --drive DRIVE_ID
-agent-drive put video.mp4 /outputs/launch/video-final.mp4 --drive DRIVE_ID --if-version VERSION_ID
+agent-drive put video.mp4 /outputs/launch/video-final.mp4 --drive DRIVE_ID
+agent-drive put video-v2.mp4 /outputs/launch/video-final.mp4 --drive DRIVE_ID --if-version VERSION_ID
 ```
 
 Details and conflict recovery are in [Files, versions and sync](files-and-sync.md). The MCP tool names for these commands are in the table in [MCP server and tools](mcp-tools.md).

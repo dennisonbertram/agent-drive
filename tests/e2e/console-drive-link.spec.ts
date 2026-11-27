@@ -114,7 +114,7 @@ test('console link: an unavailable drive opens a fallback root with an explanati
   expect(landed.searchParams.get('path')).toBeNull();
   // The other drive's root shows; the linked folder was never fetched or rendered.
   await expect(browser.getByText('own-note.txt', { exact: true })).toBeVisible();
-  expect(browser.getByText('decoy.txt', { exact: true })).toHaveCount(0);
+  await expect(browser.getByText('decoy.txt', { exact: true })).toHaveCount(0);
   expect(prefixes.filter((prefix) => prefix)).toEqual([]);
 
   // A manual drive switch still works and clears the explanation.
@@ -193,6 +193,113 @@ test('console link: a drive past the first page still resolves and keeps the lin
   expect(landed.searchParams.get('path')).toBe('/deep');
   // The deep folder was only ever asked of the linked drive, never a fallback.
   expect(listCalls.filter((call) => call.endsWith(':/deep'))).toEqual(['drive-149:/deep']);
+});
+
+test('console link: a selected drive removed during a refresh falls back once paging ends', async ({
+  page: browser,
+  context,
+}) => {
+  // The open drive leaves the account while >100 drives remain: the in-page
+  // refresh keeps the stale selection through the first page, so the fallback
+  // can only be picked once the surviving pages have all been seen.
+  let removed = false;
+  const drives = Array.from({ length: 150 }, (_, index) => ({
+    id: `drive-${String(index).padStart(3, '0')}`,
+    name: `Synthetic drive ${String(index).padStart(3, '0')}`,
+    quota_bytes: '1000000',
+    key_backup_at: null,
+    key_backup_method: null,
+  }));
+  // "gone" marks a listing that ran after the drive left the account.
+  const listCalls: string[] = [];
+  await browser.route('**/api/console/**', async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace('/api/console/', '');
+    const collection = path === 'drives' || path === 'agents' || path === 'keys' ? path : null;
+    if (collection) {
+      const entries =
+        collection === 'drives'
+          ? drives.filter((item) => !removed || item.id !== 'drive-050')
+          : [];
+      await route.fulfill({ json: page(collection, url.searchParams.get('cursor'), entries) });
+      return;
+    }
+    const listMatch = /^drives\/([^/]+)\/list$/.exec(path);
+    if (listMatch) {
+      const prefix = url.searchParams.get('prefix') ?? '';
+      listCalls.push(`${listMatch[1]}:${prefix}${removed ? '@gone' : ''}`);
+      await route.fulfill({
+        json: {
+          items:
+            prefix === '/linked/folder'
+              ? [
+                  {
+                    id: 'linked-file',
+                    path: '/linked/folder/linked-note.txt',
+                    ciphertext_size: 8,
+                    created_at: new Date(0).toISOString(),
+                    kind: 'file',
+                  },
+                ]
+              : [
+                  {
+                    id: 'root-file',
+                    path: '/root-note.txt',
+                    ciphertext_size: 8,
+                    created_at: new Date(0).toISOString(),
+                    kind: 'file',
+                  },
+                ],
+          nextCursor: null,
+        },
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { error: { message: `Unexpected ${path}` } } });
+  });
+
+  const session = await context.request.post('/api/test-session', {
+    headers: { Authorization: `Bearer ${authSecret()}` },
+    data: { userId: 'e2e_drive_link_refresh_test' },
+  });
+  expect(session.status()).toBe(200);
+
+  await browser.goto('/console?drive=drive-050&path=%2Flinked%2Ffolder');
+  await expect(browser.getByTestId('drive-menu-button')).toContainText('Synthetic drive 050');
+  await expect(browser.getByText('linked-note.txt', { exact: true })).toBeVisible();
+
+  // The drive leaves the account; the refresh only learns that once every
+  // surviving page is in, then a still-present drive opens at its own root.
+  removed = true;
+  await browser.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(browser.getByText(/isn.t available in this account/)).toBeVisible();
+  await expect(browser).toHaveURL(/drive=drive-000/);
+  const landed = new URL(browser.url());
+  expect(landed.searchParams.get('drive')).toBe('drive-000');
+  expect(landed.searchParams.get('path')).toBeNull();
+  await expect(browser.getByTestId('drive-menu-button')).toContainText('Synthetic drive 000');
+  await expect(browser.getByText('root-note.txt', { exact: true })).toBeVisible();
+  // The vanished drive is never listed after it left, and the linked folder is
+  // only ever asked of the drive that owned it — the fallback lists its root.
+  expect(
+    listCalls.filter((call) => call.startsWith('drive-050:') && call.endsWith('@gone')),
+  ).toEqual([]);
+  expect(listCalls.filter((call) => call.includes('/linked/folder'))).toEqual([
+    'drive-050:/linked/folder',
+  ]);
+  expect(listCalls).toContain('drive-000:@gone');
+
+  // A manual drive switch still works and clears the explanation.
+  await browser.getByTestId('drive-menu-button').click();
+  await browser.getByRole('button', { name: 'Synthetic drive 001', exact: true }).click();
+  await expect(browser.getByTestId('drive-menu-button')).toContainText('Synthetic drive 001');
+  await expect(browser).toHaveURL(/drive=drive-001/);
+  await expect(browser.getByText(/isn.t available in this account/)).toHaveCount(0);
+
+  // Back returns to the rewritten fallback entry, never to the dead drive.
+  await browser.goBack();
+  await expect(browser).toHaveURL(/drive=drive-000/);
+  expect(new URL(browser.url()).searchParams.get('drive')).not.toBe('drive-050');
 });
 
 test('console link: an unavailable drive with no drives keeps onboarding and shows the message', async ({

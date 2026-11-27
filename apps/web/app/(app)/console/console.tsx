@@ -1402,15 +1402,23 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // missing drive. With no drive to open, the link still gets its explanation.
   useEffect(() => {
     if (!linkedDriveMissing) return;
-    const fallback = drives.find((item) => item.id === selected);
+    // The open drive can be the one that vanished: a refresh keeps the stale
+    // selection while later pages could still contain it. Once paging is done,
+    // open a drive that is still there — the remembered one, else the first.
+    const fallback =
+      drives.find((item) => item.id === selected) ??
+      drives.find((item) => item.id === pickDrive(drives));
     if (!fallback) {
       setNotice('The linked drive isn’t available in this account.');
       return;
     }
+    if (fallback.id !== selected) setSelected(fallback.id);
     const next = new URLSearchParams(window.location.search);
-    next.set('drive', selected);
-    next.delete('path');
-    window.history.replaceState(null, '', `${window.location.pathname}?${next}`);
+    if (next.get('drive') !== fallback.id || next.has('path')) {
+      next.set('drive', fallback.id);
+      next.delete('path');
+      window.history.replaceState(null, '', `${window.location.pathname}?${next}`);
+    }
     setNotice(`The linked drive isn’t available in this account. Opened ${fallback.name} instead.`);
   }, [linkedDriveMissing, selected, drives]);
   useEffect(() => {
