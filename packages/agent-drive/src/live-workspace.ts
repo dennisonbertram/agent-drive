@@ -332,6 +332,46 @@ export function liveWorkspaceInstaboxEnvironment(
   return filtered as NodeJS.ProcessEnv;
 }
 
+function parseMachineIdentity(output: string): { id: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    throw new Error('Instabox returned invalid machine JSON.');
+  }
+  const value =
+    parsed && typeof parsed === 'object' && 'machine' in parsed
+      ? (parsed as { machine: unknown }).machine
+      : parsed;
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Instabox returned an invalid machine response.');
+  const machine = value as { id?: unknown; machineId?: unknown };
+  const id = typeof machine.id === 'string' ? machine.id : machine.machineId;
+  if (typeof id !== 'string' || !/^m_[A-Za-z0-9_-]{1,128}$/.test(id))
+    throw new Error('Instabox returned an invalid machine ID.');
+  return { id };
+}
+
+function parseHelperResponse(line: string, expectedId: string | number): LiveWorkspaceResponse {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new Error('Instabox helper returned an invalid response.');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Instabox helper returned an invalid response.');
+  const response = value as Partial<LiveWorkspaceResponse>;
+  const validId =
+    (typeof response.id === 'string' && response.id.length > 0 && response.id.length <= 256) ||
+    (typeof response.id === 'number' && Number.isSafeInteger(response.id) && response.id >= 0);
+  if (!validId || response.id !== expectedId || typeof response.ok !== 'boolean')
+    throw new Error('Instabox helper returned a mismatched response.');
+  if (response.errno !== undefined && typeof response.errno !== 'string')
+    throw new Error('Instabox helper returned an invalid error code.');
+  return response as LiveWorkspaceResponse;
+}
+
 /** Authenticated CLI transport. It uploads only the fixed helper and sends RPC as framed stdin. */
 export function createInstaboxLiveWorkspaceTransport(
   options: InstaboxTransportOptions,
@@ -342,106 +382,183 @@ export function createInstaboxLiveWorkspaceTransport(
     throw new Error('Invalid Instabox sandbox identifier.');
   let child: ChildProcess | undefined;
   let tempDir: string | undefined;
-  let input = options.root ?? '';
-  const decoder = new StringDecoder('utf8');
+  let pinnedMachineId: string | undefined;
+  let rootIdentity: string | undefined;
+  const registeredRoot = options.root ?? '';
+  let decoder = new StringDecoder('utf8');
   let queue = Promise.resolve();
   let stdoutBuffer = '';
   const responseQueue: Array<{
+    id: unknown;
     resolve(value: LiveWorkspaceResponse): void;
     reject(error: Error): void;
   }> = [];
   let startup: Promise<void> | undefined;
+  let sessionClosing: Promise<void> | undefined;
+  let tempCleanup: Promise<void> | undefined;
+  let closed = false;
+  const shutdownController = new AbortController();
+  const closedChildren = new WeakSet<ChildProcess>();
 
   const runCli = (args: string[], signal?: AbortSignal) =>
     new Promise<string>((resolve, reject) => {
+      const effectiveSignal = signal
+        ? AbortSignal.any([signal, shutdownController.signal])
+        : shutdownController.signal;
       const childProcess = spawnProcess('instabox', args, {
         stdio: ['ignore', 'pipe', 'ignore'],
         env: liveWorkspaceInstaboxEnvironment(),
       });
       let output = '';
+      let failure: Error | undefined;
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        effectiveSignal.removeEventListener('abort', abort);
+        if (error) reject(error);
+        else resolve(output);
+      };
       childProcess.stdout!.on('data', (chunk: Buffer) => {
+        if (failure) return;
         output += chunk.toString('utf8');
         if (Buffer.byteLength(output) > 64 * 1024) {
+          failure = new Error('Instabox helper setup returned too much output.');
           childProcess.kill('SIGTERM');
-          reject(new Error('Instabox helper setup returned too much output.'));
         }
       });
       const abort = () => {
+        failure = new DOMException('Canceled', 'AbortError');
         childProcess.kill('SIGTERM');
-        reject(new DOMException('Canceled', 'AbortError'));
       };
-      signal?.addEventListener('abort', abort, { once: true });
+      effectiveSignal.addEventListener('abort', abort, { once: true });
       childProcess.once('error', (error) => {
-        signal?.removeEventListener('abort', abort);
-        reject(error);
+        failure = error;
+        childProcess.kill('SIGTERM');
       });
       childProcess.once('close', (code) => {
-        signal?.removeEventListener('abort', abort);
-        if (code === 0) resolve(output);
-        else reject(new Error(`Instabox helper setup failed (exit ${code ?? 'unknown'}).`));
+        if (failure) finish(failure);
+        else if (code === 0) finish();
+        else finish(new Error(`Instabox helper setup failed (exit ${code ?? 'unknown'}).`));
       });
+      if (effectiveSignal.aborted) abort();
     });
 
   const start = async (signal?: AbortSignal) => {
+    if (closed) throw new Error('Instabox workspace transport is closed.');
     if (startup) return startup;
     startup = (async () => {
-      await options.beforeIO?.(sandboxId, signal);
-      tempDir = await mkdtemp(join(tmpdir(), 'agent-drive-live-'));
-      const helperPath = join(tempDir, HELPER_FILENAME);
-      await writeFile(helperPath, LIVE_WORKSPACE_HELPER_SOURCE, { mode: 0o600, flag: 'wx' });
-      const remoteDir = `/tmp/agent-drive-live-${randomUUID()}`;
-      const remotePath = `${remoteDir}/${HELPER_FILENAME}`;
-      await runCli(['ssh', sandboxId, '--', 'mkdir', '-m', '700', '--', remoteDir], signal);
-      await runCli(['cp', helperPath, `${sandboxId}:${remotePath}`], signal);
-      const checked = await runCli(['ssh', sandboxId, '--', 'sha256sum', '--', remotePath], signal);
-      const expectedHash = createHash('sha256').update(LIVE_WORKSPACE_HELPER_SOURCE).digest('hex');
-      if (!checked.trim().startsWith(`${expectedHash} `))
-        throw new Error('Instabox helper integrity check failed.');
-      child = spawnProcess('instabox', ['ssh', sandboxId, '--', 'python3', '-u', remotePath], {
-        stdio: ['pipe', 'pipe', 'ignore'],
-        env: liveWorkspaceInstaboxEnvironment(),
-      });
-      child.stdout!.on('data', (chunk: Buffer) => {
-        stdoutBuffer += decoder.write(chunk);
-        if (
-          Buffer.byteLength(stdoutBuffer) > LIVE_WORKSPACE_MAX_LINE_BYTES &&
-          !stdoutBuffer.includes('\n')
-        ) {
-          child?.kill('SIGTERM');
-          rejectPending(new Error('Instabox helper response exceeded the size limit.'));
-          return;
+      await sessionClosing;
+      await tempCleanup;
+      const startupSignal = signal
+        ? AbortSignal.any([signal, shutdownController.signal])
+        : shutdownController.signal;
+      let attemptDir: string | undefined;
+      let attemptChild: ChildProcess | undefined;
+      try {
+        const lookupId = pinnedMachineId ?? sandboxId;
+        const machine = parseMachineIdentity(await runCli(['get', lookupId, '--json'], startupSignal));
+        if (pinnedMachineId && machine.id !== pinnedMachineId)
+          throw new Error('Instabox returned a different machine ID.');
+        if (!pinnedMachineId) {
+          if (/^m_[A-Za-z0-9_-]+$/.test(sandboxId) && machine.id !== sandboxId)
+            throw new Error('Instabox returned a different machine ID.');
+          pinnedMachineId = machine.id;
         }
-        let newline: number;
-        while ((newline = stdoutBuffer.indexOf('\n')) >= 0) {
-          const line = stdoutBuffer.slice(0, newline);
-          stdoutBuffer = stdoutBuffer.slice(newline + 1);
-          const pending = responseQueue.shift();
-          if (!pending) continue;
-          try {
-            pending.resolve(JSON.parse(line) as LiveWorkspaceResponse);
-          } catch {
-            rejectPending(new Error('Instabox helper returned an invalid response.'));
-            child?.kill('SIGTERM');
+        await options.beforeIO?.(pinnedMachineId, startupSignal);
+        attemptDir = await mkdtemp(join(tmpdir(), 'agent-drive-live-'));
+        tempDir = attemptDir;
+        const helperPath = join(attemptDir, HELPER_FILENAME);
+        await writeFile(helperPath, LIVE_WORKSPACE_HELPER_SOURCE, { mode: 0o600, flag: 'wx' });
+        const remoteDir = `/tmp/agent-drive-live-${randomUUID()}`;
+        const remotePath = `${remoteDir}/${HELPER_FILENAME}`;
+        await runCli(['ssh', pinnedMachineId, '--', 'mkdir', '-m', '700', '--', remoteDir], startupSignal);
+        await runCli(['cp', helperPath, `${pinnedMachineId}:${remotePath}`], startupSignal);
+        const checked = await runCli(['ssh', pinnedMachineId, '--', 'sha256sum', '--', remotePath], startupSignal);
+        const expectedHash = createHash('sha256').update(LIVE_WORKSPACE_HELPER_SOURCE).digest('hex');
+        if (!checked.trim().startsWith(`${expectedHash} `))
+          throw new Error('Instabox helper integrity check failed.');
+        stdoutBuffer = '';
+        decoder = new StringDecoder('utf8');
+        const session = spawnProcess('instabox', ['ssh', pinnedMachineId, '--', 'python3', '-u', remotePath], {
+          stdio: ['pipe', 'pipe', 'ignore'],
+          env: liveWorkspaceInstaboxEnvironment(),
+        });
+        attemptChild = session;
+        child = session;
+        session.stdout!.on('data', (chunk: Buffer) => {
+          stdoutBuffer += decoder.write(chunk);
+          if (
+            Buffer.byteLength(stdoutBuffer) > LIVE_WORKSPACE_MAX_LINE_BYTES &&
+            !stdoutBuffer.includes('\n')
+          ) {
+            failSession(session, new Error('Instabox helper response exceeded the size limit.'));
+            return;
           }
-        }
-      });
-      const session = child;
-      child.once('close', (code, signalName) => {
-        if (child === session) {
-          child = undefined;
-          startup = undefined;
-        }
-        rejectPending(
-          new Error(
-            `Instabox workspace transport closed (exit ${code ?? signalName ?? 'unknown'}).`,
-          ),
+          let newline: number;
+          while ((newline = stdoutBuffer.indexOf('\n')) >= 0) {
+            const line = stdoutBuffer.slice(0, newline);
+            stdoutBuffer = stdoutBuffer.slice(newline + 1);
+            const pending = responseQueue.shift();
+            if (!pending) {
+              failSession(session, new Error('Instabox helper returned an unexpected response.'));
+              return;
+            }
+            try {
+              if (Buffer.byteLength(line) > LIVE_WORKSPACE_MAX_LINE_BYTES)
+                throw new Error('Instabox helper response exceeded the size limit.');
+              const response = parseHelperResponse(line, pending.id as string | number);
+              pending.resolve(response);
+            } catch (error) {
+              pending.reject(error instanceof Error ? error : new Error('Invalid helper response.'));
+              failSession(session, error instanceof Error ? error : new Error('Invalid helper response.'));
+              return;
+            }
+          }
+        });
+        session.once('close', (code, signalName) => {
+          closedChildren.add(session);
+          if (child === session) {
+            child = undefined;
+            startup = undefined;
+            clearSessionBuffers();
+          }
+          if (tempDir === attemptDir) {
+            tempDir = undefined;
+            if (attemptDir) {
+              const cleanup = rm(attemptDir, { recursive: true, force: true }).catch(() => undefined);
+              const trackedCleanup = cleanup.finally(() => {
+                if (tempCleanup === trackedCleanup) tempCleanup = undefined;
+              });
+              tempCleanup = trackedCleanup;
+            }
+          }
+          rejectPending(
+            new Error(
+              `Instabox workspace transport closed (exit ${code ?? signalName ?? 'unknown'}).`,
+            ),
+          );
+        });
+        const init = await rawRequest(
+          { id: 'init', op: 'init', root: registeredRoot, ...(rootIdentity ? { rootIdentity } : {}) },
+          signal,
         );
-      });
-      const init = await rawRequest({ id: 'init', op: 'init', root: input }, signal);
-      if (!init.ok)
-        throw new Error(
-          `Instabox workspace helper initialization failed (${String(init.errno ?? 'EIO')}).`,
-        );
+        if (!init.ok)
+          throw new Error(
+            `Instabox workspace helper initialization failed (${String(init.errno ?? 'EIO')}).`,
+          );
+        if (typeof init.rootIdentity !== 'string' || init.rootIdentity.length === 0 || init.rootIdentity.length > 256)
+          throw new Error('Instabox workspace helper returned an invalid root identity.');
+        if (rootIdentity && init.rootIdentity !== rootIdentity)
+          throw new Error('Instabox workspace root identity changed.');
+        rootIdentity = init.rootIdentity;
+      } catch (error) {
+        if (attemptDir && tempDir === attemptDir) tempDir = undefined;
+        if (attemptChild) await stopChild(attemptChild);
+        if (attemptDir) await rm(attemptDir, { recursive: true, force: true }).catch(() => undefined);
+        clearSessionBuffers();
+        throw error;
+      }
     })();
     try {
       await startup;
@@ -457,35 +574,67 @@ export function createInstaboxLiveWorkspaceTransport(
     }
   };
 
+  const clearSessionBuffers = () => {
+    stdoutBuffer = '';
+    decoder = new StringDecoder('utf8');
+  };
+
+  const stopChild = async (process: ChildProcess) => {
+    if (closedChildren.has(process)) return;
+    if (process.exitCode === null && process.signalCode === null) process.kill('SIGTERM');
+    await once(process, 'close').catch(() => undefined);
+  };
+
+  const failSession = (process: ChildProcess, error: Error) => {
+    rejectPending(error);
+    clearSessionBuffers();
+    if (child === process) {
+      child = undefined;
+      startup = undefined;
+    }
+    const closing = stopChild(process).finally(() => {
+      if (sessionClosing === closing) sessionClosing = undefined;
+    });
+    sessionClosing = closing;
+  };
+
   const rawRequest = (payload: Record<string, unknown>, signal?: AbortSignal) =>
     new Promise<LiveWorkspaceResponse>((resolve, reject) => {
       if (signal?.aborted) return reject(new DOMException('Canceled', 'AbortError'));
       if (!child?.stdin || child.killed)
         return reject(new Error('Instabox workspace transport is unavailable.'));
-      const id = payload.id;
+      const active = child;
+      let waiter: (typeof responseQueue)[number];
+      const removeAbort = () => signal?.removeEventListener('abort', abort);
       const abort = () => {
-        child?.kill('SIGTERM');
+        const index = responseQueue.indexOf(waiter);
+        if (index >= 0) responseQueue.splice(index, 1);
+        failSession(active, new DOMException('Canceled', 'AbortError'));
         reject(new DOMException('Canceled', 'AbortError'));
       };
       signal?.addEventListener('abort', abort, { once: true });
-      responseQueue.push({
+      waiter = {
+        id: payload.id,
         resolve: (response) => {
-          signal?.removeEventListener('abort', abort);
+          removeAbort();
           resolve(response);
         },
         reject: (error) => {
-          signal?.removeEventListener('abort', abort);
+          removeAbort();
           reject(error);
         },
-      });
+      };
+      responseQueue.push(waiter);
       const line = `${JSON.stringify(payload)}\n`;
-      child.stdin.write(line, (error) => {
+      active.stdin!.write(line, (error) => {
         if (error) {
-          signal?.removeEventListener('abort', abort);
+          const index = responseQueue.indexOf(waiter);
+          if (index >= 0) responseQueue.splice(index, 1);
+          removeAbort();
           reject(error);
+          failSession(active, error);
         }
       });
-      void id;
     });
 
   return {
@@ -494,13 +643,10 @@ export function createInstaboxLiveWorkspaceTransport(
     },
     request(payload, signal) {
       const result = queue.then(async () => {
-        if (payload.op === 'init') input = String(payload.root ?? '');
+        if (closed) throw new Error('Instabox workspace transport is closed.');
+        if (payload.op === 'init')
+          return { id: payload.id as string | number, ok: false, errno: 'EACCES' };
         if (!startup && payload.op !== 'init') await start(signal);
-        else if (payload.op === 'init' && !startup) {
-          input = String(payload.root ?? '');
-          await start(signal);
-          return { id: payload.id as string | number, ok: true };
-        }
         const safeRead = ['stat', 'list', 'read'].includes(String(payload.op));
         try {
           return await rawRequest(payload, signal);
@@ -528,11 +674,21 @@ export function createInstaboxLiveWorkspaceTransport(
       return result;
     },
     async close() {
-      child?.kill('SIGTERM');
+      if (closed) return;
+      closed = true;
+      shutdownController.abort();
+      const pendingStartup = startup;
+      const active = child;
       child = undefined;
+      if (active) await stopChild(active);
+      await pendingStartup?.catch(() => undefined);
+      await sessionClosing;
       if (tempDir) await rm(tempDir, { recursive: true, force: true });
       tempDir = undefined;
+      await tempCleanup;
       startup = undefined;
+      rejectPending(new Error('Instabox workspace transport is closed.'));
+      clearSessionBuffers();
     },
   };
 }
@@ -566,6 +722,7 @@ export async function createLiveWorkspaceProvider(options: LiveWorkspaceOptions)
     ops: [
       'stat',
       'list',
+      'mkdir',
       'read',
       'capabilities',
       'openWrite',
@@ -600,6 +757,7 @@ export async function createLiveWorkspaceProvider(options: LiveWorkspaceOptions)
       const supported = [
         'stat',
         'list',
+        'mkdir',
         'read',
         'openWrite',
         'write',
@@ -619,6 +777,7 @@ export async function createLiveWorkspaceProvider(options: LiveWorkspaceOptions)
           request.op === 'read' ||
           request.op === 'stat' ||
           request.op === 'list' ||
+          request.op === 'mkdir' ||
           request.op === 'openWrite'
         ) {
           if (
@@ -672,6 +831,7 @@ export async function createLiveWorkspaceProvider(options: LiveWorkspaceOptions)
           options.readOnly &&
           [
             'openWrite',
+            'mkdir',
             'write',
             'truncate',
             'readStaged',
