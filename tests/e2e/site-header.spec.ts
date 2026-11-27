@@ -129,6 +129,40 @@ test.describe('auth cross-links', () => {
       }
     }
   });
+
+  test('keeps an absolute redirect_url on this origin through both cross-links', async ({
+    page,
+  }) => {
+    const link = (name: string) => page.getByRole('main').getByRole('link', { name, exact: true });
+    await page.goto('/sign-in');
+    const origin = new URL(page.url()).origin;
+    // auth.protect() sends the absolute request URL, e.g. <origin>/console?drive=...&path=...
+    const folder = '/console?drive=drv_e2e&path=/team/specs';
+    const kept = `redirect_url=${encodeURIComponent(folder)}`;
+
+    await page.goto(`/sign-in?redirect_url=${encodeURIComponent(`${origin}${folder}`)}`);
+    await expect(link('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
+    await link('Sign up free').click();
+    await expect(page).toHaveURL(/\/sign-up\?/);
+    await expect(link('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+    await link('Sign in').click();
+    await expect(page).toHaveURL(/\/sign-in\?/);
+    await expect(link('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
+
+    // The sign-up page accepts the same absolute value directly.
+    await page.goto(`/sign-up?redirect_url=${encodeURIComponent(`${origin}${folder}`)}`);
+    await expect(link('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+
+    // Absolutes on any other origin, or with no path after this origin, are dropped.
+    for (const value of [
+      `https://evil.example${folder}`,
+      `${origin}.evil.example${folder}`,
+      `${origin}//evil.example/x`,
+    ]) {
+      await page.goto(`/sign-in?redirect_url=${encodeURIComponent(value)}`);
+      await expect(link('Sign up free'), value).toHaveAttribute('href', '/sign-up');
+    }
+  });
 });
 
 for (const size of [phone, desktop]) {

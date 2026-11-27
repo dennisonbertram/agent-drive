@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { SignUp } from '@clerk/nextjs';
 import { AuthLinks, safeRedirect, SiteHeader } from '../../../site-header';
 import { clerkConfigured } from '@/src/console/auth';
+import { publicOrigin } from '@/src/content/origin';
 import { t1Appearance } from '../../sign-in/appearance';
 import '../../../styles/account.css';
 
@@ -17,7 +19,7 @@ export default async function SignUpPage({
 }: {
   searchParams: Promise<{ redirect_url?: string | string[] }>;
 }) {
-  const redirect = safeRedirect((await searchParams).redirect_url);
+  const redirect = safeRedirect((await searchParams).redirect_url, publicOrigin(await headers()));
   return (
     <>
       <SiteHeader current="sign-up" />

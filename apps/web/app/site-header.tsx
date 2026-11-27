@@ -37,8 +37,13 @@ export function SiteHeader({ current }: { current?: Current }) {
  * Same-origin paths only. Rejects backslashes and control or whitespace characters (browsers
  * treat "/\\evil" and "/<tab>/evil" as other origins), then resolves the value against a
  * placeholder origin and keeps it only if it stays on that origin.
+ *
+ * Clerk's auth.protect() sends an absolute redirect_url on this deployment's own origin, so a
+ * value that starts with the exact `origin` followed by a path slash is first reduced to its
+ * path and checked the same way.
  */
-export function safeRedirect(v: string | string[] | undefined) {
+export function safeRedirect(v: string | string[] | undefined, origin?: string) {
+  if (typeof v === 'string' && origin && v.startsWith(`${origin}/`)) v = v.slice(origin.length);
   if (typeof v !== 'string' || !v.startsWith('/') || /[\\\s\u0000-\u001f\u007f]/.test(v))
     return undefined;
   const base = 'https://placeholder.invalid';
