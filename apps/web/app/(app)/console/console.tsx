@@ -765,6 +765,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       !drives.some((item) => item.id === requestedDrive) &&
       (collectionPages.drives.cursor || collectionPages.drives.loading),
   );
+  // The drive the link names is known missing only once every drive page has been
+  // seen; until then it may be past the first page (deepLinkPending). Its path
+  // belongs to that drive, so it must not be fetched or shown under another one.
+  const linkedDriveMissing = Boolean(
+    ready && urlDrive && !drives.some((item) => item.id === urlDrive) && !deepLinkPending,
+  );
   const fileScope = `${selected}:${tab}:${view}:${folder}:${fileRefresh}`;
   const searchTerm = tab === 'Files' && filter.trim() ? typed : '';
   const pageKey = `${fileScope}|${searchTerm}|${sort.key}:${sort.dir}`;
@@ -1060,7 +1066,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => clearTimeout(timer);
   }, [filter]);
   useEffect(() => {
-    if (!selected || deepLinkPending || (tab !== 'Files' && tab !== 'Trash') || sharedView) return;
+    if (
+      !selected ||
+      deepLinkPending ||
+      linkedDriveMissing ||
+      (tab !== 'Files' && tab !== 'Trash') ||
+      sharedView
+    )
+      return;
     let active = true;
     void (async () => {
       const searched = tab === 'Files' && Boolean(searchTerm);
@@ -1108,7 +1121,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     return () => {
       active = false;
     };
-  }, [selected, tab, view, folder, fileScope, sharedView, searchTerm, deepLinkPending]);
+  }, [
+    selected,
+    tab,
+    view,
+    folder,
+    fileScope,
+    sharedView,
+    searchTerm,
+    deepLinkPending,
+    linkedDriveMissing,
+  ]);
   // Check the durable claim first; only its 404 allows a submitted.md approval
   // probe. Both answers belong to this drive, folder and listing generation.
   useEffect(() => {
@@ -1374,21 +1397,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setRestoredWatch(null);
     showToast(message, {}, id);
   }, [restoredWatch, toasts, tab, listStatus, selected, filePage, hiddenRows]);
-  // A drive in the URL that does not exist is replaced by the one that opened.
+  // A drive the link names that is not in this account is replaced by the one
+  // that opened — at that drive's root, since the linked path belongs to the
+  // missing drive. With no drive to open, the link still gets its explanation.
   useEffect(() => {
-    if (
-      !ready ||
-      !selected ||
-      !urlDrive ||
-      !requestedDrive ||
-      drives.some((item) => item.id === requestedDrive)
-    )
+    if (!linkedDriveMissing) return;
+    const fallback = drives.find((item) => item.id === selected);
+    if (!fallback) {
+      setNotice('The linked drive isn’t available in this account.');
       return;
-    if (deepLinkPending) return;
+    }
     const next = new URLSearchParams(window.location.search);
     next.set('drive', selected);
+    next.delete('path');
     window.history.replaceState(null, '', `${window.location.pathname}?${next}`);
-  }, [ready, selected, urlDrive, requestedDrive, drives, deepLinkPending]);
+    setNotice(`The linked drive isn’t available in this account. Opened ${fallback.name} instead.`);
+  }, [linkedDriveMissing, selected, drives]);
   useEffect(() => {
     if (!selected) return;
     try {
