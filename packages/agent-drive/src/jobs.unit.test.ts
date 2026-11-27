@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentDriveApiError, StreamSizeLimitError } from './client.js';
 import type { FileEntry, RecentEvent, RecentPage, Version } from './client.js';
 import { encryptedSize } from './crypto-format.js';
@@ -477,6 +477,20 @@ describe('submitJob', () => {
     expect(result.state).toBe('claimed');
   });
 
+  it('reports claimed when the receipt exists but visible status is missing', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-receipt-only');
+    await drive.put(
+      DRIVE,
+      '/jobs/.agent-drive/claims/job-receipt-only.json',
+      textBytes('{"version":1}'),
+    );
+
+    const result = await submitJob(client, DRIVE, 'job-receipt-only');
+    expect(result.state).toBe('claimed');
+  });
+
   it('propagates an API or auth failure on the status check instead of reporting queued', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
@@ -837,6 +851,33 @@ describe('runJobs once', () => {
     );
     expect(seen).toEqual(['zz-real']);
     expect(drive.calls.filter((call) => call === 'list:/jobs/').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('stops scanning at a page boundary when the signal aborts mid-scan', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    // 250 drafts force three list pages at the real page limit.
+    for (let index = 0; index < 250; index += 1)
+      await drive.put(
+        DRIVE,
+        `/jobs/pad-${String(index).padStart(3, '0')}/request.md`,
+        textBytes('x'),
+      );
+    const controller = new AbortController();
+    let lists = 0;
+    drive.before = (call) => {
+      if (call === 'list:/jobs/') {
+        lists += 1;
+        if (lists === 2) controller.abort();
+      }
+    };
+
+    await runJobs(client, DRIVE, async () => [], {
+      once: true,
+      signal: controller.signal,
+    });
+    // The abort lands on page two; page three must never be listed.
+    expect(lists).toBe(2);
   });
 
   it('drains only the submissions visible in one pass', async () => {
@@ -1219,6 +1260,40 @@ describe('runJobs failure and finalization', () => {
 });
 
 describe('runJobs daemon follow', () => {
+  it.each([
+    ['recentHead', 401],
+    ['list:/jobs/', 403],
+  ])('surfaces permanent authorization failure from %s promptly', async (call, status) => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    const error = new AgentDriveApiError('permission_denied', status, 'denied');
+    drive.inject.set(call, () => error);
+
+    await expect(
+      runJobs(client, DRIVE, async () => [], {
+        once: false,
+        signal: new AbortController().signal,
+        sleep: async () => {},
+      }),
+    ).rejects.toBe(error);
+  });
+
+  it('surfaces a permanent authorization failure while creating the claim receipt', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-no-claim-scope');
+    const error = new AgentDriveApiError('permission_denied', 403, 'denied');
+    drive.inject.set('put:/jobs/.agent-drive/claims/job-no-claim-scope.json', () => error);
+
+    await expect(
+      runJobs(client, DRIVE, async () => [], {
+        once: false,
+        signal: new AbortController().signal,
+        sleep: async () => {},
+      }),
+    ).rejects.toBe(error);
+  });
+
   it('probes the head cursor before the startup scan so no join is lost', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
@@ -1404,6 +1479,92 @@ describe('runJobs daemon follow', () => {
     );
     expect(seen).toEqual(['reconciled']);
     expect(drive.status('reconciled')?.state).toBe('done');
+  });
+
+  it('cancels the idle poll timer on shutdown instead of holding the process open', async () => {
+    vi.useFakeTimers();
+    try {
+      const drive = new FakeDrive();
+      const client = asClient(drive);
+      const controller = new AbortController();
+      drive.pollHook = (call) => {
+        // Fire while the worker is parked in the post-poll nap.
+        if (call === 1) setTimeout(() => controller.abort(), 20);
+      };
+      // No sleep override: the regression is the DEFAULT nap timer surviving abort.
+      const worker = runJobs(client, DRIVE, async () => [], {
+        once: false,
+        signal: controller.signal,
+        pollMs: 60_000,
+        pollMaxMs: 60_000,
+        retryMs: 1,
+      });
+      await vi.advanceTimersByTimeAsync(20);
+      await worker;
+      // The abort timer and the default nap timer are both gone after shutdown.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers a queued submission after a transient first-scan outage without a new event', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    // The submission is already queued before the worker starts; nothing new lands.
+    await seedSubmission(drive, 'job-boot');
+    const controller = new AbortController();
+    drive.failures.set('list:/jobs/', 1); // the startup scan's first page 500s
+    drive.pollHook = () => {
+      if (drive.status('job-boot') || drive.eventCount() > 50) controller.abort();
+    };
+
+    let invoked = 0;
+    await runJobs(client, DRIVE, async () => ((invoked += 1), []), {
+      once: false,
+      signal: controller.signal,
+      pollMs: 1,
+      pollMaxMs: 2,
+      retryMs: 1,
+      sleep: async () => {},
+    });
+    expect(invoked).toBe(1);
+    expect(drive.status('job-boot')?.state).toBe('done');
+  });
+
+  it('keeps the old cursor when a recovery scan fails after a new head, so no work is lost', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    const controller = new AbortController();
+    drive.failures.set('recent', 1); // the first poll 500s -> recovery reconcile
+    let lists = 0;
+    drive.before = (call) => {
+      if (call === 'list:/jobs/') {
+        lists += 1;
+        // The recovery scan (second list) fails AFTER the fresh head was captured.
+        if (lists === 2) throw outage();
+      }
+    };
+    drive.pollHook = async (call) => {
+      if (call === 1)
+        // Lands before the recovery head probe; its event sits below that head.
+        await seedSubmission(drive, 'job-slip');
+      if (drive.status('job-slip')?.state === 'done' || call > 20) controller.abort();
+    };
+
+    let invoked = 0;
+    await runJobs(client, DRIVE, async () => ((invoked += 1), []), {
+      once: false,
+      signal: controller.signal,
+      pollMs: 1,
+      pollMaxMs: 2,
+      retryMs: 1,
+      sleep: async () => {},
+    });
+    // Advancing the cursor to the new head despite the failed scan would skip
+    // job-slip's submit event; the retry must follow from the older cursor.
+    expect(invoked).toBe(1);
+    expect(drive.status('job-slip')?.state).toBe('done');
   });
 });
 

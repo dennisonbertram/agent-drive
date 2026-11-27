@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { AgentDriveApiError, StreamSizeLimitError } from './client.js';
 import type { AgentDriveClient, FileEntry, RecentEvent, RecentPage, Version } from './client.js';
 import { plaintextSize } from './crypto-format.js';
@@ -34,15 +35,8 @@ export type InitJobsClient = Pick<AgentDriveClient, 'put'>;
 export type SubmitJobClient = Pick<AgentDriveClient, 'getVersionMetadata' | 'rename'>;
 export type RunJobsClient = Pick<
   AgentDriveClient,
-  'get' | 'getVersionMetadata' | 'list' | 'put' | 'recent'
-> & {
-  /**
-   * Newest event-feed cursor (recentHead lands on AgentDriveClient in a parallel
-   * change). Optional: without it the first poll walks the oldest events once
-   * before settling on the tail.
-   */
-  recentHead?(driveId: string, signal?: AbortSignal): Promise<string | null>;
-};
+  'get' | 'getVersionMetadata' | 'list' | 'put' | 'recent' | 'recentHead'
+>;
 
 export const JOBS_README_PATH = '/jobs/README.md';
 
@@ -116,8 +110,8 @@ export type RunJobsOptions = {
   rescanMs?: number;
   /** Base backoff after a discovery or claim outage (default 5s). */
   retryMs?: number;
-  /** Sleep override for tests and schedulers. */
-  sleep?: (ms: number) => Promise<void>;
+  /** Sleep override for tests and schedulers; abort must cancel the wait. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 };
 
 const GUIDE = `# Agent Drive jobs
@@ -132,36 +126,46 @@ worker executes it, and results land as ordinary encrypted files.
 /jobs/<id>/submitted.md          the request the worker picks up
 /jobs/<id>/status.json           worker-owned visible status
 /jobs/<id>/outputs/<name>        worker-written results
-/jobs/.agent-drive/claims/<id>.json  private execution receipt (worker-owned)
+/jobs/.agent-drive/claims/<id>.json  internal execution receipt (worker-owned)
 
 ## Submit a job
 
 1. Write /jobs/<id>/request.md and any /jobs/<id>/inputs/<name> files.
 2. Submit with \`agent-drive jobs submit <id>\` or the dashboard's Submit action.
-   Both perform a version-guarded rename of request.md to submitted.md: the draft
-   must still be what you wrote and the destination must not exist. A plain mv or
-   \`agent-drive mv\` is NOT version-guarded and can clobber a concurrent submitter.
-3. A submission already present means the job is queued; a status.json or a claim
-   receipt means it is claimed. Submitting again never creates a duplicate run.
+   Both guard the source version and require submitted.md to be absent. The CLI
+   uses metadata only and needs read+write scopes, but no local drive key.
+   On Linux, mounted POSIX mv guards versions seen at the rename syscall, but may
+   replace an existing destination when the key has delete. Prefer jobs submit or
+   dashboard Submit when the destination must be absent.
+3. A normal queued job has submitted.md and neither status.json nor a receipt.
+   The worker creates its receipt before status.json; a receipt without status.json
+   is still claimed. Submitting again never creates a duplicate run.
 
 Job ids: ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$
 Limits: request 64KiB; up to 16 inputs of 8MiB each, 32MiB total.
 Outputs are held to the same budget.
-Runner credentials need read+write over all of /jobs/, including .agent-drive/.
+The worker needs read+write scopes and a write path covering /jobs/, including
+.agent-drive/claims/. Submitter write paths should cover only their own job
+folders and must exclude .agent-drive/. Write paths limit writes, not reads: any
+read-scoped key on this drive can see file metadata and download ciphertext from
+other jobs; plaintext requires the drive key. Use separate drives for privacy.
 
 ## status.json and the claims receipt are worker-owned — never edit or move them
 
-Before dispatch the worker creates BOTH the receipt and status.json create-only.
-Either existing — even trashed — means the id is claimed forever:
+The worker creates the execution receipt first, then status.json. The receipt is
+an ordinary encrypted file on the drive, not access-restricted: drive readers can
+see its metadata and ciphertext. It is the durable duplicate-run guard; keep it
+outside submitter write paths. If it exists, the id stays claimed even if status is
+missing or moved:
 
 - {"state":"running"}    a worker claimed the job and may still be running
 - {"state":"done"}       every output under outputs/ is committed
 - {"state":"failed"}     a fixed "reason" code says why (no raw errors or secrets)
 
-The receipt survives the visible status file being moved aside, so a moved or
-missing status.json does NOT rerun an already-executed job. submitted.md with no
-status.json means the claim lives in the receipt: the worker died mid-claim or
-the visible status was moved; the job stays claimed.
+A queued submission has neither status.json nor a receipt. Once the receipt
+exists, missing status.json means the worker is still creating visible state or
+stopped before it could do so; the outcome is unknown and the id remains held.
+Moving status.json aside never reruns the job because the receipt remains.
 
 ## Manual recovery
 
@@ -174,6 +178,10 @@ status.json and the receipt to force a rerun is deliberately unsupported.
 
 function isNotFound(error: unknown) {
   return error instanceof AgentDriveApiError && error.status === 404;
+}
+
+function isPermanentAuthorizationFailure(error: unknown) {
+  return error instanceof AgentDriveApiError && (error.status === 401 || error.status === 403);
 }
 
 /** A create-only collision that can only mean the id was claimed before. */
@@ -274,6 +282,7 @@ export async function submitJob(
   const requestPath = `${dir}/request.md`;
   const submittedPath = `${dir}/submitted.md`;
   const statusPath = `${dir}/status.json`;
+  const receiptPath = `${CLAIM_PREFIX}${id}.json`;
 
   const metadata = async (path: string) => {
     try {
@@ -288,10 +297,11 @@ export async function submitJob(
   if (existing) {
     // The status check must answer truthfully: an API or auth failure is not a queue.
     const status = await metadata(statusPath);
+    const receipt = status ? null : await metadata(receiptPath);
     return {
       id,
       path: submittedPath,
-      state: status ? 'claimed' : 'queued',
+      state: status || receipt ? 'claimed' : 'queued',
       versionId: existing.id,
     };
   }
@@ -345,8 +355,12 @@ export async function runJobs(
   options: RunJobsOptions,
 ): Promise<void> {
   const signal = options.signal;
+  // timers/promises setTimeout takes the signal directly: abort cancels the
+  // underlying timer instead of leaving a referenced handle behind.
   const sleep =
-    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    options.sleep ??
+    ((ms: number, signal?: AbortSignal) =>
+      delay(ms, undefined, signal ? { signal } : undefined).then(() => {}));
   const basePollMs = options.pollMs ?? 4_000;
   const pollMaxMs = options.pollMaxMs ?? 45_000;
   const rescanMs = options.rescanMs ?? 3_600_000;
@@ -402,7 +416,7 @@ export async function runJobs(
         resolve();
       };
       signal.addEventListener('abort', onAbort, { once: true });
-      sleep(ms).then(onAbort, (error: unknown) => {
+      sleep(ms, signal).then(onAbort, (error: unknown) => {
         signal.removeEventListener('abort', onAbort);
         reject(error);
       });
@@ -410,22 +424,10 @@ export async function runJobs(
     });
   };
 
-  const headCursor = async () => {
-    if (!client.recentHead) return null;
-    return client.recentHead(driveId, signal);
-  };
+  const headCursor = () => client.recentHead(driveId, signal);
 
   /** Newest-first tail cursor, captured BEFORE a scan so the join cannot be lost. */
   let cursor: string | null = null;
-  if (!options.once) {
-    try {
-      cursor = await headCursor();
-    } catch {
-      if (signal?.aborted) return;
-      // A null cursor makes the first poll walk the oldest events once — bounded
-      // — then settle on the last-row cursor the feed returns.
-    }
-  }
 
   const observe = (event: RecentEvent) => {
     const parts = jobPathParts(event.path);
@@ -480,7 +482,7 @@ export async function runJobs(
       requestMeta = await client.getVersionMetadata(driveId, submittedPath);
     } catch (error) {
       if (isNotFound(error)) return;
-      retryLater(id);
+      if (!isPermanentAuthorizationFailure(error)) retryLater(id);
       throw error;
     }
 
@@ -502,7 +504,7 @@ export async function runJobs(
     } catch (error) {
       if (isClaimed(error)) remember(id);
       else {
-        retryLater(id);
+        if (!isPermanentAuthorizationFailure(error)) retryLater(id);
         throw error;
       }
       return;
@@ -563,6 +565,7 @@ export async function runJobs(
       let pageCursor: string | undefined;
       const cursors = new Set<string>();
       do {
+        if (signal?.aborted) return;
         const page = await client.list(driveId, inputsPrefix, PAGE_LIMIT, pageCursor);
         for (const entry of page.items) {
           // The prefix is advisory: only ever use paths proven under inputs/.
@@ -693,6 +696,7 @@ export async function runJobs(
       } catch (error) {
         // Acquisition errors are remembered for the once-mode report; a single
         // bad job — buggy or not — never kills the worker or starves the next.
+        if (isPermanentAuthorizationFailure(error)) throw error;
         recordError(error);
       }
     }
@@ -715,6 +719,7 @@ export async function runJobs(
     };
     let pageCursor: string | undefined;
     do {
+      if (signal?.aborted) return;
       const page = await client.list(driveId, JOBS_PREFIX, PAGE_LIMIT, pageCursor);
       for (const item of page.items) {
         const parts = jobPathParts(item.path);
@@ -740,6 +745,7 @@ export async function runJobs(
     const cursors = new Set<string>();
     let previous = firstCursor;
     for (;;) {
+      if (signal?.aborted) return;
       for (const event of page.items) observe(event);
       if (page.latestCursor) cursor = page.latestCursor;
       if (!page.nextCursor) return;
@@ -749,25 +755,35 @@ export async function runJobs(
     }
   };
 
-  await scan();
-  if (options.once || signal?.aborted) {
+  if (options.once) {
+    await scan();
     // Report the first discovery or acquisition failure instead of a false pass.
     if (firstError !== undefined && !signal?.aborted) throw firstError;
     return;
   }
+  if (signal?.aborted) return;
 
   let pollMs = basePollMs;
-  let nextReconcile = Date.now() + rescanMs;
+  // The startup scan runs as the loop's first reconcile: a transient outage at
+  // boot recovers like any other poll failure instead of killing the worker.
+  let nextReconcile = Date.now();
+
+  /**
+   * Captures the head BEFORE the reconcile scan so the join cannot be lost, then
+   * advances the cursor only if the scan succeeded: a failed scan keeps the
+   * older cursor so its unobserved events stay in the follow stream.
+   */
+  const reconcile = async () => {
+    const head = await headCursor();
+    await scan();
+    if (head) cursor = head;
+    nextReconcile = Date.now() + rescanMs;
+  };
+
   for (;;) {
     if (signal?.aborted) return;
     try {
-      if (Date.now() >= nextReconcile) {
-        // Capture the head BEFORE the reconcile scan so the join cannot be lost.
-        const head = await headCursor();
-        if (head) cursor = head;
-        await scan();
-        nextReconcile = Date.now() + rescanMs;
-      }
+      if (Date.now() >= nextReconcile) await reconcile();
       const page = await client.recent(driveId, undefined, PAGE_LIMIT, cursor ?? undefined, signal);
       const idle = page.items.length === 0;
       await follow(page, cursor ?? undefined);
@@ -776,19 +792,18 @@ export async function runJobs(
       // Adaptive pacing: settle at the base interval after activity and double
       // toward the ceiling while idle.
       pollMs = idle ? Math.min(pollMs * 2, pollMaxMs) : basePollMs;
-    } catch {
+    } catch (error) {
       if (signal?.aborted) return;
+      if (isPermanentAuthorizationFailure(error)) throw error;
       // Timeout or transport outage: pace, then reconcile from a fresh head
       // captured before the recovery scan plus the authoritative cursor.
       await nap(retryMs);
       if (signal?.aborted) return;
       try {
-        const head = await headCursor();
-        if (head) cursor = head;
-        await scan();
-        nextReconcile = Date.now() + rescanMs;
-      } catch {
+        await reconcile();
+      } catch (error) {
         if (signal?.aborted) return;
+        if (isPermanentAuthorizationFailure(error)) throw error;
         // Still down; the outer loop keeps the paced cadence.
       }
     }
