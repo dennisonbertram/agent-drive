@@ -1237,6 +1237,7 @@ test.describe('agent device login', () => {
     await expect(approveButton).toBeInViewport({ ratio: 1 });
 
     // A bad pasted key is reported next to the key field in plain words.
+    await page.locator('#connect-verify').fill(second.verify);
     await page.locator('input[type="password"]').fill('not-a-key');
     await approveButton.click();
     const error = page.locator('#connect-key-error');

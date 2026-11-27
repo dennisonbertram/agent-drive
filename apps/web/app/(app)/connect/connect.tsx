@@ -834,35 +834,34 @@ export default function Connect({
           {request.user_code}
         </span>
         <small>If it does not, close this page; the request expires on its own.</small>
+        <label className="connect-verify">
+          Verification code
+          <input
+            id="connect-verify"
+            value={verifyText}
+            disabled={busy}
+            onChange={(event) => setVerifyText(event.target.value)}
+            placeholder="a1b2 c3d4 e5f6 7890"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            aria-invalid={fieldError?.field === 'verify' || undefined}
+            aria-describedby={
+              fieldError?.field === 'verify' ? 'connect-verify-error' : 'connect-verify-hint'
+            }
+            className={fieldError?.field === 'verify' ? 'invalid' : undefined}
+          />
+        </label>
+        {fieldError?.field === 'verify' ? (
+          <p className="connect-field-error" role="alert" id="connect-verify-error">
+            {fieldError.message}
+          </p>
+        ) : (
+          <p className="connect-hint" id="connect-verify-hint">
+            Type the code from your agent’s terminal. This page never shows it.
+          </p>
+        )}
       </div>
-      <label className="connect-verify">
-        Verification code
-        <input
-          id="connect-verify"
-          value={verifyText}
-          disabled={busy}
-          onChange={(event) => setVerifyText(event.target.value)}
-          placeholder="a1b2 c3d4 e5f6 7890"
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          aria-invalid={fieldError?.field === 'verify' || undefined}
-          aria-describedby={
-            fieldError?.field === 'verify' ? 'connect-verify-error' : 'connect-verify-hint'
-          }
-          className={fieldError?.field === 'verify' ? 'invalid' : undefined}
-        />
-      </label>
-      {fieldError?.field === 'verify' ? (
-        <p className="connect-field-error" role="alert" id="connect-verify-error">
-          {fieldError.message}
-        </p>
-      ) : (
-        <p className="connect-hint" id="connect-verify-hint">
-          Type the verification code your agent printed below its login code. This page never shows
-          it — that is what proves the code came from your terminal, not from us.
-        </p>
-      )}
       <div className="connect-actions">
         <button
           className="button primary connect-approve"
