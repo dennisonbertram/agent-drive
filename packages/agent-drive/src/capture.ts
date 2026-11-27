@@ -9,7 +9,12 @@ import https from 'node:https';
 import { constants as osConstants } from 'node:os';
 import { basename, join } from 'node:path';
 import zlib from 'node:zlib';
-import { codexOverride, codexProviderFlags } from './capture-codex.js';
+import {
+  CODEX_CAPTURE_TOKEN_ENV,
+  CODEX_CAPTURE_TOKEN_HEADER,
+  codexOverride,
+  codexProviderFlags,
+} from './capture-codex.js';
 import { Drainer, Spool, SpoolFullError } from './capture-spool.js';
 import { AgentDriveClient } from './client.js';
 import { autoSealHeldKeys, sealClientWithDeadline } from './account-seal.js';
@@ -337,7 +342,11 @@ export async function startProxy(options: ProxyOptions) {
     // The first path segment is the run secret: checked before any routing,
     // recording or forwarding, and never carried upstream or into logs/traces.
     const gate = /^\/([0-9A-Za-z_-]+)(\/.*|\?.*)?$/u.exec(req.url ?? '');
-    if (!gate || !authorized(gate[1] ?? '')) {
+    const pathAuthenticated = gate !== null && authorized(gate[1] ?? '');
+    const headerToken = req.headers[CODEX_CAPTURE_TOKEN_HEADER];
+    const headerAuthenticated =
+      typeof headerToken === 'string' && authorized(headerToken);
+    if (!pathAuthenticated && !headerAuthenticated) {
       drop('unauthorized');
       res.writeHead(401, { 'content-type': 'application/json' });
       res.end('{"error":"unauthorized"}');
@@ -347,7 +356,8 @@ export async function startProxy(options: ProxyOptions) {
       log('capture: unauthorized 401');
       return;
     }
-    const match = /^\/(anthropic|openai)(\/.*)?$/u.exec(gate[2] ?? '/');
+    const routePath = pathAuthenticated ? (gate?.[2] ?? '/') : (req.url ?? '/');
+    const match = /^\/(anthropic|openai)(\/.*)?$/u.exec(routePath);
     if (!match) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{"error":"unknown route"}');
@@ -380,7 +390,12 @@ export async function startProxy(options: ProxyOptions) {
     const headers: IncomingHttpHeaders = {};
     const requestHop = hopHeaders(req.headers);
     for (const [name, value] of Object.entries(req.headers))
-      if (!requestHop.has(name) && name !== 'host') headers[name] = value;
+      if (
+        !requestHop.has(name) &&
+        name !== 'host' &&
+        name !== CODEX_CAPTURE_TOKEN_HEADER
+      )
+        headers[name] = value;
     const defaultPort = upstream.protocol === 'https' ? 443 : 80;
     headers.host =
       upstream.port === defaultPort ? upstream.hostname : `${upstream.hostname}:${upstream.port}`;
@@ -612,12 +627,15 @@ export async function runCapture(input: {
   const origin = `http://127.0.0.1:${proxy.port}`;
   const env = {
     ...process.env,
-    ANTHROPIC_BASE_URL: `${origin}/${proxy.secret}/anthropic`,
-    OPENAI_BASE_URL: `${origin}/${proxy.secret}/openai`,
+    ANTHROPIC_BASE_URL:
+      base === 'codex' ? `${origin}/anthropic` : `${origin}/${proxy.secret}/anthropic`,
+    OPENAI_BASE_URL:
+      base === 'codex' ? `${origin}/openai` : `${origin}/${proxy.secret}/openai`,
+    ...(base === 'codex' ? { [CODEX_CAPTURE_TOKEN_ENV]: proxy.secret } : {}),
   };
   const args =
     base === 'codex'
-      ? [...codexProviderFlags(proxy.port, proxy.secret), ...command.slice(1)]
+      ? [...codexProviderFlags(proxy.port), ...command.slice(1)]
       : command.slice(1);
   const code = await spawnChild(command, env, args);
   await proxy.close();

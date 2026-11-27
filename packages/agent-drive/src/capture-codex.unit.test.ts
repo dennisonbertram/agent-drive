@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { codexOverride, codexProviderFlags } from './capture-codex.js';
+import {
+  CODEX_CAPTURE_TOKEN_ENV,
+  CODEX_CAPTURE_TOKEN_HEADER,
+  codexOverride,
+  codexProviderFlags,
+} from './capture-codex.js';
 
 describe('codex overrides', () => {
-  it('emits the six provider settings as -c flags', () => {
-    const flags = codexProviderFlags(4321, 'run-secret');
-    expect(flags.filter((f) => f === '-c').length).toBe(6);
+  it('emits the provider settings without placing the per-run token in argv', () => {
+    const flags = codexProviderFlags(4321);
+    expect(flags.filter((f) => f === '-c').length).toBe(7);
     expect(flags.filter((f) => f !== '-c')).toEqual([
       'model_providers.agent_drive_capture.name="Agent Drive capture"',
-      'model_providers.agent_drive_capture.base_url="http://127.0.0.1:4321/run-secret/openai/v1"',
+      'model_providers.agent_drive_capture.base_url="http://127.0.0.1:4321/openai/v1"',
       'model_providers.agent_drive_capture.env_key="OPENAI_API_KEY"',
+      `model_providers.agent_drive_capture.env_http_headers={"${CODEX_CAPTURE_TOKEN_HEADER}"="${CODEX_CAPTURE_TOKEN_ENV}"}`,
       'model_providers.agent_drive_capture.wire_api="responses"',
       'model_providers.agent_drive_capture.supports_websockets=false',
       'model_provider="agent_drive_capture"',

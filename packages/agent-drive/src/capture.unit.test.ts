@@ -6,6 +6,7 @@ import zlib from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Drainer, Spool, type UploadClient } from './capture-spool.js';
 import { startProxy, type ProxyOptions } from './capture.js';
+import { CODEX_CAPTURE_TOKEN_HEADER } from './capture-codex.js';
 import { AgentDriveApiError } from './client.js';
 import { decryptFile, generateDriveKey } from './crypto.js';
 
@@ -94,6 +95,16 @@ function send(
   onChunk?: (chunk: Buffer, at: number) => void,
 ) {
   return sendRaw(proxy.port, `/${proxy.secret}${path}`, options, onChunk);
+}
+function sendWithCaptureHeader(
+  proxy: { port: number; secret: string },
+  path: string,
+  options: { method?: string; headers?: http.OutgoingHttpHeaders; body?: Buffer | string } = {},
+) {
+  return sendRaw(proxy.port, path, {
+    ...options,
+    headers: { ...options.headers, [CODEX_CAPTURE_TOKEN_HEADER]: proxy.secret },
+  });
 }
 function sendRaw(
   port: number,
@@ -199,6 +210,29 @@ describe('authentication', () => {
     expect(s.logs.join('\n')).not.toContain(s.proxy.secret);
     await s.proxy.close({ taskMs: 1000, totalMs: 500 });
     expect((await spooled(s.dir)).length + s.uploads.length).toBe(0);
+  });
+
+  it('authenticates Codex by header and strips the capture token before upstream routing', async () => {
+    const up = await fakeUpstream((_q, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+    const s = await setup(up.upstreams, {
+      client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
+    });
+    const reply = await sendWithCaptureHeader(s.proxy, '/openai/v1/responses?x=1', {
+      headers: { authorization: 'Bearer SYNTHETIC-OPENAI-KEY' },
+      body: '{"model":"test"}',
+    });
+    expect(reply.status).toBe(200);
+    expect(up.seen[0]!.url).toBe('/v1/responses?x=1');
+    expect(up.seen[0]!.headers.authorization).toBe('Bearer SYNTHETIC-OPENAI-KEY');
+    expect(up.seen[0]!.headers[CODEX_CAPTURE_TOKEN_HEADER]).toBeUndefined();
+    await s.proxy.close({ taskMs: 1000, totalMs: 500 });
+    expect(s.logs.join('\n')).not.toContain(s.proxy.secret);
+    const [trace] = await spooled(s.dir);
+    expect(trace!.trace.request.path).toBe('/v1/responses?x=1');
+    expect(trace!.text).not.toContain(s.proxy.secret);
   });
 
   it('answers with a fresh per-run secret and never exposes it upstream, in logs or in traces', async () => {

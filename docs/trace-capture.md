@@ -30,9 +30,9 @@ Everything after `--` belongs to COMMAND. Only the flags before `--` are read by
 What happens:
 
 1. The CLI starts a proxy on `127.0.0.1` on a random port and generates a fresh secret for the run.
-2. It starts COMMAND with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<secret>/anthropic` and `OPENAI_BASE_URL=http://127.0.0.1:<port>/<secret>/openai` in the environment of that child process only. Codex also receives the secret in a `-c` provider URL argument. Your shell, shell profile, Claude settings and `~/.codex/config.toml` are not changed.
-3. The proxy answers only requests whose first path segment is that run's secret. Anything else gets a 401 and is never forwarded or recorded, which keeps other local processes from relaying through the proxy. It does not protect against software that can read the child process's environment, command-line arguments, or memory.
-4. The proxy removes the secret segment, then forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives. The proxy's own access logs and trace paths omit the secret. System-level process debugging may record child arguments or environment values.
+2. It starts COMMAND with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<secret>/anthropic` in the environment of that child process only. For Codex, it sets `OPENAI_BASE_URL=http://127.0.0.1:<port>/openai`, provides the secret in `AGENT_DRIVE_CAPTURE_TOKEN`, and configures Codex to send that environment value in `x-agent-drive-capture-token`. The token is not in Codex's command-line arguments. Your shell, shell profile, Claude settings and `~/.codex/config.toml` are not changed.
+3. The proxy answers only requests whose first path segment or `x-agent-drive-capture-token` header contains that run's secret. Anything else gets a 401 and is never forwarded or recorded, which keeps other local processes from relaying through the proxy. It does not protect against software that can read the child process's environment or memory.
+4. The proxy removes the secret segment and authentication header, then forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives. The proxy's own access logs and trace paths omit the secret. System-level process debugging may record child environment values.
 5. For each exchange it builds a redacted copy, encrypts it with the drive key, and queues it for upload.
 6. When COMMAND exits, the CLI exits with the same exit code.
 
@@ -42,8 +42,9 @@ For a command named `codex`, the CLI adds these arguments before yours, because 
 
 ```text
 -c model_providers.agent_drive_capture.name="Agent Drive capture"
--c model_providers.agent_drive_capture.base_url="http://127.0.0.1:<port>/<secret>/openai/v1"
+-c model_providers.agent_drive_capture.base_url="http://127.0.0.1:<port>/openai/v1"
 -c model_providers.agent_drive_capture.env_key="OPENAI_API_KEY"
+-c model_providers.agent_drive_capture.env_http_headers={"x-agent-drive-capture-token"="AGENT_DRIVE_CAPTURE_TOKEN"}
 -c model_providers.agent_drive_capture.wire_api="responses"
 -c model_providers.agent_drive_capture.supports_websockets=false
 -c model_provider="agent_drive_capture"
