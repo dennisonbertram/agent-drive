@@ -115,7 +115,7 @@ final class BridgeTests: XCTestCase {
                     "writePaths": ["/work"],
                     "maxReadBytes": 1_048_576,
                     "maxWriteBytes": 1_048_576,
-                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "flush", "flushStatus", "closeWrite", "completeWrite", "mkdir", "unlink", "rmdir", "rename"],
+                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "finalizeWrite", "flushStatus", "closeWrite", "mkdir", "unlink", "rmdir", "rename"],
                 ],
             ])
         }
@@ -208,10 +208,7 @@ final class BridgeTests: XCTestCase {
                 XCTAssertEqual(sent["offset"] as? Int, 0)
                 XCTAssertEqual(sent["data"] as? String, "AQID")
                 return try MockURLProtocol.response(json: ["id": id, "ok": true, "bytesWritten": 3])
-            case "completeWrite":
-                XCTAssertEqual(sent["handleId"] as? String, "stage-1")
-                return try MockURLProtocol.response(json: ["id": id, "ok": true])
-            case "flush":
+            case "finalizeWrite":
                 return try MockURLProtocol.response(json: [
                     "id": id, "ok": false, "errno": "ESTALE",
                     "recoveryPath": "/tmp/agent-drive-recovery/new.txt",
@@ -231,9 +228,8 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(handle.handleId, "stage-1")
         let bytesWritten = try await client.write(handleId: handle.handleId, offset: 0, data: Data([1, 2, 3]))
         XCTAssertEqual(bytesWritten, 3)
-        try await client.completeWrite(handleId: handle.handleId)
         do {
-            _ = try await client.flush(handleId: handle.handleId)
+            _ = try await client.finalizeWrite(handleId: handle.handleId)
             XCTFail("Expected stale base version to preserve recovery details.")
         } catch BridgeClientError.remoteFailure(let failure) {
             XCTAssertEqual(failure.errno, "ESTALE")
@@ -241,7 +237,7 @@ final class BridgeTests: XCTestCase {
             XCTAssertEqual(failure.currentVersionId, "remote-v2")
             XCTAssertFalse(failure.outcomeIsUnknown)
         }
-        XCTAssertEqual(operations.values, ["openWrite", "write", "completeWrite", "flush"])
+        XCTAssertEqual(operations.values, ["openWrite", "write", "finalizeWrite"])
     }
 
     func testDirectoryDeleteAndGuardedRenameUseExactMutationFields() async throws {
@@ -297,7 +293,7 @@ final class BridgeTests: XCTestCase {
         MockURLProtocol.handler = { request in
             let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
             let id = try XCTUnwrap(sent["id"] as? String)
-            XCTAssertEqual(sent["op"] as? String, "flush")
+            XCTAssertEqual(sent["op"] as? String, "finalizeWrite")
             XCTAssertNotNil(UUID(uuidString: sent["operationId"] as? String ?? ""))
             return try MockURLProtocol.response(json: [
                 "id": id,
@@ -309,7 +305,7 @@ final class BridgeTests: XCTestCase {
             connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
             session: MockURLProtocol.makeSession()
         )
-        let result = try await client.flush(handleId: "interop-stage")
+        let result = try await client.finalizeWrite(handleId: "interop-stage")
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
     }
 
@@ -319,7 +315,7 @@ final class BridgeTests: XCTestCase {
         MockURLProtocol.handler = { request in
             let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
             let id = try XCTUnwrap(sent["id"] as? String)
-            XCTAssertEqual(sent["op"] as? String, "flush")
+            XCTAssertEqual(sent["op"] as? String, "finalizeWrite")
             let operationId = try XCTUnwrap(sent["operationId"] as? String)
             operationIds.append(operationId)
             let attempt = attempts.values.count + 1
@@ -343,7 +339,7 @@ final class BridgeTests: XCTestCase {
             session: MockURLProtocol.makeSession()
         )
 
-        let result = try await client.flush(handleId: "busy-stage")
+        let result = try await client.finalizeWrite(handleId: "busy-stage")
 
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
         XCTAssertEqual(operationIds.values.count, 2)
@@ -412,7 +408,7 @@ final class BridgeTests: XCTestCase {
             let id = try XCTUnwrap(sent["id"] as? String)
             let op = try XCTUnwrap(sent["op"] as? String)
             operations.append(op)
-            if op == "flush" {
+            if op == "finalizeWrite" {
                 XCTAssertEqual(sent["handleId"] as? String, "slow-stage")
                 operationId.append(try XCTUnwrap(sent["operationId"] as? String))
                 return try MockURLProtocol.response(json: [
@@ -433,9 +429,9 @@ final class BridgeTests: XCTestCase {
             session: MockURLProtocol.makeSession()
         )
 
-        let result = try await client.flush(handleId: "slow-stage")
+        let result = try await client.finalizeWrite(handleId: "slow-stage")
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
-        XCTAssertEqual(operations.values, ["flush", "flushStatus"])
+        XCTAssertEqual(operations.values, ["finalizeWrite", "flushStatus"])
     }
 
     func testFlushPreservesUnknownOutcomeWhenStatusCannotBeReconciled() async throws {
@@ -443,7 +439,7 @@ final class BridgeTests: XCTestCase {
         MockURLProtocol.handler = { request in
             let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
             let id = try XCTUnwrap(sent["id"] as? String)
-            if sent["op"] as? String == "flush" {
+            if sent["op"] as? String == "finalizeWrite" {
                 operationId.append(try XCTUnwrap(sent["operationId"] as? String))
                 return try MockURLProtocol.response(json: [
                     "id": id, "ok": true, "pending": true,
@@ -460,7 +456,7 @@ final class BridgeTests: XCTestCase {
         )
 
         do {
-            _ = try await client.flush(handleId: "slow-stage")
+            _ = try await client.finalizeWrite(handleId: "slow-stage")
             XCTFail("Expected the unknown commit outcome to be preserved")
         } catch let BridgeClientError.remoteFailure(failure) {
             XCTAssertEqual(failure.errno, "ETIMEDOUT")
@@ -478,7 +474,7 @@ final class BridgeTests: XCTestCase {
             let id = try XCTUnwrap(sent["id"] as? String)
             let op = try XCTUnwrap(sent["op"] as? String)
             operations.append(op)
-            if op == "flush" {
+            if op == "finalizeWrite" {
                 let newId = try XCTUnwrap(sent["operationId"] as? String)
                 operationId.append(newId)
                 return try MockURLProtocol.response(json: [
@@ -499,9 +495,9 @@ final class BridgeTests: XCTestCase {
             session: MockURLProtocol.makeSession()
         )
 
-        let result = try await client.flush(handleId: "slow-stage")
+        let result = try await client.finalizeWrite(handleId: "slow-stage")
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
-        XCTAssertEqual(operations.values, ["flush", "flushStatus", "flushStatus"])
+        XCTAssertEqual(operations.values, ["finalizeWrite", "flushStatus", "flushStatus"])
     }
 
     func testFlushRetriesAUncertainStartUsingTheSameOperationId() async throws {
@@ -511,7 +507,7 @@ final class BridgeTests: XCTestCase {
             let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
             let id = try XCTUnwrap(sent["id"] as? String)
             let op = try XCTUnwrap(sent["op"] as? String)
-            if op == "flush" {
+            if op == "finalizeWrite" {
                 let operationId = try XCTUnwrap(sent["operationId"] as? String)
                 operationIds.append(operationId)
                 let call = flushCalls.values.count + 1
@@ -533,7 +529,7 @@ final class BridgeTests: XCTestCase {
             session: MockURLProtocol.makeSession()
         )
 
-        let result = try await client.flush(handleId: "slow-stage")
+        let result = try await client.finalizeWrite(handleId: "slow-stage")
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
         XCTAssertEqual(flushCalls.values.count, 2)
         XCTAssertEqual(operationIds.values.count, 2)

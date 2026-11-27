@@ -195,13 +195,13 @@ public struct MountCapabilities: Decodable, Equatable {
 
     public func allowsWrite(_ path: String) -> Bool {
         guard !readOnly, write, maxWriteBytes > 0,
-              ["openWrite", "write", "truncate", "flush", "flushStatus", "closeWrite"].allSatisfy(ops.contains),
+              ["openWrite", "write", "truncate", "finalizeWrite", "flushStatus", "closeWrite"].allSatisfy(ops.contains),
               ItemPath.isCanonical(path)
         else { return false }
         return writePaths.isEmpty || writePaths.contains(where: { contains($0, path: path) })
     }
 
-    public var supportsIncompleteWrite: Bool { ops.contains("completeWrite") }
+    public var supportsIncompleteWrite: Bool { ops.contains("finalizeWrite") }
 
     public func allowsDelete(_ path: String) -> Bool {
         guard !readOnly, delete, ops.contains("unlink"), ops.contains("rmdir"), ItemPath.isCanonical(path) else {
@@ -362,7 +362,7 @@ public struct DriveBridge {
         return (data, response.eof)
     }
 
-    public func flush(handleId: String) async throws -> FlushResult {
+    public func finalizeWrite(handleId: String) async throws -> FlushResult {
         guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
         let deadline = Date().addingTimeInterval(12 * 60)
         let admissionDeadline = Date().addingTimeInterval(60)
@@ -373,7 +373,7 @@ public struct DriveBridge {
         while true {
             do {
                 payload = try await request(
-                    op: "flush", handleId: handleId, operationId: requestedOperationId
+                    op: "finalizeWrite", handleId: handleId, operationId: requestedOperationId
                 )
                 break
             } catch {
@@ -398,7 +398,7 @@ public struct DriveBridge {
                 guard !retriedUncertainStart,
                       let bridgeError = error as? BridgeClientError,
                       bridgeError == .unavailable || bridgeError == .malformedResponse
-                else { throw uncertainFlush(error, operationId: requestedOperationId) }
+                    else { throw uncertainFlush(error, operationId: requestedOperationId) }
                 retriedUncertainStart = true
             }
         }

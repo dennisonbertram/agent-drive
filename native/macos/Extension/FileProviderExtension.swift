@@ -525,14 +525,14 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         capabilities: MountCapabilities,
         progress: Progress
     ) async throws -> (flush: FlushResult, size: Int64) {
-        guard contents == nil || capabilities.supportsIncompleteWrite else {
+        guard capabilities.supportsIncompleteWrite else {
             throw BridgeClientError.unavailable
         }
         let handle = try await client.openWrite(
             path: path,
             baseVersionId: baseVersionId,
             truncateOnOpen: true,
-            incomplete: contents != nil
+            incomplete: true
         )
         var flushStarted = false
         do {
@@ -572,11 +572,8 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
                 progress.completedUnitCount = offset
             }
             try Task.checkCancellation()
-            if contents != nil {
-                try await client.completeWrite(handleId: handle.handleId)
-            }
             flushStarted = true
-            let result = try await client.flush(handleId: handle.handleId)
+            let result = try await client.finalizeWrite(handleId: handle.handleId)
             return (result, size)
         } catch {
             let bridgeError = error as? BridgeClientError
