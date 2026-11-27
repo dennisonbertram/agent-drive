@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AgentDriveApiError, StreamSizeLimitError } from './client.js';
+import { DriveCryptoError } from './crypto.js';
 import { WorkerUnavailableError } from './job-command.js';
 import type { AgentDriveClient, FileEntry, RecentEvent, RecentPage, Version } from './client.js';
 import { plaintextSize } from './crypto-format.js';
@@ -48,7 +49,15 @@ export type InitJobsClient = Pick<AgentDriveClient, 'put'>;
 export type SubmitJobClient = Pick<AgentDriveClient, 'getVersionMetadata' | 'rename'>;
 export type RunJobsClient = Pick<
   AgentDriveClient,
-  'get' | 'getVersionMetadata' | 'put' | 'list' | 'recent' | 'recentHead' | 'pendingJobSubmissions'
+  | 'get'
+  | 'getJobApproval'
+  | 'put'
+  | 'putStream'
+  | 'replayCommit'
+  | 'list'
+  | 'recent'
+  | 'recentHead'
+  | 'pendingJobSubmissions'
 >;
 
 export const JOBS_README_PATH = '/jobs/README.md';
@@ -92,6 +101,7 @@ export type JobFailureReason =
   | 'handler_error'
   | 'invalid_output'
   | 'output_commit_failed'
+  | 'output_commit_unknown'
   | 'internal_error';
 
 export type SubmitJobResult = {
@@ -208,6 +218,14 @@ function isPermanentAuthorizationFailure(error: unknown) {
 /** The adapter's shared error base; subclasses such as cleanup failures are fatal too. */
 function isWorkerUnavailable(error: unknown) {
   return error instanceof WorkerUnavailableError;
+}
+
+function isWorkerApiUnsupported(error: unknown) {
+  return error instanceof AgentDriveApiError && error.code === 'worker_api_unsupported';
+}
+
+function isDefinitiveCommitError(error: unknown) {
+  return error instanceof AgentDriveApiError && error.status >= 400 && error.status < 500;
 }
 
 /**
@@ -455,8 +473,8 @@ export async function runJobs(
   const backoff = new Map<string, { at: number; delay: number; versionId: string }>();
   /** First discovery/acquisition error; once mode reports it after the drain. */
   let firstError: unknown;
-  /** A terminal receipt could not be saved; watch mode must stop with its diagnosis. */
-  let terminalPersistenceFailure: Error | undefined;
+  /** An outcome needs operator action; watch mode must stop with its diagnosis. */
+  let operatorActionFailure: Error | undefined;
 
   const enqueue = (submission: { id: string; versionId: string }) => {
     const { id, versionId } = submission;
@@ -493,11 +511,19 @@ export async function runJobs(
         'and the claims receipt before any manual recovery.',
     );
 
-  const recordPersistenceError = (id: string) => {
-    const error = persistenceError(id);
-    terminalPersistenceFailure ??= error;
+  const recordOperatorActionError = (error: Error) => {
+    operatorActionFailure ??= error;
     recordError(error);
   };
+
+  const recordPersistenceError = (id: string) => {
+    recordOperatorActionError(persistenceError(id));
+  };
+
+  const outputCommitUnknownError = (id: string) =>
+    new Error(
+      `Job "${id}": an output commit status is unknown; inspect its protected claims receipt before retrying.`,
+    );
 
   const nap = async (ms: number) => {
     if (!signal) return sleep(ms);
@@ -535,27 +561,70 @@ export async function runJobs(
     const inputsPrefix = `${dir}/inputs/`;
     const receiptPath = `${CLAIM_PREFIX}${id}.json`;
 
-    // This pinned metadata query also proves that the current live file at this
-    // path still owns the submitted version. A missing, moved, trashed, or
-    // replaced file is dropped without an unpinned metadata request.
-    let requestMeta: Version;
+    // The API selects the latest authentic submit event for this live file.
+    // Older servers must fail closed rather than returning ordinary metadata.
+    let approval: Version;
     try {
-      requestMeta = await client.getVersionMetadata(driveId, submittedPath, {
-        versionId,
-        ...(signal ? { signal } : {}),
-      });
+      approval = await client.getJobApproval(driveId, id, signal);
     } catch (error) {
       if (isNotFound(error)) {
         backoff.delete(id);
         return;
       }
-      if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
+      if (!isPermanentAuthorizationFailure(error) && !isWorkerApiUnsupported(error))
+        retryLater(id, versionId);
       throw error;
     }
 
+    // Authenticate the approved request before claiming the id. A local key
+    // mismatch must stop the worker without consuming any queued approvals.
+    let preflightFailure: JobFailureReason | undefined;
+    let request: Uint8Array | undefined;
+    let requestSize: number;
+    try {
+      requestSize = plaintextSize(approval.ciphertextSize);
+    } catch {
+      preflightFailure = 'request_unavailable';
+      requestSize = 0;
+    }
+    if (preflightFailure === undefined && requestSize > JOB_LIMITS.requestBytes) {
+      preflightFailure = 'request_too_large';
+    } else if (preflightFailure === undefined) {
+      try {
+        request = (
+          await client.get(driveId, submittedPath, {
+            versionId: approval.id,
+            maxPlaintextBytes: JOB_LIMITS.requestBytes,
+            ...(signal ? { signal } : {}),
+          })
+        ).bytes;
+      } catch (error) {
+        if (error instanceof DriveCryptoError) {
+          throw new WorkerUnavailableError(
+            `Cannot decrypt approved job "${id}". Check the configured drive key; the request may also be damaged. The job remains unclaimed.`,
+            { cause: error },
+          );
+        }
+        if (isNotFound(error)) {
+          backoff.delete(id);
+          return;
+        }
+        if (error instanceof StreamSizeLimitError) {
+          preflightFailure = 'request_too_large';
+        } else {
+          if (!isPermanentAuthorizationFailure(error) && !isWorkerApiUnsupported(error))
+            retryLater(id, versionId);
+          throw error;
+        }
+      }
+    }
+
+    if (signal?.aborted) return;
+
     // The durable receipt is the authoritative claim: it survives the visible
     // status file being moved aside, so an already-executed job can never rerun.
-    // Claim BEFORE any handler invocation or content download. A conflict —
+    // Claim only after authenticating the approved request, and before the
+    // handler or any attachment download. A conflict —
     // including a trashed receipt — means a previous worker owns the id forever.
     // An ambiguous error must never run: the job backs off and is rediscovered,
     // where a landed receipt surfaces as the conflict and a lost one can retry.
@@ -570,7 +639,7 @@ export async function runJobs(
             version: 1,
             job: id,
             state: 'running',
-            requestVersionId: versionId,
+            requestVersionId: approval.id,
             claimedAt,
           })}\n`,
         ),
@@ -612,6 +681,8 @@ export async function runJobs(
     const startedAt = new Date().toISOString();
     /** Every output version committed so far; the receipt records all of them. */
     const committed: { name: string; versionId: string }[] = [];
+    /** Uploaded outputs whose one same-intent commit replay stayed ambiguous. */
+    const unknownOutputs: { name: string; intentId: string }[] = [];
 
     /**
      * Guarded terminal updates: the authoritative receipt first, then the
@@ -626,10 +697,11 @@ export async function runJobs(
         job: id,
         state,
         ...(reason !== undefined ? { reason } : {}),
-        requestVersionId: versionId,
+        requestVersionId: approval.id,
         claimedAt,
         finishedAt,
         outputs: committed,
+        ...(unknownOutputs.length > 0 ? { unknownOutputs } : {}),
       };
       const statusBody = {
         version: 1,
@@ -676,15 +748,8 @@ export async function runJobs(
 
     let stage: Stage = 'request';
     try {
-      // The pinned request version is the metadata observed at pickup; the size
-      // bound is enforced from ciphertext metadata before any download.
-      let requestSize: number;
-      try {
-        requestSize = plaintextSize(requestMeta.ciphertextSize);
-      } catch {
-        throw new JobFailure('request_unavailable');
-      }
-      if (requestSize > JOB_LIMITS.requestBytes) throw new JobFailure('request_too_large');
+      if (preflightFailure) throw new JobFailure(preflightFailure);
+      if (!request) throw new JobFailure('request_unavailable');
 
       stage = 'inputs';
       const inputEntries: FileEntry[] = [];
@@ -729,14 +794,6 @@ export async function runJobs(
         if (inputBytes > JOB_LIMITS.totalInputBytes) throw new JobFailure('inputs_too_large');
       }
 
-      stage = 'request';
-      const request = (
-        await client.get(driveId, submittedPath, {
-          versionId,
-          maxPlaintextBytes: JOB_LIMITS.requestBytes,
-          ...(signal ? { signal } : {}),
-        })
-      ).bytes;
       stage = 'inputs';
       const inputs: JobFile[] = [];
       for (const entry of inputEntries) {
@@ -781,11 +838,37 @@ export async function runJobs(
           throw new JobFailure('invalid_output');
       }
       for (const output of produced) {
-        const wrote = await client.put(driveId, `${dir}/outputs/${output.name}`, output.bytes, {
-          mode: 'create',
-          ...(signal ? { signal } : {}),
-        });
-        committed.push({ name: output.name, versionId: wrote.id });
+        const path = `${dir}/outputs/${output.name}`;
+        let intentId: string | undefined;
+        let uploadComplete = false;
+        const source = async function* () {
+          if (output.bytes.byteLength > 0) yield output.bytes;
+        };
+        try {
+          const wrote = await client.putStream(driveId, path, source(), output.bytes.byteLength, {
+            mode: 'create',
+            ...(signal ? { signal } : {}),
+            onIntent: (id) => {
+              intentId = id;
+            },
+            onUploadComplete: (id) => {
+              if (id === intentId) uploadComplete = true;
+            },
+          });
+          committed.push({ name: output.name, versionId: wrote.id });
+        } catch (error) {
+          if (!intentId || !uploadComplete || isDefinitiveCommitError(error)) throw error;
+          try {
+            const wrote = await client.replayCommit(driveId, intentId, signal ? { signal } : {});
+            committed.push({ name: output.name, versionId: wrote.id });
+          } catch {
+            // The first commit response was ambiguous. A second error cannot
+            // prove that the original intent failed, even if it is an early
+            // authorization, rate-limit, or conflict response.
+            unknownOutputs.push({ name: output.name, intentId });
+            throw new JobFailure('output_commit_unknown');
+          }
+        }
       }
 
       stage = 'finalize';
@@ -796,6 +879,7 @@ export async function runJobs(
       // A dead executable is fatal for the worker, not a job failure.
       if (isWorkerUnavailable(error)) throw error;
       await persistTerminal('failed', reasonFor(stage, error));
+      if (unknownOutputs.length > 0) recordOperatorActionError(outputCommitUnknownError(id));
     }
   };
 
@@ -821,13 +905,14 @@ export async function runJobs(
         // bad job — buggy or not — never kills the worker or starves the next.
         if (
           isWorkerUnavailable(error) ||
+          isWorkerApiUnsupported(error) ||
           isPermanentAuthorizationFailure(error) ||
-          error === terminalPersistenceFailure
+          error === operatorActionFailure
         )
           throw error;
         recordError(error);
       }
-      if (!options.once && terminalPersistenceFailure) throw terminalPersistenceFailure;
+      if (!options.once && operatorActionFailure) throw operatorActionFailure;
     }
   };
 
@@ -907,8 +992,9 @@ export async function runJobs(
       if (signal?.aborted) return;
       if (
         isWorkerUnavailable(error) ||
+        isWorkerApiUnsupported(error) ||
         isPermanentAuthorizationFailure(error) ||
-        error === terminalPersistenceFailure
+        error === operatorActionFailure
       )
         throw error;
       // Timeout or transport outage: pace, then reconcile from a fresh head
@@ -921,8 +1007,9 @@ export async function runJobs(
         if (signal?.aborted) return;
         if (
           isWorkerUnavailable(error) ||
+          isWorkerApiUnsupported(error) ||
           isPermanentAuthorizationFailure(error) ||
-          error === terminalPersistenceFailure
+          error === operatorActionFailure
         )
           throw error;
         // Still down; the outer loop keeps the paced cadence.
