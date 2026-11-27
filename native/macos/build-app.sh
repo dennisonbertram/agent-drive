@@ -96,6 +96,12 @@ assert_app_bundle() {
   local extension_point
   extension_point="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$extension_path/Contents/Info.plist")"
   [[ "$extension_point" == 'com.apple.fileprovider-nonui' ]] || fail 'embedded extension has the wrong extension point'
+  local supports_enumeration
+  supports_enumeration="$(
+    /usr/bin/plutil -extract NSExtension.NSExtensionFileProviderSupportsEnumeration raw \
+      -expect bool "$extension_path/Contents/Info.plist" 2>/dev/null
+  )" || fail 'embedded extension must declare NSExtensionFileProviderSupportsEnumeration as a Boolean under NSExtension'
+  [[ "$supports_enumeration" == 'true' ]] || fail 'embedded extension must enable NSExtensionFileProviderSupportsEnumeration'
 }
 
 verify_signed_component() {
@@ -169,7 +175,7 @@ case "$mode" in
       CODE_SIGNING_REQUIRED=YES \
       archive
 
-    /usr/bin/plutil -create xml1 -o "$export_options"
+    /usr/bin/plutil -create xml1 "$export_options"
     /usr/bin/plutil -insert destination -string export "$export_options"
     /usr/bin/plutil -insert method -string developer-id "$export_options"
     /usr/bin/plutil -insert signingStyle -string manual "$export_options"

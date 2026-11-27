@@ -58,9 +58,8 @@ targets:
         NSExtension:
           NSExtensionPointIdentifier: com.apple.fileprovider-nonui
           NSExtensionPrincipalClass: '$(PRODUCT_MODULE_NAME).FileProviderExtension'
-          NSExtensionAttributes:
-            NSExtensionFileProviderSupportsEnumeration: true
-            NSExtensionFileProviderDownloadPipelineDepth: 1
+          NSExtensionFileProviderSupportsEnumeration: true
+          NSExtensionFileProviderDownloadPipelineDepth: 1
           NSExtensionFileProviderDocumentGroup: '$(AGENTDRIVE_APP_GROUP)'
         AgentDriveAppGroup: '$(AGENTDRIVE_APP_GROUP)'
     entitlements:
