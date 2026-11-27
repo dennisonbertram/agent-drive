@@ -1,7 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { ModuleKind, ScriptTarget, transpile } from 'typescript';
+import { reverificationErrorResponse } from '@clerk/nextjs/server';
 
 const EMPTY_DRIVE = /This drive has no files yet\. Load its recovery file or credentials bundle/;
 
@@ -249,6 +253,122 @@ test('traces: the dialog cannot be closed while a token is being created, and re
   } finally {
     await cleanupUser(userId);
   }
+});
+
+test('traces: a Clerk response suspends the native dialog without issuing a token', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(120_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    await page.addInitScript(() => {
+      const events: string[] = [];
+      const showModal = HTMLDialogElement.prototype.showModal;
+      const close = HTMLDialogElement.prototype.close;
+      HTMLDialogElement.prototype.showModal = function (...args) {
+        events.push('show');
+        return showModal.apply(this, args);
+      };
+      HTMLDialogElement.prototype.close = function (...args) {
+        events.push('close');
+        return close.apply(this, args);
+      };
+      (window as Window & { __nativeDialogEvents?: string[] }).__nativeDialogEvents = events;
+    });
+    await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    const created = await context.request.post('/api/console/drives', {
+      data: { name: 'Trace reverification drive' },
+      headers: { Origin: baseURL! },
+    });
+    const driveId = ((await created.json()) as { id: string }).id;
+    const driveKey = randomBytes(32).toString('base64url');
+    const bundle = `adcred1.${Buffer.from(JSON.stringify({ v: 1, driveKeys: { [driveId]: driveKey } })).toString('base64url')}`;
+    let challenged = false;
+    await page.route('**/trace-inbox/challenge', async (route) => {
+      if (route.request().method() === 'POST' && !challenged) {
+        challenged = true;
+        const body = await reverificationErrorResponse('strict').json();
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify(body),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(`/console?drive=${driveId}`);
+    await page.getByTestId('capture-link').click();
+    await addWebhook(page).click();
+    await page.getByText('Paste a key instead').click();
+    await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
+    await page.getByRole('button', { name: 'Load key', exact: true }).click();
+
+    await expect(dialog(page)).toBeVisible();
+    await expect(dialog(page).getByRole('alert')).toContainText('does not open this drive');
+    await expect(page.getByTestId('webhook-created')).toHaveCount(0);
+    const events = await page.evaluate(
+      () => (window as Window & { __nativeDialogEvents?: string[] }).__nativeDialogEvents ?? [],
+    );
+    expect(events.slice(-2)).toEqual(['close', 'show']);
+    expect(challenged).toBe(true);
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
+test('native dialog suspension exposes an external prompt and restores focus in a browser', async ({
+  page,
+}) => {
+  const helper = await readFile(
+    resolve(process.cwd(), 'apps/web/src/console/native-dialog-suspension.ts'),
+    'utf8',
+  );
+  const script = transpile(helper, {
+    module: ModuleKind.CommonJS,
+    target: ScriptTarget.ES2022,
+  });
+  await page.setContent(`
+    <dialog id="native" tabindex="-1">
+      <button id="continue">Continue</button>
+    </dialog>
+    <main id="prompt-host"></main>
+  `);
+  await page.addScriptTag({
+    content: `const module = { exports: {} }; const exports = module.exports; ${script}; window.suspendNativeDialog = module.exports.suspendNativeDialog;`,
+  });
+  await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLDialogElement>('#native')!;
+    const continueButton = document.querySelector<HTMLButtonElement>('#continue')!;
+    dialog.showModal();
+    continueButton.focus();
+    const resume = (
+      window as Window & {
+        suspendNativeDialog: (value: HTMLDialogElement) => () => void;
+      }
+    ).suspendNativeDialog(dialog);
+    const prompt = document.createElement('div');
+    prompt.setAttribute('role', 'alertdialog');
+    prompt.setAttribute('aria-label', 'Synthetic external prompt');
+    prompt.innerHTML = '<button type="button">Complete prompt</button>';
+    prompt.querySelector('button')!.addEventListener('click', () => {
+      prompt.remove();
+      resume();
+    });
+    document.querySelector('#prompt-host')!.append(prompt);
+  });
+  const prompt = page.getByRole('alertdialog', { name: 'Synthetic external prompt' });
+  await expect(prompt).toBeVisible();
+  await expect(page.locator('#native')).toHaveJSProperty('open', false);
+  await prompt.getByRole('button', { name: 'Complete prompt' }).click();
+  await expect(page.locator('#native')).toHaveJSProperty('open', true);
+  await expect(page.locator('#continue')).toBeFocused();
 });
 
 test('traces: on a phone the header buttons give way to the drive menu', async ({

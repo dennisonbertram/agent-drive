@@ -32,7 +32,7 @@ function fake(
   const calls: string[] = [];
   const posted: unknown[] = [];
   const challenges: unknown[] = [];
-  let proofResults = [...(opts.inboxProofs ?? [opts.inboxProof ?? true])];
+  const proofResults = [...(opts.inboxProofs ?? [opts.inboxProof ?? true])];
   let inbox = opts.inbox ?? false;
   let tokenConflict = opts.tokenConflictOnce ?? false;
   let inboxConflict = opts.inboxConflictOnce ?? false;
