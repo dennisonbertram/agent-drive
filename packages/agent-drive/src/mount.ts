@@ -140,8 +140,9 @@ type MountWriteback = {
     size: number,
   ): Promise<{ data: Uint8Array; eof: boolean }>;
   flush(handleId: string): Promise<{ id: string; path: string }>;
+  finalize?(handleId: string): Promise<{ id: string; path: string }>;
   release(handleId: string): Promise<{ recoveryPath?: string }>;
-  closeWithoutFlush(handleId: string): Promise<{ recoveryPath?: string }>;
+  closeWithoutFlush?(handleId: string): Promise<{ recoveryPath?: string }>;
   listStaged(prefix?: string): Promise<MountStagedEntry[]>;
   recover(): Promise<unknown[]>;
   close(): Promise<void>;
@@ -289,6 +290,7 @@ export async function createMountBridge(
   let closed = false;
   let requestTail = Promise.resolve();
   let readerTail = Promise.resolve();
+  const independentWriteCloses = new Set<Promise<void>>();
   // Flush stays on the mutation tail, while immutable remote reads can bypass its wait.
   let activeFlushes = 0;
   const capabilities =
@@ -873,6 +875,33 @@ export async function createMountBridge(
           bytes.fill(0);
           return { id: request.id, ok: true, data, eof: result.eof } as MountResponse;
         }
+        if (request.op === 'finalizeWrite') {
+          if (typeof request.handleId !== 'string' || !validUuid(request.operationId))
+            throw Object.assign(new Error('Invalid Finder finalization request.'), {
+              code: 'EINVAL',
+            });
+          const stage = requireStagedHandle(request.handleId);
+          const writer = requireWriteback();
+          if (!writer.finalize)
+            throw Object.assign(new Error('Finder finalization is unavailable.'), { code: 'EIO' });
+          let version: { id: string; path: string };
+          try {
+            version = await writer.finalize(request.handleId);
+          } finally {
+            activeWriteHandles.delete(request.handleId);
+            stagedHandles.delete(request.handleId);
+          }
+          if (!validUuid(version.id))
+            throw Object.assign(new Error('The committed file version is invalid.'), {
+              code: 'EIO',
+            });
+          stagedTokenVersions.set(request.handleId, {
+            path: stage.path,
+            versionId: version.id,
+            size: stage.size,
+          });
+          return { id: request.id, ok: true, version } as MountResponse;
+        }
         if (request.op === 'flush') {
           if (typeof request.handleId !== 'string')
             throw Object.assign(new Error('Invalid flush request.'), { code: 'EINVAL' });
@@ -929,9 +958,20 @@ export async function createMountBridge(
             activeWriteHandles.delete(request.handleId);
             return { id: request.id, ok: true } as MountResponse;
           }
+          const writer = requireWriteback();
+          if (!writer.closeWithoutFlush)
+            throw Object.assign(new Error('No-flush write-handle close is unavailable.'), {
+              code: 'EIO',
+            });
           let result: { recoveryPath?: string };
           try {
-            result = await requireWriteback().closeWithoutFlush(request.handleId);
+            try {
+              result = await writer.closeWithoutFlush(request.handleId);
+            } catch (error) {
+              if (mountErrno(error) !== 'EBADF') throw error;
+              stagedHandles.delete(request.handleId);
+              return { id: request.id, ok: true } as MountResponse;
+            }
           } finally {
             activeWriteHandles.delete(request.handleId);
           }
@@ -1087,7 +1127,9 @@ export async function createMountBridge(
       if (requestSignal?.aborted) return Promise.resolve(canceled());
       const op = input && typeof input === 'object' && 'op' in input ? String(input.op) : undefined;
       const independentRead = ['capabilities', 'stat', 'list', 'read'].includes(op ?? '');
+      const independentClose = op === 'closeWrite';
       const bypassFlushWait = independentRead && activeFlushes > 0;
+      const bypassGlobalQueue = bypassFlushWait || independentClose;
       const scheduleRead = () => {
         if (closed) return dispatchRequest(input, requestSignal, progress);
         const queued = readerTail.then(async () => {
@@ -1100,13 +1142,14 @@ export async function createMountBridge(
         );
         return queued;
       };
-      const pending = bypassFlushWait
+      const pending = bypassGlobalQueue
         ? op === 'read'
           ? scheduleRead()
           : dispatchRequest(input, requestSignal, progress)
         : requestTail.then(async () => {
             if (op === 'read') return await scheduleRead();
-            if (op !== 'flush') return await dispatchRequest(input, requestSignal, progress);
+            if (op !== 'flush' && op !== 'finalizeWrite')
+              return await dispatchRequest(input, requestSignal, progress);
             activeFlushes += 1;
             try {
               return await dispatchRequest(input, requestSignal, progress);
@@ -1114,11 +1157,19 @@ export async function createMountBridge(
               activeFlushes -= 1;
             }
           });
-      if (!bypassFlushWait) {
+      if (!bypassGlobalQueue) {
         requestTail = pending.then(
           () => undefined,
           () => undefined,
         );
+      }
+      if (independentClose) {
+        const tracked = pending.then(
+          () => undefined,
+          () => undefined,
+        );
+        independentWriteCloses.add(tracked);
+        void tracked.then(() => independentWriteCloses.delete(tracked));
       }
       if (!requestSignal) return pending;
       return new Promise<MountResponse>((resolveRequest, rejectRequest) => {
@@ -1143,6 +1194,7 @@ export async function createMountBridge(
       closePromise = (async () => {
         await requestTail;
         await readerTail;
+        await Promise.allSettled([...independentWriteCloses]);
         metadataCache.clear();
         const reader = activeReader;
         activeReader = undefined;

@@ -14,7 +14,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS = 8;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_PENDING_FLUSHES = 4;
+const MAX_PENDING_FINALIZATIONS = 4;
 const MAX_FLUSH_OPERATIONS = 64;
 const FLUSH_OPERATION_TTL_MS = 20 * 60_000;
 const HELPER_START_TIMEOUT_MS = 15_000;
@@ -124,7 +124,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'write',
       'truncate',
       'readStaged',
-      'flush',
+      'finalizeWrite',
       'flushStatus',
       'release',
       'closeWrite',
@@ -142,7 +142,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'write',
       'truncate',
       'readStaged',
-      'flush',
+      'finalizeWrite',
       'flushStatus',
       'release',
       'closeWrite',
@@ -162,7 +162,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
   )
     return false;
   if (
-    value.op === 'flush' &&
+    value.op === 'finalizeWrite' &&
     (typeof value.operationId !== 'string' || !UUID_PATTERN.test(value.operationId))
   )
     return false;
@@ -460,7 +460,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
       return { id, ok: true, pending: true, operationId: operation.operationId };
     return { ...(operation.result as Record<string, unknown>), id };
   };
-  const startFlushOperation = (rpc: Record<string, unknown>) => {
+  const startFinalizeWriteOperation = (rpc: Record<string, unknown>) => {
     const handleId = rpc.handleId as string;
     const requestedOperationId = rpc.operationId as string;
     pruneFlushOperations();
@@ -479,7 +479,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     if (current) latestFlushByHandle.delete(handleId);
     if (
       [...flushOperations.values()].filter((operation) => operation.result === undefined).length >=
-      MAX_PENDING_FLUSHES
+      MAX_PENDING_FINALIZATIONS
     )
       return { id: rpc.id, ok: false, errno: 'EBUSY', mutationOutcome: 'notSubmitted' };
     pruneFlushOperations();
@@ -496,7 +496,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     void Promise.resolve()
       .then(() => options.dispatch(rpc))
       .then(
-        async (result) => {
+        (result) => {
           const validResult =
             isRecord(result) && result.id === rpc.id && typeof result.ok === 'boolean';
           const encodedResult = validResult ? JSON.stringify(result) : '';
@@ -504,21 +504,10 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
             validResult && Buffer.byteLength(encodedResult) <= MAX_RESPONSE_BYTES
               ? result
               : { id: rpc.id, ok: false, errno: validResult ? 'EOVERFLOW' : 'EIO' };
-          try {
-            await closeWriteAfterFlush(operation);
-          } catch {
-            // Flush outcome remains authoritative. A future close or bridge shutdown can
-            // still release a handle if local journal cleanup itself failed.
-          }
           operation.result = settledResult;
           operation.completedAt = Date.now();
         },
-        async () => {
-          try {
-            await closeWriteAfterFlush(operation);
-          } catch {
-            // Keep the original operation failure for reconciliation.
-          }
+        () => {
           operation.result = { id: rpc.id, ok: false, errno: 'EIO' };
           operation.completedAt = Date.now();
         },
@@ -531,14 +520,6 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     if (!operation || operation.handleId !== handleId)
       return { id, ok: false, errno: 'ESTALE', mutationOutcome: 'unknown', operationId };
     return responseForFlushOperation(id, operation);
-  };
-  const closeWriteAfterFlush = async (operation: FlushOperation) => {
-    const closeId = `close-${operation.operationId}`;
-    return await options.dispatch({
-      id: closeId,
-      op: 'closeWrite',
-      handleId: operation.handleId,
-    });
   };
   const handleRequest = async (request: IncomingMessage, response: ServerResponse) => {
     const port = (server.address() as { port: number } | null)?.port;
@@ -583,7 +564,8 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
           flushStatus(rpc.id as string | number, rpc.handleId as string, rpc.operationId as string),
         );
       }
-      if (rpc.op === 'flush') return jsonResponse(response, 200, startFlushOperation(rpc));
+      if (rpc.op === 'finalizeWrite')
+        return jsonResponse(response, 200, startFinalizeWriteOperation(rpc));
       if (
         ['write', 'truncate', 'completeWrite', 'release', 'closeWrite'].includes(rpc.op as string)
       ) {

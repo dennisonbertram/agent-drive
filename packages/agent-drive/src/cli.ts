@@ -690,6 +690,7 @@ async function run(command: string, raw: string[]) {
               'truncate',
               'readStaged',
               'flush',
+              'finalizeWrite',
               'flushStatus',
               'release',
               'closeWrite',

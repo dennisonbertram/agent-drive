@@ -23,8 +23,9 @@ export type MountWritebackRpcRequest =
   | { id: string; op: 'write'; handleId: string; offset: number; data: string }
   | { id: string; op: 'truncate'; handleId: string; size: number }
   | { id: string; op: 'completeWrite'; handleId: string }
+  | { id: string; op: 'finalizeWrite'; handleId: string; operationId: string }
   | { id: string; op: 'readStaged'; handleId: string; offset: number; size: number }
-  | { id: string; op: 'flush' | 'release'; handleId: string };
+  | { id: string; op: 'flush' | 'release' | 'closeWrite'; handleId: string };
 
 export type MountNamespaceMutationRequest =
   | { id: string; op: 'mkdir' | 'rmdir'; path: string }
@@ -121,6 +122,7 @@ export type MountWriteback = {
   completeWrite(handleId: string): Promise<void>;
   readStaged(handleId: string, offset: number, size: number): Promise<MountWritebackRead>;
   flush(handleId: string): Promise<WritebackVersion>;
+  finalize(handleId: string): Promise<WritebackVersion>;
   release(handleId: string): Promise<{ recoveryPath?: string }>;
   closeWithoutFlush(handleId: string): Promise<{ recoveryPath?: string }>;
   listStaged(prefix?: string): Promise<MountWritebackStagedEntry[]>;
@@ -1113,6 +1115,39 @@ export async function createMountWriteback(
         }
         throw error;
       }
+    },
+    async finalize(handleId) {
+      const session = requireSession(handleId);
+      return await serialized(session, async () => {
+        let version: WritebackVersion | undefined;
+        let failure: unknown;
+        try {
+          if (session.record.producerComplete === false) {
+            session.record.producerComplete = true;
+            await persistRecord(scopePath, session.record);
+          }
+          version = await commitSession(session);
+        } catch (error) {
+          failure = error;
+          if (session.record.state !== 'uploaded' && session.record.state !== 'conflict') {
+            session.record.producerComplete = false;
+            session.record.errorCode = 'MANUAL_RECOVERY';
+            await persistRecord(scopePath, session.record).catch(() => undefined);
+          }
+        }
+        try {
+          await releaseSession(session, false);
+        } catch (error) {
+          await session.data.close().catch(() => undefined);
+          session.closed = true;
+          sessions.delete(session.record.id);
+          await releasePathLock(session.lock);
+          if (!failure && !version) failure = error;
+        }
+        if (failure) throw failure;
+        if (!version) throw new MountWritebackError('EIO', 'The Finder save did not complete.');
+        return version;
+      });
     },
     async release(handleId) {
       const session = requireSession(handleId);

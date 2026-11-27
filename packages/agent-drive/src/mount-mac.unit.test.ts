@@ -388,7 +388,7 @@ setTimeout(() => {
     await handle.close();
   }, 20_000);
 
-  it('returns the committed result from a bounded flush operation after a slow upload', async () => {
+  it('returns the committed result from one bounded finalizeWrite operation after a slow upload', async () => {
     const directory = await fixture();
     const actualPath = join(directory, 'finder-root');
     await mkdir(actualPath);
@@ -412,12 +412,12 @@ while (true) {
 const endpoint = 'http://127.0.0.1:' + startup.port + '/rpc';
 const headers = { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' };
 const post = async (body) => await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify(body) });
-const initial = await (await post({ id: 'flush-start', op: 'flush', handleId: 'slow-handle', operationId: '11111111-1111-4111-8111-111111111111' })).json();
+const initial = await (await post({ id: 'flush-start', op: 'finalizeWrite', handleId: 'slow-handle', operationId: '11111111-1111-4111-8111-111111111111' })).json();
 if (!initial.pending || typeof initial.operationId !== 'string') {
   await writeFile(${JSON.stringify(resultPath)}, JSON.stringify({ initial }));
   process.exit(41);
 }
-const repeated = await (await post({ id: 'flush-retry', op: 'flush', handleId: 'slow-handle', operationId: initial.operationId })).json();
+const repeated = await (await post({ id: 'flush-retry', op: 'finalizeWrite', handleId: 'slow-handle', operationId: initial.operationId })).json();
 if (!repeated.pending || repeated.operationId !== initial.operationId) process.exit(43);
 const unrelated = await (await post({ id: 'while-pending', op: 'stat', path: '/note.txt' })).json();
 if (!unrelated.ok) process.exit(44);
@@ -460,7 +460,7 @@ process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
           return { id: (request as Record<string, unknown>).id, ok: true, entry: {} };
         }
         dispatchCalls += 1;
-        expect(request).toMatchObject({ op: 'flush', handleId: 'slow-handle' });
+        expect(request).toMatchObject({ op: 'finalizeWrite', handleId: 'slow-handle' });
         startDispatch();
         return await dispatchResult;
       },
@@ -494,7 +494,7 @@ process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
       expect(startup.port).toBeGreaterThan(0);
       expect(startup.token).toBeTruthy();
       expect(dispatchCalls).toBe(1);
-      expect(closeWriteCalls).toBe(1);
+      expect(closeWriteCalls).toBe(0);
     } finally {
       vi.useRealTimers();
       await handle.close();

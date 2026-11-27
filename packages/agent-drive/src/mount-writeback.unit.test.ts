@@ -226,6 +226,28 @@ describe('mount writeback journal protocol', () => {
     expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('partial');
   });
 
+  it('finalizes an incomplete Finder stage and retires its lock in one writeback operation', async () => {
+    const root = await fixture();
+    const fake = fakeClient({ baseVersionId: null });
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    const handle = await journal.openWrite('/doc.txt', null, 0, true, true, true);
+    await journal.truncate(handle.handleId, 5);
+    await journal.write(handle.handleId, 0, new TextEncoder().encode('saved'));
+
+    await expect(journal.finalize(handle.handleId)).resolves.toMatchObject({
+      id: 'committed-intent-1',
+      path: '/doc.txt',
+    });
+    expect(fake.uploads).toHaveLength(1);
+    await expect(journal.listStaged('/')).resolves.toEqual([]);
+    await expect(journal.finalize(handle.handleId)).rejects.toMatchObject({ code: 'EBADF' });
+    await journal.close();
+  });
+
   it('keeps a never-submitted stage as manual recovery data across remount', async () => {
     const root = await fixture();
     const fake = fakeClient({ baseVersionId: null });
