@@ -96,6 +96,9 @@ assert_app_bundle() {
   local extension_point
   extension_point="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionPointIdentifier' "$extension_path/Contents/Info.plist")"
   [[ "$extension_point" == 'com.apple.fileprovider-nonui' ]] || fail 'embedded extension has the wrong extension point'
+  local supports_enumeration
+  supports_enumeration="$(/usr/libexec/PlistBuddy -c 'Print :NSExtension:NSExtensionFileProviderSupportsEnumeration' "$extension_path/Contents/Info.plist" 2>/dev/null || true)"
+  [[ "$supports_enumeration" == 'true' ]] || fail 'embedded extension must declare NSExtensionFileProviderSupportsEnumeration under NSExtension'
 }
 
 verify_signed_component() {
