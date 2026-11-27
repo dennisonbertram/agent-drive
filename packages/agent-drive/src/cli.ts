@@ -383,7 +383,7 @@ async function run(command: string, raw: string[]) {
         args.values.once
       )
         throw new Error('Usage: jobs submit ID [--drive ID]');
-      const { client } = await connect(args, { requireDriveKey: true });
+      const { client } = await connect(args);
       const driveId = requiredDrive(args);
       const { submitJob } = await import('./jobs.js');
       output(await submitJob(client, driveId, id));

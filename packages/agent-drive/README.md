@@ -51,14 +51,23 @@ path while mounted. An `EIO` unlink may have succeeded remotely; refresh before 
 ## Local jobs
 
 Use a dedicated drive as the trust boundary for submitted work; keys scoped to `/jobs` can edit and
-submit jobs throughout it. Limit submitter keys to their own job directories. `jobs init` creates the `/jobs`
-instructions once, `jobs submit ID` explicitly submits a draft, and `jobs work` runs one fixed local
-command for submitted jobs. Drafts stay inert until submitted. For a synthetic local example and
-the folder layout, see the [mounted jobs guide](https://agentdrive.xyz/docs/cli#mounted-jobs).
+submit jobs throughout it. Submitter keys need `read` and `write` scopes. Limit each submitter's
+`writePaths` to its own job directory, but note
+that write paths do not limit reads: any key with `read` access to the drive can read every job on
+it. Use separate drives when jobs must be private from other readers. `jobs init` creates the
+`/jobs` instructions once, `jobs submit ID` explicitly submits a draft, and `jobs work` runs one
+fixed local command for submitted jobs. Drafts stay inert until submitted. For a synthetic local
+example and the folder layout, see the
+[mounted jobs guide](https://agentdrive.xyz/docs/cli#mounted-jobs).
 
-The worker runs under the operating-system account that starts it, and its private working
-directory is not a sandbox. Use a dedicated system user or container when request authors are
-untrusted.
+The `jobs submit` CLI command uses metadata and a guarded rename. Its API key needs `read` and
+`write` scopes and write paths covering both rename paths, but no local drive decryption key. On Linux, plain
+POSIX `mv` can replace an existing `submitted.md` when the key also has `delete`; use `jobs submit`
+or the dashboard Submit action when the destination must be absent.
+
+The worker key needs `read` and `write` scopes, with `writePaths` covering `/jobs`. It runs under
+the operating-system account that starts it, and its private working directory is not a sandbox.
+Use a dedicated system user or container when request authors are untrusted.
 
 ```sh
 agent-drive jobs init --drive DRIVE_ID

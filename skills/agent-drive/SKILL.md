@@ -12,13 +12,19 @@ names, tags, descriptions, and attribution stay visible to the service.
 ## Local submitted jobs
 
 Use a dedicated drive for this workflow because keys scoped to `/jobs` can edit or submit jobs
-throughout that tree. Limit submitter keys to their own job directories; the worker needs write
-access under `/jobs` for its execution receipt, status, and results.
+throughout that tree. Submitter keys need `read` and `write` scopes. Limit each submitter's
+`writePaths` to its own job directory; the worker needs `read` and `write` scopes, with `writePaths`
+covering `/jobs` for its execution receipt, status, and results. Write paths do not limit
+reads: any key with `read` access to the drive can read every job on it. Use separate drives when
+jobs must be private from other readers.
 The agent may create a draft under `/jobs/<stable-id>/` with `request.md` and flat files under
 `inputs/`. Do not ask a worker to run while the request is still a draft. Leave it for the owner to
-review and submit with `agent-drive jobs submit <stable-id> --drive <drive-id>` or by renaming
-`request.md` to `submitted.md` in the mounted drive. The browser Submit action performs the same
-explicit rename.
+review and submit with `agent-drive jobs submit <stable-id> --drive <drive-id>` or the dashboard
+Submit action. The CLI submit command reads metadata and sends a source-version-guarded rename; its
+API key needs `read` and `write` scopes and write paths covering both rename paths, but no local
+drive decryption key. Both submission paths require `submitted.md` to be absent. On Linux, plain POSIX `mv` can
+replace an existing destination when the key also has `delete`, though the mount guards the versions
+it observed at the rename syscall. Use the CLI or dashboard when the destination must be absent.
 
 The owner runs a fixed, explicitly configured local worker with
 `agent-drive jobs work --drive <drive-id> --once -- COMMAND [ARGS...]`. The worker sends the request

@@ -194,14 +194,19 @@ the current file before making another change.
 Mounted jobs let an agent prepare encrypted work on one dedicated drive and let an explicitly
 configured local command process submitted requests. The drive is the trust boundary: a key scoped
 to `/jobs` can edit or submit jobs throughout that tree. Use a dedicated drive and give it only to
-the agents and local worker that need it. Limit submitter keys to their own job directories; the
-worker key needs write access under `/jobs` for its execution receipt, status, and results. The
+the agents and local worker that need it. Limit submitter keys to their own job directories; they
+need `read` and `write` scopes, with write paths covering that job. The worker key needs `read` and
+`write` scopes, with write paths under `/jobs` for its execution receipt, status, and results. The
 worker command runs as the operating-system user that
 started it; a private working directory is not a sandbox. If request authors are untrusted, run the
 worker as a dedicated system user or in a container with only the files and local services it needs.
 
+Write paths limit where a key can change files, not where it can read. Any key with `read` access to
+this drive can read other job folders even when its writes are limited to one job directory. Use
+separate drives when request authors must not read one another's jobs.
+
 Initialize the drive once. This creates `/jobs/README.md` only if it is absent. Then mount it with a
-key that can write under `/jobs`:
+key that has `read` and `write` scopes and can write under `/jobs`:
 
 ```sh
 agent-drive jobs init --drive DRIVE_ID
@@ -226,10 +231,15 @@ Drafts are not executed until explicitly submitted. Submit with the CLI:
 agent-drive jobs submit monthly-close --drive DRIVE_ID
 ```
 
-You can also use the mounted drive's native move operation to rename `request.md` to
-`submitted.md`; the dashboard's Submit action performs that same transition. The destination must
-not already exist. A submission is a version-guarded rename, so a concurrent edit cannot silently
-change the request being submitted.
+The CLI `jobs submit` command and the dashboard's Submit action always require `submitted.md` to be
+absent. The CLI reads file metadata and performs a source-version-guarded rename; its API key needs
+`read` and `write` scopes, with write paths covering both rename paths, but the CLI does not need a
+local drive decryption key.
+
+On Linux, a plain POSIX `mv` through the mounted drive uses the source and destination versions
+observed at the rename syscall, but can replace an existing destination when the key also has
+`delete`. Use `jobs submit` or the dashboard Submit action when the destination must be absent; both
+enforce that condition even if the key has `delete`.
 
 Run the explicitly configured local bookkeeper. This synthetic example compares the two invoice
 rows with the reported total and saves a CSV result; it makes no model or network calls:
@@ -294,9 +304,8 @@ local `ollama run` command.
 
 An existing agent can connect by mounting the same dedicated drive with write access to its job
 directory, writing `request.md` and flat files under `inputs/`, and then asking the owner to submit
-the stable job ID. The agent should leave
-the draft unsubmitted until the owner has reviewed it. The owner can submit with the CLI above or
-rename `request.md` to `submitted.md` in the mounted drive.
+the stable job ID. The agent should leave the draft unsubmitted until the owner has reviewed it.
+The owner can submit with the CLI above or the dashboard Submit action.
 
 Job IDs start with a letter or digit and contain at most 64 letters, digits, underscores, or
 hyphens. Inputs are limited to 16 flat files, 8 MiB per file and 32 MiB total; requests are limited

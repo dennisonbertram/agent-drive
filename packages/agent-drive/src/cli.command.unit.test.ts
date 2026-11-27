@@ -29,7 +29,7 @@ type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 async function cli(
   argv: string[],
   saved: Saved,
-  respond: (path: string, init?: RequestInit) => unknown = (path) =>
+  respond: (path: string, init?: RequestInit, search?: string) => unknown = (path) =>
     path === 'account-key' ? { accountKey: null } : {},
   env: Record<string, string> = {},
 ) {
@@ -83,7 +83,8 @@ async function cli(
         authorization: new Headers(init?.headers).get('authorization'),
         ...(typeof init?.body === 'string' ? { body: init.body } : {}),
       });
-      const response = respond(path, init);
+      const response = respond(path, init, parsed.search);
+      if (response instanceof Response) return response;
       const hasAccountKey =
         response !== null &&
         typeof response === 'object' &&
@@ -1404,5 +1405,61 @@ describe('jobs CLI', () => {
       vi.doUnmock('./job-command.js');
       vi.resetModules();
     }
+  });
+
+  it('submits with metadata and a guarded rename when the CLI has no local drive key', async () => {
+    const noDriveKey: Saved = { keys: {}, origins: {} };
+    const draftPath = '/jobs/monthly-close/request.md';
+    const submittedPath = '/jobs/monthly-close/submitted.md';
+    const metadata = {
+      id: 'draft-version-1',
+      path: draftPath,
+      ciphertextSize: 42,
+      wrappedKey: 'not-used-by-submit',
+      agentId: 'agent-1',
+      machineId: null,
+      userId: null,
+      tags: [],
+      description: null,
+      createdAt: '2026-11-26T00:00:00.000Z',
+    };
+    const r = await cli(
+      ['jobs', 'submit', 'monthly-close', '--drive', A],
+      noDriveKey,
+      (path, _init, search = '') => {
+        if (path === `drives/${A}/get`) {
+          const target = new URLSearchParams(search).get('path');
+          if (target === submittedPath)
+            return Response.json(
+              { error: { code: 'not_found', message: 'File not found.' } },
+              { status: 404 },
+            );
+          if (target === draftPath) return metadata;
+        }
+        if (path === `drives/${A}/rename`)
+          return { id: 'file-1', path: submittedPath, versionId: 'submitted-version-1' };
+        return path === 'account-key' ? { accountKey: null } : {};
+      },
+    );
+
+    expect(r.exitCode).toBeUndefined();
+    expect(r.err).toBe('');
+    const metadataQueries = r.queries.filter((query) => query.includes('metadataOnly=1'));
+    expect(metadataQueries.length).toBeGreaterThan(0);
+    expect(metadataQueries).toHaveLength(
+      r.paths.filter((path) => path === `drives/${A}/get`).length,
+    );
+    const rename = r.calls.find((call) => call.path === `drives/${A}/rename`);
+    expect(rename?.method).toBe('POST');
+    expect(rename?.authorization).toBe('Bearer tok');
+    expect(JSON.parse(rename?.body ?? '{}')).toMatchObject({
+      path: draftPath,
+      destinationPath: submittedPath,
+      ifSourceVersionId: 'draft-version-1',
+      ifDestinationVersionId: null,
+    });
+    expect(JSON.parse(rename?.body ?? '{}').operationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+    );
   });
 });
