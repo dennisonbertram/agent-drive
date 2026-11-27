@@ -1141,7 +1141,7 @@ describe('capture command', () => {
     expect(env.ANTHROPIC_BASE_URL).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/anthropic$/u,
     );
-    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/openai$/u);
+    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/openai\/v1$/u);
     expect(process.env.ANTHROPIC_BASE_URL).toBe('');
     expect(process.env.OPENAI_BASE_URL).toBe('');
     expect(disabled(r.err)).toEqual([]);
