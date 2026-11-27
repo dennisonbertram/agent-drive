@@ -496,6 +496,7 @@ export async function sealDrivesToAccount(opts: {
   // against the pin the first one committed rather than a stale read.
   let checked: Record<string, string> = {};
   let unverified = false;
+  let newlyVerified = false;
   await withSealState((state) => {
     checked = { ...state.checked };
     const statePin = state.pins[origin];
@@ -517,6 +518,7 @@ export async function sealDrivesToAccount(opts: {
     // one to a verified pin.
     const independentlyVerified = expected === fingerprint;
     const previouslyVerified = state.verifiedPins[origin] === fingerprint;
+    newlyVerified = independentlyVerified && !previouslyVerified;
     if (!independentlyVerified && !previouslyVerified) {
       // Pins written by earlier versions were TOFU pins from this API, not independent
       // verification. Preserve them but require one human-sourced fingerprint before sealing.
@@ -545,7 +547,8 @@ export async function sealDrivesToAccount(opts: {
   }
   const now = Date.now();
   for (const target of pending) {
-    if (!opts.force && recentlyChecked(checked, origin, target.driveId, now)) continue;
+    if (!opts.force && !newlyVerified && recentlyChecked(checked, origin, target.driveId, now))
+      continue;
     try {
       const sealed = await sealDriveKey(key.publicKey, target.driveId, target.driveKey, {
         salt: ACCOUNT_SEAL_SALT,
@@ -690,12 +693,23 @@ export async function autoSealHeldKeys(opts: {
     if (opts.selectedDriveId) early.add(opts.selectedDriveId);
     if (opts.keys) for (const id of Object.keys(opts.keys)) early.add(id);
     if (!early.size) return;
+    const rawFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
+    const expectedFingerprint = expectedAccountFingerprint(rawFingerprint);
+    if (rawFingerprint !== undefined && !expectedFingerprint)
+      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
+    let retryUnverified = false;
     if (!opts.force) {
       const read = await readSealStateFile();
       if (read.kind === 'unreadable') throw new AccountSealStateUnreadable();
+      retryUnverified = Boolean(
+        expectedFingerprint &&
+          read.kind === 'ok' &&
+          read.state.verifiedPins[origin] !== expectedFingerprint,
+      );
       const checked = read.kind === 'ok' ? read.state.checked : {};
       const now = Date.now();
-      if (![...early].some((id) => !recentlyChecked(checked, origin, id, now))) return;
+      if (!retryUnverified && ![...early].some((id) => !recentlyChecked(checked, origin, id, now)))
+        return;
     }
     // The full listing tells bulk sealing which held drives still exist and which are
     // agent-only; recorded --agent-only create intents join in by name. A key without `read`
@@ -748,15 +762,11 @@ export async function autoSealHeldKeys(opts: {
     const verified = new Set([...listed, ...(opts.driveIds ?? [])]);
     // A fingerprint the human preset in the environment counts as independently sourced;
     // the first seal verifies and pins it. Without one, first use fails closed.
-    const rawFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
-    const expectedFingerprint = expectedAccountFingerprint(rawFingerprint);
-    if (rawFingerprint !== undefined && !expectedFingerprint)
-      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
     const result = await sealDrivesToAccount({
       client: opts.client,
       config: opts.config,
       targets,
-      force: opts.force === true,
+      force: opts.force === true || retryUnverified,
       requireVerifiedType: true,
       verifiedDriveIds: verified,
       stateDeadlineAt: opts.deadlineAt,

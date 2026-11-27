@@ -207,7 +207,6 @@ describe('sealDrivesToAccount', () => {
       client,
       config: baseConfig,
       targets: [{ driveId: A, driveKey: KEY_A }],
-      force: true,
       expectedFingerprint: accountKeyFingerprint(account.publicKey),
     });
     expect(verified.get(A)).toBe('sealed');
@@ -1338,6 +1337,29 @@ describe('autoSealHeldKeys', () => {
     await autoSealHeldKeys({ client, config: config(), warn: (warning) => warnings.push(warning) });
     expect(posts).toHaveLength(0);
     expect(warnings.join('\n')).toContain('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT');
+  });
+
+  it('retries an unverified automatic seal when the fingerprint is set afterward', async () => {
+    await dir();
+    const account = await accountKeyPair();
+    const { client, posts } = mockClient({
+      publicKey: account.publicKey,
+      list: async () => ({
+        items: [{ id: A, name: 'a', agentOnly: false, created_at: 't', quota_bytes: 0 }],
+        nextCursor: null,
+      }),
+    });
+    const warnings: string[] = [];
+    await autoSealHeldKeys({ client, config: config(), warn: (warning) => warnings.push(warning) });
+    expect(posts).toHaveLength(0);
+    expect(warnings.join('\n')).toContain('account seal --fingerprint');
+
+    vi.stubEnv('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT', accountKeyFingerprint(account.publicKey));
+    await autoSealHeldKeys({ client, config: config(), warn: (warning) => warnings.push(warning) });
+    expect(posts).toHaveLength(1);
+    expect((await readSealState()).verifiedPins?.['https://x.test']).toBe(
+      accountKeyFingerprint(account.publicKey),
+    );
   });
 
   it('skips unmarked drives when a write-only key cannot list (unknown type)', async () => {

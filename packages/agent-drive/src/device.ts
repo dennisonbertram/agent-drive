@@ -52,6 +52,18 @@ function sameOrigin(a: string | undefined, b: string) {
   }
 }
 
+function safeTerminalText(value: unknown) {
+  return String(value).replace(
+    /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,
+    (char) => {
+      if (char === '\n') return '\\n';
+      if (char === '\r') return '\\r';
+      if (char === '\t') return '\\t';
+      return `\\u${char.codePointAt(0)!.toString(16).padStart(4, '0')}`;
+    },
+  );
+}
+
 function openUrl(url: string) {
   const [command, args] =
     process.platform === 'darwin'
@@ -122,7 +134,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   }
   if (!started.ok) {
     const description = started.data.error_description ?? started.data.error ?? started.status;
-    throw new Error(`Agent Drive refused the login request: ${String(description)}`);
+    throw new Error(`Agent Drive refused the login request: ${safeTerminalText(description)}`);
   }
   const grant = started.data as {
     device_code: string;
@@ -182,7 +194,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     else if (code === 'expired_token') throw expired();
     else
       throw new Error(
-        `Login failed: ${String(code ?? result.status)}. Run \`agent-drive login\` again.`,
+        `Login failed: ${safeTerminalText(code ?? result.status)}. Run \`agent-drive login\` again.`,
       );
   }
 
@@ -204,7 +216,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       driveKeys[driveId] = key;
       unsealed.push(driveId);
     } catch {
-      options.log(`Could not unseal the key for drive ${driveId}; it is not saved.`);
+      options.log(
+        `Could not unseal the key for drive ${safeTerminalText(driveId)}; it is not saved.`,
+      );
       noKey.push(driveId);
     }
   }
@@ -233,18 +247,21 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     throw new Error(
       `Login finished but this agent has no usable drive key. Run \`agent-drive login\` again; the owner's approval will create a drive for this agent. (The login was saved to ${configPath()}.)`,
     );
-  options.log(`Logged in as agent ${token.agent_name ?? options.name}.`);
-  options.log(`Usable drives: ${usable.join(', ')}`);
-  options.log(`Scopes: ${token.scope ?? ''}`);
-  if (token.write_paths?.length) options.log(`Writes limited to: ${token.write_paths.join(', ')}`);
+  options.log(`Logged in as agent ${safeTerminalText(token.agent_name ?? options.name)}.`);
+  options.log(`Usable drives: ${usable.map(safeTerminalText).join(', ')}`);
+  options.log(`Scopes: ${safeTerminalText(token.scope ?? '')}`);
+  if (token.write_paths?.length)
+    options.log(`Writes limited to: ${token.write_paths.map(safeTerminalText).join(', ')}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
-    options.log(`New drive ${token.new_drive_id} created; its key is saved in the config file.`);
+    options.log(
+      `New drive ${safeTerminalText(token.new_drive_id)} created; its key is saved in the config file.`,
+    );
     options.log(BACKUP_HINT);
   }
   if (noKey.length)
     options.log(
-      `No usable key for: ${noKey.join(', ')}. You can list names but not read contents.`,
+      `No usable key for: ${noKey.map(safeTerminalText).join(', ')}. You can list names but not read contents.`,
     );
   return { unsealed, noKey, usable, newDriveId: token.new_drive_id ?? null };
 }
@@ -304,7 +321,7 @@ export async function grantLogin(options: {
     );
   const request = await client.deviceRequest(code);
   options.log(
-    `Request from ${request.client_name}${request.machine ? ` on ${request.machine}` : ''}, made ${request.created_at}.`,
+    `Request from ${safeTerminalText(request.client_name)}${request.machine ? ` on ${safeTerminalText(request.machine)}` : ''}, made ${safeTerminalText(request.created_at)}.`,
   );
   if ((await verificationCode(request.public_key)) !== expected)
     throw new Error(
@@ -314,11 +331,11 @@ export async function grantLogin(options: {
   const sealedDriveKey = await sealDriveKey(request.public_key, drive, driveKey);
   await client.grantDevice(code, { driveId: drive, scopes, writePaths, sealedDriveKey });
   options.log(
-    `Offered drive ${drive} to ${request.client_name} (${scopes.join(' ')}; ${
+    `Offered drive ${safeTerminalText(drive)} to ${safeTerminalText(request.client_name)} (${scopes.map(safeTerminalText).join(' ')}; ${
       !scopes.includes('write')
         ? 'no writes'
         : writePaths.length
-          ? `writes under ${writePaths.join(', ')}`
+          ? `writes under ${writePaths.map(safeTerminalText).join(', ')}`
           : 'writes anywhere in the drive'
     }). The owner approves at ${client.apiOrigin}/connect?code=${code}.`,
   );

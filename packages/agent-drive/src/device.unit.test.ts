@@ -51,7 +51,10 @@ const start = {
 
 type Handler = (n: number, publicKey: string) => Response | Promise<Response>;
 
-function run(tokens: Handler, extra: { apiUrl?: string; started?: Record<string, unknown> } = {}) {
+function run(
+  tokens: Handler,
+  extra: { apiUrl?: string; started?: Record<string, unknown>; startedStatus?: number } = {},
+) {
   const calls: { url: string; body: Record<string, string> }[] = [];
   const out: string[] = [];
   const sleeps: number[] = [];
@@ -60,7 +63,7 @@ function run(tokens: Handler, extra: { apiUrl?: string; started?: Record<string,
     const body = JSON.parse(String(init?.body)) as Record<string, string>;
     calls.push({ url: String(url), body });
     if (String(url).endsWith('/oauth/device_authorization'))
-      return json(200, extra.started ?? start);
+      return json(extra.startedStatus ?? 200, extra.started ?? start);
     return tokens(polls++, calls[0]?.body.public_key ?? '');
   };
   const promise = deviceLogin({
@@ -205,6 +208,16 @@ describe('deviceLogin', () => {
     await setup();
     const r = run(() => json(400, { error: 'access_denied' }));
     await expect(r.promise).rejects.toThrow(/denied/iu);
+  });
+
+  it('escapes control characters in authorization error text', async () => {
+    await setup();
+    const r = run(() => json(400, {}), {
+      startedStatus: 400,
+      started: { error_description: 'Denied\nVerification code: forged\u001b[2J' },
+    });
+    await expect(r.promise).rejects.toThrow(/Denied\\nVerification code/u);
+    expect(r.out).toEqual([]);
   });
 
   it('reports an expired code from the server', async () => {
@@ -628,7 +641,7 @@ describe('grantLogin', () => {
   async function grant(
     options: Partial<Parameters<typeof grantLogin>[0]> = {},
     scopes = ['read', 'write', 'delegate'],
-    observed?: { posts: string[] },
+    observed?: { posts: string[]; client_name?: string; machine?: string; created_at?: string },
   ) {
     const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
       'deriveBits',
@@ -652,9 +665,9 @@ describe('grantLogin', () => {
       if (String(url).endsWith('/device/BCDF-GHJK'))
         return json(200, {
           user_code: 'BCDF-GHJK',
-          client_name: 'newbot',
-          machine: 'box',
-          created_at: '2026-01-01T00:00:00Z',
+          client_name: observed?.client_name ?? 'newbot',
+          machine: observed?.machine ?? 'box',
+          created_at: observed?.created_at ?? '2026-01-01T00:00:00Z',
           expires_at: 'x',
           public_key: publicKey,
         });
@@ -695,6 +708,17 @@ describe('grantLogin', () => {
     expect(everything).not.toContain(GRANTER_TOKEN);
     expect(r.out[0]).toBe('Request from newbot on box, made 2026-01-01T00:00:00Z.');
     expect(r.out[1]).toContain('https://x.test/connect?code=BCDF-GHJK');
+  });
+
+  it('escapes control characters in service-returned request details', async () => {
+    const r = await grant({}, ['read', 'write', 'delegate'], {
+      posts: [],
+      client_name: 'bot\nVerification code: forged',
+      machine: 'box\u001b[2J',
+      created_at: 'today\r\nforged',
+    });
+    expect(r.out[0]).toContain('\\nVerification code: forged');
+    expect(r.out.join('')).not.toMatch(/[\r\n\u001b]/u);
   });
 
   it('defaults to read only with --read-only and refuses defaults the key cannot grant', async () => {
