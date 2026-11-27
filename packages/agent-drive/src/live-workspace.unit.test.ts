@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   realpath,
+  rename,
   rm,
   stat,
   symlink,
@@ -339,6 +340,64 @@ describe('live workspace helper', () => {
         }),
       ).toMatchObject({ ok: true, version: flushed.version });
       expect(await readdir(root)).toEqual(['draft.env']);
+    } finally {
+      child.kill();
+      await once(child, 'exit').catch(() => undefined);
+    }
+  });
+
+  it('retires a committed handle when release cleanup loses its parent directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agent-drive-live-'));
+    roots.push(root);
+    const parent = join(root, 'removed');
+    await mkdir(parent);
+    const { child, send } = await startHelper(root);
+    try {
+      const opened = await send({
+        id: 1,
+        op: 'openWrite',
+        path: '/removed/draft.env',
+        baseVersionId: null,
+      });
+      expect(opened.ok).toBe(true);
+      const bytes = Buffer.from('VALUE=committed\n');
+      expect(
+        await send({
+          id: 2,
+          op: 'write',
+          handleId: opened.handleId,
+          offset: 0,
+          data: bytes.toString('base64'),
+        }),
+      ).toMatchObject({ ok: true, bytesWritten: bytes.length });
+      const flushed = await send({
+        id: 3,
+        op: 'flush',
+        handleId: opened.handleId,
+        operationId: 'release-cleanup-error',
+      });
+      expect(flushed.ok).toBe(true);
+      const moved = join(root, 'moved');
+      await rename(parent, moved);
+      const movedEntry = await send({ id: 4, op: 'stat', path: '/moved/draft.env' });
+      expect((movedEntry.entry as { versionId: string }).versionId).toBe(
+        (flushed.version as { id: string }).id,
+      );
+      expect(await readFile(join(moved, 'draft.env'))).toEqual(bytes);
+
+      expect(await send({ id: 5, op: 'release', handleId: opened.handleId })).toMatchObject({
+        ok: false,
+        errno: 'ENOENT',
+      });
+      expect(
+        await send({
+          id: 6,
+          op: 'readStaged',
+          handleId: opened.handleId,
+          offset: 0,
+          size: bytes.length,
+        }),
+      ).toMatchObject({ ok: false, errno: 'EBADF' });
     } finally {
       child.kill();
       await once(child, 'exit').catch(() => undefined);

@@ -219,27 +219,36 @@ def list_page(request):
     finally: os.close(fd)
 
 def cleanup_record(handle,record):
-    parent=dir_for(record['parentPath'] or '/')
+    parent=None; stagefd=None
     try:
+        parent=dir_for(record['parentPath'] or '/')
         stagefd=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
-        try:
-            try: os.unlink(record['stage'],dir_fd=stagefd)
-            except FileNotFoundError: pass
-            try: os.unlink('.gitignore',dir_fd=stagefd)
-            except FileNotFoundError: pass
-            try: os.fsync(stagefd)
-            except OSError: pass
-        finally: os.close(stagefd)
+        try: os.unlink(record['stage'],dir_fd=stagefd)
+        except FileNotFoundError: pass
+        try: os.unlink('.gitignore',dir_fd=stagefd)
+        except FileNotFoundError: pass
+        try: os.fsync(stagefd)
+        except OSError: pass
         try: os.rmdir(record['stageDir'],dir_fd=parent)
         except FileNotFoundError: pass
         try: os.fsync(parent)
         except OSError: pass
-    finally: os.close(parent)
-    fd=record.pop('fd',None)
-    if fd is not None:
-        try: os.close(fd)
-        except OSError: pass
-    HANDLES.pop(handle,None)
+    except Exception as error:
+        try: error.recoveryPath=recovery(record)
+        except Exception: pass
+        raise
+    finally:
+        if stagefd is not None:
+            try: os.close(stagefd)
+            except OSError: pass
+        if parent is not None:
+            try: os.close(parent)
+            except OSError: pass
+        fd=record.pop('fd',None)
+        if fd is not None:
+            try: os.close(fd)
+            except OSError: pass
+        HANDLES.pop(handle,None)
 
 def respond(request):
     global ROOT, ROOT_PATH, ROOT_IDENTITY
@@ -418,9 +427,15 @@ for raw in sys.stdin.buffer:
         code=errno.errorcode.get(e.errno,'EIO')
         response={'id':request.get('id') if isinstance(request,dict) else '', 'ok':False,'errno':code}
         record=HANDLES.get(request.get('handleId')) if isinstance(request,dict) else None
-        if record is not None: response['recoveryPath']=recovery(record)
-    except Exception:
+        recovery_path=getattr(e,'recoveryPath',None)
+        if recovery_path is None and record is not None: recovery_path=recovery(record)
+        if recovery_path is not None: response['recoveryPath']=recovery_path
+    except Exception as error:
         response={'id':request.get('id') if isinstance(request,dict) else '', 'ok':False,'errno':'EIO'}
+        record=HANDLES.get(request.get('handleId')) if isinstance(request,dict) else None
+        recovery_path=getattr(error,'recoveryPath',None)
+        if recovery_path is None and record is not None: recovery_path=recovery(record)
+        if recovery_path is not None: response['recoveryPath']=recovery_path
     try: sys.stdout.write(json.dumps(response,separators=(',',':'))+'\n'); sys.stdout.flush()
     except Exception: break
 for handle,record in list(HANDLES.items()):
