@@ -4,7 +4,19 @@ The CLI registers a drive in Finder through Apple's File Provider framework. Fin
 
 The CLI holds the drive key. The extension connects to it over an authenticated loopback connection and discovers which operations the configured key permits.
 
-Agent Drive does not yet publish a signed macOS companion app. The npm release includes native Linux mount helpers for x64 and arm64. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it. Until a notarized zip is available from GitHub Releases, use the build and signing instructions below to prepare the companion app from source.
+## Install the released app
+
+Requires macOS 13 or later; tested on macOS 15.7.7. Download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip). Open the ZIP to extract `Agent Drive.app` and drag it to `/Applications`. Opening the app from Finder does not open a window; Finder adds the provider location when the CLI starts a mount.
+
+Install the CLI and complete [login and drive-key setup](../../docs/connect-an-agent.md) first. Mounting requires API credentials and a drive key for the selected drive in the CLI config. The standard login approval can provision a drive key for the new agent. With one configured drive, run this command from Terminal:
+
+```sh
+agent-drive mount "$HOME/AgentDrive"
+```
+
+If multiple drive keys are configured, add `--drive ID`. Finder may list the provider as `Agent Drive` or include the first 8 characters of the drive ID when multiple drives are registered; use the mountpoint you passed to the command to identify the requested drive.
+
+For development or building a new version from source, use the instructions below. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it.
 
 ## Supported operations
 
