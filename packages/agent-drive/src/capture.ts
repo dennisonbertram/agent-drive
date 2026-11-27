@@ -344,8 +344,7 @@ export async function startProxy(options: ProxyOptions) {
     const gate = /^\/([0-9A-Za-z_-]+)(\/.*|\?.*)?$/u.exec(req.url ?? '');
     const pathAuthenticated = gate !== null && authorized(gate[1] ?? '');
     const headerToken = req.headers[CODEX_CAPTURE_TOKEN_HEADER];
-    const headerAuthenticated =
-      typeof headerToken === 'string' && authorized(headerToken);
+    const headerAuthenticated = typeof headerToken === 'string' && authorized(headerToken);
     if (!pathAuthenticated && !headerAuthenticated) {
       drop('unauthorized');
       res.writeHead(401, { 'content-type': 'application/json' });
@@ -390,11 +389,7 @@ export async function startProxy(options: ProxyOptions) {
     const headers: IncomingHttpHeaders = {};
     const requestHop = hopHeaders(req.headers);
     for (const [name, value] of Object.entries(req.headers))
-      if (
-        !requestHop.has(name) &&
-        name !== 'host' &&
-        name !== CODEX_CAPTURE_TOKEN_HEADER
-      )
+      if (!requestHop.has(name) && name !== 'host' && name !== CODEX_CAPTURE_TOKEN_HEADER)
         headers[name] = value;
     const defaultPort = upstream.protocol === 'https' ? 443 : 80;
     headers.host =
@@ -627,17 +622,14 @@ export async function runCapture(input: {
   const origin = `http://127.0.0.1:${proxy.port}`;
   const env = {
     ...process.env,
-    ANTHROPIC_BASE_URL:
-      base === 'codex' ? `${origin}/anthropic` : `${origin}/${proxy.secret}/anthropic`,
-    // Codex itself uses its per-provider base URL and custom header below. Its
-    // descendants inherit OPENAI_BASE_URL, so keep that route path-authenticated.
+    ANTHROPIC_BASE_URL: `${origin}/${proxy.secret}/anthropic`,
+    // Codex itself uses its per-provider OpenAI URL and custom header below.
+    // Descendant SDK clients inherit these path-authenticated base URLs.
     OPENAI_BASE_URL: `${origin}/${proxy.secret}/openai`,
     ...(base === 'codex' ? { [CODEX_CAPTURE_TOKEN_ENV]: proxy.secret } : {}),
   };
   const args =
-    base === 'codex'
-      ? [...codexProviderFlags(proxy.port), ...command.slice(1)]
-      : command.slice(1);
+    base === 'codex' ? [...codexProviderFlags(proxy.port), ...command.slice(1)] : command.slice(1);
   const code = await spawnChild(command, env, args);
   await proxy.close();
   log(await proxy.summary());
