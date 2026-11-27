@@ -5,7 +5,7 @@
 // key itself is never sent anywhere.
 import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
 import {
-  unwrapInboxPrivateKey,
+  verifyInboxKeypair,
   type TraceInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
@@ -94,7 +94,7 @@ export async function verifyDriveKey(
   if (record) {
     hadEvidence = true;
     try {
-      await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
+      await verifyInboxKeypair(inboxFor(driveId, record), key);
       return 'inbox';
     } catch {
       // A corrupt inbox is still evidence, but cannot establish this key as correct.

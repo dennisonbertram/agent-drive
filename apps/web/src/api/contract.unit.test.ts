@@ -39,6 +39,7 @@ describe('core API contract', () => {
         "POST /api/console/billing/portal",
         "GET /api/console/billing/statements",
         "GET|POST /api/console/drives/:id/trace-inbox",
+        "POST /api/console/drives/:id/trace-inbox/challenge",
         "GET|POST|DELETE /api/console/drives/:id/webhook-token",
         "POST /api/stripe/webhook",
         "POST /api/webhooks/openrouter/:driveId",

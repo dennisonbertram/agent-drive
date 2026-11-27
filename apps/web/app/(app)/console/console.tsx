@@ -14,6 +14,7 @@ import {
   type FocusEvent,
   type FormEvent,
   type MouseEvent,
+  type RefObject,
   type ReactNode,
 } from 'react';
 import {
@@ -52,6 +53,7 @@ import { MenuButton } from './menu-button';
 import { Toast, type Announcement, type ToastItem } from './toast';
 import { ConfirmBody } from './confirm-dialog';
 import { RevokeControl, STATUS_LABEL, ShareDialog, type SharesState } from './share-dialog';
+import { suspendNativeDialog } from '@/src/console/native-dialog-suspension';
 import { addShareRow, type ShareRow } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import { formatBytes, formatMetered } from '@/src/format/bytes';
@@ -412,16 +414,17 @@ function Dialog({
   onClose,
   closable = true,
   className,
+  dialogRef,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   closable?: boolean;
   className?: string | undefined;
+  dialogRef: RefObject<HTMLDialogElement | null>;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    const dialog = ref.current;
+    const dialog = dialogRef.current;
     const opener = document.activeElement as HTMLElement | null;
     dialog?.showModal();
     // Land on the first field, or the Copy button of a secret receipt, not on Close.
@@ -436,10 +439,11 @@ function Dialog({
       // Give focus back to whatever opened the dialog, unless it has left the page.
       if (opener?.isConnected) opener.focus();
     };
-  }, []);
+  }, [dialogRef]);
   return (
     <dialog
-      ref={ref}
+      ref={dialogRef}
+      tabIndex={-1}
       className={className}
       onCancel={(event) => {
         event.preventDefault();
@@ -493,6 +497,9 @@ const NOT_IN_ACCOUNT =
 const MISMATCH = 'This drive’s account copy is invalid — load its recovery file to repair it.';
 const AGENT_ONLY = 'Agent-only: open with a recovery file.';
 const passThrough = <A extends unknown[], R>(fn: (...args: A) => Promise<R>) => fn;
+function isClerkReverificationResult(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && 'clerk_error' in value;
+}
 function useClerkIdentity() {
   const { isLoaded, user } = useUser();
   return {
@@ -537,10 +544,35 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The vault reads the current user id through this ref, so a mid-load identity change is seen.
   const identityRef = useRef(identity);
   identityRef.current = identity;
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const resumeDialogRef = useRef<(() => void) | null>(null);
+  const strictFetcher = useCallback(async (path: string, method?: string, body?: unknown) => {
+    const result = await vaultRequest(path, method, body);
+    if (isClerkReverificationResult(result) && !resumeDialogRef.current)
+      resumeDialogRef.current = suspendNativeDialog(dialogRef.current);
+    return result;
+  }, []);
   const useWrap = (clerkEnabled ? useReverification : passThrough) as typeof passThrough;
-  const strictRequest = useWrap(vaultRequest);
-  const strictRef = useRef(strictRequest);
-  strictRef.current = strictRequest;
+  const strictRequest = useWrap(strictFetcher);
+  const strictRequestRef = useRef(strictRequest);
+  strictRequestRef.current = strictRequest;
+  const resumeStrictDialog = useCallback(() => {
+    const resume = resumeDialogRef.current;
+    resumeDialogRef.current = null;
+    resume?.();
+  }, []);
+  // `Request` is generic; vaultRequest is not. Keep the call pointed at the current
+  // reverification wrapper and return from Clerk's external prompt before restoring the dialog.
+  const strictApi = useCallback(
+    async <T,>(path: string, method?: string, body?: unknown) => {
+      try {
+        return (await strictRequestRef.current(path, method, body)) as T;
+      } finally {
+        resumeStrictDialog();
+      }
+    },
+    [resumeStrictDialog],
+  );
   const lockedRef = useRef<(reason: LockReason) => void>(() => {});
   const [, bumpVault] = useReducer((count: number) => count + 1, 0);
   const inboxCache = useRef<InboxCache>(new Map());
@@ -549,7 +581,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     () =>
       new Vault({
         request: (path, method, body) => api(path, method, body),
-        strict: (path, method, body) => strictRef.current(path, method, body),
+        strict: (path, method, body) => strictApi(path, method, body),
         envelope: async (driveId, path) => {
           const result = await api<{ items: { wrappedKey?: string }[] }>(
             `drives/${driveId}/versions?path=${encodeURIComponent(path)}&limit=1`,
@@ -4125,6 +4157,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       {modal && (
         <Dialog
           key={modal}
+          dialogRef={dialogRef}
           title={
             {
               drive: 'Create a drive',
@@ -4354,6 +4387,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveId={selected}
               origin={origin}
               request={api}
+              strictRequest={strictApi}
               verify={(id, key) => vault.verifyKey(id, key)}
               getKey={webhookKey}
               onBusy={setTracesBusy}

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { generateDriveKey } from './crypto.js';
+import { decodeDriveKey, encodeBase64Url, generateDriveKey } from './crypto.js';
 import {
+  answerTraceInboxChallenge,
   createTraceInbox,
   sealFileKeyToInbox,
+  sealTraceInboxChallenge,
   unsealFileKeyFromInbox,
   unwrapInboxPrivateKey,
+  verifyInboxKeypair,
 } from './trace-inbox.js';
 import { vector as v } from './trace-inbox.vectors.js';
 
@@ -66,6 +69,54 @@ describe('trace inbox round trip and failures', () => {
     );
   });
 
+  it('opens a challenge only with the exact record private key and drive key', async () => {
+    const driveKey = generateDriveKey();
+    const rec = await createTraceInbox(v.driveId, driveKey);
+    const recipient = { driveId: v.driveId, ...rec };
+    const proof = generateDriveKey(); // 32 random bytes encoded as the existing key primitive expects.
+    const envelope = await sealTraceInboxChallenge(proof, recipient);
+    await expect(
+      answerTraceInboxChallenge({ driveId: v.driveId, driveKey, record: rec, envelope }),
+    ).resolves.toBe(proof);
+    const privateKey = await unwrapInboxPrivateKey(recipient, driveKey);
+    await expect(
+      unsealFileKeyFromInbox(envelope, privateKey, rec.keyId, v.driveId, rec.publicKey),
+    ).rejects.toThrow('Invalid wrapped key.');
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey: generateDriveKey(),
+        record: rec,
+        envelope,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey,
+        record: { ...rec, publicKey: v.publicKey },
+        envelope,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects a stored file-key envelope as challenge proof before returning any plaintext', async () => {
+    const driveKey = generateDriveKey();
+    const rec = await createTraceInbox(v.driveId, driveKey);
+    const fileKeyEnvelope = await sealFileKeyToInbox(v.fileKey, {
+      driveId: v.driveId,
+      ...rec,
+    });
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey,
+        record: rec,
+        envelope: fileKeyEnvelope,
+      }),
+    ).rejects.toThrow('Invalid inbox challenge.');
+  });
+
   it('rejects tampering with epk, iv and ct, and a wrong driveId or keyId', async () => {
     const key = await unwrapInboxPrivateKey(inbox, v.driveKey);
     const open = (env: string, keyId = v.keyId, driveId = v.driveId) =>
@@ -103,5 +154,66 @@ describe('trace inbox round trip and failures', () => {
     await expect(
       sealFileKeyToInbox(v.fileKey, { ...inbox, publicKey: 'A'.repeat(87) }),
     ).rejects.toThrow();
+  });
+});
+
+describe('verifyInboxKeypair', () => {
+  // A record that unwraps cleanly but holds a different private key than publicKey: only the
+  // ECDH pair check, not the wrap, can catch it.
+  const wrapOtherPrivateKey = async (i: typeof inbox, driveKey: string) => {
+    const other = await crypto.subtle.generateKey(EC, true, ['deriveBits']);
+    const aes = await crypto.subtle.importKey(
+      'raw',
+      decodeDriveKey(driveKey) as Uint8Array<ArrayBuffer>,
+      'AES-GCM',
+      false,
+      ['wrapKey'],
+    );
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const wrapped = new Uint8Array(
+      await crypto.subtle.wrapKey('pkcs8', other.privateKey, aes, {
+        name: 'AES-GCM',
+        iv,
+        additionalData: new TextEncoder().encode(
+          `agent-drive:trace-inbox:v1:${i.driveId}:${i.keyId}:${i.publicKey}`,
+        ),
+      }),
+    );
+    const out = new Uint8Array(1 + 12 + wrapped.length);
+    out[0] = 1;
+    out.set(iv, 1);
+    out.set(wrapped, 13);
+    return encodeBase64Url(out);
+  };
+
+  it('returns the private key for a consistent record', async () => {
+    const driveKey = generateDriveKey();
+    const rec = await createTraceInbox(v.driveId, driveKey);
+    const i = { driveId: v.driveId, ...rec };
+    const key = await verifyInboxKeypair(i, driveKey);
+    const env = await sealFileKeyToInbox(v.fileKey, i);
+    expect(await unsealFileKeyFromInbox(env, key, rec.keyId, v.driveId, rec.publicKey)).toBe(
+      v.fileKey,
+    );
+  });
+
+  it('also accepts the frozen vector record', async () => {
+    await expect(verifyInboxKeypair(inbox, v.driveKey)).resolves.toBeDefined();
+  });
+
+  it('rejects a wrapped private key that does not match the public key', async () => {
+    const tampered = {
+      ...inbox,
+      wrappedPrivateKey: await wrapOtherPrivateKey(inbox, v.driveKey),
+    };
+    // The wrap itself still opens: the pair check is the only guard.
+    await expect(unwrapInboxPrivateKey(tampered, v.driveKey)).resolves.toBeDefined();
+    await expect(verifyInboxKeypair(tampered, v.driveKey)).rejects.toThrow(
+      'key pair does not match',
+    );
+  });
+
+  it('rejects a wrong drive key before reaching the pair check', async () => {
+    await expect(verifyInboxKeypair(inbox, generateDriveKey())).rejects.toThrow();
   });
 });

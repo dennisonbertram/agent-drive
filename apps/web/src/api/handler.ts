@@ -58,6 +58,8 @@ import {
 } from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { renameFile } from './mount-rename';
+import { inboxRecordDigest } from './trace-webhook';
+import { sealTraceInboxChallenge } from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -496,6 +498,14 @@ export function actionFor(method: string, parts: string[], bearer = false) {
     if (method === 'GET') return 'drive.trace_inbox.read';
     if (method === 'POST') return 'console.drive.trace_inbox.create';
   }
+  if (
+    parts.length === 4 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'trace-inbox' &&
+    parts[3] === 'challenge' &&
+    method === 'POST'
+  )
+    return 'console.drive.trace_inbox.challenge';
   if (parts.length === 3 && parts[0] === 'drives' && parts[2] === 'webhook-token') {
     const action = { GET: 'read', POST: 'create', DELETE: 'revoke' }[method];
     if (action) return `console.drive.webhook_token.${action}`;
@@ -1226,6 +1236,131 @@ async function lockVaultDrive(client: PoolClient, accountId: string, driveId: st
   );
   if (!drive.rows[0]) throw new ApiError('not_found', 'Drive not found.');
   return drive.rows[0] as Row;
+}
+
+const TRACE_INBOX_CHALLENGE_TTL_SECONDS = 5 * 60;
+
+function parseTraceInboxRecord(body: Record<string, unknown>) {
+  return {
+    keyId: uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId'),
+    publicKey: ecPointField(body.publicKey, 'publicKey'),
+    wrappedPrivateKey: wrappedPrivateKeyField(body.wrappedPrivateKey),
+  };
+}
+
+function parseTraceInboxProof(body: Record<string, unknown>) {
+  const challengeId = uuid(
+    typeof body.challengeId === 'string' ? body.challengeId : undefined,
+    'challengeId',
+  );
+  const proof = body.proof;
+  if (typeof proof !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(proof))
+    throw new ApiError('validation_error', 'A valid inbox possession proof is required.');
+  const bytes = Buffer.from(proof, 'base64url');
+  if (bytes.length !== 32 || bytes.toString('base64url') !== proof)
+    throw new ApiError('validation_error', 'A valid inbox possession proof is required.');
+  return { challengeId, proofHash: createHash('sha256').update(proof).digest('hex') };
+}
+
+async function traceInboxChallengeEndpoint(
+  request: Request,
+  auth: Auth,
+  driveId: string,
+  reverified: boolean,
+) {
+  if (request.method !== 'POST') throw new ApiError('not_found', 'Endpoint not found.');
+  if (!reverified) return reverificationErrorResponse('strict');
+  await ensureDrive(auth, driveId);
+  if (!auth.userId) throw new ApiError('unauthorized', 'The console user is unavailable.');
+  const actorUserId = auth.userId;
+  const body = await jsonBody(request);
+  onlyFields(body, ['action', 'inbox']);
+  const action = body.action;
+  if (action !== 'enroll' && action !== 'issue-token')
+    throw new ApiError('validation_error', 'The inbox proof action is invalid.');
+  if (!body.inbox || typeof body.inbox !== 'object' || Array.isArray(body.inbox))
+    throw new ApiError('validation_error', 'A complete trace inbox record is required.');
+  const recordBody = body.inbox as Record<string, unknown>;
+  onlyFields(recordBody, ['keyId', 'publicKey', 'wrappedPrivateKey']);
+  const record = parseTraceInboxRecord(recordBody);
+  const recordHash = inboxRecordDigest(record.keyId, record.publicKey, record.wrappedPrivateKey);
+  const challenge = randomBytes(32).toString('base64url');
+  const envelope = await sealTraceInboxChallenge(challenge, { driveId, ...record });
+  const challengeId = randomUUID();
+  await withTransaction(async (client) => {
+    await lockVaultDrive(client, auth.accountId, driveId);
+    const current = await client.query(
+      'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1 FOR UPDATE',
+      [driveId],
+    );
+    const row = current.rows[0] as Row | undefined;
+    if (action === 'enroll' && row)
+      throw new ApiError('conflict', 'A trace inbox already exists for this drive.');
+    if (action === 'issue-token') {
+      if (!row) throw new ApiError('conflict', 'Create the trace inbox first.');
+      if (
+        record.keyId !== row.key_id ||
+        record.publicKey !== row.public_key ||
+        record.wrappedPrivateKey !== row.wrapped_private_key
+      )
+        throw new ApiError(
+          'conflict',
+          'The trace inbox changed. Reload the page and verify it again before creating a token.',
+        );
+    }
+    // At most one unconsumed challenge per actor, drive and action. Expired rows are ephemeral and
+    // safe to discard here; no legacy or persistent account data is touched.
+    await client.query('DELETE FROM drive_trace_inbox_challenges WHERE expires_at <= now()');
+    await client.query(
+      `DELETE FROM drive_trace_inbox_challenges
+        WHERE drive_id = $1 AND actor_user_id = $2 AND action = $3`,
+      [driveId, actorUserId, action],
+    );
+    await client.query(
+      `INSERT INTO drive_trace_inbox_challenges
+         (id, drive_id, actor_user_id, action, inbox_record_hash, challenge_hash, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now() + ($7 * interval '1 second'))`,
+      [
+        challengeId,
+        driveId,
+        actorUserId,
+        action,
+        recordHash,
+        createHash('sha256').update(challenge).digest('hex'),
+        TRACE_INBOX_CHALLENGE_TTL_SECONDS,
+      ],
+    );
+  });
+  return response({ challengeId, envelope }, 201);
+}
+
+async function consumeTraceInboxChallenge(
+  client: PoolClient,
+  input: {
+    challengeId: string;
+    proofHash: string;
+    userId: string;
+    driveId: string;
+    action: 'enroll' | 'issue-token';
+    recordHash: string;
+  },
+) {
+  const consumed = await client.query(
+    `DELETE FROM drive_trace_inbox_challenges
+      WHERE id = $1 AND actor_user_id = $2 AND drive_id = $3 AND action = $4
+        AND inbox_record_hash = $5 AND challenge_hash = $6 AND expires_at > clock_timestamp()
+      RETURNING id`,
+    [
+      input.challengeId,
+      input.userId,
+      input.driveId,
+      input.action,
+      input.recordHash,
+      input.proofHash,
+    ],
+  );
+  if (!consumed.rowCount)
+    throw new ApiError('conflict', 'The inbox proof expired or no longer matches. Verify again.');
 }
 
 const staleKeyMessage = 'Your passphrase was changed elsewhere. Reload the page.';
@@ -2505,6 +2640,7 @@ async function traceEndpoint(
   operation: 'trace-inbox' | 'webhook-token',
   url: URL,
   console: boolean,
+  reverified: boolean,
 ) {
   const method = request.method;
   if (operation === 'trace-inbox' && method === 'GET') {
@@ -2516,21 +2652,37 @@ async function traceEndpoint(
     return response(traceInboxOutput(result.rows[0]));
   }
   if (!console) throw new ApiError('not_found', 'Endpoint not found.');
+  // Enrolling the inbox and issuing a token are strict routes: only a session that recently
+  // passed Clerk strict reverification may change what future traces are sealed to or hand out
+  // a new bearer. The GETs and the token DELETE keep ordinary session auth.
+  if (method === 'POST' && !reverified) return reverificationErrorResponse('strict');
   await ensureDrive(auth, driveId);
   if (operation === 'trace-inbox') {
     const body = await jsonBody(request);
-    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey']);
-    const keyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
-    const publicKey = ecPointField(body.publicKey, 'publicKey');
-    const wrappedPrivateKey = wrappedPrivateKeyField(body.wrappedPrivateKey);
+    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey', 'challengeId', 'proof']);
+    const record = parseTraceInboxRecord(body);
+    const proof = parseTraceInboxProof(body);
+    if (!auth.userId) throw new ApiError('unauthorized', 'The console user is unavailable.');
     const created = await withTransaction(async (client) => {
       await lockVaultDrive(client, auth.accountId, driveId);
+      const recordHash = inboxRecordDigest(
+        record.keyId,
+        record.publicKey,
+        record.wrappedPrivateKey,
+      );
+      await consumeTraceInboxChallenge(client, {
+        ...proof,
+        userId: auth.userId!,
+        driveId,
+        action: 'enroll',
+        recordHash,
+      });
       const inserted = await client.query(
         `INSERT INTO drive_trace_inboxes (drive_id, account_id, key_id, public_key, wrapped_private_key)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT DO NOTHING
          RETURNING *`,
-        [driveId, auth.accountId, keyId, publicKey, wrappedPrivateKey],
+        [driveId, auth.accountId, record.keyId, record.publicKey, record.wrappedPrivateKey],
       );
       return inserted.rows[0] as Row | undefined;
     });
@@ -2539,20 +2691,76 @@ async function traceEndpoint(
   }
   if (method === 'GET') {
     const result = await getPool().query(
-      'SELECT id, created_at FROM drive_webhook_tokens WHERE drive_id = $1 AND revoked_at IS NULL',
+      `SELECT t.id, t.created_at, t.inbox_key_id, t.inbox_record_hash,
+              i.key_id AS current_key_id, i.public_key AS current_public_key,
+              i.wrapped_private_key AS current_wrapped_key
+         FROM drive_webhook_tokens t
+         LEFT JOIN drive_trace_inboxes i ON i.drive_id = t.drive_id
+        WHERE t.drive_id = $1 AND t.revoked_at IS NULL`,
       [driveId],
     );
     const row = result.rows[0] as Row | undefined;
-    return response({ token: row ? { id: row.id, createdAt: row.created_at } : null });
+    if (!row) return response({ token: null });
+    const legacy = row.inbox_key_id === null && row.inbox_record_hash === null;
+    const current =
+      row.inbox_key_id !== null &&
+      row.inbox_record_hash !== null &&
+      row.current_key_id === row.inbox_key_id &&
+      row.current_key_id !== null &&
+      row.current_public_key !== null &&
+      row.current_wrapped_key !== null &&
+      inboxRecordDigest(row.current_key_id, row.current_public_key, row.current_wrapped_key) ===
+        row.inbox_record_hash;
+    return response({
+      token: {
+        id: row.id,
+        createdAt: row.created_at,
+        status: legacy || current ? 'active' : 'stale',
+      },
+    });
   }
   if (method === 'POST') {
+    // Requiring the full snapshot prevents an older client from silently binding a token to an
+    // inbox row that changed after the browser proved it. Older token rows remain usable.
+    const verifiedRecordRequired =
+      'A full verified trace inbox record is required. Reload the console or update the client before creating a token.';
+    if (request.body === null) throw new ApiError('validation_error', verifiedRecordRequired);
+    const body = await jsonBody(request);
+    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey', 'challengeId', 'proof']);
+    if (
+      typeof body.keyId !== 'string' ||
+      typeof body.publicKey !== 'string' ||
+      typeof body.wrappedPrivateKey !== 'string'
+    )
+      throw new ApiError('validation_error', verifiedRecordRequired);
+    const expected = parseTraceInboxRecord(body);
+    const proof = parseTraceInboxProof(body);
+    if (!auth.userId) throw new ApiError('unauthorized', 'The console user is unavailable.');
     const token = `adw_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const created = await withTransaction(async (client) => {
       await lockVaultDrive(client, auth.accountId, driveId);
-      const inbox = await client.query('SELECT 1 FROM drive_trace_inboxes WHERE drive_id = $1', [
+      const inbox = await client.query(
+        'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1 FOR UPDATE',
+        [driveId],
+      );
+      const record = inbox.rows[0] as Row | undefined;
+      if (!record) throw new ApiError('conflict', 'Create the trace inbox first.');
+      if (
+        expected.keyId !== record.key_id ||
+        expected.publicKey !== record.public_key ||
+        expected.wrappedPrivateKey !== record.wrapped_private_key
+      )
+        throw new ApiError(
+          'conflict',
+          'The trace inbox changed. Reload the page and verify it again before creating a token.',
+        );
+      await consumeTraceInboxChallenge(client, {
+        ...proof,
+        userId: auth.userId!,
         driveId,
-      ]);
-      if (!inbox.rowCount) throw new ApiError('conflict', 'Create the trace inbox first.');
+        action: 'issue-token',
+        recordHash: inboxRecordDigest(record.key_id, record.public_key, record.wrapped_private_key),
+      });
       const agent = await client.query(
         `INSERT INTO agents (account_id, name) VALUES ($1, 'openrouter')
          ON CONFLICT (account_id, name) DO UPDATE SET name = EXCLUDED.name
@@ -2564,9 +2772,17 @@ async function traceEndpoint(
         [driveId],
       );
       const inserted = await client.query(
-        `INSERT INTO drive_webhook_tokens (drive_id, account_id, agent_id, token_hash)
-         VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-        [driveId, auth.accountId, agent.rows[0].id, hashToken(token)],
+        `INSERT INTO drive_webhook_tokens
+           (drive_id, account_id, agent_id, token_hash, inbox_key_id, inbox_record_hash)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+        [
+          driveId,
+          auth.accountId,
+          agent.rows[0].id,
+          hashToken(token),
+          record.key_id,
+          inboxRecordDigest(record.key_id, record.public_key, record.wrapped_private_key),
+        ],
       );
       return inserted.rows[0] as Row;
     });
@@ -3281,6 +3497,14 @@ export function consoleRouteAllowed(method: string, parts: string[]) {
   if (method === 'DELETE' && parts.length === 2 && parts[0] === 'keys') return true;
   if (method === 'POST' && parts.length === 3 && parts[0] === 'agents' && parts[2] === 'revoke')
     return true;
+  if (
+    method === 'POST' &&
+    parts.length === 4 &&
+    parts[0] === 'drives' &&
+    parts[2] === 'trace-inbox' &&
+    parts[3] === 'challenge'
+  )
+    return true;
   if (method === 'DELETE' && parts.length === 4 && parts[0] === 'drives' && parts[2] === 'shares')
     return true;
   if (parts.length !== 3 || parts[0] !== 'drives') return false;
@@ -3385,6 +3609,20 @@ async function handleRequest(request: Request, mode: RequestMode) {
       output = await shareEndpoint(request, auth, relative[1]!, relative[2]!, url);
     } else if (
       relative[0] === 'drives' &&
+      relative.length === 4 &&
+      relative[2] === 'trace-inbox' &&
+      relative[3] === 'challenge'
+    ) {
+      if (mode.kind !== 'console') throw new ApiError('not_found', 'Endpoint not found.');
+      uuid(relative[1], 'drive id');
+      output = await traceInboxChallengeEndpoint(
+        request,
+        auth,
+        relative[1]!,
+        mode.kind === 'console' && mode.reverified,
+      );
+    } else if (
+      relative[0] === 'drives' &&
       relative[2] === 'shares' &&
       relative.length === 4 &&
       request.method === 'DELETE'
@@ -3406,6 +3644,7 @@ async function handleRequest(request: Request, mode: RequestMode) {
         relative[2],
         url,
         mode.kind === 'console',
+        mode.kind === 'console' && mode.reverified,
       );
     } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');

@@ -1,4 +1,5 @@
 import {
+  answerTraceInboxChallenge,
   createTraceInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
@@ -32,46 +33,112 @@ const conflict = (reason: unknown) => (reason as { status?: number } | null)?.st
  */
 export async function setUpWebhook(args: {
   request: Request;
+  strictRequest: Request;
   driveId: string;
   key: string;
   source: Source;
   verify: (driveId: string, key: string) => Promise<Verdict>;
+  /** Test seam; production opens the challenge using the exact locally unwrapped inbox key. */
+  answerChallenge?: typeof answerTraceInboxChallenge;
 }): Promise<WebhookToken> {
-  const { request, driveId, key, source, verify } = args;
-  const verdict = await verify(driveId, key);
-  if (verdict === 'mismatch') throw new Error(MISMATCH);
-  // Only a key bound to this drive may create the inbox when there is nothing to check it against.
-  // A vault slot is only unsealed, never matched to the drive.
-  if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
+  const { request, strictRequest, driveId, key, source, verify } = args;
+  const answerChallenge = args.answerChallenge ?? answerTraceInboxChallenge;
 
-  async function ensureInbox() {
+  const readInbox = async () => {
     const { inbox } = await request<{ inbox: TraceInboxRecord | null }>(
       `drives/${driveId}/trace-inbox`,
     );
-    if (inbox) {
-      // An inbox that appeared after the first check (another tab) must open with this key.
-      if (verdict === 'unverifiable') {
-        const again = await verify(driveId, key);
-        if (again !== 'file' && again !== 'inbox') throw new Error(MISMATCH);
-      }
-      return;
+    return inbox;
+  };
+
+  async function requestProof(action: 'enroll' | 'issue-token', record: TraceInboxRecord) {
+    const challenge = await strictRequest<{ challengeId: string; envelope: string }>(
+      `drives/${driveId}/trace-inbox/challenge`,
+      'POST',
+      {
+        action,
+        inbox: {
+          keyId: record.keyId,
+          publicKey: record.publicKey,
+          wrappedPrivateKey: record.wrappedPrivateKey,
+        },
+      },
+    );
+    let proof: string;
+    try {
+      proof = await answerChallenge({
+        driveId,
+        driveKey: key,
+        record,
+        envelope: challenge.envelope,
+      });
+    } catch {
+      throw new Error(MISMATCH);
+    }
+    return { challengeId: challenge.challengeId, proof };
+  }
+
+  // Returns the exact record the drive has on the server after this call.
+  async function ensureInbox(): Promise<TraceInboxRecord> {
+    const verifyRecord = async (record: TraceInboxRecord) => {
+      const verdict = await verify(driveId, key);
+      if (verdict === 'mismatch') throw new Error(MISMATCH);
+      if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
+      return record;
+    };
+    const readWinner = async (reason: unknown) => {
+      const winner = await readInbox();
+      if (!winner) throw reason;
+      return verifyRecord(winner);
+    };
+
+    const inbox = await readInbox();
+    if (inbox) return verifyRecord(inbox);
+
+    // With no inbox to prove against, use a drive file or trusted recovery material. A vault slot
+    // alone cannot identify an empty drive.
+    const verdict = await verify(driveId, key);
+    if (verdict === 'mismatch') throw new Error(MISMATCH);
+    if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
+
+    const created = await createTraceInbox(driveId, key);
+    let proof: { challengeId: string; proof: string };
+    try {
+      proof = await requestProof('enroll', created);
+    } catch (reason) {
+      if (!conflict(reason)) throw reason;
+      // Another tab may have enrolled after the initial read but before this challenge request.
+      return readWinner(reason);
     }
     try {
-      await request(`drives/${driveId}/trace-inbox`, 'POST', await createTraceInbox(driveId, key));
+      await strictRequest(`drives/${driveId}/trace-inbox`, 'POST', { ...created, ...proof });
+      return created;
     } catch (reason) {
       if (!conflict(reason)) throw reason;
       // Another tab created it first: the key must open that inbox.
-      const again = await verify(driveId, key);
-      if (again !== 'file' && again !== 'inbox') throw new Error(MISMATCH);
+      // A fresh issue-token challenge below proves possession of the winner's exact private key.
+      return readWinner(reason);
     }
   }
 
-  await ensureInbox();
+  let record = await ensureInbox();
   try {
-    return await request<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST');
+    const proof = await requestProof('issue-token', record);
+    return await strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
+      ...proof,
+      keyId: record.keyId,
+      publicKey: record.publicKey,
+      wrappedPrivateKey: record.wrappedPrivateKey,
+    });
   } catch (reason) {
     if (!conflict(reason)) throw reason;
-    await ensureInbox();
-    return request<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST');
+    record = await ensureInbox();
+    const proof = await requestProof('issue-token', record);
+    return strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
+      ...proof,
+      keyId: record.keyId,
+      publicKey: record.publicKey,
+      wrappedPrivateKey: record.wrappedPrivateKey,
+    });
   }
 }

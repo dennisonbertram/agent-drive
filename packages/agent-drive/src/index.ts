@@ -30,6 +30,7 @@ export {
   unwrapFileKey,
 } from './crypto.js';
 export {
+  answerTraceInboxChallenge,
   createTraceInbox,
   sealFileKeyToInbox,
   unsealFileKeyFromInbox,

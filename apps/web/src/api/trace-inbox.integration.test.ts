@@ -1,10 +1,17 @@
-import { createECDH, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { reverificationErrorResponse } from '@clerk/nextjs/server';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handleApiRequest, handleConsoleApiRequest } from './handler';
+import { inboxRecordDigest } from './trace-webhook';
+import { decodeBase64Url, generateDriveKey } from '../../../../packages/agent-drive/src/crypto.js';
+import {
+  answerTraceInboxChallenge,
+  createTraceInbox,
+} from '../../../../packages/agent-drive/src/trace-inbox.js';
 
 const pool = new Pool({
   connectionString:
@@ -15,15 +22,6 @@ const root = 'http://agent-drive.test';
 const accountIds: string[] = [];
 const userIds: string[] = [];
 
-const b64 = (bytes: Buffer) => bytes.toString('base64url');
-// A real P-256 public point (uncompressed, 65 bytes): the API rejects off-curve values.
-const point = () => {
-  const ecdh = createECDH('prime256v1');
-  ecdh.generateKeys();
-  return b64(ecdh.getPublicKey());
-};
-const wrapped = () => b64(Buffer.concat([Buffer.from([1]), randomBytes(12 + 16 + 48)]));
-const inboxBody = () => ({ keyId: randomUUID(), publicKey: point(), wrappedPrivateKey: wrapped() });
 const tokenHash = (value: string) => createHash('sha256').update(value).digest('hex');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const json = async (response: Response) => (await response.json()) as Record<string, any>;
@@ -35,15 +33,81 @@ function init(method: string, body: unknown, headers: Record<string, string>) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   };
 }
-const consoleCall = (userId: string, path: string, method = 'GET', body?: unknown) =>
+const consoleCall = (
+  userId: string,
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  reverified = true,
+) =>
   handleConsoleApiRequest(
     new Request(`${root}/api/console/${path}`, init(method, body, { origin: root })),
     userId,
+    reverified,
   );
 const bearerCall = (token: string, path: string, method = 'GET', body?: unknown) =>
   handleApiRequest(
     new Request(`${root}/api/v1/${path}`, init(method, body, { authorization: `Bearer ${token}` })),
   );
+
+async function challenge(
+  f: Awaited<ReturnType<typeof fixture>>,
+  action: 'enroll' | 'issue-token',
+  inbox: Awaited<ReturnType<typeof createTraceInbox>>,
+  reverified = true,
+) {
+  const response = await consoleCall(
+    f.userId,
+    `drives/${f.driveId}/trace-inbox/challenge`,
+    'POST',
+    { action, inbox },
+    reverified,
+  );
+  const value = await json(response.clone());
+  return {
+    response,
+    proof:
+      response.status === 201
+        ? {
+            challengeId: value.challengeId as string,
+            proof: await answerTraceInboxChallenge({
+              driveId: f.driveId,
+              driveKey: f.driveKey,
+              record: inbox,
+              envelope: value.envelope as string,
+            }),
+          }
+        : undefined,
+  };
+}
+
+async function enrollInbox(
+  f: Awaited<ReturnType<typeof fixture>>,
+  inbox: Awaited<ReturnType<typeof createTraceInbox>>,
+) {
+  const issued = await challenge(f, 'enroll', inbox);
+  if (!issued.proof) return issued.response;
+  return consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+    ...inbox,
+    ...issued.proof,
+  });
+}
+
+async function createWebhookToken(
+  f: Awaited<ReturnType<typeof fixture>>,
+  inbox: Awaited<ReturnType<typeof createTraceInbox>>,
+  reverified = true,
+) {
+  const issued = await challenge(f, 'issue-token', inbox, reverified);
+  if (!issued.proof) return issued.response;
+  return consoleCall(
+    f.userId,
+    `drives/${f.driveId}/webhook-token`,
+    'POST',
+    { ...inbox, ...issued.proof },
+    reverified,
+  );
+}
 
 async function fixture() {
   const userId = `user_${randomUUID()}`;
@@ -69,6 +133,7 @@ async function fixture() {
   );
   const driveId = drive.rows[0].id as string;
   const otherDriveId = otherDrive.rows[0].id as string;
+  const driveKey = generateDriveKey();
   const makeKey = async (scopes: string[], driveIds: string[]) => {
     const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     await pool.query(
@@ -78,8 +143,11 @@ async function fixture() {
     );
     return token;
   };
-  return { userId, accountId, driveId, otherDriveId, makeKey };
+  return { userId, accountId, driveId, otherDriveId, driveKey, makeKey };
 }
+
+const inboxBody = (f: Awaited<ReturnType<typeof fixture>>) =>
+  createTraceInbox(f.driveId, f.driveKey);
 
 beforeAll(async () => {
   await migrate(drizzle(pool), { migrationsFolder: resolve(process.cwd(), 'apps/web/drizzle') });
@@ -104,41 +172,226 @@ afterAll(async () => {
 });
 
 describe('trace inbox', () => {
+  it('issues a one-time enroll challenge encrypted to the exact candidate record', async () => {
+    const f = await fixture();
+    const inbox = await createTraceInbox(f.driveId, f.driveKey);
+    const path = `drives/${f.driveId}/trace-inbox/challenge`;
+    const response = await consoleCall(f.userId, path, 'POST', { action: 'enroll', inbox });
+    expect(response.status).toBe(201);
+    const body = await json(response);
+    expect(body).toMatchObject({
+      challengeId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
+      envelope: expect.any(String),
+    });
+    expect(body).not.toHaveProperty('proof');
+    expect(decodeBase64Url(body.envelope as string)[0]).toBe(3);
+    const stored = await pool.query(
+      'SELECT actor_user_id, drive_id, action, inbox_record_hash, challenge_hash, expires_at FROM drive_trace_inbox_challenges WHERE id = $1',
+      [body.challengeId],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      actor_user_id: f.userId,
+      drive_id: f.driveId,
+      action: 'enroll',
+      inbox_record_hash: inboxRecordDigest(inbox.keyId, inbox.publicKey, inbox.wrappedPrivateKey),
+    });
+    expect(stored.rows[0].challenge_hash).not.toContain(body.envelope);
+    expect(new Date(stored.rows[0].expires_at).getTime()).toBeGreaterThan(Date.now());
+  });
+
   it('returns null, creates once, then 409s', async () => {
     const f = await fixture();
     const path = `drives/${f.driveId}/trace-inbox`;
     expect(await json(await consoleCall(f.userId, path))).toEqual({ inbox: null });
-    const body = inboxBody();
-    const created = await consoleCall(f.userId, path, 'POST', body);
+    const body = await createTraceInbox(f.driveId, f.driveKey);
+    const created = await enrollInbox(f, body);
     expect(created.status).toBe(201);
     expect((await json(created)).inbox).toMatchObject({
       keyId: body.keyId,
       publicKey: body.publicKey,
       wrappedPrivateKey: body.wrappedPrivateKey,
     });
-    expect((await consoleCall(f.userId, path, 'POST', inboxBody())).status).toBe(409);
+    expect((await enrollInbox(f, await createTraceInbox(f.driveId, f.driveKey))).status).toBe(409);
     expect((await json(await consoleCall(f.userId, path))).inbox.keyId).toBe(body.keyId);
+  });
+
+  it('returns exactly the Clerk strict reverification response when not reverified', async () => {
+    const f = await fixture();
+    const path = `drives/${f.driveId}/trace-inbox`;
+    const expected = reverificationErrorResponse('strict');
+    const res = await consoleCall(
+      f.userId,
+      path,
+      'POST',
+      await createTraceInbox(f.driveId, f.driveKey),
+      false,
+    );
+    expect(res.status).toBe(expected.status);
+    expect(await res.text()).toBe(await expected.text());
+    // Nothing was enrolled.
+    expect(await json(await consoleCall(f.userId, path))).toEqual({ inbox: null });
+    // Reads stay ordinary session routes.
+    expect((await consoleCall(f.userId, path, 'GET', undefined, false)).status).toBe(200);
+  });
+
+  it('does not issue an enrollment challenge without strict reverification', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const expected = reverificationErrorResponse('strict');
+    const response = await consoleCall(
+      f.userId,
+      `drives/${f.driveId}/trace-inbox/challenge`,
+      'POST',
+      { action: 'enroll', inbox },
+      false,
+    );
+    expect(response.status).toBe(expected.status);
+    expect(await response.text()).toBe(await expected.text());
+    const rows = await pool.query(
+      'SELECT 1 FROM drive_trace_inbox_challenges WHERE drive_id = $1',
+      [f.driveId],
+    );
+    expect(rows.rowCount).toBe(0);
+  });
+
+  it('consumes a proof challenge once, even when two enrollment requests race', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    expect(issued.proof).toBeDefined();
+    const body = { ...inbox, ...issued.proof };
+    const results = await Promise.all([
+      consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', body),
+      consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', body),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual([201, 409]);
+    expect(
+      (
+        await pool.query('SELECT count(*)::int AS n FROM drive_trace_inboxes WHERE drive_id = $1', [
+          f.driveId,
+        ])
+      ).rows[0].n,
+    ).toBe(1);
+    expect(
+      (
+        await pool.query(
+          'SELECT count(*)::int AS n FROM drive_trace_inbox_challenges WHERE id = $1',
+          [issued.proof!.challengeId],
+        )
+      ).rows[0].n,
+    ).toBe(0);
+  });
+
+  it('rejects a proof challenge bound to another actor and leaves inbox state unchanged', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    await pool.query('UPDATE drive_trace_inbox_challenges SET actor_user_id = $1 WHERE id = $2', [
+      `other-${f.userId}`,
+      issued.proof!.challengeId,
+    ]);
+    const response = await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+      ...inbox,
+      ...issued.proof,
+    });
+    expect(response.status).toBe(409);
+    expect((await json(response)).error.message).toContain('proof expired or no longer matches');
+    expect(await json(await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`))).toEqual({
+      inbox: null,
+    });
+  });
+
+  it('rejects an altered candidate record without consuming the valid proof', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    const altered = await inboxBody(f);
+    const rejected = await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+      ...altered,
+      ...issued.proof,
+    });
+    expect(rejected.status).toBe(409);
+    const retry = await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+      ...inbox,
+      ...issued.proof,
+    });
+    expect(retry.status).toBe(201);
+  });
+
+  it('rejects expired challenge proofs', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    await pool.query(
+      "UPDATE drive_trace_inbox_challenges SET expires_at = now() - interval '1 second' WHERE id = $1",
+      [issued.proof!.challengeId],
+    );
+    const response = await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+      ...inbox,
+      ...issued.proof,
+    });
+    expect(response.status).toBe(409);
+  });
+
+  it('checks challenge expiry after waiting for the drive lock', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [f.driveId]);
+      const holderPid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0]
+        .pid as number;
+      const request = consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+        ...inbox,
+        ...issued.proof,
+      });
+      let blocked = false;
+      for (let i = 0; i < 100; i += 1) {
+        const waiting = await pool.query(
+          'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+          [holderPid],
+        );
+        if (waiting.rowCount) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(blocked).toBe(true);
+      await pool.query(
+        `UPDATE drive_trace_inbox_challenges
+            SET expires_at = clock_timestamp() - interval '1 second'
+          WHERE id = $1`,
+        [issued.proof!.challengeId],
+      );
+      await holder.query('COMMIT');
+      expect((await request).status).toBe(409);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
   });
 
   it('validates the body', async () => {
     const f = await fixture();
     const path = `drives/${f.driveId}/trace-inbox`;
-    expect((await consoleCall(f.userId, path, 'POST', { ...inboxBody(), extra: 1 })).status).toBe(
+    const inbox = await inboxBody(f);
+    expect((await consoleCall(f.userId, path, 'POST', { ...inbox, extra: 1 })).status).toBe(400);
+    expect(
+      (await consoleCall(f.userId, path, 'POST', { ...inbox, publicKey: 'short' })).status,
+    ).toBe(400);
+    expect((await consoleCall(f.userId, path, 'POST', { ...inbox, keyId: 'nope' })).status).toBe(
       400,
     );
-    expect(
-      (await consoleCall(f.userId, path, 'POST', { ...inboxBody(), publicKey: 'short' })).status,
-    ).toBe(400);
-    expect(
-      (await consoleCall(f.userId, path, 'POST', { ...inboxBody(), keyId: 'nope' })).status,
-    ).toBe(400);
   });
 
   it('serves bearer reads with the read scope, charges one operation, and rejects other keys', async () => {
     const f = await fixture();
     const path = `drives/${f.driveId}/trace-inbox`;
-    const body = inboxBody();
-    expect((await consoleCall(f.userId, path, 'POST', body)).status).toBe(201);
+    const body = await createTraceInbox(f.driveId, f.driveKey);
+    expect((await enrollInbox(f, body)).status).toBe(201);
     const reader = await f.makeKey(['read'], [f.driveId]);
     const response = await bearerCall(reader, path);
     expect(response.status).toBe(200);
@@ -150,7 +403,18 @@ describe('trace inbox', () => {
     expect(audit.rows).toEqual([{ outcome: 'success' }]);
     expect((await bearerCall(await f.makeKey(['write'], [f.driveId]), path)).status).toBe(403);
     expect((await bearerCall(await f.makeKey(['read'], [f.otherDriveId]), path)).status).toBe(403);
-    expect((await bearerCall(reader, path, 'POST', inboxBody())).status).toBe(404);
+    expect(
+      (await bearerCall(reader, path, 'POST', await createTraceInbox(f.driveId, f.driveKey)))
+        .status,
+    ).toBe(404);
+    expect(
+      (
+        await bearerCall(reader, `drives/${f.driveId}/trace-inbox/challenge`, 'POST', {
+          action: 'enroll',
+          inbox: await createTraceInbox(f.driveId, f.driveKey),
+        })
+      ).status,
+    ).toBe(404);
     expect((await bearerCall(reader, `drives/${f.driveId}/webhook-token`)).status).toBe(404);
   });
 });
@@ -158,25 +422,193 @@ describe('trace inbox', () => {
 describe('webhook token', () => {
   it('requires an inbox first', async () => {
     const f = await fixture();
-    const res = await consoleCall(f.userId, `drives/${f.driveId}/webhook-token`, 'POST');
+    const candidate = await inboxBody(f);
+    const { response: res } = await challenge(f, 'issue-token', candidate);
     expect(res.status).toBe(409);
     expect((await json(res)).error.message).toContain('Create the trace inbox first.');
+  });
+
+  it('returns exactly the Clerk strict reverification response when not reverified', async () => {
+    const f = await fixture();
+    const path = `drives/${f.driveId}/webhook-token`;
+    await enrollInbox(f, await inboxBody(f));
+    const expected = reverificationErrorResponse('strict');
+    const res = await consoleCall(f.userId, path, 'POST', undefined, false);
+    expect(res.status).toBe(expected.status);
+    expect(await res.text()).toBe(await expected.text());
+    const rows = await pool.query('SELECT 1 FROM drive_webhook_tokens WHERE drive_id = $1', [
+      f.driveId,
+    ]);
+    expect(rows.rowCount).toBe(0);
+    // GET and DELETE keep ordinary session auth.
+    expect((await consoleCall(f.userId, path, 'GET', undefined, false)).status).toBe(200);
+    expect((await consoleCall(f.userId, path, 'DELETE', undefined, false)).status).toBe(404);
+  });
+
+  it('binds each issued token to the exact inbox record', async () => {
+    const f = await fixture();
+    const tokenPath = `drives/${f.driveId}/webhook-token`;
+    const body = await inboxBody(f);
+    await enrollInbox(f, body);
+    const created = await json(await createWebhookToken(f, body));
+    const row = (await pool.query('SELECT * FROM drive_webhook_tokens WHERE id = $1', [created.id]))
+      .rows[0];
+    expect(row.inbox_key_id).toBe(body.keyId);
+    expect(row.inbox_record_hash).toBe(
+      inboxRecordDigest(body.keyId, body.publicKey, body.wrappedPrivateKey),
+    );
+  });
+
+  it('refuses token issuance when the verified inbox record changed under the same keyId', async () => {
+    const f = await fixture();
+    const tokenPath = `drives/${f.driveId}/webhook-token`;
+    const verified = await inboxBody(f);
+    await enrollInbox(f, verified);
+    const active = await json(await createWebhookToken(f, verified));
+    const changed = await inboxBody(f);
+    await pool.query(
+      `UPDATE drive_trace_inboxes
+          SET public_key = $1, wrapped_private_key = $2
+        WHERE drive_id = $3`,
+      [changed.publicKey, changed.wrappedPrivateKey, f.driveId],
+    );
+
+    // This is the exact snapshot the browser verified before the stored record changed.
+    const res = await createWebhookToken(f, verified);
+    expect(res.status).toBe(409);
+    expect((await json(res)).error.message).toContain('trace inbox changed');
+    const rows = await pool.query(
+      'SELECT id, revoked_at FROM drive_webhook_tokens WHERE drive_id = $1',
+      [f.driveId],
+    );
+    expect(rows.rows).toEqual([{ id: active.id, revoked_at: null }]);
+    expect((await json(await consoleCall(f.userId, tokenPath))).token.status).toBe('stale');
+  });
+
+  it('rejects a record change between the challenge and token transaction without revoking the active token', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    const active = await json(await createWebhookToken(f, inbox));
+    const issued = await challenge(f, 'issue-token', inbox);
+    const changed = await inboxBody(f);
+    await pool.query(
+      'UPDATE drive_trace_inboxes SET key_id = $1, public_key = $2, wrapped_private_key = $3 WHERE drive_id = $4',
+      [changed.keyId, changed.publicKey, changed.wrappedPrivateKey, f.driveId],
+    );
+    const response = await consoleCall(f.userId, `drives/${f.driveId}/webhook-token`, 'POST', {
+      ...inbox,
+      ...issued.proof,
+    });
+    expect(response.status).toBe(409);
+    const tokens = await pool.query(
+      'SELECT id, revoked_at FROM drive_webhook_tokens WHERE drive_id = $1',
+      [f.driveId],
+    );
+    expect(tokens.rows).toEqual([{ id: active.id, revoked_at: null }]);
+  });
+
+  it('locks the inbox until token rotation commits', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    const active = await json(await createWebhookToken(f, inbox));
+    const issued = await challenge(f, 'issue-token', inbox);
+    const changed = await inboxBody(f);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query(
+        'UPDATE drive_trace_inboxes SET key_id = $1, public_key = $2, wrapped_private_key = $3 WHERE drive_id = $4',
+        [changed.keyId, changed.publicKey, changed.wrappedPrivateKey, f.driveId],
+      );
+      const pid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0].pid as number;
+      const rotating = consoleCall(f.userId, `drives/${f.driveId}/webhook-token`, 'POST', {
+        ...inbox,
+        ...issued.proof,
+      });
+      let waiting = false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const blocked = await pool.query(
+          'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+          [pid],
+        );
+        if (blocked.rowCount) {
+          waiting = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(waiting).toBe(true);
+      await holder.query('COMMIT');
+      const response = await rotating;
+      expect(response.status).toBe(409);
+      const rows = await pool.query(
+        'SELECT id, revoked_at FROM drive_webhook_tokens WHERE drive_id = $1',
+        [f.driveId],
+      );
+      expect(rows.rows).toEqual([{ id: active.id, revoked_at: null }]);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
+  });
+
+  it('does not let a legacy request issue a token for an existing inbox', async () => {
+    const f = await fixture();
+    const path = `drives/${f.driveId}/webhook-token`;
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    const active = await json(await createWebhookToken(f, inbox));
+
+    const noBody = await consoleCall(f.userId, path, 'POST');
+    const keyIdOnly = await consoleCall(f.userId, path, 'POST', { keyId: inbox.keyId });
+    expect(noBody.status).toBe(400);
+    expect((await json(noBody)).error.message).toContain('update the client');
+    expect(keyIdOnly.status).toBe(400);
+    expect((await json(keyIdOnly)).error.message).toContain('update the client');
+    const rows = await pool.query(
+      'SELECT id, revoked_at FROM drive_webhook_tokens WHERE drive_id = $1',
+      [f.driveId],
+    );
+    expect(rows.rows).toEqual([{ id: active.id, revoked_at: null }]);
+  });
+
+  it('409s a token request that names a different keyId than the stored record', async () => {
+    const f = await fixture();
+    const tokenPath = `drives/${f.driveId}/webhook-token`;
+    const body = await inboxBody(f);
+    await enrollInbox(f, body);
+    const altered = { ...body, keyId: randomUUID() };
+    const { response: res } = await challenge(f, 'issue-token', altered);
+    expect(res.status).toBe(409);
+    expect((await json(res)).error.message).toContain('trace inbox changed');
+    const rows = await pool.query('SELECT 1 FROM drive_webhook_tokens WHERE drive_id = $1', [
+      f.driveId,
+    ]);
+    expect(rows.rowCount).toBe(0);
   });
 
   it('creates a token shown once, hashed at rest, and never returned by GET', async () => {
     const f = await fixture();
     const tokenPath = `drives/${f.driveId}/webhook-token`;
-    await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
     expect(await json(await consoleCall(f.userId, tokenPath))).toEqual({ token: null });
-    const created = await consoleCall(f.userId, tokenPath, 'POST');
+    const created = await createWebhookToken(f, inbox);
     expect(created.status).toBe(201);
     const body = await json(created);
     expect(body.token).toMatch(/^adw_[0-9a-f]{64}$/u);
     expect(body.url).toContain(`/api/webhooks/openrouter/${f.driveId}`);
+    expect((await json(await consoleCall(f.userId, tokenPath))).token.status).toBe('active');
     const row = await pool.query('SELECT * FROM drive_webhook_tokens WHERE id = $1', [body.id]);
     expect(row.rows[0].token_hash).toBe(tokenHash(body.token));
     const text = await (await consoleCall(f.userId, tokenPath)).text();
-    expect(JSON.parse(text).token).toEqual({ id: body.id, createdAt: expect.any(String) });
+    expect(JSON.parse(text).token).toEqual({
+      id: body.id,
+      createdAt: expect.any(String),
+      status: 'active',
+    });
     expect(text).not.toContain(body.token);
     expect(text).not.toContain(row.rows[0].token_hash);
   });
@@ -184,9 +616,10 @@ describe('webhook token', () => {
   it('replaces the active token, revokes on DELETE, and reuses one openrouter agent', async () => {
     const f = await fixture();
     const tokenPath = `drives/${f.driveId}/webhook-token`;
-    await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());
-    const first = await json(await consoleCall(f.userId, tokenPath, 'POST'));
-    const second = await json(await consoleCall(f.userId, tokenPath, 'POST'));
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    const first = await json(await createWebhookToken(f, inbox));
+    const second = await json(await createWebhookToken(f, inbox));
     expect(second.id).not.toBe(first.id);
     const rows = await pool.query(
       'SELECT id, revoked_at FROM drive_webhook_tokens WHERE drive_id = $1',
@@ -210,8 +643,9 @@ describe('webhook token', () => {
   it('DELETE waits for a concurrent rotation and then revokes the new token', async () => {
     const f = await fixture();
     const tokenPath = `drives/${f.driveId}/webhook-token`;
-    await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());
-    const first = await json(await consoleCall(f.userId, tokenPath, 'POST'));
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    const first = await json(await createWebhookToken(f, inbox));
     // Play the rotation by hand: hold the drive lock, revoke A, insert B, and commit only after
     // DELETE is observed waiting on that lock.
     const holder = await pool.connect();
@@ -255,8 +689,9 @@ describe('webhook token', () => {
 
   it('cascades when the drive is deleted', async () => {
     const f = await fixture();
-    await consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', inboxBody());
-    await consoleCall(f.userId, `drives/${f.driveId}/webhook-token`, 'POST');
+    const inbox = await inboxBody(f);
+    await enrollInbox(f, inbox);
+    await createWebhookToken(f, inbox);
     await pool.query('DELETE FROM drives WHERE id = $1', [f.driveId]);
     for (const table of ['drive_trace_inboxes', 'drive_webhook_tokens']) {
       const left = await pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE drive_id = $1`, [
