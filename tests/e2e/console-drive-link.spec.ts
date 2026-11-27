@@ -218,9 +218,7 @@ test('console link: a selected drive removed during a refresh falls back once pa
     const collection = path === 'drives' || path === 'agents' || path === 'keys' ? path : null;
     if (collection) {
       const entries =
-        collection === 'drives'
-          ? drives.filter((item) => !removed || item.id !== 'drive-050')
-          : [];
+        collection === 'drives' ? drives.filter((item) => !removed || item.id !== 'drive-050') : [];
       await route.fulfill({ json: page(collection, url.searchParams.get('cursor'), entries) });
       return;
     }
