@@ -118,14 +118,18 @@ test.describe('auth cross-links', () => {
     ] as const;
     for (const [from, name, to] of cases) {
       const link = () => page.getByRole('main').getByRole('link', { name, exact: true });
+      const header = () =>
+        page.locator('header.site-header').getByRole('link', { name, exact: true });
       await page.goto(`${from}?redirect_url=${encodeURIComponent('/connect?code=ABCD-EFGH')}`);
       await expect(link()).toHaveAttribute('href', /redirect_url=%2Fconnect%3Fcode%3DABCD-EFGH/);
+      await expect(header()).toHaveAttribute('href', /redirect_url=%2Fconnect%3Fcode%3DABCD-EFGH/);
       for (const value of bad) {
         // Raw values that are already percent-encoded are sent as is; others are encoded once.
         const q =
           value.startsWith('%') || value.includes('%09') ? value : encodeURIComponent(value);
         await page.goto(`${from}?redirect_url=${q}`);
         await expect(link(), `${from} ${value}`).toHaveAttribute('href', to);
+        await expect(header(), `${from} header ${value}`).toHaveAttribute('href', to);
       }
     }
   });
@@ -134,6 +138,8 @@ test.describe('auth cross-links', () => {
     page,
   }) => {
     const link = (name: string) => page.getByRole('main').getByRole('link', { name, exact: true });
+    const header = (name: string) =>
+      page.locator('header.site-header').getByRole('link', { name, exact: true });
     await page.goto('/sign-in');
     const origin = new URL(page.url()).origin;
     // auth.protect() sends the absolute request URL, e.g. <origin>/console?drive=...&path=...
@@ -142,16 +148,22 @@ test.describe('auth cross-links', () => {
 
     await page.goto(`/sign-in?redirect_url=${encodeURIComponent(`${origin}${folder}`)}`);
     await expect(link('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
+    await expect(header('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+    await expect(header('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
     await link('Sign up free').click();
     await expect(page).toHaveURL(/\/sign-up\?/);
     await expect(link('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+    await expect(header('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+    await expect(header('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
     await link('Sign in').click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(link('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
+    await expect(header('Sign up free')).toHaveAttribute('href', `/sign-up?${kept}`);
 
     // The sign-up page accepts the same absolute value directly.
     await page.goto(`/sign-up?redirect_url=${encodeURIComponent(`${origin}${folder}`)}`);
     await expect(link('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
+    await expect(header('Sign in')).toHaveAttribute('href', `/sign-in?${kept}`);
 
     // Absolutes on any other origin, or with no path after this origin, are dropped.
     for (const value of [
@@ -161,6 +173,8 @@ test.describe('auth cross-links', () => {
     ]) {
       await page.goto(`/sign-in?redirect_url=${encodeURIComponent(value)}`);
       await expect(link('Sign up free'), value).toHaveAttribute('href', '/sign-up');
+      await expect(header('Sign up free'), value).toHaveAttribute('href', '/sign-up');
+      await expect(header('Sign in'), value).toHaveAttribute('href', '/sign-in');
     }
   });
 });

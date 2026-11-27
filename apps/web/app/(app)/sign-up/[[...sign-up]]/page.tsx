@@ -22,7 +22,7 @@ export default async function SignUpPage({
   const redirect = safeRedirect((await searchParams).redirect_url, publicOrigin(await headers()));
   return (
     <>
-      <SiteHeader current="sign-up" />
+      <SiteHeader current="sign-up" redirect={redirect} />
       <main className="auth-page">
         {clerkConfigured() ? (
           <SignUp

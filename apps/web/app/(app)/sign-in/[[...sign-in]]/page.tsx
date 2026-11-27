@@ -21,7 +21,7 @@ export default async function SignInPage({
   const redirect = safeRedirect((await searchParams).redirect_url, publicOrigin(await headers()));
   return (
     <>
-      <SiteHeader current="sign-in" />
+      <SiteHeader current="sign-in" redirect={redirect} />
       <main className="auth-page">
         {clerkConfigured() ? (
           <SignIn
