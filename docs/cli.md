@@ -299,7 +299,8 @@ the receipt is authoritative, while the visible status and outputs are the human
 `cat` commands above read the result and status through the mounted drive. The worker creates output
 files without replacing existing files; people can edit them later without changing the execution
 receipt. `--once` processes all currently queued jobs in one scan and then exits; without it, the
-worker stays in the foreground and follows later submissions. Use an operator-owned wrapper if an
+worker stays in the foreground. While idle and connected, it checks for submissions every 4 to 45
+seconds. Use an operator-owned wrapper if an
 existing local agent needs a particular request format or local model service. The worker does not
 select a provider or add credentials to the child environment. Keep the command fixed and trusted;
 do not build it from request text or input files. SIGINT and SIGTERM request a graceful stop; a
