@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { accessSync, constants, statSync, type Stats } from 'node:fs';
+import {
+  accessSync,
+  closeSync,
+  constants,
+  openSync,
+  readSync,
+  statSync,
+  type Stats,
+} from 'node:fs';
 import {
   type FileHandle,
   lstat,
@@ -13,7 +21,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 
 /** A mounted job handed to the owner-configured worker command. Structural: engine-independent. */
 export type JobRequest = {
@@ -134,7 +142,13 @@ export function makeJobHandler(
   // non-executable program stops the worker here, never after claims land.
   const executable = resolveExecutable(command[0]!, process.cwd());
   const pin = pinExecutable(executable);
+  // Decided once here: a `#!/usr/bin/env NAME` launcher is bound to its resolved
+  // interpreter and spawned through it, because env's PATH lookup inside the
+  // child's minimal environment is what exits 127 per job otherwise.
+  const launch = planLaunch(executable);
   const args = command.slice(1);
+  const spawnFile = launch.bound ? launch.interpreter : executable;
+  const spawnArgs = launch.bound ? [executable, ...args] : args;
 
   const assertReady = () => {
     const now = pinExecutable(executable);
@@ -142,6 +156,7 @@ export function makeJobHandler(
       throw new WorkerUnavailableError(
         `the worker command ${JSON.stringify(executable)} was replaced after startup`,
       );
+    if (launch.interpreter !== undefined) requireInterpreter(launch.interpreter, executable);
   };
 
   const run: JobHandler = async (job, signal) => {
@@ -168,8 +183,8 @@ export function makeJobHandler(
       await stageInputs(join(workdir, dirs.inputs), job.inputs);
 
       const outcome = await runWorker({
-        executable,
-        args,
+        executable: spawnFile,
+        args: spawnArgs,
         cwd: workdir,
         env: workerEnv(join(workdir, dirs.home), join(workdir, dirs.tmp)),
         stdin: job.request,
@@ -285,6 +300,133 @@ function pinExecutable(executable: string): { dev: number; ino: number } {
     );
   }
   return { dev: meta.dev, ino: meta.ino };
+}
+
+/**
+ * The interpreter a script's shebang names, reduced to what the launch needs.
+ * `bound` launchers (a `#!/usr/bin/env NAME` script) are exec'd through the
+ * resolved interpreter ourselves — the worker's minimal PATH is not consulted,
+ * so an `env node` launcher uses the Node Agent Drive itself runs on. Other
+ * scripts and binaries stay kernel-launched; an absolute interpreter named in
+ * the shebang is merely re-verified at readiness.
+ */
+type LaunchPlan = { bound: false; interpreter?: string } | { bound: true; interpreter: string };
+
+/** A single bare interpreter name after `#!/usr/bin/env` — the only env form supported. */
+const ENV_NAME = /^[A-Za-z0-9_+][A-Za-z0-9_+.-]*$/u;
+
+/**
+ * Inspects the pinned executable's shebang once, at handler-build time. A
+ * `#!/usr/bin/env NAME` line binds `NAME` resolved under a deliberately scoped
+ * PATH; `#!/abs/interp ...` lines are checked for a present, executable
+ * interpreter and left to the kernel. A launcher needing env flag parsing or a
+ * non-absolute interpreter is unsupported: fail now, before any job is claimed,
+ * rather than per job in the queue.
+ */
+function planLaunch(executable: string): LaunchPlan {
+  if (process.platform === 'win32') return { bound: false }; // no kernel shebang handling
+  const line = shebangLine(executable);
+  if (line === null) return { bound: false };
+  const body = line.slice(2).replace(/^[ \t]+/u, '');
+  const spaceAt = body.search(/[ \t]/u);
+  const interp = spaceAt === -1 ? body : body.slice(0, spaceAt);
+  const rest = (spaceAt === -1 ? '' : body.slice(spaceAt)).trim();
+  if (interp === '/usr/bin/env' || interp === '/bin/env') {
+    if (rest.startsWith('/') && !rest.includes(' ') && !rest.includes('\t')) {
+      // env given an absolute command: equivalent to naming it in the shebang.
+      requireInterpreter(rest, executable);
+      return { bound: true, interpreter: rest };
+    }
+    if (!ENV_NAME.test(rest))
+      throw new Error(
+        `the worker command ${JSON.stringify(executable)} has an unsupported '${interp}' line ${JSON.stringify(rest)}; wrap it in a launcher with a single interpreter name`,
+      );
+    return { bound: true, interpreter: scopedInterpreter(rest, executable) };
+  }
+  if (!interp.startsWith('/'))
+    throw new Error(
+      `the worker command ${JSON.stringify(executable)} has an unsupported interpreter line ${JSON.stringify(line)}; use an absolute interpreter path or '#!/usr/bin/env NAME'`,
+    );
+  requireInterpreter(interp, executable);
+  return { bound: false, interpreter: interp };
+}
+
+/**
+ * Reads the pinned file's first line when it starts with `#!`; null for
+ * binaries and unreadable files, which the kernel handles as usual.
+ */
+function shebangLine(executable: string): string | null {
+  let fd: number;
+  try {
+    fd = openSync(executable, 'r');
+  } catch {
+    return null; // e.g. an execute-only file: there is no line to inspect
+  }
+  try {
+    const head = Buffer.alloc(512);
+    const bytes = readSync(fd, head, 0, head.length, 0);
+    if (bytes < 2 || head[0] !== 0x23 || head[1] !== 0x21) return null;
+    const text = head.subarray(0, bytes).toString('latin1');
+    const end = text.search(/[\r\n]/u);
+    return end === -1 ? text : text.slice(0, end);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Resolves an `env` interpreter name under a deliberately scoped PATH: the
+ * directory of the runtime Agent Drive itself runs on (so `env node` launchers
+ * get this Node even when it comes from nvm or another nonstandard prefix),
+ * then the child's minimal PATH. The owner's PATH is never searched.
+ */
+function scopedInterpreter(name: string, executable: string): string {
+  if (name === basename(process.execPath)) return process.execPath;
+  const searched = new Set<string>();
+  for (const dir of [dirname(process.execPath), ...MINIMAL_PATH.split(delimiter)]) {
+    if (searched.has(dir)) continue;
+    searched.add(dir);
+    const candidate = join(dir, name);
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here, or present but not executable: keep looking.
+    }
+  }
+  throw new WorkerUnavailableError(
+    `the worker command ${JSON.stringify(executable)} needs interpreter ${JSON.stringify(name)} from its shebang, which is not executable on the worker's scoped PATH`,
+  );
+}
+
+/**
+ * Requires a script's interpreter to exist as an executable regular file —
+ * checked at handler build and on every assertReady, so a gone or broken
+ * interpreter halts the worker instead of failing job after job.
+ */
+function requireInterpreter(interpreter: string, executable: string): void {
+  let meta: Stats;
+  try {
+    meta = statSync(interpreter);
+  } catch (error) {
+    throw new WorkerUnavailableError(
+      `the worker command ${JSON.stringify(executable)} needs interpreter ${JSON.stringify(interpreter)}, which is not available (${errCode(error)})`,
+      { cause: error },
+    );
+  }
+  if (!meta.isFile())
+    throw new WorkerUnavailableError(
+      `the worker command ${JSON.stringify(executable)} needs interpreter ${JSON.stringify(interpreter)}, which is not a regular file`,
+    );
+  try {
+    accessSync(interpreter, constants.X_OK);
+  } catch (error) {
+    throw new WorkerUnavailableError(
+      `the worker command ${JSON.stringify(executable)} needs interpreter ${JSON.stringify(interpreter)}, which is not executable (${errCode(error)})`,
+      { cause: error },
+    );
+  }
 }
 
 function workerEnv(home: string, tmp: string): NodeJS.ProcessEnv {
@@ -410,13 +552,29 @@ function runWorker(init: {
   timeoutMs: number;
 }): Promise<WorkerOutcome> {
   return new Promise((resolve) => {
-    const child = spawn(init.executable, init.args, {
-      cwd: init.cwd,
-      env: init.env,
-      stdio: ['pipe', 'pipe', 'ignore'],
-      shell: false,
-      detached: process.platform !== 'win32',
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(init.executable, init.args, {
+        cwd: init.cwd,
+        env: init.env,
+        stdio: ['pipe', 'pipe', 'ignore'],
+        shell: false,
+        detached: process.platform !== 'win32',
+      });
+    } catch (error) {
+      // posix_spawn can report an unexecutable program synchronously instead of
+      // through the 'error' event; it is the same unavailability either way.
+      resolve({
+        spawnError: error as Error,
+        code: null,
+        signal: null,
+        stdout: Buffer.alloc(0),
+        stdoutOverflow: false,
+        stdoutTruncated: false,
+        timedOut: false,
+      });
+      return;
+    }
     const chunks: Buffer[] = [];
     let stdoutBytes = 0;
     let spawnError: Error | undefined;
