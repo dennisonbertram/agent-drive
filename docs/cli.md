@@ -17,7 +17,7 @@ Run it without installing by putting `npx -y @dennisonbertram/agent-drive@latest
 npx -y @dennisonbertram/agent-drive@latest whoami
 ```
 
-The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS requires the separate signed Agent Drive app, which is not yet available as a public binary. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it. Until a notarized zip is available from GitHub Releases, use the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare it from source; the CLI does not install it.
+The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS requires the separate signed Agent Drive app. Download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP to extract `Agent Drive.app`, drag it to `/Applications`, and open it once. The CLI package does not install the app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it; for source builds, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
 
 The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on `login`, or with `AGENT_DRIVE_API_URL`.
 
@@ -152,10 +152,13 @@ recover any pending local edits.
 
 ### macOS requirements and unmounting
 
-Install and run the signed `Agent Drive.app` on the same Mac as the CLI. The CLI launches the Finder
-helper from `/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder`; if you keep the app in
-another location, set `AGENT_DRIVE_FINDER_HELPER` to its absolute executable path. See the
-[macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare the companion app.
+Install the CLI and signed `Agent Drive.app` on the same Mac. If needed, download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP to extract `Agent Drive.app`, drag it to `/Applications`, and open it once. Then run `agent-drive mount MOUNTPOINT [--drive ID] [--read-only]`. The CLI launches the Finder helper from `/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder`; if the app is elsewhere, set `AGENT_DRIVE_FINDER_HELPER` to its absolute executable path. For source builds, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
+
+If macOS does not discover the extension after you open the app, register the bundled extension once, then rerun the mount command:
+
+```sh
+/usr/bin/pluginkit -a '/Applications/Agent Drive.app/Contents/PlugIns/AgentDriveFileProvider.appex'
+```
 
 On a new mount, Finder adds the provider under **Locations**. Match the Finder location to the mountpoint path you passed to `agent-drive mount MOUNTPOINT`. The Finder row may read `Agent
 Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive
