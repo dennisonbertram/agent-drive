@@ -191,10 +191,11 @@ the current file before making another change.
 
 ## Mounted jobs
 
-Mounted jobs let an agent prepare encrypted work on one dedicated drive and let an explicitly
-configured local command process submitted requests. The drive is the trust boundary: a key scoped
-to `/jobs` can edit or submit jobs throughout that tree. Use a dedicated drive and give it only to
-the agents and local worker that need it.
+Write a draft on the encrypted drive. Click **Submit job** in the dashboard or run
+`agent-drive jobs submit` to queue it. A worker running an agent command on your machine can pick
+it up even after the submitting client unmounts. Status and results appear in the same job folder.
+Use a dedicated drive and give access only to the agents and worker that need it. A key with write
+access to all of `/jobs` can edit or submit any job on that drive.
 
 Give each submitter `read` and `write` scopes with write paths on exactly its draft, its submission,
 and its inputs — never `status.json`, `outputs/`, or the worker's `/jobs/.agent-drive/` receipts.
@@ -236,10 +237,11 @@ agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
 ```
 
 The mount command stays in the foreground, so use a second terminal for the remaining commands.
-Create a draft using a stable ID and flat input filenames. Submission pins the request: the worker
-records the `submitted.md` version the qualifying rename committed and runs exactly that version,
-so editing the file afterwards does not change what runs. Inputs are pinned differently — each
-input is the version present when the worker picks up the job.
+Create a draft using a stable ID and flat input filenames. At pickup, the worker runs the last
+version you explicitly submitted by renaming `request.md` to `submitted.md`. Editing
+`submitted.md` alone leaves the approved version in place. If you move it back to `request.md`,
+edit and submit it again before pickup, the worker uses the new submission. Inputs are read at the
+versions present when the worker picks up the job. The server must support job approval lookups.
 
 ```sh
 mkdir -p "$HOME/AgentDrive/jobs/monthly-close/inputs"
@@ -300,12 +302,16 @@ the receipt is authoritative, while the visible status and outputs are the human
 files without replacing existing files; people can edit them later without changing the execution
 receipt. `--once` processes all currently queued jobs in one scan and then exits; without it, the
 worker stays in the foreground. While idle and connected, it checks for submissions every 4 to 45
-seconds. Use an operator-owned wrapper if an
-existing local agent needs a particular request format or local model service. The worker does not
-select a provider or add credentials to the child environment. Keep the command fixed and trusted;
-do not build it from request text or input files. SIGINT and SIGTERM request a graceful stop; a
-second signal forces exit. If a signal stops an already claimed job, its outcome is unknown and its
-execution receipt keeps the ID held for reconciliation.
+seconds. If your local agent needs a particular request format or model service, configure a fixed
+wrapper that you control. The worker launches the command with a minimal PATH and leaves provider
+credentials out of its environment. On macOS and Linux, an npm launcher that starts with
+`#!/usr/bin/env node` uses the same Node executable as the CLI. For a script that needs interpreter
+flags, pass the interpreter and script explicitly, for example `-- "$NODE_BIN" /opt/worker/job.mjs`.
+Keep executable paths and arguments under the operator's control.
+
+SIGINT and SIGTERM request a graceful stop. A second signal forces exit. If a signal stops an
+already claimed job, its outcome is unknown and the execution receipt keeps the ID held for
+reconciliation.
 
 If Ollama is already installed with a local `llama3` model, this fixed shell wrapper sends the
 request and each CSV attachment to the loopback model service. Use it instead of the deterministic
