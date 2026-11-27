@@ -44,13 +44,16 @@ import {
 import {
   autoSealHeldKeys,
   clearAgentOnlyIntent,
+  expectedAccountFingerprint,
   heldSealTargets,
   pendingAgentOnlyNames,
+  PIN_REQUIRED_HINT,
   recordAgentOnlyDrive,
   recordAgentOnlyIntent,
   sealClientWithDeadline,
   sealDrivesToAccount,
   UNKNOWN_TYPE_HINT,
+  UNVERIFIED_HINT,
 } from './account-seal.js';
 import { SyncInterruptedError, syncDirectory } from './sync.js';
 import { backupDirectory } from './backup.js';
@@ -114,6 +117,8 @@ function parse(raw: string[]) {
       target: { type: 'string' },
       'agent-only': { type: 'boolean' },
       repin: { type: 'boolean' },
+      verify: { type: 'string' },
+      fingerprint: { type: 'string' },
       once: { type: 'boolean' },
       sandbox: { type: 'string' },
       root: { type: 'string' },
@@ -563,6 +568,13 @@ async function run(command: string, raw: string[]) {
     throw new Error(
       '--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`.',
     );
+  if (args.values.verify !== undefined && command !== 'grant')
+    throw new Error('--verify is only supported by `grant`.');
+  if (
+    args.values.fingerprint !== undefined &&
+    !(command === 'account' && args.positionals[0] === 'seal')
+  )
+    throw new Error('--fingerprint is only supported by `account seal`.');
   if (args.values.sandbox !== undefined && command !== 'mounts' && command !== 'connect')
     throw new Error('--sandbox is only supported by `mounts add` and `connect`.');
   if (args.values.root !== undefined && command !== 'connect')
@@ -1053,10 +1065,18 @@ async function run(command: string, raw: string[]) {
   if (command === 'grant') {
     const code = args.positionals[0];
     if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
+    // The recipient's public key comes from the API — a channel whose trust is in question —
+    // so sealing needs the verification code the human read on the new agent's terminal.
+    if (!args.values.verify)
+      throw new Error(
+        'grant requires --verify <verification code>: the code the new agent printed under ' +
+          '"Verification code:" when it ran `agent-drive login`. Ask the human for it.',
+      );
     const connection = await resolveConnection(args.values.api);
     const drive = args.values.drive?.[0];
     await grantLogin({
       code,
+      verify: args.values.verify,
       ...(drive ? { drive } : {}),
       ...(args.values['read-only'] ? { readOnly: true } : {}),
       ...(args.values.scope ? { scopes: args.values.scope } : {}),
@@ -1125,15 +1145,30 @@ async function run(command: string, raw: string[]) {
       process.stdout.write('No drive keys on this machine.\n');
       return;
     }
+    // First use and repin need the fingerprint the human read in the console, supplied by
+    // --fingerprint or AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT — never trusted to the API alone.
+    const flagFingerprint = expectedAccountFingerprint(args.values.fingerprint);
+    if (args.values.fingerprint !== undefined && !flagFingerprint)
+      throw new Error(
+        '--fingerprint must look like "a1b2 c3d4 e5f6 7890", exactly as the console shows it.',
+      );
+    const rawEnvironmentFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
+    const environmentFingerprint = expectedAccountFingerprint(rawEnvironmentFingerprint);
+    if (rawEnvironmentFingerprint !== undefined && !environmentFingerprint)
+      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
+    if (args.values.repin === true && !flagFingerprint)
+      throw new Error(`--repin requires --fingerprint. ${PIN_REQUIRED_HINT}`);
+    const expectedFingerprint = flagFingerprint ?? environmentFingerprint;
     const result = await sealDrivesToAccount({
       client,
       config: connection.config,
       targets,
       force: true,
       repin: args.values.repin === true,
+      ...(expectedFingerprint ? { expectedFingerprint } : {}),
       onRepair: () =>
         process.stderr.write(
-          'The account-key pin file was unreadable, so a new one was started. Pins for other API origins are gone — run `agent-drive account seal --repin` under each of them.\n',
+          'The account-key pin file was unreadable, so a new one was started. Pins for other API origins are gone — run `agent-drive account seal --repin --fingerprint` under each of them.\n',
         ),
       requireVerifiedType: true,
       verifiedDriveIds: new Set(listed ?? []),
@@ -1142,7 +1177,12 @@ async function run(command: string, raw: string[]) {
       process.stdout.write(`${target.driveId}: ${result.get(target.driveId)!}\n`);
     const statuses = [...result.values()];
     if (statuses.includes('unknown type')) process.stderr.write(`${UNKNOWN_TYPE_HINT}\n`);
-    if (statuses.some((status) => status === 'failed' || status === 'unknown type'))
+    if (statuses.includes('unverified')) process.stderr.write(`${UNVERIFIED_HINT}\n`);
+    if (
+      statuses.some(
+        (status) => status === 'failed' || status === 'unknown type' || status === 'unverified',
+      )
+    )
       process.exitCode = 1;
     return;
   }
@@ -1724,7 +1764,8 @@ Commands:
                                         '**/node_modules' skips node_modules at any depth, a bare 'node_modules' only the top-level one.
                                         Over 5000 files or 1 GiB needs --yes (or preview with --dry-run). One backup per prefix at a time.
   version                               Print the CLI version
-  grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...   Seal this machine's drive key for the login showing CODE; the owner then approves it on /connect
+  grant CODE --verify CODE2 [--drive ID] [--read-only] [--scope S]... [--write-path P]...
+                                        Check the new agent's printed verification code before sealing; the owner then approves on /connect
   credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
                                         Back up the API key and drive keys (bundle "adcred1.…"). Offer 1Password first, then the clipboard (for Apple Passwords or another manager), then a file outside the repo
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
@@ -1732,7 +1773,8 @@ Commands:
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
   credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
   credentials status                    Which drive keys are backed up, when, and how
-  account seal [--drive ID] [--repin]   Seal held drive keys to your account key for the console
+  account seal [--drive ID] [--fingerprint CODE] [--repin]
+                                        Verify the console's account-key fingerprint before sealing or repinning
   skill install [--target claude|codex|DIR]   Install the agent-drive SKILL.md for your agent
   capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]   Run an agent with its LLM calls saved as encrypted traces under /traces
   mcp

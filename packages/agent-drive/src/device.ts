@@ -17,6 +17,7 @@ import {
   unsealDriveKey,
   type SealedDriveKey,
 } from './seal.js';
+import { normalizeVerificationCode, verificationCode } from './verification.js';
 
 type TokenResponse = {
   access_token: string;
@@ -51,6 +52,18 @@ function sameOrigin(a: string | undefined, b: string) {
   }
 }
 
+function safeTerminalText(value: unknown) {
+  return String(value).replace(
+    /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,
+    (char) => {
+      if (char === '\n') return '\\n';
+      if (char === '\r') return '\\r';
+      if (char === '\t') return '\\t';
+      return `\\u${char.codePointAt(0)!.toString(16).padStart(4, '0')}`;
+    },
+  );
+}
+
 function openUrl(url: string) {
   const [command, args] =
     process.platform === 'darwin'
@@ -75,7 +88,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
   // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
-  validateUrl(options.apiUrl, true);
+  const apiUrl = validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
   const post = async (path: string, body: Record<string, unknown>, bearer?: string) => {
     let response: Response;
@@ -121,19 +134,29 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   }
   if (!started.ok) {
     const description = started.data.error_description ?? started.data.error ?? started.status;
-    throw new Error(`Agent Drive refused the login request: ${String(description)}`);
+    throw new Error(`Agent Drive refused the login request: ${safeTerminalText(description)}`);
   }
   const grant = started.data as {
     device_code: string;
     user_code: string;
-    verification_uri: string;
-    verification_uri_complete?: string;
     expires_in: number;
     interval?: number;
   };
-  const link = grant.verification_uri_complete ?? grant.verification_uri;
+  // The API response is untrusted terminal input. Accept only the server's fixed user-code
+  // alphabet, then build the URL from the API origin the caller configured; never print or open
+  // a server-supplied URL that could contain terminal controls or send the human elsewhere.
+  if (!/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/u.test(grant.user_code))
+    throw new Error('Agent Drive returned an invalid user code. Run `agent-drive login` again.');
+  const approvalUrl = new URL('/connect', apiUrl.origin);
+  approvalUrl.searchParams.set('code', grant.user_code);
+  const link = approvalUrl.toString();
+  // The verification code is a commitment to this device's public key. It travels only through
+  // the human — from this terminal to the approval page or to `agent-drive grant --verify` —
+  // so a service that hands either side a different public key cannot get a key sealed to it.
+  const verify = await verificationCode(publicKey);
   options.log(`Open this link to approve: ${link}`);
   options.log(`Check that the code matches: ${grant.user_code}`);
+  options.log(`Verification code: ${verify}`);
   options.log('Waiting for approval...');
   if (options.openBrowser) openUrl(link);
 
@@ -171,7 +194,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     else if (code === 'expired_token') throw expired();
     else
       throw new Error(
-        `Login failed: ${String(code ?? result.status)}. Run \`agent-drive login\` again.`,
+        `Login failed: ${safeTerminalText(code ?? result.status)}. Run \`agent-drive login\` again.`,
       );
   }
 
@@ -193,7 +216,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
       driveKeys[driveId] = key;
       unsealed.push(driveId);
     } catch {
-      options.log(`Could not unseal the key for drive ${driveId}; it is not saved.`);
+      options.log(
+        `Could not unseal the key for drive ${safeTerminalText(driveId)}; it is not saved.`,
+      );
       noKey.push(driveId);
     }
   }
@@ -222,18 +247,21 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     throw new Error(
       `Login finished but this agent has no usable drive key. Run \`agent-drive login\` again; the owner's approval will create a drive for this agent. (The login was saved to ${configPath()}.)`,
     );
-  options.log(`Logged in as agent ${token.agent_name ?? options.name}.`);
-  options.log(`Usable drives: ${usable.join(', ')}`);
-  options.log(`Scopes: ${token.scope ?? ''}`);
-  if (token.write_paths?.length) options.log(`Writes limited to: ${token.write_paths.join(', ')}`);
+  options.log(`Logged in as agent ${safeTerminalText(token.agent_name ?? options.name)}.`);
+  options.log(`Usable drives: ${usable.map(safeTerminalText).join(', ')}`);
+  options.log(`Scopes: ${safeTerminalText(token.scope ?? '')}`);
+  if (token.write_paths?.length)
+    options.log(`Writes limited to: ${token.write_paths.map(safeTerminalText).join(', ')}`);
   options.log(`Config: ${configPath()}`);
   if (token.new_drive_id) {
-    options.log(`New drive ${token.new_drive_id} created; its key is saved in the config file.`);
+    options.log(
+      `New drive ${safeTerminalText(token.new_drive_id)} created; its key is saved in the config file.`,
+    );
     options.log(BACKUP_HINT);
   }
   if (noKey.length)
     options.log(
-      `No usable key for: ${noKey.join(', ')}. You can list names but not read contents.`,
+      `No usable key for: ${noKey.map(safeTerminalText).join(', ')}. You can list names but not read contents.`,
     );
   return { unsealed, noKey, usable, newDriveId: token.new_drive_id ?? null };
 }
@@ -247,9 +275,15 @@ function expired() {
 /**
  * An agent that holds a drive seals its drive key to a pending login and offers it. The human
  * still approves on /connect. Prints the request facts and the approval URL, never a key.
+ *
+ * `verify` is the verification code the requesting device's login printed, relayed by the
+ * human. It is checked against the public key the API returns for the request BEFORE the drive
+ * key is sealed: a service that answers this lookup with a substituted key would receive the
+ * sealed drive key, so a mismatch refuses the seal outright (docs/agent-login.md §15).
  */
 export async function grantLogin(options: {
   code: string;
+  verify: string;
   drive?: string;
   readOnly?: boolean;
   scopes?: string[];
@@ -280,18 +314,28 @@ export async function grantLogin(options: {
       `This key does not hold ${scopes.join(' and ')}; pass --scope for what it may grant.`,
     );
   const writePaths = options.writePaths?.length ? options.writePaths : (who.writePaths ?? []);
+  const expected = normalizeVerificationCode(options.verify);
+  if (!expected)
+    throw new Error(
+      'Pass --verify with the verification code the new agent printed, exactly as shown ("a1b2 c3d4 e5f6 7890").',
+    );
   const request = await client.deviceRequest(code);
   options.log(
-    `Request from ${request.client_name}${request.machine ? ` on ${request.machine}` : ''}, made ${request.created_at}.`,
+    `Request from ${safeTerminalText(request.client_name)}${request.machine ? ` on ${safeTerminalText(request.machine)}` : ''}, made ${safeTerminalText(request.created_at)}.`,
   );
+  if ((await verificationCode(request.public_key)) !== expected)
+    throw new Error(
+      'The verification code does not match this request. Check the code the new agent printed; ' +
+        'if it is right, do not grant — the request may have been tampered with.',
+    );
   const sealedDriveKey = await sealDriveKey(request.public_key, drive, driveKey);
   await client.grantDevice(code, { driveId: drive, scopes, writePaths, sealedDriveKey });
   options.log(
-    `Offered drive ${drive} to ${request.client_name} (${scopes.join(' ')}; ${
+    `Offered drive ${safeTerminalText(drive)} to ${safeTerminalText(request.client_name)} (${scopes.map(safeTerminalText).join(' ')}; ${
       !scopes.includes('write')
         ? 'no writes'
         : writePaths.length
-          ? `writes under ${writePaths.join(', ')}`
+          ? `writes under ${writePaths.map(safeTerminalText).join(', ')}`
           : 'writes anywhere in the drive'
     }). The owner approves at ${client.apiOrigin}/connect?code=${code}.`,
   );

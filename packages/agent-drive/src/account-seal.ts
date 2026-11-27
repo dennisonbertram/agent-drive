@@ -20,6 +20,7 @@ import {
 } from './config.js';
 import { sealDriveKey } from './seal.js';
 import { ensurePrivateStateDirectory } from './sync.js';
+import { normalizeVerificationCode } from './verification.js';
 
 export const SEAL_THROTTLE_MS = 24 * 60 * 60 * 1000;
 /** Background (automatic) sealing must never hold a command; the whole attempt gets this budget. */
@@ -30,9 +31,15 @@ const NO_ACCOUNT_KEY_WARNING =
   'Set a passphrase in the console under Settings; agents will add the drive then.';
 const UNREADABLE_PIN_FILE =
   'The account-key pin file is unreadable, so sealing is refused. Confirm the account key ' +
-  'fingerprint in the console, then repair the file with `agent-drive account seal --repin`.';
+  'fingerprint in the console, then repair the file with `agent-drive account seal --repin --fingerprint <fingerprint>`.';
 export const UNKNOWN_TYPE_HINT =
   "unknown drive type: run 'agent-drive account seal --drive ID' with a key that can read drives";
+export const UNVERIFIED_HINT =
+  'The account key has not been verified on this machine. Copy its fingerprint from the console ' +
+  '(Settings) and run `agent-drive account seal --fingerprint "<the fingerprint>"`.' +
+  ' Sealing stays off until then.';
+export const PIN_REQUIRED_HINT =
+  'Copy the account-key fingerprint shown in the console (Settings) and pass --fingerprint.';
 
 export type SealStatus =
   | 'sealed'
@@ -41,7 +48,8 @@ export type SealStatus =
   | 'no account key'
   | 'failed'
   | 'wrong origin'
-  | 'unknown type';
+  | 'unknown type'
+  | 'unverified';
 export type SealTarget = { driveId: string; driveKey: string; agentOnly?: boolean };
 
 /** The same fingerprint the console prints on Settings: SHA-256(raw key), first 8 bytes, grouped. */
@@ -57,7 +65,7 @@ export class AccountKeyPinMismatch extends Error {
   constructor(expected: string, actual: string) {
     super(
       `The account public key changed (pinned fingerprint ${expected}, server returned ${actual}). ` +
-        'If the owner reset the passphrase in the console, run `agent-drive account seal --repin` to pin the new key.',
+        'If the owner reset the passphrase in the console, verify its Settings fingerprint and run `agent-drive account seal --repin --fingerprint <fingerprint>` to pin the new key.',
     );
     this.name = 'AccountKeyPinMismatch';
   }
@@ -70,9 +78,42 @@ export class AccountSealStateUnreadable extends Error {
   }
 }
 
+/** The human-supplied fingerprint does not match the account key the service returned. */
+export class AccountKeyFingerprintMismatch extends Error {
+  constructor(expected: string, actual: string) {
+    super(
+      `The supplied fingerprint (${expected}) does not match the account key the service returned (${actual}). ` +
+        'Check the fingerprint in the console under Settings; if it is right, the API may be answering with a different account key.',
+    );
+    this.name = 'AccountKeyFingerprintMismatch';
+  }
+}
+
+/** A pin change without an independently sourced fingerprint; callers must fail closed. */
+export class AccountSealPinRequired extends Error {
+  constructor() {
+    super(
+      `Establishing or replacing the account-key pin needs a verified fingerprint. ${PIN_REQUIRED_HINT}`,
+    );
+    this.name = 'AccountSealPinRequired';
+  }
+}
+
+/**
+ * A fingerprint the human carried to the agent outside the API: `--fingerprint`, the
+ * AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT environment variable, or nothing. Returns the canonical
+ * "xxxx xxxx xxxx xxxx" form, or undefined — a malformed value behaves as "no fingerprint",
+ * which fails closed rather than silently pinning whatever the API returns.
+ */
+export function expectedAccountFingerprint(value: string | undefined): string | undefined {
+  return value === undefined ? undefined : normalizeVerificationCode(value);
+}
+
 type SealState = {
   /** Account public key fingerprint pinned per effective API origin. */
   pins: Record<string, string>;
+  /** Pins verified against a fingerprint supplied outside the API, per API origin. */
+  verifiedPins: Record<string, string>;
   /** `${origin}\n${driveId}` -> ISO time of the last seal check (any outcome). */
   checked: Record<string, string>;
   /** `${origin}\n${driveId}` recorded agent-only at creation or learned from a slot rejection. */
@@ -86,7 +127,7 @@ export function accountSealStatePath() {
 }
 
 function emptyState(): SealState {
-  return { pins: {}, checked: {}, agentOnly: [], pendingAgentOnly: [] };
+  return { pins: {}, verifiedPins: {}, checked: {}, agentOnly: [], pendingAgentOnly: [] };
 }
 
 /** Marks are origin-scoped: cloned APIs sharing a drive id must not share outcomes. */
@@ -143,7 +184,8 @@ async function readSealStateFile(): Promise<SealStateRead> {
     record.pins === undefined &&
     record.checked === undefined &&
     record.agentOnly === undefined &&
-    record.pendingAgentOnly === undefined;
+    record.pendingAgentOnly === undefined &&
+    record.verifiedPins === undefined;
   if (legacy && isStringMap(record))
     return { kind: 'ok', state: { ...emptyState(), checked: record } };
   // A current-format file is damaged when `pins` is absent or not a map, or any pin is not a
@@ -151,6 +193,9 @@ async function readSealStateFile(): Promise<SealStateRead> {
   if (
     !isStringMap(record.pins) ||
     Object.values(record.pins).some((pin) => !isFingerprint(pin)) ||
+    (record.verifiedPins !== undefined &&
+      (!isStringMap(record.verifiedPins) ||
+        Object.values(record.verifiedPins).some((pin) => !isFingerprint(pin)))) ||
     (record.checked !== undefined && !isStringMap(record.checked)) ||
     (record.agentOnly !== undefined && !isStringList(record.agentOnly)) ||
     (record.pendingAgentOnly !== undefined && !isStringList(record.pendingAgentOnly))
@@ -160,6 +205,7 @@ async function readSealStateFile(): Promise<SealStateRead> {
     kind: 'ok',
     state: {
       pins: record.pins,
+      verifiedPins: (record.verifiedPins as Record<string, string> | undefined) ?? {},
       checked: (record.checked as Record<string, string> | undefined) ?? {},
       agentOnly: (record.agentOnly as string[] | undefined) ?? [],
       pendingAgentOnly: (record.pendingAgentOnly as string[] | undefined) ?? [],
@@ -347,8 +393,16 @@ export async function sealDrivesToAccount(opts: {
   targets: SealTarget[];
   /** Bypass the 24h throttle (`account seal`, drive create/login/import/mcp). */
   force?: boolean;
-  /** Accept a changed account public key (`account seal --repin`); also repairs an unreadable pin file. */
+  /** Accept a changed account public key (`account seal --repin --fingerprint`); also repairs an unreadable pin file. */
   repin?: boolean;
+  /**
+   * The account-key fingerprint the human supplied outside the API (flag or env), normalized
+   * with expectedAccountFingerprint. First use (no pin anywhere) and every repin require it:
+   * without it first use marks each drive 'unverified' — nothing is sealed and nothing is
+   * pinned — and repin throws AccountSealPinRequired. A supplied value that does not match the
+   * key the service returned throws AccountKeyFingerprintMismatch before anything is posted.
+   */
+  expectedFingerprint?: string;
   /** Fires once when --repin replaces an unreadable state file: every other origin's pin is gone. */
   onRepair?: () => void;
   /** Collects per-drive failures; without it they only mark the 'failed' status. */
@@ -433,23 +487,68 @@ export async function sealDrivesToAccount(opts: {
     return result;
   }
   const fingerprint = accountKeyFingerprint(key.publicKey);
+  const expected = opts.expectedFingerprint;
+  // The human's independently sourced fingerprint must match the key the service returned,
+  // always — before any pin compare or slot post.
+  if (expected !== undefined && expected !== fingerprint)
+    throw new AccountKeyFingerprintMismatch(expected, fingerprint);
   // The pin compare-and-set runs under the state lock, so a second concurrent process compares
   // against the pin the first one committed rather than a stale read.
   let checked: Record<string, string> = {};
+  let unverified = false;
+  let newlyVerified = false;
   await withSealState((state) => {
     checked = { ...state.checked };
-    const pinned = state.pins[origin] ?? config.accountKeyPins?.[origin];
-    if (pinned && pinned !== fingerprint && !opts.repin)
+    const statePin = state.pins[origin];
+    const configPin = config.accountKeyPins?.[origin];
+    const validConfigPin = configPin && isFingerprint(configPin) ? configPin : undefined;
+    const pinned = statePin ?? validConfigPin;
+    if (opts.repin) {
+      // A pin change is never entrusted to the API alone: no verified fingerprint, no repin.
+      if (!expected) throw new AccountSealPinRequired();
+    } else if (statePin && statePin !== fingerprint) {
+      // A changed pin always needs the explicit --repin path, even when the new key was
+      // independently verified; silently replacing a known old pin would hide a reset.
+      throw new AccountKeyPinMismatch(statePin, fingerprint);
+    } else if (pinned && pinned !== fingerprint) {
       throw new AccountKeyPinMismatch(pinned, fingerprint);
+    }
+    // Config pins predate the verification marker and may have been copied from an old TOFU
+    // install. Keep them as mismatch guards, but require a fresh fingerprint before upgrading
+    // one to a verified pin.
+    const independentlyVerified = expected === fingerprint;
+    const previouslyVerified = state.verifiedPins[origin] === fingerprint;
+    newlyVerified = independentlyVerified && !previouslyVerified;
+    if (!independentlyVerified && !previouslyVerified) {
+      // Pins written by earlier versions were TOFU pins from this API, not independent
+      // verification. Preserve them but require one human-sourced fingerprint before sealing.
+      unverified = true;
+      return { changed: false };
+    }
+    let changed = false;
     if (state.pins[origin] !== fingerprint) {
       state.pins[origin] = fingerprint;
-      return { changed: true };
+      changed = true;
     }
-    return { changed: false };
+    if (state.verifiedPins[origin] !== fingerprint) {
+      state.verifiedPins[origin] = fingerprint;
+      changed = true;
+    }
+    return { changed };
   }, stateOpts);
+  if (unverified) {
+    const at = new Date().toISOString();
+    for (const target of pending) result.set(target.driveId, 'unverified');
+    await withSealState((state) => {
+      for (const target of pending) state.checked[scoped(origin, target.driveId)] = at;
+      return { changed: true };
+    }, stateOpts).catch(() => {});
+    return result;
+  }
   const now = Date.now();
   for (const target of pending) {
-    if (!opts.force && recentlyChecked(checked, origin, target.driveId, now)) continue;
+    if (!opts.force && !newlyVerified && recentlyChecked(checked, origin, target.driveId, now))
+      continue;
     try {
       const sealed = await sealDriveKey(key.publicKey, target.driveId, target.driveKey, {
         salt: ACCOUNT_SEAL_SALT,
@@ -594,12 +693,23 @@ export async function autoSealHeldKeys(opts: {
     if (opts.selectedDriveId) early.add(opts.selectedDriveId);
     if (opts.keys) for (const id of Object.keys(opts.keys)) early.add(id);
     if (!early.size) return;
+    const rawFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
+    const expectedFingerprint = expectedAccountFingerprint(rawFingerprint);
+    if (rawFingerprint !== undefined && !expectedFingerprint)
+      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
+    let retryUnverified = false;
     if (!opts.force) {
       const read = await readSealStateFile();
       if (read.kind === 'unreadable') throw new AccountSealStateUnreadable();
+      retryUnverified = Boolean(
+        expectedFingerprint &&
+          read.kind === 'ok' &&
+          read.state.verifiedPins[origin] !== expectedFingerprint,
+      );
       const checked = read.kind === 'ok' ? read.state.checked : {};
       const now = Date.now();
-      if (![...early].some((id) => !recentlyChecked(checked, origin, id, now))) return;
+      if (!retryUnverified && ![...early].some((id) => !recentlyChecked(checked, origin, id, now)))
+        return;
     }
     // The full listing tells bulk sealing which held drives still exist and which are
     // agent-only; recorded --agent-only create intents join in by name. A key without `read`
@@ -650,21 +760,26 @@ export async function autoSealHeldKeys(opts: {
     // Drives explicitly named by the caller (a just-created drive) are known to exist even
     // when the listing is denied; every other drive needs the listing or a local mark.
     const verified = new Set([...listed, ...(opts.driveIds ?? [])]);
+    // A fingerprint the human preset in the environment counts as independently sourced;
+    // the first seal verifies and pins it. Without one, first use fails closed.
     const result = await sealDrivesToAccount({
       client: opts.client,
       config: opts.config,
       targets,
-      force: opts.force === true,
+      force: opts.force === true || retryUnverified,
       requireVerifiedType: true,
       verifiedDriveIds: verified,
       stateDeadlineAt: opts.deadlineAt,
       onFailure: (driveId, error) => failures.set(driveId, error),
+      ...(expectedFingerprint ? { expectedFingerprint } : {}),
     });
     if (opts.deadline?.aborted) return;
     // Only the named events (create/login/import/mcp) warn: an account with no key would
     // otherwise print the same line on every throttled command.
     if (opts.force && [...result.values()].some((status) => status === 'no account key'))
       opts.warn(NO_ACCOUNT_KEY_WARNING);
+    // First use with no fingerprint source: the one-time verification step is the owner's.
+    if ([...result.values()].some((status) => status === 'unverified')) opts.warn(UNVERIFIED_HINT);
     const unknown = targets
       .filter((target) => result.get(target.driveId) === 'unknown type')
       .map((target) => target.driveId);

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
 import { unsealDriveKey } from './seal.js';
+import { verificationCode } from './verification.js';
 import { DriveCryptoError } from './crypto.js';
 import {
   apiErrorLines,
@@ -50,7 +51,10 @@ const start = {
 
 type Handler = (n: number, publicKey: string) => Response | Promise<Response>;
 
-function run(tokens: Handler, extra: { apiUrl?: string } = {}) {
+function run(
+  tokens: Handler,
+  extra: { apiUrl?: string; started?: Record<string, unknown>; startedStatus?: number } = {},
+) {
   const calls: { url: string; body: Record<string, string> }[] = [];
   const out: string[] = [];
   const sleeps: number[] = [];
@@ -58,7 +62,8 @@ function run(tokens: Handler, extra: { apiUrl?: string } = {}) {
   const fetcher = async (url: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, string>;
     calls.push({ url: String(url), body });
-    if (String(url).endsWith('/oauth/device_authorization')) return json(200, start);
+    if (String(url).endsWith('/oauth/device_authorization'))
+      return json(extra.startedStatus ?? 200, extra.started ?? start);
     return tokens(polls++, calls[0]?.body.public_key ?? '');
   };
   const promise = deviceLogin({
@@ -148,10 +153,37 @@ describe('deviceLogin', () => {
     const printed = r.out.join('\n');
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');
+    // The verification code is the fingerprint of the public key this login generated — the
+    // value the owner types on /connect or relays to `grant --verify`.
+    const loginKey = r.calls[0]!.body.public_key as string;
+    expect(printed).toContain(`Verification code: ${await verificationCode(loginKey)}`);
     expect(printed).toMatch(/d2/u);
     expect(printed).toMatch(/No usable key for: d2\./u);
     for (const secret of ['adk_SECRETTOKEN', K1, saved.driveKeys.d3 ?? 'x'])
       expect(printed).not.toContain(secret);
+  });
+
+  it('constructs the approval URL from the configured origin, not the API response', async () => {
+    await setup();
+    const r = run(() => json(400, { error: 'access_denied' }), {
+      started: {
+        ...start,
+        verification_uri: 'https://evil.example/\u001b[2J',
+        verification_uri_complete: 'https://evil.example/\nVerification code: forged',
+      },
+    });
+    await expect(r.promise).rejects.toThrow(/denied/u);
+    expect(r.out).toContain('Open this link to approve: https://x.test/connect?code=BCDF-GHJK');
+    expect(r.out.join('\n')).not.toContain('evil.example');
+  });
+
+  it('rejects a malformed server user code before printing any login details', async () => {
+    await setup();
+    const r = run(() => json(400, { error: 'access_denied' }), {
+      started: { ...start, user_code: 'BCDF-GHJK\nVerification code: forged' },
+    });
+    await expect(r.promise).rejects.toThrow(/invalid.*user code/iu);
+    expect(r.out).toEqual([]);
   });
 
   it('prints the write paths only when the key is limited', async () => {
@@ -176,6 +208,16 @@ describe('deviceLogin', () => {
     await setup();
     const r = run(() => json(400, { error: 'access_denied' }));
     await expect(r.promise).rejects.toThrow(/denied/iu);
+  });
+
+  it('escapes control characters in authorization error text', async () => {
+    await setup();
+    const r = run(() => json(400, {}), {
+      startedStatus: 400,
+      started: { error_description: 'Denied\nVerification code: forged\u001b[2J' },
+    });
+    await expect(r.promise).rejects.toThrow(/Denied\\nVerification code/u);
+    expect(r.out).toEqual([]);
   });
 
   it('reports an expired code from the server', async () => {
@@ -599,15 +641,18 @@ describe('grantLogin', () => {
   async function grant(
     options: Partial<Parameters<typeof grantLogin>[0]> = {},
     scopes = ['read', 'write', 'delegate'],
+    observed?: { posts: string[]; client_name?: string; machine?: string; created_at?: string },
   ) {
     const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
       'deriveBits',
     ]);
     const publicKey = b64(await subtle.exportKey('raw', pair.publicKey));
+    const verify = await verificationCode(publicKey);
     const bodies: string[] = [];
     const out: string[] = [];
     const fetcher = async (url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.body) bodies.push(String(init.body));
+      if (init?.method === 'POST') observed?.posts.push(String(init.body ?? ''));
       if (String(url).endsWith('/whoami'))
         return json(200, {
           accountId: 'a',
@@ -620,9 +665,9 @@ describe('grantLogin', () => {
       if (String(url).endsWith('/device/BCDF-GHJK'))
         return json(200, {
           user_code: 'BCDF-GHJK',
-          client_name: 'newbot',
-          machine: 'box',
-          created_at: '2026-01-01T00:00:00Z',
+          client_name: observed?.client_name ?? 'newbot',
+          machine: observed?.machine ?? 'box',
+          created_at: observed?.created_at ?? '2026-01-01T00:00:00Z',
           expires_at: 'x',
           public_key: publicKey,
         });
@@ -635,12 +680,13 @@ describe('grantLogin', () => {
     });
     await grantLogin({
       code: 'bcdf-ghjk',
+      verify,
       client,
       config: { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } },
       log: (line) => out.push(line),
       ...options,
     });
-    return { pair, bodies, out };
+    return { pair, bodies, out, verify };
   }
 
   it('seals the key to the request public key, posts it, and prints no key', async () => {
@@ -664,6 +710,17 @@ describe('grantLogin', () => {
     expect(r.out[1]).toContain('https://x.test/connect?code=BCDF-GHJK');
   });
 
+  it('escapes control characters in service-returned request details', async () => {
+    const r = await grant({}, ['read', 'write', 'delegate'], {
+      posts: [],
+      client_name: 'bot\nVerification code: forged',
+      machine: 'box\u001b[2J',
+      created_at: 'today\r\nforged',
+    });
+    expect(r.out[0]).toContain('\\nVerification code: forged');
+    expect(r.out.join('')).not.toMatch(/[\r\n\u001b]/u);
+  });
+
   it('defaults to read only with --read-only and refuses defaults the key cannot grant', async () => {
     const r = await grant({ readOnly: true });
     expect(JSON.parse(r.bodies[0]!).scopes).toEqual(['read']);
@@ -682,17 +739,39 @@ describe('grantLogin', () => {
     });
     const config = { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } };
     await expect(
-      grantLogin({ code: 'BCDF-GHJK', client, config, drive: 'd1', log: () => undefined }),
+      grantLogin({
+        code: 'BCDF-GHJK',
+        verify: 'a1b2 c3d4 e5f6 7890',
+        client,
+        config,
+        drive: 'd1',
+        log: () => undefined,
+      }),
     ).rejects.toThrow(/no drive key for d1/);
     await expect(
       grantLogin({
         code: 'BCDF-GHJK',
+        verify: 'a1b2 c3d4 e5f6 7890',
         client,
         config: { driveKeys: { d1: K1 } },
         log: () => undefined,
       }),
     ).rejects.toThrow(/drive key/);
     expect(posts).toEqual([]);
+  });
+
+  it('refuses to seal when --verify does not match the request public key, and posts nothing', async () => {
+    // The negative case for recipient binding: a substituted key (or a wrong code relayed by
+    // the human) must stop the seal before the offer is posted.
+    const posts: string[] = [];
+    await expect(grant({ verify: 'a1b2 c3d4 e5f6 7890' }, undefined, { posts })).rejects.toThrow(
+      /verification code does not match/,
+    );
+    expect(posts).toEqual([]);
+  });
+
+  it('refuses a malformed --verify before the request is even fetched', async () => {
+    await expect(grant({ verify: 'not-a-code' })).rejects.toThrow(/Pass --verify/);
   });
 
   it('summarizes the offer from scopes and paths', async () => {
