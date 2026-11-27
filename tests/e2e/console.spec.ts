@@ -2143,6 +2143,233 @@ test('console preview: decrypts in the tab, never renders HTML or SVG, and revok
   }
 });
 
+test('console preview: owner-opened MP4 and WebM play in the panel; undecodable or oversized video keeps the Download path', async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  test.setTimeout(240_000);
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  const root = await mkdtemp(join(tmpdir(), 'agent-drive-video-'));
+  const driveKey = randomBytes(32).toString('base64url');
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    const post = async <T>(path: string, data: unknown) =>
+      (await (
+        await context.request.post(`/api/console/${path}`, { data, headers: { Origin: baseURL! } })
+      ).json()) as T;
+    const drive = await post<{ id: string }>('drives', { name: 'Video drive' });
+    const agent = await post<{ id: string }>('agents', { name: 'Video agent' });
+    const key = await post<{ token: string }>('keys', {
+      label: 'Video key',
+      agentId: agent.id,
+      driveIds: [drive.id],
+      scopes: ['read', 'write'],
+    });
+    const environment = {
+      ...process.env,
+      AGENT_DRIVE_API_URL: baseURL,
+      AGENT_DRIVE_API_KEY: key.token,
+      AGENT_DRIVE_KEY: driveKey,
+      AGENT_DRIVE_CONFIG: join(root, 'config.json'),
+    };
+
+    // The clips are made here, in the test browser: a canvas recorded by MediaRecorder
+    // is a real, short file in each container — no fixture bytes and no ffmpeg.
+    await page.goto('/console');
+    const record = (mimeType: string) =>
+      page.evaluate(async (mime) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 90;
+        const ctx = canvas.getContext('2d')!;
+        const recorder = new MediaRecorder(canvas.captureStream(10), { mimeType: mime });
+        const chunks: Blob[] = [];
+        recorder.ondataavailable = (event) => {
+          if (event.data.size) chunks.push(event.data);
+        };
+        const stopped = new Promise<void>((resolve) => {
+          recorder.onstop = () => resolve();
+        });
+        recorder.start();
+        const start = performance.now();
+        await new Promise<void>((resolve) => {
+          const draw = () => {
+            ctx.fillStyle = `hsl(${Math.round((performance.now() - start) / 5)}, 70%, 45%)`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px sans-serif';
+            ctx.fillText('clip', 10, 30);
+            if (performance.now() - start < 700) requestAnimationFrame(draw);
+            else resolve();
+          };
+          draw();
+        });
+        recorder.stop();
+        await stopped;
+        const url = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(new Blob(chunks, { type: mime }));
+        });
+        return url.split(',')[1]!;
+      }, mimeType);
+
+    const plaintext = {
+      'clip.webm': Buffer.from(await record('video/webm'), 'base64'),
+      'clip.mp4': Buffer.from(await record('video/mp4'), 'base64'),
+      'broken.mp4': Buffer.from('<html><script>window.__pwned=1</script>not a video'),
+      'movie.mov': Buffer.from('quicktime placeholder'),
+      'big.mp4': Buffer.alloc(10.5 * 1024 * 1024, 'v'),
+    };
+    for (const [name, content] of Object.entries(plaintext)) {
+      const local = join(root, name);
+      await writeFile(local, content, { mode: 0o600 });
+      const upload = await cli(['put', local, `/v/${name}`, '--drive', drive.id], environment);
+      expect(upload.status, `upload ${name}: ${upload.stderr.slice(0, 300)}`).toBe(0);
+    }
+    const recovery = join(root, 'video.key.json');
+    await writeFile(
+      recovery,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: drive.id, key: driveKey }),
+    );
+    await page.addInitScript(() => {
+      const w = window as unknown as { __made: string[]; __revoked: string[] };
+      w.__made = [];
+      w.__revoked = [];
+      const make = URL.createObjectURL.bind(URL);
+      const revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (blob: Blob | MediaSource) => {
+        const url = make(blob);
+        w.__made.push(`${(blob as Blob).type}|${url}`);
+        return url;
+      };
+      URL.revokeObjectURL = (url: string) => {
+        w.__revoked.push(url);
+        revoke(url);
+      };
+    });
+    const requests: string[] = [];
+    const pageErrors: string[] = [];
+    page.on('request', (request) => requests.push(request.url()));
+    page.on('pageerror', (error) => pageErrors.push(String(error)));
+
+    await page.goto('/console?path=/v');
+    const nameButton = (name: string) => page.getByTitle(`Preview ${name}`, { exact: true });
+    const preview = (name: string) => page.getByRole('dialog', { name });
+
+    // The open dialog holds a playing, fitted video whose blob URL dies with it.
+    const expectPlays = async (name: string) => {
+      const video = preview(name).locator('video.preview-video');
+      await expect(video).toBeVisible();
+      const src = await video.getAttribute('src');
+      expect(src).toMatch(/^blob:/);
+      await expect(video).toHaveAttribute('controls', /.*/);
+      await expect(video).toHaveAttribute('controlslist', 'nodownload');
+      expect(await video.getAttribute('autoplay')).toBeNull();
+      // loadedmetadata: intrinsic size and duration are known before any play.
+      await expect
+        .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState))
+        .toBeGreaterThanOrEqual(1);
+      expect(await video.evaluate((el: HTMLVideoElement) => el.videoWidth)).toBe(160);
+      expect(await video.evaluate((el: HTMLVideoElement) => el.duration)).toBeGreaterThan(0.3);
+      await video.evaluate((el: HTMLVideoElement) => el.play());
+      await expect.poll(() => video.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+      await video.evaluate((el: HTMLVideoElement) => el.pause());
+      const box = (await video.boundingBox())!;
+      const dialog = (await preview(name).boundingBox())!;
+      expect(box.width).toBeLessThanOrEqual(dialog.width);
+      expect(box.height).toBeLessThanOrEqual(dialog.height);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect(
+        await page.evaluate(() => (window as unknown as { __revoked: string[] }).__revoked),
+      ).toContain(src);
+    };
+
+    // 1. On a locked drive the first Preview asks for the key, then the WebM plays.
+    await nameButton('clip.webm').click();
+    await expect(page.getByText('After the key loads, clip.webm opens.')).toBeVisible();
+    await page.getByLabel('Choose recovery file').setInputFiles(recovery);
+    await expectPlays('clip.webm');
+    expect(
+      await page.evaluate(() => (window as unknown as { __made: string[] }).__made),
+    ).toContainEqual(expect.stringMatching(/^video\/webm\|blob:/));
+
+    // 2. The MP4 plays the same way.
+    await nameButton('clip.mp4').click();
+    await expectPlays('clip.mp4');
+    expect(
+      await page.evaluate(() => (window as unknown as { __made: string[] }).__made),
+    ).toContainEqual(expect.stringMatching(/^video\/mp4\|blob:/));
+
+    // 3. The panel still fits on a phone-sized viewport.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await nameButton('clip.webm').click();
+    const video = preview('clip.webm').locator('video.preview-video');
+    await expect(video).toBeVisible();
+    const fit = (await video.boundingBox())!;
+    const dialogBox = (await preview('clip.webm').boundingBox())!;
+    expect(fit.width).toBeLessThanOrEqual(dialogBox.width);
+    expect(fit.height).toBeLessThanOrEqual(dialogBox.height);
+    expect(fit.width).toBeLessThanOrEqual(390);
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    // 4. A container on the allowlist whose bytes the browser cannot decode keeps the
+    // Download path, and the download carries the decrypted bytes — never rendered HTML.
+    await nameButton('broken.mp4').click();
+    await expect(
+      preview('broken.mp4').getByText(
+        'This video can’t be played in this browser. Download it to open it on your computer.',
+      ),
+    ).toBeVisible();
+    const savedBroken = page.waitForEvent('download');
+    await preview('broken.mp4').getByRole('button', { name: 'Download', exact: true }).click();
+    const brokenDownload = await savedBroken;
+    expect(brokenDownload.suggestedFilename()).toBe('broken.mp4');
+    expect(await readFile((await brokenDownload.path())!)).toEqual(plaintext['broken.mp4']);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBe(
+      undefined,
+    );
+    await page.keyboard.press('Escape');
+
+    // 5. Over the preview cap there is no file fetch at all; Download still works.
+    const beforeBig = requests.length;
+    await nameButton('big.mp4').click();
+    await expect(preview('big.mp4').getByText(/Too large to preview/)).toBeVisible();
+    expect(requests.slice(beforeBig).some((entry) => entry.includes('/get?'))).toBe(false);
+    const savedBig = page.waitForEvent('download');
+    await preview('big.mp4').getByRole('button', { name: 'Download', exact: true }).click();
+    expect((await savedBig).suggestedFilename()).toBe('big.mp4');
+    await page.keyboard.press('Escape');
+
+    // 6. A container outside the allowlist gets no preview and no blob URL.
+    const madeSoFar = (
+      await page.evaluate(() => (window as unknown as { __made: string[] }).__made)
+    ).length;
+    await nameButton('movie.mov').click();
+    await expect(preview('movie.mov').getByText('No preview for this file type.')).toBeVisible();
+    await page.keyboard.press('Escape');
+    expect(
+      await page.evaluate(() => (window as unknown as { __made: string[] }).__made),
+    ).toHaveLength(madeSoFar);
+
+    // 7. No secret and no rendered payload left the tab.
+    await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
+    expect(pageErrors).toEqual([]);
+    expect(requests.join('\n')).not.toContain(driveKey);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await cleanupUser(userId);
+  }
+});
+
 test('ux round 10: share IDs identify links through both revoke confirmations', async ({
   page,
   context,

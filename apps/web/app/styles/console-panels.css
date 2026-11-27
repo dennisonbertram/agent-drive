@@ -798,6 +798,13 @@ dialog.preview > .dialog-heading + * {
   max-height: 100%;
   object-fit: contain;
 }
+.preview-video {
+  display: block;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  background: #000;
+}
 .preview-footer {
   flex: 0 0 auto;
   display: flex;

@@ -1,8 +1,15 @@
 // Preview rules. Files are agent-written and untrusted, so the console decides what each
 // extension may become. HTML and SVG are text on purpose: they are shown as source, never rendered.
 export const PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
-export type PreviewKind = 'text' | 'image' | 'pdf' | 'none';
-type PreviewMime = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | 'application/pdf';
+export type PreviewKind = 'text' | 'image' | 'pdf' | 'video' | 'none';
+type PreviewMime =
+  | 'image/png'
+  | 'image/jpeg'
+  | 'image/gif'
+  | 'image/webp'
+  | 'application/pdf'
+  | 'video/mp4'
+  | 'video/webm';
 
 const TEXT = new Set(
   'md markdown txt log csv tsv json jsonl ndjson yaml yml toml ini env xml html htm svg css js mjs cjs ts tsx jsx py rb go rs java sh bash zsh sql diff patch'.split(
@@ -17,6 +24,8 @@ const MIME: Record<string, PreviewMime> = {
   gif: 'image/gif',
   webp: 'image/webp',
   pdf: 'application/pdf',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
 };
 
 function extension(name: string) {
@@ -35,7 +44,8 @@ export function previewKind(name: string): PreviewKind {
   if (TEXT.has(ext)) return 'text';
   const mime = previewMime(name);
   if (!mime) return 'none';
-  return mime === 'application/pdf' ? 'pdf' : 'image';
+  if (mime === 'application/pdf') return 'pdf';
+  return mime.startsWith('video/') ? 'video' : 'image';
 }
 
 export function looksBinary(bytes: Uint8Array): boolean {
