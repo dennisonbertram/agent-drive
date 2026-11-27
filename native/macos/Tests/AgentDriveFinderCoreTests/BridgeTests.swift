@@ -3,6 +3,21 @@ import XCTest
 @testable import AgentDriveFinderCore
 
 final class BridgeTests: XCTestCase {
+    func testBridgeEntryDecodesOptionalPerEntryReadOnly() throws {
+        let decoder = JSONDecoder()
+        let locked = try decoder.decode(
+            BridgeEntry.self,
+            from: Data(#"{"name":"locked.txt","kind":"file","size":3,"mtimeMs":4,"versionId":"v1","readOnly":true}"#.utf8)
+        )
+        let legacy = try decoder.decode(
+            BridgeEntry.self,
+            from: Data(#"{"name":"normal.txt","kind":"file","size":3,"mtimeMs":4,"versionId":"v1"}"#.utf8)
+        )
+
+        XCTAssertEqual(locked.readOnly, true)
+        XCTAssertNil(legacy.readOnly)
+    }
+
     func testLegacyBridgeDoesNotAdvertiseProducerCompletion() {
         let legacy = MountCapabilities(
             readOnly: false,

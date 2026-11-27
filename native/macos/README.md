@@ -6,7 +6,7 @@ The CLI holds the drive key. The extension connects to it over an authenticated 
 
 ## Install the released app
 
-Requires macOS 13 or later; tested on macOS 15.7.7. Download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip). Open the ZIP to extract `Agent Drive.app` and drag it to `/Applications`. Opening the app from Finder does not open a window; Finder adds the provider location when the CLI starts a mount.
+Requires macOS 13 or later; tested on macOS 15.7.7. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip). Open the ZIP to extract `Agent Drive.app` and drag it to `/Applications`. Opening the app from Finder does not open a window; Finder adds the provider location when the CLI starts a mount.
 
 Install the CLI and complete [login and drive-key setup](../../docs/connect-an-agent.md) first. Mounting requires API credentials and a drive key for the selected drive in the CLI config. The standard login approval can provision a drive key for the new agent. With one configured drive, run this command from Terminal:
 

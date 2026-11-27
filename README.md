@@ -63,6 +63,29 @@ for platform requirements, saving behavior, and recovery details.
 pnpm agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
 ```
 
+To save an Instabox workspace mount and start it automatically at login without using Agent Drive
+drive credentials, connect its exact sandbox ID and absolute folder path with `--persist`:
+
+```sh
+agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
+  --sandbox SANDBOX_ID --root /workspace/project --persist
+```
+
+To run a mount in the foreground instead, omit `--persist`. Reconnect to a saved mount with:
+
+```sh
+agent-drive mount --name coordinator
+agent-drive mounts service install coordinator
+```
+
+Wake-on-access defaults on for new connections. Use `--no-wake-on-access` to keep the sandbox
+asleep, or `agent-drive mounts wake coordinator off` to change a saved policy. The mounted folder
+exposes files already in the sandbox, including hidden files such as `.env`; registration does not
+copy files or print their contents. See the
+[live workspace mount guide](docs/cli.md#live-workspace-mounts).
+Live mounts currently support creating new files. Saving changes over an existing file is not
+supported yet and returns a read-only error.
+
 ## MCP server
 
 Install the CLI, then add it to your MCP host. Agent Drive reads API credentials and drive keys

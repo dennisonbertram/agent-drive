@@ -17,7 +17,7 @@ Run it without installing by putting `npx -y @dennisonbertram/agent-drive@latest
 npx -y @dennisonbertram/agent-drive@latest whoami
 ```
 
-The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS 13 or later is required (tested on macOS 15.7.7), with the separate signed Agent Drive app. Download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP to extract `Agent Drive.app`, and drag it to `/Applications`. Opening the app from Finder does not open a window; the Finder location appears when the CLI starts a mount. Complete [CLI login and drive-key setup](connect-an-agent.md) before mounting. The CLI package does not install the app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it; for source builds, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
+The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS 13 or later is required (tested on macOS 15.7.7), with the separate signed Agent Drive app. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip), open the ZIP to extract `Agent Drive.app`, and drag it to `/Applications`. Opening the app from Finder does not open a window; the Finder location appears when the CLI starts a mount. Complete [CLI login and drive-key setup](connect-an-agent.md) before mounting. The CLI package does not install the app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it; for source builds, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
 
 The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on `login`, or with `AGENT_DRIVE_API_URL`.
 
@@ -69,7 +69,13 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `key revoke`          | Revoke an API key.                                           | [Connect an agent](connect-an-agent.md)                      |
 | `put`                 | Upload and encrypt a file.                                   | [Files, versions and sync](files-and-sync.md)                |
 | `get`                 | Download and decrypt a file.                                 | [Files, versions and sync](files-and-sync.md)                |
-| `mount`               | Mount a drive on Linux or macOS.                             | [Mount a drive](#mount-a-drive)                              |
+| `connect`             | Save and start a live sandbox folder mount.                  | [Live workspace mounts](#live-workspace-mounts)              |
+| `mount`               | Mount a drive or a saved live workspace.                     | [Mounts](#mount-a-drive)                                     |
+| `mounts list`         | List saved local mount definitions.                          | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts status`       | Inspect a saved mountpoint.                                  | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts forget`       | Forget an offline live workspace registration.               | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts wake`         | Change a saved live workspace's wake policy.                 | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts service`      | Install, check or remove login startup for a named mount.    | [Live workspace mounts](#live-workspace-mounts)              |
 | `jobs init`           | Create the jobs guide in a drive.                            | [Mounted jobs](#mounted-jobs)                                |
 | `jobs submit`         | Submit one draft for local processing.                       | [Mounted jobs](#mounted-jobs)                                |
 | `jobs work`           | Run one configured local worker.                             | [Mounted jobs](#mounted-jobs)                                |
@@ -104,6 +110,7 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 
 ```sh
 agent-drive mount MOUNTPOINT [--drive ID] [--read-only]
+agent-drive mount --name NAME
 ```
 
 For example:
@@ -126,6 +133,83 @@ Deleting files, removing directories, or replacing an existing file during renam
 `delete`. Directory creation requires `write`. Directory rename is not supported. On Linux,
 `rmdir` removes only an empty directory; Finder's macOS directory deletion walks children and is
 not an atomic subtree operation.
+
+## Live workspace mounts
+
+Register an exact Instabox sandbox ID and absolute folder path under a local name:
+
+```sh
+mkdir -p "$HOME/AgentWorkspaces"
+agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
+  --sandbox SANDBOX_ID --root /workspace/project
+```
+
+`connect` saves the local definition and starts the mount in the foreground. Press Ctrl+C to stop
+that session; reconnect later with:
+
+```sh
+agent-drive mount --name coordinator
+agent-drive mounts list
+agent-drive mounts status coordinator
+```
+
+`connect` writes a private per-user mount definition. It does not contact Agent Drive or store an
+Agent Drive API key or drive key. The definition records only the local name and mountpoint, the
+exact Instabox sandbox ID, the absolute sandbox folder, and the read-only and wake settings. It
+does not copy files. The mounted folder includes hidden files such as `.env` when they exist in the
+selected sandbox directory.
+
+New connections wake the selected sandbox on first filesystem access. Use
+`--no-wake-on-access` when the sandbox must stay asleep, or `--wake-on-access` to state the default
+explicitly. Add `--persist` to install and start the named login service in the same command:
+
+```sh
+agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
+  --sandbox SANDBOX_ID --root /workspace/project --persist
+agent-drive mounts wake coordinator off
+```
+
+To add a local `.env` only when the selected sandbox folder does not already contain one, copy it
+with `cp -n "$LOCAL_ENV_FILE" "$HOME/AgentWorkspaces/coordinator/.env"`. This leaves an existing
+sandbox `.env` untouched and does not print its contents.
+
+The wake operation targets only the saved sandbox ID. It runs on first remote file I/O, not when you
+connect, list a name, or check local capabilities. Use `mounts wake NAME on|off` to change the
+saved setting later; the command updates local metadata and may restart that exact managed service,
+but it does not call Instabox. Existing saved definitions with
+`wakeOnAccess: false` remain asleep until enabled. `--read-only` saves a read-only definition.
+Changing this setting restarts an active managed login service after a graceful stop. If the stop
+cannot complete safely, the command reports the error and leaves pending local writes recoverable.
+A foreground mount uses the setting it loaded at startup; stop it cleanly and run
+`agent-drive mount --name NAME` again to apply a later change.
+Different names may point at the same sandbox folder, but each name needs a distinct local mountpoint.
+On macOS, Finder supports one registered mount per sandbox folder. Use the existing name and
+mountpoint instead of registering a second Finder alias for the same sandbox folder.
+
+Live mounts currently support creating new files. Saving changes over an existing file is not
+supported yet and fails safely with a read-only error. Existing files are available to read; use a
+separate workflow to edit them until replacement support is available.
+
+`mounts list` reads the local registry only and never wakes a sandbox. `mounts status NAME` checks
+the local mountpoint. To start a mount automatically at login, use `connect ... --persist` or
+install and activate its user service later:
+
+```sh
+agent-drive mounts service install coordinator
+agent-drive mounts service status coordinator
+agent-drive mounts service remove coordinator
+```
+
+After stopping the foreground mount and removing any login service, use
+`agent-drive mounts forget NAME` to forget its local definition. It does not change the sandbox or
+files in it. The command refuses to forget a mount while its service or mountpoint may still be
+active.
+
+`--persist` installs and activates the named login service. You can also install it after connecting
+with `mounts service install`. New live connections wake on first filesystem access unless
+`--no-wake-on-access` is saved. Finder or another file browser can therefore wake the sandbox when
+it first accesses the mounted folder. Removing the service stops and removes only its owned startup
+definition; the saved mount registration and sandbox files remain.
 
 ### Linux requirements and unmounting
 
@@ -153,7 +237,7 @@ recover any pending local edits.
 
 ### macOS requirements and unmounting
 
-Install the CLI and signed `Agent Drive.app` on the same Mac. macOS 13 or later is required; the app was tested on macOS 15.7.7. If needed, download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP to extract `Agent Drive.app`, and drag it to `/Applications`. Opening the app from Finder does not open a window; the Finder location appears when the CLI starts a mount.
+Install the CLI and signed `Agent Drive.app` on the same Mac. macOS 13 or later is required; the app was tested on macOS 15.7.7. If needed, download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip), open the ZIP to extract `Agent Drive.app`, and drag it to `/Applications`. Opening the app from Finder does not open a window; the Finder location appears when the CLI starts a mount.
 
 Before mounting, complete [login and drive-key setup](connect-an-agent.md). The CLI needs saved API credentials and a local drive key for the selected drive. With one drive key configured for the current API, run this copyable command:
 

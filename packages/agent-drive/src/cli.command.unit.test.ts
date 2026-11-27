@@ -673,7 +673,9 @@ describe('mount command validation', () => {
 
   it('rejects --read-only outside mount before connecting', async () => {
     const result = await cli(['ls', '--read-only'], one);
-    expect(result.err).toContain('--read-only is only supported by `mount` and `grant`');
+    expect(result.err).toContain(
+      '--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`',
+    );
     expect(result.calls).toEqual([]);
   });
 });
@@ -722,7 +724,9 @@ describe('grant command read-only permission', () => {
     expect(request).toBeDefined();
     expect(JSON.parse(request!.body!).scopes).toEqual(['read']);
     const unrelated = await cli(['ls', '--read-only'], one);
-    expect(unrelated.err).toContain('--read-only is only supported by `mount` and `grant`');
+    expect(unrelated.err).toContain(
+      '--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`',
+    );
     expect(unrelated.calls).toEqual([]);
   });
 });

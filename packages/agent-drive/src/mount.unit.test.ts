@@ -14,7 +14,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encryptedSize } from './crypto-format.js';
 import { AgentDriveApiError } from './client.js';
-import { createMountBridge, resolveMountHelper, runLinuxMount } from './mount.js';
+import {
+  createMountBridge,
+  resolveMountHelper,
+  runLinuxMount,
+  runLinuxMountBridge,
+} from './mount.js';
 
 const DRIVE = '11111111-1111-4111-8111-111111111111';
 const VERSION = '22222222-2222-4222-8222-222222222222';
@@ -2295,5 +2300,60 @@ setInterval(() => {}, 1000);
     await expect(runLinuxMount(client, DRIVE, link, { helperPath: helper })).rejects.toThrow(
       'Mountpoint must be a real directory, not a symlink.',
     );
+  });
+
+  it('runs the same helper lifecycle against a provided bridge factory and dispatch', async () => {
+    const root = await scratch();
+    const helper = join(root, 'dispatch-helper');
+    await writeFile(
+      helper,
+      `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ id: 'ws-list', op: 'list', path: '/' }) + '\\n');
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (!input.includes('\\n')) return;
+  const response = JSON.parse(input.slice(0, input.indexOf('\\n')));
+  process.exit(response.ok === true && response.id === 'ws-list' ? 0 : 66);
+});
+`,
+      { mode: 0o700 },
+    );
+    await chmod(helper, 0o700);
+    const dispatched: unknown[] = [];
+    const close = vi.fn(async () => {});
+    let factorySignal: AbortSignal | undefined;
+    const factory = vi.fn((signal: AbortSignal) => {
+      factorySignal = signal;
+      return {
+        request: async (input: unknown) => {
+          dispatched.push(input);
+          const request = input as { id: string };
+          return { id: request.id, ok: true as const, entries: [], nextCursor: null };
+        },
+        close,
+      };
+    });
+
+    await expect(
+      runLinuxMountBridge(join(root, 'mountpoint'), factory, { helperPath: helper }),
+    ).resolves.toEqual({ code: 0, signal: null });
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(factorySignal).toBeInstanceOf(AbortSignal);
+    expect(dispatched).toEqual([{ id: 'ws-list', op: 'list', path: '/' }]);
+    expect(close).toHaveBeenCalledTimes(1);
+    await expect(stat(join(root, 'mountpoint'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('checks the helper before invoking a provided bridge factory', async () => {
+    const root = await scratch();
+    const factory = vi.fn(() => ({ request: vi.fn(), close: vi.fn(async () => {}) }));
+    await expect(
+      runLinuxMountBridge(join(root, 'mountpoint'), factory, {
+        helperPath: join(root, 'missing-helper'),
+      }),
+    ).rejects.toThrow('The Agent Drive mount helper is missing or not executable.');
+    expect(factory).not.toHaveBeenCalled();
   });
 });
