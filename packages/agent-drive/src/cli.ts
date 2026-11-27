@@ -565,7 +565,9 @@ async function run(command: string, raw: string[]) {
     command !== 'mounts' &&
     command !== 'connect'
   )
-    throw new Error('--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`.');
+    throw new Error(
+      '--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`.',
+    );
   if (args.values.verify !== undefined && command !== 'grant')
     throw new Error('--verify is only supported by `grant`.');
   if (
