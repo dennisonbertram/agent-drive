@@ -1519,9 +1519,7 @@ describe('jobs CLI', () => {
     expect(r.calls.filter((call) => call.path === `drives/${A}/rename`)).toHaveLength(1);
     const metadataPaths = r.paths
       .map((path, index) =>
-        path === `drives/${A}/get`
-          ? new URLSearchParams(r.queries[index]).get('path')
-          : null,
+        path === `drives/${A}/get` ? new URLSearchParams(r.queries[index]).get('path') : null,
       )
       .filter((path): path is string => path !== null);
     expect(metadataPaths).toEqual([
