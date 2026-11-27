@@ -32,15 +32,16 @@ The CLI keeps the API key and drive keys in `~/.config/agent-drive/config.json`,
 
 ### Environment variables
 
-| Variable                     | Effect                                                                                                                                                                                               |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AGENT_DRIVE_CONFIG`         | Path of the config file.                                                                                                                                                                             |
-| `AGENT_DRIVE_API_URL`        | API URL. Overrides the saved value.                                                                                                                                                                  |
-| `AGENT_DRIVE_API_KEY`        | API key. Overrides the saved value. `login` saves it instead of starting browser approval.                                                                                                           |
-| `AGENT_DRIVE_MACHINE`        | Machine name sent with each request. Defaults to the host name. Also used in the default `backup` prefix.                                                                                            |
-| `AGENT_DRIVE_CREDENTIALS`    | A credentials bundle (`adcred1.…`). Merged in memory at startup and never written to disk. Its drives count as backed up. The saved config and the explicit variables above take precedence over it. |
-| `AGENT_DRIVE_KEY_<DRIVE_ID>` | Drive key for one drive. The drive ID is uppercased and every non-alphanumeric character becomes `_`.                                                                                                |
-| `AGENT_DRIVE_KEY`            | Drive key used for any drive.                                                                                                                                                                        |
+| Variable                              | Effect                                                                                                                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENT_DRIVE_CONFIG`                  | Path of the config file.                                                                                                                                                                             |
+| `AGENT_DRIVE_API_URL`                 | API URL. Overrides the saved value.                                                                                                                                                                  |
+| `AGENT_DRIVE_API_KEY`                 | API key. Overrides the saved value. `login` saves it instead of starting browser approval.                                                                                                           |
+| `AGENT_DRIVE_MACHINE`                 | Machine name sent with each request. Defaults to the host name. Also used in the default `backup` prefix.                                                                                            |
+| `AGENT_DRIVE_CREDENTIALS`             | A credentials bundle (`adcred1.…`). Merged in memory at startup and never written to disk. Its drives count as backed up. The saved config and the explicit variables above take precedence over it. |
+| `AGENT_DRIVE_KEY_<DRIVE_ID>`          | Drive key for one drive. The drive ID is uppercased and every non-alphanumeric character becomes `_`.                                                                                                |
+| `AGENT_DRIVE_KEY`                     | Drive key used for any drive.                                                                                                                                                                        |
+| `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT` | Account-key fingerprint (`a1b2 c3d4 e5f6 7890`, as the console shows it). Lets first-time `account seal` verify and pin the account key without `--fingerprint`.                                     |
 
 ### Drive key precedence
 
@@ -478,7 +479,7 @@ agent-drive login --api URL --token-stdin
 | `--api URL`     | API URL for this login.                                                                        |
 | `--token-stdin` | Read an existing API key from stdin and save it.                                               |
 
-Without `AGENT_DRIVE_API_KEY` or `--token-stdin`, `login` runs the device flow: it prints a link and a code, opens a browser only when stdout is a terminal, `CI` is unset and `--no-browser` is absent, and waits until the owner approves. It then saves the API key and the drive keys to the config and prints the usable drives and the config path. It never prints a key. If no granted drive has a usable key, it exits with code 1 (the config is still saved); run `login` again.
+Without `AGENT_DRIVE_API_KEY` or `--token-stdin`, `login` runs the device flow: it prints a link, a code and a `Verification code:` line (the fingerprint of the login's public key — the owner types it on the approval page and passes it to `grant --verify`), opens a browser only when stdout is a terminal, `CI` is unset and `--no-browser` is absent, and waits until the owner approves. It then saves the API key and the drive keys to the config and prints the usable drives and the config path. It never prints a key. If no granted drive has a usable key, it exits with code 1 (the config is still saved); run `login` again.
 
 With an existing key, `login` checks it with `whoami`, saves it, and prints the `whoami` JSON. If the API key changes, earlier credential backup records are cleared and the CLI says so on stderr; run `credentials export` again.
 
@@ -607,7 +608,7 @@ See [Files, versions and sync](files-and-sync.md) for the rules.
 ## Credentials
 
 ```sh
-agent-drive grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...
+agent-drive grant CODE --verify "VCODE" [--drive ID] [--read-only] [--scope S]... [--write-path P]...
 agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
 agent-drive credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
 agent-drive credentials confirm [--method stdout]
@@ -645,19 +646,19 @@ Needs the `delegate` scope. Creates a new agent named `NAME` with its own API ke
 
 ### grant
 
-Needs the `delegate` scope. `CODE` is the code a new agent's `agent-drive login` printed. `grant` seals this machine's drive key to that login and posts it as an offer. It does not approve anything: the owner opens `<origin>/connect?code=CODE` and approves once. The drive defaults to the only configured drive key. Scopes default to `read write` (`read` with `--read-only`) and must be within yours. Write paths default to yours. It only offers a drive key saved for the current API origin. See [Connect an agent](connect-an-agent.md).
+Needs the `delegate` scope. `CODE` is the code a new agent's `agent-drive login` printed. `--verify VCODE` is required: `VCODE` is the verification code the new agent printed under its code (`a1b2 c3d4 e5f6 7890`), relayed by the owner. `grant` recomputes the code from the request's `public_key` and refuses on mismatch before sealing, so a service that returns a substituted key never receives the drive key. `grant` seals this machine's drive key to that login and posts it as an offer. It does not approve anything: the owner opens `<origin>/connect?code=CODE` and approves once. The drive defaults to the only configured drive key. Scopes default to `read write` (`read` with `--read-only`) and must be within yours. Write paths default to yours. It only offers a drive key saved for the current API origin. See [Connect an agent](connect-an-agent.md).
 
 ## Account
 
 ```sh
-agent-drive account seal [--drive ID]... [--repin]
+agent-drive account seal [--drive ID]... [--repin] [--fingerprint PRINT]
 ```
 
-Every drive key this machine holds can be sealed to the owner's account public key, so the console's passphrase unlock opens those drives with no recovery file. `account seal` does it on demand and prints one line per drive: `sealed`, `already sealed`, `agent-only`, `no account key`, `unknown type` or `failed` (a failing drive does not stop the rest, but the command exits 1 if any drive fails or its type cannot be proven). A slot is only inserted when the drive has none, so repeat runs are safe. `--drive` limits the run to the named drives and fails if no key for one is saved here. `unknown type` means the key cannot list drives (a write-only key) and no local mark proves the drive's type — the key is not sent; re-run `account seal --drive ID` with a key that can read drives.
+Every drive key this machine holds can be sealed to the owner's account public key, so the console's passphrase unlock opens those drives with no recovery file. `account seal` does it on demand and prints one line per drive: `sealed`, `already sealed`, `agent-only`, `no account key`, `unverified`, `unknown type` or `failed` (a failing drive does not stop the rest, but the command exits 1 if any drive fails, is unverified, or its type cannot be proven). A slot is only inserted when the drive has none, so repeat runs are safe. `--drive` limits the run to the named drives and fails if no key for one is saved here. `unknown type` means the key cannot list drives (a write-only key) and no local mark proves the drive's type — the key is not sent; re-run `account seal --drive ID` with a key that can read drives.
 
 The CLI also seals on its own, and sealing never fails or slows the command you ran: on `drive create`, `login` (and `grant`), `credentials import` and MCP server start it seals every held key, and at most once every 24 hours per drive on any other command that loads a drive key — it starts only after the command's own output has been written. The last check per drive is kept in `<config path>.state/account-seal.json`, never in the drive. Agent-only drives are skipped, and a failure becomes one line on stderr. If the account has no account key yet, nothing is sealed; the named commands then print one warning saying to set a passphrase in the console. Dry runs (`backup --dry-run` and any other `--dry-run` path) never seal.
 
-The first time the CLI sees the account public key for an API origin it pins its fingerprint (SHA-256 of the raw key) in `<config path>.state/account-seal.json`, next to the throttle timestamps — never in `config.json`, so a credentials bundle's keys cannot be written to disk. The file is written atomically and never followed through a symlink; if it exists but cannot be read or parsed, sealing refuses rather than silently dropping the pin — confirm the fingerprint in the console and run `agent-drive account seal --repin` to repair it. A later answer with a different key is refused with an error naming both fingerprints, so a compromised server cannot silently substitute its own account key. After the owner confirms in the console that the passphrase was reset, `--repin` pins the new key. The console's Settings page shows the same fingerprint for comparison.
+The account public key is pinned per API origin in `<config path>.state/account-seal.json`, next to the throttle timestamps — never in `config.json`, so a credentials bundle's keys cannot be written to disk. First use requires a fingerprint the owner supplies with `--fingerprint` or `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT`. The CLI compares it with the key the API returns before pinning or sealing; a mismatch names both fingerprints. Without one, first use reports `unverified` — nothing is sealed, nothing is pinned, and automatic sealing prints one warning instead of failing the command. Existing `accountKeyPins` config entries are preserved as mismatch guards but do not count as verified; after upgrading, verify one once with `--fingerprint`. Once pinned, a later answer with a different key is refused with an error naming both fingerprints. `--repin` replaces the pin after a passphrase reset and requires the explicit `--fingerprint` flag for the new key. The Settings page is the supported place to view the fingerprint, so verifying it depends on trusting that console session. A malicious deploy controlling the console could show a false fingerprint; use a fingerprint recorded through a separately trusted channel if you need protection from a malicious console deploy. The pin file is written atomically and never followed through a symlink; if it exists but cannot be read or parsed, sealing refuses rather than silently dropping the pin — repair it with `agent-drive account seal --repin --fingerprint <fingerprint>`.
 
 ## Skill install
 

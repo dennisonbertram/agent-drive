@@ -12,7 +12,7 @@ The agent never receives a drive key in the clear. It sends a public key when it
 
 1. The agent generates a P-256 key pair and calls `POST /api/oauth/device_authorization` with its public key.
 2. The response has a `user_code` and a `verification_uri_complete`. The agent shows both to the person.
-3. The person opens `https://agentdrive.xyz/connect`, signs in, checks that the code matches, chooses access, and approves. The browser seals the drive keys to the agent's public key.
+3. The person opens `https://agentdrive.xyz/connect`, signs in, checks that the code matches, types the verification code the agent printed (its public-key fingerprint — the page never shows it), chooses access, and approves. The browser checks the typed code against the request's `public_key` and only then seals the drive keys to it.
 4. The agent polls `POST /api/oauth/token` every `interval` seconds.
 5. After approval, the token response returns the API key once, the drive IDs, and the sealed drive keys.
 6. The agent unseals each drive key with its private key and saves the API key and drive keys.
@@ -102,8 +102,9 @@ Success, 200:
 
 The `/connect` page approves a request through routes under `/api/console/device/:userCode`. They use a signed-in browser session and are not for agents. For reference:
 
-- An approval with an empty body (apart from the `delegate` and `offerRevision` fields) grants `read`, `write`, `delete` and `share`. It reconnects the drives the previous key held, or creates a new drive named after the agent (`name`, then `name (machine)`, then `name 2`, and so on). A reconnect keeps the previous key's scopes and write paths.
-- Any other body is an explicit approval: `scopes` (required, from `read write delete share delegate`, never `manage`), `driveIds`, `newDriveName`, `writePaths`, `agentId` and `sealedDriveKeys`.
+- Every approval body carries a required `deviceVerification`: the verification code the agent printed (the fingerprint of the request's `public_key`), typed by the person. The server recomputes it from the stored `public_key` and rejects a mismatch with 409 `conflict`, so an approval always binds the key the person verified rather than whatever the service happened to return. The `/connect` page never displays the code — it travels only through the person's eyes from the terminal.
+- An approval carrying only `delegate`, `offerRevision` and `deviceVerification` grants `read`, `write`, `delete` and `share`. It reconnects the drives the previous key held, or creates a new drive named after the agent (`name`, then `name (machine)`, then `name 2`, and so on). A reconnect keeps the previous key's scopes and write paths.
+- Any other body is an explicit approval: `scopes` (required, from `read write delete share delegate`, never `manage`), `driveIds`, `newDriveName`, `writePaths`, `agentId`, `deviceVerification` and `sealedDriveKeys`.
 - `delegate` is never inherited from a previous key or an offer. Only the person's choice on the page adds it.
 
 ## Delegation: one agent offers a drive to another
@@ -144,7 +145,7 @@ The caller can offer only what it holds: the drive must be in its drive list, ea
 
 Response 200: `{ "status": "offered", "revision": 1 }`. A repeat offer for the same request replaces the first and raises `revision`. Granting does not approve anything. When the person approves, the console must send the `offerRevision` it showed. A newer offer makes the approval fail with 409 `The request changed; reload the page.` At token time the server checks that the offering key is still valid and still holds what it offered. If not, the token call returns `access_denied`.
 
-The CLI command for this is `agent-drive grant CODE`. See [CLI reference](cli.md).
+The CLI command for this is `agent-drive grant CODE --verify "<code>"`: quote the value because the printed code has spaces between its four groups. The person relays the verification code the new agent printed, and `grant` checks it against the request's `public_key` before sealing, so a substituted `public_key` never receives the drive key. See [CLI reference](cli.md).
 
 ### Issue a key directly: POST /api/v1/keys with agentName
 

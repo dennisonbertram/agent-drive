@@ -29,8 +29,9 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
    agent-drive login --name "<your agent name>"${api}
 
-   It prints a link and a code. Tell the human: "Open this link (you must be signed in to
-   Agent Drive), check that the code matches the one I printed, and click Approve." Other options
+   It prints a link, a code and a "Verification code:" line. Tell the human: "Open this link (you
+   must be signed in to Agent Drive), check that the code matches the one I printed, type the
+   verification code into the page — it never shows it — and click Approve." Other options
    on the page are optional; the defaults are right. Wait; the command finishes by itself after approval.
 
 3. The human approves (step 2). Wait for the command to finish.
@@ -92,9 +93,11 @@ drive's recovery file), pick the drive, and give the key there. Their browser se
 never sees it. They can make the new agent read-only or limit its writes to one folder.
 
 If you already hold the drive and your key has \`delegate\`, and a human is present, let the new
-agent run \`agent-drive login${api}\` and show you its code, then run
-\`agent-drive grant <its code> --write-path <its folder>\` (add \`--read-only\` for read only).
-You seal the drive key to that login; the human clicks Approve once on the page, which shows
+agent run \`agent-drive login${api}\` and show you its code and verification code, then run
+\`agent-drive grant <its code> --verify <its verification code> --write-path <its folder>\`
+(add \`--read-only\` for read only). The human relays the verification code; you check it against
+the login's public key before sealing, so a tampered request never receives the drive key. You
+seal the drive key to that login; the human clicks Approve once on the page, which shows
 "Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
 
 Which handoff when: the new agent has a shell and a human is present, use \`grant\` if you hold
@@ -153,6 +156,8 @@ Once they set a passphrase in the console (the key menu's "Set up passphrase unl
 
 Sealing also happens automatically, so this only adds a drive that was missed; \`no account key\`
 means the passphrase is not set up yet, and \`agent-only\` means the drive is kept out by design.
+\`unverified\` means this machine has not pinned your account key yet — re-run with
+\`--fingerprint\` set to the value the human copies from the console under Settings.
 The human can open files or download a fresh recovery file using the account passphrase or an enrolled passkey.
 Never paste a credentials bundle or drive key into chat — if a file is needed, run
 \`agent-drive credentials export --to <path>\` on their machine and tell them to choose that file

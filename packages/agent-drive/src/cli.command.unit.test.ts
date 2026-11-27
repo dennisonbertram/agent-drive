@@ -9,6 +9,8 @@ import { generateDriveKey } from './crypto.js';
 import { writeConfig } from './config.js';
 import { encodeBundle, issueCredentials } from './credentials.js';
 import { unsealDriveKey, type SealedDriveKey } from './seal.js';
+import { verificationCode } from './verification.js';
+import { accountKeyFingerprint } from './account-seal.js';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
@@ -689,28 +691,32 @@ describe('grant command read-only permission', () => {
       await webcrypto.subtle.exportKey('raw', devicePair.publicKey),
     ).toString('base64url');
     const code = 'ABCD-EFGH';
-    const granted = await cli(['grant', code, '--read-only'], one, (path) => {
-      if (path === 'whoami')
-        return {
-          accountId: 'account',
-          agentId: 'agent',
-          keyId: 'key',
-          scopes: ['read', 'write'],
-          writePaths: [],
-          driveIds: [A],
-        };
-      if (path === `device/${code}`)
-        return {
-          user_code: code,
-          client_name: 'synthetic-agent',
-          machine: null,
-          created_at: 'now',
-          expires_at: 'later',
-          public_key: publicKey,
-        };
-      if (path === `device/${code}/grant`) return { status: 'offered', revision: 1 };
-      return {};
-    });
+    const granted = await cli(
+      ['grant', code, '--read-only', '--verify', await verificationCode(publicKey)],
+      one,
+      (path) => {
+        if (path === 'whoami')
+          return {
+            accountId: 'account',
+            agentId: 'agent',
+            keyId: 'key',
+            scopes: ['read', 'write'],
+            writePaths: [],
+            driveIds: [A],
+          };
+        if (path === `device/${code}`)
+          return {
+            user_code: code,
+            client_name: 'synthetic-agent',
+            machine: null,
+            created_at: 'now',
+            expires_at: 'later',
+            public_key: publicKey,
+          };
+        if (path === `device/${code}/grant`) return { status: 'offered', revision: 1 };
+        return {};
+      },
+    );
 
     expect(granted.exitCode).toBeUndefined();
     expect(granted.err).toBe('');
@@ -924,6 +930,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
       AGENT_DRIVE_API_URL: 'https://staging.test/api',
       AGENT_DRIVE_API_KEY: 'staging-token',
       AGENT_DRIVE_CREDENTIALS: environment,
+      AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT: accountKeyFingerprint(account.publicKey),
     });
 
     expect(r.out).toContain('imported 1 drive key');
@@ -960,6 +967,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
         driveKeys: { [A]: envKey },
         driveKeyOrigins: { [A]: 'https://production.test' },
       }),
+      AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT: accountKeyFingerprint(account.publicKey),
     });
 
     const opened = await openedSlots(r.calls, account);
@@ -986,6 +994,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
         driveKeys: { [B]: foreignKey },
         driveKeyOrigins: { [B]: 'https://foreign.test' },
       }),
+      AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT: accountKeyFingerprint(account.publicKey),
     });
 
     expect(new Set(r.calls.map((call) => call.origin)).size).toBe(1);
@@ -1009,6 +1018,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
     const account = await accountKeyPair();
     const r = await cli(['credentials', 'import', '--from', file], one, sealApi(account, [A]), {
       AGENT_DRIVE_CREDENTIALS: 'not-a-valid-bundle',
+      AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT: accountKeyFingerprint(account.publicKey),
     });
 
     expect(r.out).toContain('imported 1 drive key');

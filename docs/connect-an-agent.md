@@ -4,7 +4,7 @@ This page helps you log in an agent, approve it in the browser, add more agents 
 
 ## How login works
 
-`agent-drive login` uses a device flow. The CLI prints a link and a code. A person opens the link while signed in to Agent Drive, checks that the code matches the one in the terminal, and clicks Approve. The CLI finishes by itself. Nobody copies an API key.
+`agent-drive login` uses a device flow. The CLI prints a link, a code and a verification code. A person opens the link while signed in to Agent Drive, checks that the code matches the one in the terminal, types the verification code into the page — the page never shows it, so only the terminal can supply it — and clicks Approve. The page checks the typed code against the agent's public key before anything is sealed, and the server checks it again; a wrong code means do not approve. The CLI finishes by itself. Nobody copies an API key.
 
 The request expires after 10 minutes. If it expires, run `agent-drive login` again.
 
@@ -71,16 +71,16 @@ Choose the handoff that fits.
 
 ### Grant from an agent that holds the drive
 
-1. On the new agent's machine, run `agent-drive login --name "<new agent name>"`. It prints a code.
-2. On the agent that holds the drive, run:
+1. On the new agent's machine, run `agent-drive login --name "<new agent name>"`. It prints a code and a verification code.
+2. Update the agent that holds the drive to a CLI version that requires `--verify`, then run:
 
 ```sh
-agent-drive grant <code> --write-path <folder>
+agent-drive grant <code> --verify "<verification code>" --write-path <folder>
 ```
 
-Add `--read-only` for read only. Add `--drive <drive id>` if the machine holds more than one drive key. `--scope` (repeatable) sets the scopes explicitly.
+The verification code is the one the new agent printed under its login code (`a1b2 c3d4 e5f6 7890`), relayed by the person. Keep the quotes because the code contains spaces. An older granting CLI can still send a sealed offer before approval, so upgrade that machine before using `grant`. The current `grant` checks the code against the request's public key before sealing; a mismatch means do not grant. Add `--read-only` for read only. Add `--drive <drive id>` if the machine holds more than one drive key. `--scope` (repeatable) sets the scopes explicitly.
 
-The command seals the drive key to the new login and prints the approval URL. A person still clicks Approve on that page, which shows "Offered by" with the agent name, the drive and the permissions. Nothing secret is printed or sent in the clear.
+The command seals the drive key to the new login and prints the approval URL. A person still clicks Approve on that page, which shows "Offered by" with the agent name, the drive and the permissions, and asks for the same verification code. Nothing secret is printed or sent in the clear.
 
 The granting key needs the `delegate` scope. An agent cannot grant more than it holds, and cannot pass on `delegate`. If the granting key is limited to write paths, the new agent's write paths must be inside them.
 
