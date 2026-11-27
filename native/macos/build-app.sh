@@ -169,7 +169,7 @@ case "$mode" in
       CODE_SIGNING_REQUIRED=YES \
       archive
 
-    /usr/bin/plutil -create xml1 -o "$export_options"
+    /usr/bin/plutil -create xml1 "$export_options"
     /usr/bin/plutil -insert destination -string export "$export_options"
     /usr/bin/plutil -insert method -string developer-id "$export_options"
     /usr/bin/plutil -insert signingStyle -string manual "$export_options"
