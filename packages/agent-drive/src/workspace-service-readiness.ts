@@ -62,7 +62,7 @@ export function linuxMountInfoHasAgentDriveMount(mountpoint: string, mountInfo: 
     const filesystemFields = line.slice(separator + 3).split(' ');
     return (
       decodeMountInfoPath(mountFields[4] ?? '') === expected &&
-      filesystemFields[0] === 'fuse.agent-drive' &&
+      (filesystemFields[0] === 'fuse' || filesystemFields[0] === 'fuse.agent-drive') &&
       filesystemFields[1] === 'agent-drive'
     );
   });
@@ -83,7 +83,12 @@ export async function inspectWorkspaceMountReadiness(
       io.readMountInfo ?? (() => readFile('/proc/self/mountinfo', 'utf8'))
     )();
     return linuxMountInfoHasAgentDriveMount(mountpoint, mountInfo)
-      ? { ready: true, platform, mountpoint, evidence: 'fuse-agent-drive-mountinfo' }
+      ? {
+          ready: true,
+          platform,
+          mountpoint,
+          evidence: 'fuse-agent-drive-mountinfo',
+        }
       : {
           ready: false,
           reason: 'No exact Agent Drive FUSE mount is attached at the requested path.',
@@ -91,7 +96,10 @@ export async function inspectWorkspaceMountReadiness(
   }
 
   if (!options.expectedDomainId || !/^[0-9a-f-]{36}$/iu.test(options.expectedDomainId))
-    return { ready: false, reason: 'The expected File Provider domain UUID is unavailable.' };
+    return {
+      ready: false,
+      reason: 'The expected File Provider domain UUID is unavailable.',
+    };
   const ioLstat = io.lstat ?? lstat;
   const ioReadlink = io.readlink ?? readlink;
   let linkInfo;
@@ -99,11 +107,17 @@ export async function inspectWorkspaceMountReadiness(
     linkInfo = await ioLstat(mountpoint);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return { ready: false, reason: 'The requested Finder alias is not present.' };
+      return {
+        ready: false,
+        reason: 'The requested Finder alias is not present.',
+      };
     throw error;
   }
   if (!linkInfo.isSymbolicLink())
-    return { ready: false, reason: 'The requested mountpoint is not an Agent Drive Finder alias.' };
+    return {
+      ready: false,
+      reason: 'The requested mountpoint is not an Agent Drive Finder alias.',
+    };
   const linkTarget = await ioReadlink(mountpoint);
   const actualPath = resolve(dirname(mountpoint), linkTarget);
   const cloudStorage = resolve(io.home ?? homedir(), 'Library', 'CloudStorage');
@@ -114,10 +128,7 @@ export async function inspectWorkspaceMountReadiness(
     `Agent Drive ${domainSuffix}`,
     `AgentDrive-AgentDrive${domainSuffix}`,
   ]);
-  if (
-    dirname(actualPath) !== cloudStorage ||
-    !expectedDomainNames.has(basename(actualPath))
-  )
+  if (dirname(actualPath) !== cloudStorage || !expectedDomainNames.has(basename(actualPath)))
     return {
       ready: false,
       reason:
@@ -126,10 +137,16 @@ export async function inspectWorkspaceMountReadiness(
   try {
     const targetInfo = await ioLstat(actualPath);
     if (!targetInfo.isDirectory())
-      return { ready: false, reason: 'The selected File Provider domain path is not a directory.' };
+      return {
+        ready: false,
+        reason: 'The selected File Provider domain path is not a directory.',
+      };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return { ready: false, reason: 'The selected File Provider domain path is not present.' };
+      return {
+        ready: false,
+        reason: 'The selected File Provider domain path is not present.',
+      };
     throw error;
   }
   return {

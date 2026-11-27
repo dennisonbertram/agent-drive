@@ -64,6 +64,9 @@ describe('persistent workspace service definitions', () => {
       'Environment="PATH=/usr/bin:/home/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin:/bin:/usr/sbin:/sbin"',
     );
     expect(linux).toContain('# agent-drive-workspace-service:v1:team-work');
+    expect(linux).toMatch(/^# agent-drive-workspace-service-registry:v1:[a-f0-9]{64}$/mu);
+    expect(linux).toContain('KillMode=mixed');
+    expect(linux).toContain('TimeoutStopSec=5min');
     expect(linux).toContain(
       'Environment="AGENT_DRIVE_INSTABOX_CLI=/home/alice/.local/bin/instabox"',
     );
@@ -112,7 +115,9 @@ describe('persistent workspace service definitions', () => {
       instaboxPath: '/opt/instabox/bin/instabox',
       name: 'work',
     };
-    expect(await getWorkspaceServiceStatus(options)).toMatchObject({ state: 'missing' });
+    expect(await getWorkspaceServiceStatus(options)).toMatchObject({
+      state: 'missing',
+    });
     const installed = await installWorkspaceService(options);
     expect(installed.state).toBe('installed');
     expect((await stat(installed.path)).mode & 0o777).toBe(0o600);
@@ -124,15 +129,24 @@ describe('persistent workspace service definitions', () => {
     const calls: Array<[string, string[]]> = [];
     const runner = async (command: string, args: string[]) => {
       calls.push([command, args]);
-      return { code: args.includes('is-active') ? 3 : 0, stdout: '', stderr: '' };
+      return {
+        code: args.includes('is-active') ? 3 : 0,
+        stdout: '',
+        stderr: '',
+      };
     };
-    expect(await removeWorkspaceService(options, runner)).toMatchObject({ state: 'removed' });
+    expect(await removeWorkspaceService(options, runner)).toMatchObject({
+      state: 'removed',
+    });
     expect(calls).toEqual([
       ['/usr/bin/systemctl', ['--user', 'is-active', 'agent-drive-mount-work.service']],
       ['/usr/bin/systemctl', ['--user', 'disable', '--now', 'agent-drive-mount-work.service']],
+      ['/usr/bin/systemctl', ['--user', 'is-active', 'agent-drive-mount-work.service']],
       ['/usr/bin/systemctl', ['--user', 'daemon-reload']],
     ]);
-    expect(await getWorkspaceServiceStatus(options)).toMatchObject({ state: 'missing' });
+    expect(await getWorkspaceServiceStatus(options)).toMatchObject({
+      state: 'missing',
+    });
   });
 
   it('refuses to replace or remove a colliding definition', async () => {
@@ -155,7 +169,7 @@ describe('persistent workspace service definitions', () => {
     expect(await readFile(path, 'utf8')).toBe('user-owned service');
   });
 
-  it('recognizes and updates a service after the Node, CLI, or config path changes', async () => {
+  it('recognizes and updates a service after its executable paths change', async () => {
     const home = await root();
     const original = {
       platform: 'linux' as const,
@@ -173,10 +187,11 @@ describe('persistent workspace service definitions', () => {
       ...original,
       cliPath: '/new/tooling/cli.js',
       nodePath: '/new/node/bin/node',
-      configPath: '/new/config.json',
       instaboxPath: '/new/local/bin/instabox',
     };
-    expect(await getWorkspaceServiceStatus(relocated)).toMatchObject({ state: 'installed' });
+    expect(await getWorkspaceServiceStatus(relocated)).toMatchObject({
+      state: 'installed',
+    });
     expect(await installWorkspaceService(relocated)).toMatchObject({
       state: 'installed',
       updated: true,
@@ -184,9 +199,9 @@ describe('persistent workspace service definitions', () => {
     const content = await readFile(installed.path, 'utf8');
     expect(content).toContain('"/new/node/bin/node"');
     expect(content).toContain('"/new/tooling/cli.js"');
-    expect(content).toContain('AGENT_DRIVE_CONFIG=/new/config.json');
+    expect(content).toContain('AGENT_DRIVE_CONFIG=/old/config.json');
     expect(content).toContain('AGENT_DRIVE_INSTABOX_CLI=/new/local/bin/instabox');
-    expect(content).not.toContain('/old/');
+    expect(content).not.toContain('/old/node');
   });
 
   it('recognizes the prior private Linux unit format before relocation', async () => {
@@ -210,7 +225,7 @@ describe('persistent workspace service definitions', () => {
       '',
       '[Service]',
       'Environment="PATH=/old/node/bin:/usr/local/bin:/usr/bin"',
-      'Environment="AGENT_DRIVE_CONFIG=/old/config.json"',
+      'Environment="AGENT_DRIVE_CONFIG=/new/config.json"',
       'Type=simple',
       'ExecStart="/old/node/bin/node" "/old/cli.js" "mount" "--name" "work"',
       'Restart=on-failure',
@@ -221,9 +236,245 @@ describe('persistent workspace service definitions', () => {
     ].join('\n');
     await writeFile(path, oldDefinition, { mode: 0o600 });
 
+    expect(await getWorkspaceServiceStatus(options)).toMatchObject({
+      state: 'installed',
+    });
+    expect(await installWorkspaceService(options)).toMatchObject({
+      updated: true,
+    });
+    expect(await readFile(path, 'utf8')).toContain('# agent-drive-workspace-service-registry:v1:');
+  });
+
+  it('refuses service status, removal, and wake operations from a different config registry', async () => {
+    const home = await root();
+    const owner = {
+      platform: 'linux' as const,
+      home,
+      cliPath: '/opt/agent-drive/cli.js',
+      nodePath: '/usr/bin/node',
+      configPath: join(home, 'profile-a', 'config.json'),
+      name: 'work',
+    };
+    await installWorkspaceService(owner);
+
+    const otherProfile = {
+      ...owner,
+      configPath: join(home, 'profile-b', 'config.json'),
+    };
+    const calls: string[][] = [];
+    const runner = async (_command: string, args: string[]) => {
+      calls.push(args);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    expect(await getWorkspaceServiceStatus(otherProfile)).toMatchObject({
+      state: 'conflict',
+    });
+    expect(await getWorkspaceServiceRuntimeStatus(otherProfile, runner)).toMatchObject({
+      state: 'conflict',
+      active: false,
+    });
+    await expect(removeWorkspaceService(otherProfile, runner)).rejects.toThrow(/ownership/i);
+    await expect(restartWorkspaceService(otherProfile, runner)).rejects.toThrow(
+      /definition is conflict/i,
+    );
+    expect(calls).toEqual([]);
+
+    expect(await getWorkspaceServiceStatus(owner)).toMatchObject({
+      state: 'installed',
+    });
+    expect(await readFile(workspaceServicePaths(owner).path, 'utf8')).toContain(
+      'AGENT_DRIVE_CONFIG=' + owner.configPath,
+    );
+  });
+
+  it('refuses launchd status, removal, and wake operations from a different config registry', async () => {
+    const home = await root();
+    const owner = {
+      platform: 'darwin' as const,
+      home,
+      cliPath: '/Applications/Agent Drive/bin/cli.js',
+      nodePath: '/usr/bin/node',
+      configPath: join(home, 'profile-a', 'config.json'),
+      name: 'work',
+    };
+    await installWorkspaceService(owner);
+
+    const otherProfile = {
+      ...owner,
+      configPath: join(home, 'profile-b', 'config.json'),
+    };
+    const calls: string[][] = [];
+    const runner = async (_command: string, args: string[]) => {
+      calls.push(args);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    expect(await getWorkspaceServiceStatus(otherProfile)).toMatchObject({
+      state: 'conflict',
+    });
+    expect(await getWorkspaceServiceRuntimeStatus(otherProfile, runner)).toMatchObject({
+      state: 'conflict',
+      active: false,
+    });
+    await expect(removeWorkspaceService(otherProfile, runner)).rejects.toThrow(/ownership/i);
+    await expect(restartWorkspaceService(otherProfile, runner)).rejects.toThrow(
+      /definition is conflict/i,
+    );
+    expect(calls).toEqual([]);
+    expect(await getWorkspaceServiceStatus(owner)).toMatchObject({
+      state: 'installed',
+    });
+  });
+
+  it('recognizes and upgrades a same-profile legacy launch agent', async () => {
+    const home = await root();
+    const options = {
+      platform: 'darwin' as const,
+      home,
+      cliPath: '/new/tooling/cli.js',
+      nodePath: '/usr/bin/node',
+      configPath: join(home, 'profile-a', 'config.json'),
+      name: 'work',
+    };
+    const { directory, path } = workspaceServicePaths(options);
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const legacy = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<plist version="1.0">',
+      '<dict>',
+      '<key>Label</key><string>com.agentdrive.mount.work</string>',
+      '<key>EnvironmentVariables</key>',
+      '<dict>',
+      '<key>PATH</key><string>/usr/bin</string>',
+      `<key>AGENT_DRIVE_CONFIG</key><string>${options.configPath}</string>`,
+      '</dict>',
+      '<key>ProgramArguments</key>',
+      '<array>',
+      '<string>/usr/bin/node</string>',
+      '<string>/old/cli.js</string>',
+      '<string>mount</string>',
+      '<string>--name</string>',
+      '<string>work</string>',
+      '</array>',
+      '</dict>',
+      '</plist>',
+      '',
+    ].join('\n');
+    await writeFile(path, legacy, { mode: 0o600 });
+
+    expect(await getWorkspaceServiceStatus(options)).toMatchObject({
+      state: 'installed',
+    });
+    expect(await installWorkspaceService(options)).toMatchObject({
+      state: 'installed',
+      updated: true,
+    });
+    expect(await readFile(path, 'utf8')).toContain(
+      '<!-- agent-drive-workspace-service:v1:work -->',
+    );
+  });
+
+  it('allows the configured systemd graceful stop interval to finish', async () => {
+    const home = await root();
+    const options = {
+      platform: 'linux' as const,
+      home,
+      cliPath: '/opt/agent-drive/cli.js',
+      nodePath: '/usr/bin/node',
+      name: 'work',
+    };
+    await installWorkspaceService(options);
+    const calls: Array<{ args: string[]; timeoutMs?: number }> = [];
+    const results = [
+      { code: 0, stdout: 'active' },
+      { code: 0, stdout: '' },
+      { code: 3, stdout: 'inactive' },
+      { code: 0, stdout: 'success\n' },
+    ];
+    const runner = async (
+      _command: string,
+      args: string[],
+      runOptions?: { timeoutMs?: number },
+    ) => {
+      calls.push({ args, ...(runOptions?.timeoutMs ? { timeoutMs: runOptions.timeoutMs } : {}) });
+      const result = results.shift() ?? { code: 0, stdout: '', stderr: '' };
+      return { stderr: '', ...result };
+    };
+
+    await deactivateWorkspaceService(options, runner);
+
+    expect(calls).toEqual([
+      { args: ['--user', 'is-active', 'agent-drive-mount-work.service'] },
+      {
+        args: ['--user', 'disable', '--now', 'agent-drive-mount-work.service'],
+        timeoutMs: 6 * 60_000,
+      },
+      { args: ['--user', 'is-active', 'agent-drive-mount-work.service'] },
+      {
+        args: ['--user', 'show', '--property=Result', '--value', 'agent-drive-mount-work.service'],
+      },
+    ]);
+  });
+
+  it('preserves an active service unit when systemd reports forced stop escalation', async () => {
+    const home = await root();
+    const options = {
+      platform: 'linux' as const,
+      home,
+      cliPath: '/opt/agent-drive/cli.js',
+      nodePath: '/usr/bin/node',
+      name: 'work',
+    };
+    const installed = await installWorkspaceService(options);
+    const results = [
+      { code: 0, stdout: 'active' },
+      { code: 0, stdout: '' },
+      { code: 3, stdout: 'inactive' },
+      { code: 0, stdout: 'timeout' },
+    ];
+    const calls: string[][] = [];
+    const runner = async (_command: string, args: string[]) => {
+      calls.push(args);
+      return { ...(results.shift() ?? { code: 0, stdout: '' }), stderr: '' };
+    };
+
+    await expect(removeWorkspaceService(options, runner)).rejects.toThrow(
+      /stop did not complete successfully/i,
+    );
     expect(await getWorkspaceServiceStatus(options)).toMatchObject({ state: 'installed' });
-    expect(await installWorkspaceService(options)).toMatchObject({ updated: true });
-    expect(await readFile(path, 'utf8')).toContain('# agent-drive-workspace-service:v1:work');
+    expect(await readFile(installed.path, 'utf8')).toContain('KillMode=mixed');
+    expect(calls).toContainEqual([
+      '--user',
+      'show',
+      '--property=Result',
+      '--value',
+      'agent-drive-mount-work.service',
+    ]);
+    expect(calls).not.toContainEqual(['--user', 'daemon-reload']);
+  });
+
+  it('keeps the unit installed if systemd reports the service active after stop', async () => {
+    const home = await root();
+    const options = {
+      platform: 'linux' as const,
+      home,
+      cliPath: '/opt/agent-drive/cli.js',
+      nodePath: '/usr/bin/node',
+      name: 'work',
+    };
+    const installed = await installWorkspaceService(options);
+    const results = [0, 0, 0];
+    const runner = async () => ({
+      code: results.shift() ?? 0,
+      stdout: '',
+      stderr: '',
+    });
+
+    await expect(removeWorkspaceService(options, runner)).rejects.toThrow(
+      /did not become inactive/i,
+    );
+    expect(await getWorkspaceServiceStatus(options)).toMatchObject({ state: 'installed' });
+    expect(await readFile(installed.path, 'utf8')).toContain('KillMode=mixed');
   });
 
   it('rejects unsafe names and paths before rendering', () => {
@@ -257,10 +508,14 @@ describe('persistent workspace service definitions', () => {
     };
     await installWorkspaceService(options);
     const calls: Array<[string, string[]]> = [];
-    const results = [3, 0, 0, 0, 0, 0];
+    const results = [3, 0, 0, 0, 0, 0, 3];
     const runner = async (command: string, args: string[]) => {
       calls.push([command, args]);
-      return { code: results.shift() ?? 0, stdout: 'active', stderr: '' };
+      return {
+        code: results.shift() ?? 0,
+        stdout: args.includes('show') ? 'success\n' : 'active',
+        stderr: '',
+      };
     };
     await activateWorkspaceService(options, runner);
     expect(await getWorkspaceServiceRuntimeStatus(options, runner)).toMatchObject({
@@ -275,6 +530,11 @@ describe('persistent workspace service definitions', () => {
       ['/usr/bin/systemctl', ['--user', 'is-active', 'agent-drive-mount-work.service']],
       ['/usr/bin/systemctl', ['--user', 'is-active', 'agent-drive-mount-work.service']],
       ['/usr/bin/systemctl', ['--user', 'disable', '--now', 'agent-drive-mount-work.service']],
+      ['/usr/bin/systemctl', ['--user', 'is-active', 'agent-drive-mount-work.service']],
+      [
+        '/usr/bin/systemctl',
+        ['--user', 'show', '--property=Result', '--value', 'agent-drive-mount-work.service'],
+      ],
     ]);
   });
 
@@ -307,10 +567,14 @@ describe('persistent workspace service definitions', () => {
     };
     await installWorkspaceService(options);
     const calls: string[][] = [];
-    const results = [0, 0, 0, 3, 0, 0, 0];
+    const results = [0, 0, 0, 3, 0, 3, 0, 0, 0];
     const runner = async (_command: string, args: string[]) => {
       calls.push(args);
-      return { code: results.shift() ?? 0, stdout: '', stderr: '' };
+      return {
+        code: results.shift() ?? 0,
+        stdout: args.includes('show') ? 'success\n' : '',
+        stderr: '',
+      };
     };
     expect(await restartWorkspaceService(options, runner)).toEqual({
       restarted: true,
@@ -320,6 +584,8 @@ describe('persistent workspace service definitions', () => {
       ['--user', 'is-active', 'agent-drive-mount-work.service'],
       ['--user', 'is-active', 'agent-drive-mount-work.service'],
       ['--user', 'disable', '--now', 'agent-drive-mount-work.service'],
+      ['--user', 'is-active', 'agent-drive-mount-work.service'],
+      ['--user', 'show', '--property=Result', '--value', 'agent-drive-mount-work.service'],
       ['--user', 'is-active', 'agent-drive-mount-work.service'],
       ['--user', 'daemon-reload'],
       ['--user', 'enable', '--now', 'agent-drive-mount-work.service'],

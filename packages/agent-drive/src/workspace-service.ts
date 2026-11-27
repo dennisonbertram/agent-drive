@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   access,
   lstat,
@@ -32,18 +32,26 @@ export type WorkspaceServiceStatus = {
   state: 'missing' | 'installed' | 'conflict';
   path: string;
 };
-export type WorkspaceServiceCommandResult = { code: number; stdout: string; stderr: string };
+export type WorkspaceServiceCommandResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
 export type WorkspaceServiceRunner = (
   command: string,
   args: string[],
+  options?: { timeoutMs?: number },
 ) => Promise<WorkspaceServiceCommandResult>;
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const execFileAsync = promisify(execFile);
 
-const runCommand: WorkspaceServiceRunner = async (command, args) => {
+const runCommand: WorkspaceServiceRunner = async (command, args, options) => {
   try {
-    const result = await execFileAsync(command, args, { encoding: 'utf8', timeout: 15_000 });
+    const result = await execFileAsync(command, args, {
+      encoding: 'utf8',
+      timeout: options?.timeoutMs ?? 15_000,
+    });
     return { code: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & {
@@ -52,7 +60,11 @@ const runCommand: WorkspaceServiceRunner = async (command, args) => {
       stderr?: string;
     };
     if (typeof failure.code === 'number')
-      return { code: failure.code, stdout: failure.stdout ?? '', stderr: failure.stderr ?? '' };
+      return {
+        code: failure.code,
+        stdout: failure.stdout ?? '',
+        stderr: failure.stderr ?? '',
+      };
     throw new Error(`Could not run ${command}: ${failure.message}`);
   }
 };
@@ -153,10 +165,24 @@ function ownerMarker(platform: WorkspaceServicePlatform, name: string): string {
     : `# agent-drive-workspace-service:v1:${name}`;
 }
 
+function normalizedConfigPath(
+  options: Pick<WorkspaceServiceOptions, 'configPath' | 'home'>,
+): string {
+  return resolve(
+    options.configPath ?? join(options.home ?? homedir(), '.config', 'agent-drive', 'config.json'),
+  );
+}
+
+function registryOwnerMarker(configPath: string): string {
+  const digest = createHash('sha256').update(resolve(configPath)).digest('hex');
+  return `# agent-drive-workspace-service-registry:v1:${digest}`;
+}
+
 function isLegacyOwnedDefinition(
   value: string,
   platform: WorkspaceServicePlatform,
   name: string,
+  configPath: string,
 ): boolean {
   if (platform === 'linux') {
     const lines = value.replace(/\n+$/u, '').split('\n');
@@ -168,7 +194,7 @@ function isLegacyOwnedDefinition(
       lines[3] === '' &&
       lines[4] === '[Service]' &&
       /^Environment="PATH=(?:\\.|[^"\\])*"$/u.test(lines[5] ?? '') &&
-      /^Environment="AGENT_DRIVE_CONFIG=\/(?:\\.|[^"\\])*"$/u.test(lines[6] ?? '') &&
+      lines[6] === `Environment=${systemdArg(`AGENT_DRIVE_CONFIG=${resolve(configPath)}`)}` &&
       lines[7] === 'Type=simple' &&
       new RegExp(
         `^ExecStart="/(?:\\\\.|[^"\\\\])*" "/(?:\\\\.|[^"\\\\])*" "mount" "--name" "${name}"$`,
@@ -184,7 +210,7 @@ function isLegacyOwnedDefinition(
     value.includes(`<key>Label</key><string>com.agentdrive.mount.${name}</string>`) &&
     value.includes('<key>EnvironmentVariables</key>') &&
     /<key>PATH<\/key><string>\/(?:\\.|[^<])*<\/string>/u.test(value) &&
-    /<key>AGENT_DRIVE_CONFIG<\/key><string>\/(?:\\.|[^<])*<\/string>/u.test(value) &&
+    value.includes(`<key>AGENT_DRIVE_CONFIG</key><string>${xml(resolve(configPath))}</string>`) &&
     new RegExp(
       `<key>ProgramArguments</key>\\s*<array>\\s*<string>/(?:\\\\.|[^<])*<\\/string>\\s*<string>/(?:\\\\.|[^<])*<\\/string>\\s*<string>mount<\\/string>\\s*<string>--name<\\/string>\\s*<string>${name}<\\/string>\\s*<\\/array>`,
       'u',
@@ -196,10 +222,31 @@ function isOwnedDefinition(
   value: string,
   platform: WorkspaceServicePlatform,
   name: string,
+  configPath: string,
 ): boolean {
+  const lines = value.split(/\r?\n/u).map((line) => line.trim());
+  // OS service filenames use only the mount name, while names are scoped to a
+  // credential registry. Require the exact config path, including for legacy files.
+  if (platform === 'linux') {
+    const hasNameMarker = lines.includes(ownerMarker(platform, name));
+    const hasConfigPath = lines.includes(
+      `Environment=${systemdArg(`AGENT_DRIVE_CONFIG=${resolve(configPath)}`)}`,
+    );
+    const registryMarker = registryOwnerMarker(configPath);
+    const registryMarkers = lines.filter((line) =>
+      line.startsWith('# agent-drive-workspace-service-registry:'),
+    );
+    return (
+      (hasNameMarker &&
+        hasConfigPath &&
+        (registryMarkers.length === 0 || lines.includes(registryMarker))) ||
+      isLegacyOwnedDefinition(value, platform, name, configPath)
+    );
+  }
   return (
-    value.split(/\r?\n/u).some((line) => line.trim() === ownerMarker(platform, name)) ||
-    isLegacyOwnedDefinition(value, platform, name)
+    (lines.includes(ownerMarker(platform, name)) ||
+      isLegacyOwnedDefinition(value, platform, name, configPath)) &&
+    value.includes(`<key>AGENT_DRIVE_CONFIG</key><string>${xml(resolve(configPath))}</string>`)
   );
 }
 
@@ -236,9 +283,7 @@ export function renderWorkspaceService(
   if (options.instaboxPath) validatePath(options.instaboxPath, 'Instabox path');
   const instaboxPath = options.instaboxPath ? resolve(options.instaboxPath) : undefined;
   const path = servicePath(nodePath, instaboxPath);
-  const configFilePath = resolve(
-    options.configPath ?? join(options.home ?? homedir(), '.config', 'agent-drive', 'config.json'),
-  );
+  const configFilePath = normalizedConfigPath(options);
   validatePath(configFilePath, 'Agent Drive config path');
   if (platform === 'darwin') {
     const label = `com.agentdrive.mount.${options.name}`;
@@ -275,6 +320,7 @@ export function renderWorkspaceService(
   }
   return [
     ownerMarker(platform, options.name),
+    registryOwnerMarker(configFilePath),
     '[Unit]',
     `Description=Agent Drive persistent mount ${options.name}`,
     '',
@@ -287,6 +333,10 @@ export function renderWorkspaceService(
     'Type=simple',
     `ExecStart=${[nodePath, options.cliPath, 'mount', '--name', options.name].map(systemdArg).join(' ')}`,
     'Restart=on-failure',
+    // mixed mode signals only the mount process first, keeping the SSH transport
+    // alive while open files drain; systemd kills remaining children at timeout.
+    'KillMode=mixed',
+    'TimeoutStopSec=5min',
     '',
     '[Install]',
     'WantedBy=default.target',
@@ -318,7 +368,9 @@ export async function getWorkspaceServiceStatus(
     throw error;
   }
   return {
-    state: isOwnedDefinition(existing, platform, options.name) ? 'installed' : 'conflict',
+    state: isOwnedDefinition(existing, platform, options.name, normalizedConfigPath(options))
+      ? 'installed'
+      : 'conflict',
     path,
   };
 }
@@ -348,7 +400,12 @@ export async function installWorkspaceService(
         !currentInfo.isFile() ||
         (currentInfo.mode & 0o777) !== 0o600 ||
         (typeof process.getuid === 'function' && currentInfo.uid !== process.getuid()) ||
-        !isOwnedDefinition(currentText, platformOf(options.platform), options.name)
+        !isOwnedDefinition(
+          currentText,
+          platformOf(options.platform),
+          options.name,
+          normalizedConfigPath(options),
+        )
       )
         throw new Error(`Refusing to update an unowned service definition at ${path}`);
       await rename(temporaryPath, path);
@@ -392,7 +449,14 @@ export async function removeWorkspaceService(
   await deactivateWorkspaceService(options, runner);
   // Re-read just before unlink so edits made after the status check are preserved.
   const current = await readFile(status.path, 'utf8');
-  if (!isOwnedDefinition(current, platformOf(options.platform), options.name))
+  if (
+    !isOwnedDefinition(
+      current,
+      platformOf(options.platform),
+      options.name,
+      normalizedConfigPath(options),
+    )
+  )
     throw new Error(
       `Refusing to remove a service definition without matching ownership at ${status.path}`,
     );
@@ -481,11 +545,36 @@ export async function deactivateWorkspaceService(
     target.platform === 'darwin'
       ? ['bootout', launchAgentDomain(), paths.path]
       : ['--user', 'disable', '--now', target.unit];
-  const result = await runner(command, args);
+  // This blocking systemctl command waits for the stop job; its deadline must
+  // exceed the unit's TimeoutStopSec so the inactive check can run afterward.
+  const result = await runner(
+    command,
+    args,
+    target.platform === 'linux' ? { timeoutMs: 6 * 60_000 } : undefined,
+  );
   if (result.code !== 0)
     throw new Error(
       `Could not deactivate workspace service (${command} ${args.join(' ')}): ${result.stderr || result.stdout}`,
     );
+  if (target.platform === 'linux') {
+    // systemctl --now waits for the stop job; confirm it is inactive before callers remove the unit.
+    const stopped = await getWorkspaceServiceRuntimeStatus(options, runner);
+    if (stopped.active)
+      throw new Error(`Workspace service did not become inactive after stopping: ${paths.path}`);
+    if (runtime.active) {
+      const stopResult = await runner('/usr/bin/systemctl', [
+        '--user',
+        'show',
+        '--property=Result',
+        '--value',
+        target.unit,
+      ]);
+      if (stopResult.code !== 0 || stopResult.stdout.trim() !== 'success')
+        throw new Error(
+          `Workspace service stop did not complete successfully: ${stopResult.stderr || stopResult.stdout || `systemctl exited ${stopResult.code}`}`,
+        );
+    }
+  }
 }
 
 export async function getWorkspaceServiceRuntimeStatus(

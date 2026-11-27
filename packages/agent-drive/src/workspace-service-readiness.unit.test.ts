@@ -23,6 +23,14 @@ describe('workspace mount readiness', () => {
     const expected = '/tmp/work space';
     const valid = '41 25 0:36 / /tmp/work\\040space rw,nosuid - fuse.agent-drive agent-drive rw\n';
     expect(linuxMountInfoHasAgentDriveMount(expected, valid)).toBe(true);
+    // The packaged fuser helper uses FSName("agent-drive") but no subtype,
+    // so Linux reports a plain `fuse` filesystem with the configured source.
+    expect(
+      linuxMountInfoHasAgentDriveMount(
+        expected,
+        '41 25 0:36 / /tmp/work\\040space rw,nosuid - fuse agent-drive rw\n',
+      ),
+    ).toBe(true);
     expect(
       linuxMountInfoHasAgentDriveMount(
         expected,
@@ -33,6 +41,12 @@ describe('workspace mount readiness', () => {
       linuxMountInfoHasAgentDriveMount(
         expected,
         '41 25 0:36 / /tmp/work\\040space rw - tmpfs tmpfs rw\n',
+      ),
+    ).toBe(false);
+    expect(
+      linuxMountInfoHasAgentDriveMount(
+        expected,
+        '41 25 0:36 / /tmp/work\\040space rw - fuse other-drive rw\n',
       ),
     ).toBe(false);
   });
@@ -87,7 +101,11 @@ describe('workspace mount readiness', () => {
         expectedDomainId: 'abcdef01-2345-4234-9234-abcdef012345',
         io: { home },
       }),
-    ).resolves.toMatchObject({ ready: true, actualPath, evidence: 'file-provider-domain-alias' });
+    ).resolves.toMatchObject({
+      ready: true,
+      actualPath,
+      evidence: 'file-provider-domain-alias',
+    });
 
     await rm(mountpoint);
     const cachedPath = join(cloudStorage, 'AgentDrive-AgentDriveabcdef01 2026-11-27 12.00.00');
@@ -133,7 +151,10 @@ describe('workspace mount readiness', () => {
       },
       sleep: async () => {},
     });
-    expect(result).toMatchObject({ ready: true, evidence: 'fuse-agent-drive-mountinfo' });
+    expect(result).toMatchObject({
+      ready: true,
+      evidence: 'fuse-agent-drive-mountinfo',
+    });
     expect(probes).toBe(2);
 
     await expect(
