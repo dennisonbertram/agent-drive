@@ -57,7 +57,10 @@ local agent through its normal local configuration. Do not derive the command fr
 - Start of a task: read `/memory` and look at recent files (`recent`, then `list --prefix /memory`)
   for decisions and handoffs from earlier sessions.
 - While working: put task material in `/work/<task>`.
-- When finished: save deliverables to `/outputs`.
+- When finished: save deliverables under `/outputs/<project>/` — for example `video-draft.mp4`
+  while iterating and `video-final.mp4` when done. `put` prints `folderUrl`, a private console
+  link to that folder for the owner; paste it to them (it needs their sign-in and is never a
+  share link).
 - Durable decisions and project facts go to `/memory`, one short file per topic.
 - End of a session: write a handoff note (template below) to `/work/<task>/handoff.md`.
 - Before a sandbox or container ends: run `agent-drive backup <workdir>` to upload the working

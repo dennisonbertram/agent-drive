@@ -55,6 +55,7 @@ import { CLIPBOARD_CLEAR_SECONDS } from './backup-targets.js';
 import { defaultAgentName, deviceLogin, grantLogin, shouldOpenBrowser } from './device.js';
 import { getFile, putFile } from './node-transfer.js';
 import { getPipe, parsePipeSize, putPipe } from './cli-pipes.js';
+import { consoleFolderUrl } from './console-link.js';
 
 // Resolves to the package root from both src/ and dist/.
 const { version: cliVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -1083,6 +1084,7 @@ async function run(command: string, raw: string[]) {
     const local = args.positionals[0];
     const remote = args.positionals[1];
     if (!local || !remote) throw new Error('put requires LOCAL and REMOTE.');
+    const driveId = requiredDrive(args);
     const options = {
       ...(args.values.overwrite ? { mode: 'overwrite' as const } : {}),
       ...(args.values['if-version'] ? { ifVersionId: args.values['if-version'] } : {}),
@@ -1092,9 +1094,10 @@ async function run(command: string, raw: string[]) {
     };
     const version =
       local === '-'
-        ? await putPipe(client, requiredDrive(args), remote, process.stdin, stdinSize, options)
-        : await putFile(client, requiredDrive(args), local, remote, options);
-    return output(version);
+        ? await putPipe(client, driveId, remote, process.stdin, stdinSize, options)
+        : await putFile(client, driveId, local, remote, options);
+    const folderUrl = consoleFolderUrl(client.apiOrigin, driveId, version.path);
+    return output({ ...version, ...(folderUrl ? { folderUrl } : {}) });
   }
   if (command === 'get') {
     const remote = args.positionals[0];
