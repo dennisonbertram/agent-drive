@@ -735,6 +735,20 @@ export class AgentDriveClient {
   }
 
   /**
+   * The cursor of the newest committed event on the drive, or null when it has none. Pass it to
+   * `recent` as `cursor` to see only later events. Servers that support `head=1` answer with one
+   * indexed row; older servers ignore it and return the first page, whose latestCursor is still a
+   * safe (if older) resume point — the caller just sees more events.
+   */
+  async recentHead(driveId: string, signal?: AbortSignal): Promise<string | null> {
+    const page = await this.request<RecentPage>(
+      `drives/${encode(driveId)}/recent?head=1&limit=1`,
+      signal ? { signal } : {},
+    );
+    return page.latestCursor ?? null;
+  }
+
+  /**
    * Polls `recent` until an event appears or `waitMs` passes. Returns within `waitMs` plus the
    * abort latency of one in-flight request; a stalled server cannot hold it longer. Each poll is
    * one metered `drive.recent` operation.

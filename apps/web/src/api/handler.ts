@@ -2703,6 +2703,27 @@ async function fileEndpoint(
   }
   if (operation === 'recent' && request.method === 'GET') {
     need(auth, 'read', driveId);
+    const head = queryValue(url, 'head', 8);
+    if (head !== null && head !== '1') throw new ApiError('validation_error', 'head must be 1.');
+    if (head === '1') {
+      // Head mode reads only the newest committed event; cursor and since are ambiguous here.
+      if (url.searchParams.has('cursor') || url.searchParams.has('since'))
+        throw new ApiError('validation_error', 'head cannot be combined with cursor or since.');
+      const headLimit = url.searchParams.get('limit');
+      if (headLimit !== null && headLimit !== '1')
+        throw new ApiError('validation_error', 'head only accepts limit=1.');
+      const tail = await getPool().query(
+        `SELECT e.id, e.seq::text AS seq FROM file_events e
+          WHERE e.drive_id = $1 ORDER BY e.seq DESC LIMIT 1`,
+        [driveId],
+      );
+      const latest = tail.rows[0] as Row | undefined;
+      return response({
+        items: [],
+        nextCursor: null,
+        latestCursor: latest ? encodeCursor({ value: latest.seq, id: latest.id }) : null,
+      });
+    }
     const sinceValue = queryValue(url, 'since', 128);
     const since = sinceValue ?? new Date(0).toISOString();
     const { limit, cursor } = page(url);

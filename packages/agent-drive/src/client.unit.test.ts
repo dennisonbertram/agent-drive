@@ -1062,3 +1062,40 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
     expect(inboxCalls).toBe(2);
   });
 });
+
+describe('AgentDriveClient.recentHead', () => {
+  const make = (body: unknown) => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Response.json(body);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client };
+  };
+
+  it('asks for the head row and returns latestCursor', async () => {
+    const { calls, client } = make({ items: [], nextCursor: null, latestCursor: 'cursor-1' });
+    await expect(client.recentHead('drive-1')).resolves.toBe('cursor-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('/api/v1/drives/drive-1/recent?head=1&limit=1');
+  });
+
+  it('returns null when the drive has no events', async () => {
+    const { client } = make({ items: [], nextCursor: null, latestCursor: null });
+    await expect(client.recentHead('drive-1')).resolves.toBeNull();
+  });
+
+  it('falls back to the page latestCursor on servers without head support', async () => {
+    const { client } = make({
+      items: [{ id: 'e1' }],
+      nextCursor: 'page-2',
+      latestCursor: 'first-page-cursor',
+    });
+    await expect(client.recentHead('drive-1')).resolves.toBe('first-page-cursor');
+  });
+});

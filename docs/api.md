@@ -327,10 +327,11 @@ curl -sS "$API/drives/$DRIVE/list?prefix=/notes&delimiter=/&sort=modified&limit=
 
 `GET /drives/:id/recent` returns file events, oldest first, so a client can poll for changes.
 
-- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`.
+- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`, `head`.
 - Each item: `{ id, operation, path, previousPath, versionId, agentId, agentName, machineId, userId, createdAt }`. `operation` is `put`, `copy`, `restore`, `move` or `delete`. `previousPath` is set for moves. `agentName` is `null` if the agent was removed.
 - The response also carries `latestCursor`. Pass it as `cursor` on the next call to get only newer events. With a cursor the order is exact and `since` is ignored. Without a cursor, `since` compares with the transaction start time, so it is approximate.
 - If there are no new events, `latestCursor` equals the cursor you sent (`null` if you sent none).
+- `head=1` returns only the tail: `{ items: [], nextCursor: null, latestCursor }`, where `latestCursor` is the cursor of the newest committed event on the drive (`null` when it has none). `head` cannot be combined with `cursor` or `since`, and accepts only `limit=1`.
 - Each poll counts as one `drive.recent` operation in plan usage.
 - Responses never contain object keys, wrapped keys or signed URLs.
 
