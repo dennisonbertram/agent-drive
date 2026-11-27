@@ -107,13 +107,22 @@ public struct BridgeEntry: Decodable, Equatable {
     public let size: Int64
     public let mtimeMs: Int64
     public let versionId: String?
+    public let readOnly: Bool?
 
-    public init(name: String, kind: String, size: Int64, mtimeMs: Int64, versionId: String?) {
+    public init(
+        name: String,
+        kind: String,
+        size: Int64,
+        mtimeMs: Int64,
+        versionId: String?,
+        readOnly: Bool? = nil
+    ) {
         self.name = name
         self.kind = kind
         self.size = size
         self.mtimeMs = mtimeMs
         self.versionId = versionId
+        self.readOnly = readOnly
     }
 
     public var isDirectory: Bool { kind == "directory" }
