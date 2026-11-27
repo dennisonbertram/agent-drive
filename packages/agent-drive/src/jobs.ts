@@ -211,6 +211,10 @@ function isNotFound(error: unknown) {
   return error instanceof AgentDriveApiError && error.status === 404;
 }
 
+function isJobApprovalChanged(error: unknown) {
+  return error instanceof AgentDriveApiError && error.code === 'job_approval_changed';
+}
+
 function isPermanentAuthorizationFailure(error: unknown) {
   return error instanceof AgentDriveApiError && (error.status === 401 || error.status === 403);
 }
@@ -600,16 +604,18 @@ export async function runJobs(
         ).bytes;
       } catch (error) {
         if (error instanceof DriveCryptoError) {
-          throw new WorkerUnavailableError(
-            `Cannot decrypt approved job "${id}". Check the configured drive key; the request may also be damaged. The job remains unclaimed.`,
-            { cause: error },
-          );
-        }
-        if (isNotFound(error)) {
+          if (error.code === 'decryption_failed' && error.origin === 'content') {
+            preflightFailure = 'request_unavailable';
+          } else {
+            throw new WorkerUnavailableError(
+              `Cannot decrypt approved job "${id}". Check the configured drive key; the request may also be damaged. The job remains unclaimed.`,
+              { cause: error },
+            );
+          }
+        } else if (isNotFound(error)) {
           backoff.delete(id);
           return;
-        }
-        if (error instanceof StreamSizeLimitError) {
+        } else if (error instanceof StreamSizeLimitError) {
           preflightFailure = 'request_too_large';
         } else {
           if (!isPermanentAuthorizationFailure(error) && !isWorkerApiUnsupported(error))
@@ -643,9 +649,17 @@ export async function runJobs(
             claimedAt,
           })}\n`,
         ),
-        { mode: 'create', ...(signal ? { signal } : {}) },
+        {
+          mode: 'create',
+          ifJobApprovalVersionId: approval.id,
+          ...(signal ? { signal } : {}),
+        },
       );
     } catch (error) {
+      if (isJobApprovalChanged(error)) {
+        backoff.delete(id);
+        return;
+      }
       if (isClaimed(error)) remember(id);
       else {
         if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
