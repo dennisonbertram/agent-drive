@@ -697,12 +697,14 @@ export class AgentDriveClient {
     limit?: number,
     cursor?: string,
     filters?: { tag?: string; agentId?: string; machine?: string; user?: string },
+    signal?: AbortSignal,
   ): Promise<Page<FileEntry>> {
     const page = await this.request<Page<FileEntryWire>>(
       this.pagePath(`drives/${encode(driveId)}/list`, limit, cursor, {
         ...(prefix ? { prefix } : {}),
         ...filters,
       }),
+      signal ? { signal } : {},
     );
     return {
       ...page,
@@ -730,6 +732,28 @@ export class AgentDriveClient {
         cursor,
         since ? { since } : undefined,
       ),
+      signal ? { signal } : {},
+    );
+  }
+
+  /**
+   * Job submissions still waiting for a worker: the transactional move events that renamed
+   * /jobs/<id>/request.md to /jobs/<same id>/submitted.md while the submitted file is still at
+   * that path and no worker receipt claims the job id. Each item carries the event's pinned
+   * versionId (the submitted draft version), oldest first; page with `cursor`. Servers that do
+   * not know `jobSubmissions` ignore it and return the ordinary event feed — the caller must
+   * still revalidate each event's path, version and receipt before acting on it.
+   */
+  async pendingJobSubmissions(
+    driveId: string,
+    limit?: number,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<RecentPage> {
+    return this.request<RecentPage>(
+      this.pagePath(`drives/${encode(driveId)}/recent`, limit, cursor, {
+        jobSubmissions: '1',
+      }),
       signal ? { signal } : {},
     );
   }

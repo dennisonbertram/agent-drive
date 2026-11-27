@@ -1099,3 +1099,69 @@ describe('AgentDriveClient.recentHead', () => {
     await expect(client.recentHead('drive-1')).resolves.toBe('first-page-cursor');
   });
 });
+
+describe('AgentDriveClient.pendingJobSubmissions', () => {
+  const page = { items: [{ id: 'e1' }], nextCursor: 'c2', latestCursor: 'c2' };
+  const make = (body: unknown = page) => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json(body);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client };
+  };
+
+  it('requests the submissions feed with limit, cursor and an abort signal', async () => {
+    const { calls, client } = make();
+    const controller = new AbortController();
+    await expect(
+      client.pendingJobSubmissions('drive-1', 25, 'cursor-1', controller.signal),
+    ).resolves.toEqual(page);
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/drive-1/recent');
+    expect(url.searchParams.get('jobSubmissions')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('25');
+    expect(url.searchParams.get('cursor')).toBe('cursor-1');
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
+  it('sends only the flag when no options are given', async () => {
+    const { calls, client } = make();
+    await client.pendingJobSubmissions('drive-1');
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get('jobSubmissions')).toBe('1');
+    expect(url.searchParams.has('limit')).toBe(false);
+    expect(url.searchParams.has('cursor')).toBe(false);
+    expect(calls[0]?.init?.signal).toBeUndefined();
+  });
+});
+
+describe('AgentDriveClient.list signal', () => {
+  it('forwards an optional signal as the sixth argument', async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json({ items: [], nextCursor: null });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    const controller = new AbortController();
+    await client.list('d', '/jobs/', 10, 'cursor-1', { tag: 'job' }, controller.signal);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/d/list');
+    expect(url.searchParams.get('prefix')).toBe('/jobs/');
+    expect(url.searchParams.get('tag')).toBe('job');
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+    await client.list('d');
+    expect(calls[1]?.init?.signal).toBeUndefined();
+  });
+});
