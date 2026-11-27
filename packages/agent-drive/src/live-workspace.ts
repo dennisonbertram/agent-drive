@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { StringDecoder } from 'node:string_decoder';
@@ -43,6 +43,7 @@ export type LiveWorkspaceOptions = {
   root: string;
   readOnly?: boolean;
   transport?: LiveWorkspaceTransport;
+  spawnProcess?: typeof spawn;
   beforeIO?: (machineId: string, signal?: AbortSignal) => Promise<unknown>;
 };
 
@@ -234,6 +235,10 @@ def cleanup_record(handle,record):
         try: os.fsync(parent)
         except OSError: pass
     finally: os.close(parent)
+    fd=record.pop('fd',None)
+    if fd is not None:
+        try: os.close(fd)
+        except OSError: pass
     HANDLES.pop(handle,None)
 
 def respond(request):
@@ -289,13 +294,15 @@ def respond(request):
             parts=canonical(path); parent_path='/'+'/'.join(parts[:-1]) if len(parts)>1 else '/'
             stage_dir,stage_dir_fd=create_stage(parent)
             stage='stage-'+secrets.token_hex(16)
+            fd=None
             try:
                 fd=os.open(stage,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=stage_dir_fd)
                 os.fsync(fd); size=0
-                os.close(fd)
             except Exception:
+                if fd is not None: os.close(fd)
                 os.close(stage_dir_fd)
                 raise
+            os.close(fd)
             os.close(stage_dir_fd)
             handle=secrets.token_urlsafe(24)
             HANDLES[handle]={'path':path,'parentPath':parent_path,'base':None,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
@@ -322,46 +329,54 @@ def respond(request):
             result=record['result']
             if op=='release': cleanup_record(handle,record)
             return {'version':result}
-        parentfd=dir_for(record['parentPath'] or '/')
-        try: stagefd=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parentfd)
-        finally: os.close(parentfd)
-        try:
-            fd=os.open(record['stage'],os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stagefd)
+        fd=record.get('fd')
+        opened_fd=False
+        if fd is None:
+            parentfd=dir_for(record['parentPath'] or '/')
+            try: stagefd=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parentfd)
+            finally: os.close(parentfd)
             try:
-                info=os.fstat(fd)
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid() or info.st_mode&0o077: fail('EACCES')
-                if op=='write':
-                    off=request.get('offset'); raw=request.get('data')
-                    if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(raw,str) or len(raw)>((MAX_IO+2)//3)*4: fail('EINVAL')
-                    try: data=base64.b64decode(raw,validate=True)
-                    except Exception: fail('EINVAL')
-                    if base64.b64encode(data).decode('ascii')!=raw: fail('EINVAL')
-                    if len(data)>MAX_IO or off+len(data)>MAX_FILE: fail('EFBIG')
-                    pos=0
-                    while pos<len(data):
-                        n=os.pwrite(fd,data[pos:],off+pos)
-                        if n<=0: fail('EIO')
-                        pos+=n
-                    record['size']=max(record['size'],off+pos); return {'bytesWritten':pos}
-                if op=='truncate':
-                    size=request.get('size')
-                    if not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_FILE: fail('EINVAL')
-                    os.ftruncate(fd,size); record['size']=size; return {'size':size}
-                if op=='readStaged':
-                    off=request.get('offset'); size=request.get('size')
-                    if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
-                    data=os.pread(fd,size,off); return {'data':base64.b64encode(data).decode('ascii'),'eof':off+len(data)>=os.fstat(fd).st_size}
-                if op=='completeWrite': return {}
-                if op=='flushStatus': return {'flushed':record['committed'],'version':record['result']}
-                if op in ('flush','release'):
-                    result=record['result'] if record['committed'] else commit_record(handle,record,request.get('operationId',''))
-                    if op=='release': cleanup_record(handle,record)
-                    return {'version':result}
-                if op=='closeWrite':
-                    record['retained']=True; HANDLES.pop(handle,None)
-                    return {'recoveryPath':recovery(record)}
-            finally: os.close(fd)
-        finally: os.close(stagefd)
+                fd=os.open(record['stage'],os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stagefd)
+                opened_fd=True
+            finally: os.close(stagefd)
+        try:
+            info=os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid!=os.getuid() or info.st_mode&0o077: fail('EACCES')
+            if (not record['committed'] and info.st_nlink!=1) or (record['committed'] and info.st_nlink>1): fail('EACCES')
+            if op=='write':
+                off=request.get('offset'); raw=request.get('data')
+                if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(raw,str) or len(raw)>((MAX_IO+2)//3)*4: fail('EINVAL')
+                try: data=base64.b64decode(raw,validate=True)
+                except Exception: fail('EINVAL')
+                if base64.b64encode(data).decode('ascii')!=raw: fail('EINVAL')
+                if len(data)>MAX_IO or off+len(data)>MAX_FILE: fail('EFBIG')
+                pos=0
+                while pos<len(data):
+                    n=os.pwrite(fd,data[pos:],off+pos)
+                    if n<=0: fail('EIO')
+                    pos+=n
+                record['size']=max(record['size'],off+pos); return {'bytesWritten':pos}
+            if op=='truncate':
+                size=request.get('size')
+                if not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_FILE: fail('EINVAL')
+                os.ftruncate(fd,size); record['size']=size; return {'size':size}
+            if op=='readStaged':
+                off=request.get('offset'); size=request.get('size')
+                if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
+                data=os.pread(fd,size,off); return {'data':base64.b64encode(data).decode('ascii'),'eof':off+len(data)>=os.fstat(fd).st_size}
+            if op=='completeWrite': return {}
+            if op=='flushStatus': return {'flushed':record['committed'],'version':record['result']}
+            if op in ('flush','release'):
+                result=record['result'] if record['committed'] else commit_record(handle,record,request.get('operationId',''))
+                if op=='release': cleanup_record(handle,record)
+                return {'version':result}
+            if op=='closeWrite':
+                record['retained']=True; HANDLES.pop(handle,None)
+                fd=record.pop('fd',None)
+                if fd is not None: os.close(fd)
+                return {'recoveryPath':recovery(record)}
+        finally:
+            if opened_fd: os.close(fd)
     if op=='init-stop': return {}
     fail('EINVAL')
 
@@ -369,23 +384,28 @@ def commit_record(handle,record,operation):
     if record['committed']: return record['result']
     root_path=record['parentPath'] or '/'; parent=dir_for(root_path)
     stageparent=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+    stagefile=None
     try:
         if current(parent,record['path'].split('/')[-1])!=record['base']: fail('ESTALE')
         stagefile=os.open(record['stage'],os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stageparent)
-        try: os.fsync(stagefile)
-        finally: os.close(stagefile)
+        selected=os.fstat(stagefile)
+        if not stat.S_ISREG(selected.st_mode) or selected.st_nlink!=1 or selected.st_uid!=os.getuid() or selected.st_mode&0o077: fail('EACCES')
+        os.fsync(stagefile)
         try: os.link(record['stage'],record['path'].split('/')[-1],src_dir_fd=stageparent,dst_dir_fd=parent,follow_symlinks=False)
         except FileExistsError: fail('ESTALE')
         os.unlink(record['stage'],dir_fd=stageparent)
         os.fsync(stageparent); os.fsync(parent)
         committed=os.stat(record['path'].split('/')[-1],dir_fd=parent,follow_symlinks=False)
         result={'id':version(committed),'path':record['path']}
+        record['fd']=stagefile; stagefile=None
         record['result']=result; record['operation']=operation; record['committed']=True
         return result
     except Exception:
         record['retained']=True
         raise
-    finally: os.close(stageparent); os.close(parent)
+    finally:
+        if stagefile is not None: os.close(stagefile)
+        os.close(stageparent); os.close(parent)
 
 for raw in sys.stdin.buffer:
     request={}
@@ -417,6 +437,7 @@ export const LIVE_WORKSPACE_HELPER_SOURCE = PYTHON_HELPER;
 export type InstaboxTransportOptions = {
   sandboxId: string;
   root?: string;
+  cliPath?: string;
   beforeIO?: (machineId: string, signal?: AbortSignal) => Promise<unknown>;
   spawnProcess?: typeof spawn;
 };
@@ -477,6 +498,9 @@ export function createInstaboxLiveWorkspaceTransport(
   options: InstaboxTransportOptions,
 ): LiveWorkspaceTransport {
   const spawnProcess = options.spawnProcess ?? spawn;
+  const cliPath = options.cliPath ?? 'instabox';
+  if (options.cliPath !== undefined && !isAbsolute(options.cliPath))
+    throw new Error('Configured Instabox CLI path must be absolute.');
   const sandboxId = options.sandboxId;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sandboxId))
     throw new Error('Invalid Instabox sandbox identifier.');
@@ -505,7 +529,7 @@ export function createInstaboxLiveWorkspaceTransport(
       const effectiveSignal = signal
         ? AbortSignal.any([signal, shutdownController.signal])
         : shutdownController.signal;
-      const childProcess = spawnProcess('instabox', args, {
+      const childProcess = spawnProcess(cliPath, args, {
         stdio: ['ignore', 'pipe', 'ignore'],
         env: liveWorkspaceInstaboxEnvironment(),
       });
@@ -557,7 +581,9 @@ export function createInstaboxLiveWorkspaceTransport(
       let attemptChild: ChildProcess | undefined;
       try {
         const lookupId = pinnedMachineId ?? sandboxId;
-        const machine = parseMachineIdentity(await runCli(['get', lookupId, '--json'], startupSignal));
+        const machine = parseMachineIdentity(
+          await runCli(['get', lookupId, '--json'], startupSignal),
+        );
         if (pinnedMachineId && machine.id !== pinnedMachineId)
           throw new Error('Instabox returned a different machine ID.');
         if (!pinnedMachineId) {
@@ -572,18 +598,30 @@ export function createInstaboxLiveWorkspaceTransport(
         await writeFile(helperPath, LIVE_WORKSPACE_HELPER_SOURCE, { mode: 0o600, flag: 'wx' });
         const remoteDir = `/tmp/agent-drive-live-${randomUUID()}`;
         const remotePath = `${remoteDir}/${HELPER_FILENAME}`;
-        await runCli(['ssh', pinnedMachineId, '--', 'mkdir', '-m', '700', '--', remoteDir], startupSignal);
+        await runCli(
+          ['ssh', pinnedMachineId, '--', 'mkdir', '-m', '700', '--', remoteDir],
+          startupSignal,
+        );
         await runCli(['cp', helperPath, `${pinnedMachineId}:${remotePath}`], startupSignal);
-        const checked = await runCli(['ssh', pinnedMachineId, '--', 'sha256sum', '--', remotePath], startupSignal);
-        const expectedHash = createHash('sha256').update(LIVE_WORKSPACE_HELPER_SOURCE).digest('hex');
+        const checked = await runCli(
+          ['ssh', pinnedMachineId, '--', 'sha256sum', '--', remotePath],
+          startupSignal,
+        );
+        const expectedHash = createHash('sha256')
+          .update(LIVE_WORKSPACE_HELPER_SOURCE)
+          .digest('hex');
         if (!checked.trim().startsWith(`${expectedHash} `))
           throw new Error('Instabox helper integrity check failed.');
         stdoutBuffer = '';
         decoder = new StringDecoder('utf8');
-        const session = spawnProcess('instabox', ['ssh', pinnedMachineId, '--', 'python3', '-u', remotePath], {
-          stdio: ['pipe', 'pipe', 'ignore'],
-          env: liveWorkspaceInstaboxEnvironment(),
-        });
+        const session = spawnProcess(
+          cliPath,
+          ['ssh', pinnedMachineId, '--', 'python3', '-u', remotePath],
+          {
+            stdio: ['pipe', 'pipe', 'ignore'],
+            env: liveWorkspaceInstaboxEnvironment(),
+          },
+        );
         attemptChild = session;
         child = session;
         session.stdout!.on('data', (chunk: Buffer) => {
@@ -610,8 +648,13 @@ export function createInstaboxLiveWorkspaceTransport(
               const response = parseHelperResponse(line, pending.id as string | number);
               pending.resolve(response);
             } catch (error) {
-              pending.reject(error instanceof Error ? error : new Error('Invalid helper response.'));
-              failSession(session, error instanceof Error ? error : new Error('Invalid helper response.'));
+              pending.reject(
+                error instanceof Error ? error : new Error('Invalid helper response.'),
+              );
+              failSession(
+                session,
+                error instanceof Error ? error : new Error('Invalid helper response.'),
+              );
               return;
             }
           }
@@ -626,7 +669,9 @@ export function createInstaboxLiveWorkspaceTransport(
           if (tempDir === attemptDir) {
             tempDir = undefined;
             if (attemptDir) {
-              const cleanup = rm(attemptDir, { recursive: true, force: true }).catch(() => undefined);
+              const cleanup = rm(attemptDir, { recursive: true, force: true }).catch(
+                () => undefined,
+              );
               const trackedCleanup = cleanup.finally(() => {
                 if (tempCleanup === trackedCleanup) tempCleanup = undefined;
               });
@@ -640,14 +685,23 @@ export function createInstaboxLiveWorkspaceTransport(
           );
         });
         const init = await rawRequest(
-          { id: 'init', op: 'init', root: registeredRoot, ...(rootIdentity ? { rootIdentity } : {}) },
+          {
+            id: 'init',
+            op: 'init',
+            root: registeredRoot,
+            ...(rootIdentity ? { rootIdentity } : {}),
+          },
           signal,
         );
         if (!init.ok)
           throw new Error(
             `Instabox workspace helper initialization failed (${String(init.errno ?? 'EIO')}).`,
           );
-        if (typeof init.rootIdentity !== 'string' || init.rootIdentity.length === 0 || init.rootIdentity.length > 256)
+        if (
+          typeof init.rootIdentity !== 'string' ||
+          init.rootIdentity.length === 0 ||
+          init.rootIdentity.length > 256
+        )
           throw new Error('Instabox workspace helper returned an invalid root identity.');
         if (rootIdentity && init.rootIdentity !== rootIdentity)
           throw new Error('Instabox workspace root identity changed.');
@@ -655,7 +709,8 @@ export function createInstaboxLiveWorkspaceTransport(
       } catch (error) {
         if (attemptDir && tempDir === attemptDir) tempDir = undefined;
         if (attemptChild) await stopChild(attemptChild);
-        if (attemptDir) await rm(attemptDir, { recursive: true, force: true }).catch(() => undefined);
+        if (attemptDir)
+          await rm(attemptDir, { recursive: true, force: true }).catch(() => undefined);
         clearSessionBuffers();
         throw error;
       }
@@ -808,7 +863,11 @@ export async function createLiveWorkspaceProvider(options: LiveWorkspaceOptions)
     createInstaboxLiveWorkspaceTransport({
       sandboxId: options.sandboxId,
       root: options.root,
+      ...(process.env.AGENT_DRIVE_INSTABOX_CLI !== undefined
+        ? { cliPath: process.env.AGENT_DRIVE_INSTABOX_CLI }
+        : {}),
       ...(options.beforeIO ? { beforeIO: options.beforeIO } : {}),
+      ...(options.spawnProcess ? { spawnProcess: options.spawnProcess } : {}),
     });
   let closed = false;
   let injectedTransportActivated = false;
