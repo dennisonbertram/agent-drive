@@ -150,9 +150,7 @@ test('job-submit: one click on Submit job posts the rename contract once and the
     },
     // The rename this page drove is a real submission, so the approval read pins it.
     onGet: async (call) =>
-      call.jobApproval === '1' && call.path === SUBMITTED_PATH && submitted
-        ? APPROVAL
-        : NOT_FOUND,
+      call.jobApproval === '1' && call.path === SUBMITTED_PATH && submitted ? APPROVAL : NOT_FOUND,
   });
   await signIn(context, 'e2e_job_submit_test');
   await browser.goto(`/console?drive=${DRIVE}&path=${encodeURIComponent('/jobs/job-123')}`);
