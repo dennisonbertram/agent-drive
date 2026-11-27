@@ -884,6 +884,206 @@ describe('AgentDriveClient.putEncrypted', () => {
   });
 });
 
+describe('AgentDriveClient job-approval guarded claim writes', () => {
+  const driveKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const approvalId = '33333333-3333-4333-8333-333333333333';
+  const claimPath = '/jobs/.agent-drive/claims/job-9.json';
+  const guarded = { mode: 'create' as const, ifJobApprovalVersionId: approvalId };
+  const version = {
+    id: approvalId,
+    path: claimPath,
+    ciphertextSize: 44,
+    wrappedKey: 'wrapped',
+    agentId: 'a',
+    machineId: null,
+    userId: null,
+    tags: [],
+    description: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const makeClient = (fetcher: typeof fetch) =>
+    new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+
+  it('commits a guarded byte put through the dedicated claim endpoint, never plain commit', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), ...(init ? { init } : {}) });
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(JSON.stringify({ version }), { status: 201 });
+    });
+    const client = makeClient(fetcher);
+
+    const committed = await client.put(
+      'd',
+      claimPath,
+      new TextEncoder().encode('{"state":"running"}'),
+      guarded,
+    );
+
+    expect(committed).toEqual(version);
+    expect(calls).toHaveLength(3);
+    const apiPaths = calls.map((call) => new URL(call.url).pathname);
+    expect(apiPaths[2]).toBe('/api/v1/drives/d/commit-job-claim');
+    expect(apiPaths.some((path) => path.endsWith('/commit'))).toBe(false);
+    expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
+      intentId: 'claim-intent',
+      ifJobApprovalVersionId: approvalId,
+    });
+    // The guard is a commit-time check: the staged intent body never carries it.
+    expect(String(calls[0]?.init?.body)).not.toContain('ifJobApprovalVersionId');
+  });
+
+  it('rejects the guard outside create-only mode or the claims path before any request', async () => {
+    const fetcher = vi.fn();
+    const client = makeClient(fetcher as unknown as typeof fetch);
+    const bytes = new TextEncoder().encode('x');
+
+    await expect(
+      client.put('d', claimPath, bytes, { ...guarded, mode: 'overwrite' }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      client.put('d', claimPath, bytes, { ...guarded, allowTrashedCreate: true }),
+    ).rejects.toThrow(TypeError);
+    await expect(client.put('d', '/jobs/job-9/claims/job-9.json', bytes, guarded)).rejects.toThrow(
+      TypeError,
+    );
+    await expect(
+      client.put('d', '/jobs/.agent-drive/claims/bad id.json', bytes, guarded),
+    ).rejects.toThrow(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('propagates job_approval_changed without falling back to the generic commit', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname);
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(
+        JSON.stringify({
+          error: { code: 'job_approval_changed', message: 'The job approval changed.' },
+        }),
+        { status: 409 },
+      );
+    });
+    const client = makeClient(fetcher);
+
+    await expect(client.put('d', claimPath, new Uint8Array([1]), guarded)).rejects.toMatchObject({
+      code: 'job_approval_changed',
+      status: 409,
+    });
+    expect(calls.some((path) => path.endsWith('/commit'))).toBe(false);
+    expect(calls.filter((path) => path.endsWith('/commit-job-claim'))).toHaveLength(1);
+  });
+
+  it('routes a guarded stream and its same-intent replay through the claim endpoint only', async () => {
+    const calls: { pathname: string; body?: unknown }[] = [];
+    let commits = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ pathname: url.pathname, body: init?.body });
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+              .ciphertextSize,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') {
+        const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
+        while (!(await reader.read()).done) {}
+        return new Response('', { status: 200 });
+      }
+      commits += 1;
+      if (commits === 1) return new Response('lost acknowledgement', { status: 502 });
+      return new Response(JSON.stringify({ version }), { status: 200 });
+    });
+    const client = makeClient(fetcher);
+    const source = (async function* () {
+      yield new TextEncoder().encode('{"state":"running"}');
+    })();
+
+    await expect(client.putStream('d', claimPath, source, 19, guarded)).rejects.toMatchObject({
+      status: 502,
+    });
+    // A failed commit must not leave a per-client cache that grows for the life of
+    // a worker. A restarted caller recovers the intent and carries the saved guard.
+    expect('jobClaimGuards' in client).toBe(false);
+    const restartedClient = makeClient(fetcher);
+    await expect(
+      restartedClient.replayCommit('d', 'claim-intent', {
+        ifJobApprovalVersionId: approvalId,
+      }),
+    ).resolves.toEqual(version);
+
+    const apiPaths = calls.map((call) => call.pathname);
+    expect(apiPaths.some((path) => path.endsWith('/commit'))).toBe(false);
+    const claimCommits = calls.filter((call) => call.pathname.endsWith('/commit-job-claim'));
+    expect(claimCommits).toHaveLength(2);
+    for (const call of claimCommits)
+      expect(JSON.parse(String(call.body))).toEqual({
+        intentId: 'claim-intent',
+        ifJobApprovalVersionId: approvalId,
+      });
+  });
+
+  it('keeps ordinary puts and replays on the generic commit endpoint', async () => {
+    const calls: { pathname: string; body?: unknown }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ pathname: url.pathname, body: init?.body });
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'plain-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 44,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(JSON.stringify({ version }), { status: 201 });
+    });
+    const client = makeClient(fetcher);
+
+    await client.put('d', '/jobs/job-9/status.json', new Uint8Array([1]), { mode: 'create' });
+    await client.replayCommit('d', 'plain-intent');
+
+    const commits = calls.filter((call) => call.pathname.endsWith('/commit'));
+    expect(commits).toHaveLength(2);
+    for (const call of commits)
+      expect(JSON.parse(String(call.body))).toEqual({ intentId: 'plain-intent' });
+    expect(calls.some((call) => call.pathname.endsWith('/commit-job-claim'))).toBe(false);
+  });
+});
+
 describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
   const driveA = '11111111-2222-4333-8444-555555555555';
   const driveB = '22222222-2222-4333-8444-555555555555';
