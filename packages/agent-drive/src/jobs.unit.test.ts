@@ -169,12 +169,25 @@ class FakeDrive {
     options: {
       mode?: 'create' | 'overwrite';
       ifVersionId?: string | null;
+      ifJobApprovalVersionId?: string;
       allowTrashedCreate?: boolean;
       signal?: AbortSignal;
     } = {},
   ) {
     this.fail(`put:${path}`);
     if (options.signal) this.signalSeen.add(`put:${path}`);
+    if (options.ifJobApprovalVersionId !== undefined) {
+      const match = /^\/jobs\/\.agent-drive\/claims\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.json$/u.exec(
+        path,
+      );
+      const approved = match ? this.approvedJobVersion(match[1]!) : undefined;
+      if (approved?.versionId !== options.ifJobApprovalVersionId)
+        throw new AgentDriveApiError(
+          'job_approval_changed',
+          409,
+          'The submitted request changed before it was claimed.',
+        );
+    }
     const guard = options.ifVersionId;
     const live = this.live.get(path);
     const trashed = this.trashed.get(path);
@@ -245,6 +258,12 @@ class FakeDrive {
   async getJobApproval(_driveId: string, jobId: string, signal?: AbortSignal) {
     this.fail(`approval:${jobId}`);
     if (signal) this.signalSeen.add(`approval:${jobId}`);
+    const approved = this.approvedJobVersion(jobId);
+    if (!approved) throw notFound();
+    return versionObject(approved);
+  }
+
+  private approvedJobVersion(jobId: string) {
     const path = `/jobs/${jobId}/submitted.md`;
     const event = [...this.events]
       .reverse()
@@ -258,8 +277,8 @@ class FakeDrive {
     const approved = event?.versionId ? this.history.get(event.versionId) : undefined;
     const live = this.live.get(path);
     if (!approved || approved.path !== path || !live || live.fileId !== approved.fileId)
-      throw notFound();
-    return versionObject(approved);
+      return undefined;
+    return approved;
   }
 
   async list(
@@ -814,6 +833,87 @@ describe('runJobs once', () => {
     await runJobs(client, DRIVE, okHandler, { once: true });
     expect(drive.receipt('job-key-a')?.state).toBe('done');
     expect(drive.receipt('job-key-b')?.state).toBe('done');
+  });
+
+  it('releases a withdrawn approval without claiming, then runs its resubmission', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-reapproval', { request: textBytes('approved A') });
+    const claimPath = '/jobs/.agent-drive/claims/job-reapproval.json';
+    let changed = false;
+    drive.before = (call) => {
+      if (call !== `put:${claimPath}` || changed) return;
+      changed = true;
+      drive.before = undefined;
+      drive.move('/jobs/job-reapproval/submitted.md', '/jobs/job-reapproval/request.md');
+      void drive.put(DRIVE, '/jobs/job-reapproval/request.md', textBytes('approved B'), {
+        mode: 'overwrite',
+      });
+      drive.move('/jobs/job-reapproval/request.md', '/jobs/job-reapproval/submitted.md');
+    };
+
+    const invoked: string[] = [];
+    await expect(
+      runJobs(
+        client,
+        DRIVE,
+        async (job) => {
+          invoked.push(new TextDecoder().decode(job.request));
+          return [];
+        },
+        { once: true },
+      ),
+    ).resolves.toBeUndefined();
+    expect(changed).toBe(true);
+    expect(invoked).toEqual([]);
+    expect(drive.has(claimPath)).toBe(false);
+    expect(drive.has('/jobs/job-reapproval/status.json')).toBe(false);
+
+    await runJobs(
+      client,
+      DRIVE,
+      async (job) => {
+        invoked.push(new TextDecoder().decode(job.request));
+        return [];
+      },
+      { once: true },
+    );
+    expect(invoked).toEqual(['approved B']);
+    expect(drive.receipt('job-reapproval')?.requestVersionId).toBe(
+      drive.file('/jobs/job-reapproval/submitted.md')?.versionId,
+    );
+  });
+
+  it('fails a damaged request body without stopping a healthy queued job', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-damaged');
+    await seedSubmission(drive, 'job-healthy');
+    drive.inject.set('get:/jobs/job-damaged/submitted.md', () =>
+      Object.assign(new DriveCryptoError('decryption_failed', 'damaged body'), {
+        origin: 'content' as const,
+      }),
+    );
+    const invoked: string[] = [];
+
+    await expect(
+      runJobs(
+        client,
+        DRIVE,
+        async (job) => {
+          invoked.push(job.id);
+          return [];
+        },
+        { once: true },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(invoked).toEqual(['job-healthy']);
+    expect(drive.receipt('job-damaged')).toMatchObject({
+      state: 'failed',
+      reason: 'request_unavailable',
+    });
+    expect(drive.receipt('job-healthy')?.state).toBe('done');
   });
 
   it('treats an unsupported approval API as fatal and leaves the job unclaimed', async () => {

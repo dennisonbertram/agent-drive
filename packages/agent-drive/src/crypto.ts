@@ -20,6 +20,7 @@ export class DriveCryptoError extends Error {
       | 'decryption_failed'
       | 'inbox_key_required',
     message: string,
+    readonly origin?: 'content',
   ) {
     super(message);
     this.name = 'DriveCryptoError';
@@ -71,10 +72,11 @@ async function importDriveKey(key: Uint8Array) {
   return crypto.subtle.importKey('raw', owned(key), 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
-function failedDecryption() {
+function failedDecryption(origin?: 'content') {
   return new DriveCryptoError(
     'decryption_failed',
     'Unable to decrypt: the drive key is wrong, or the file is damaged or incomplete.',
+    origin,
   );
 }
 
@@ -194,7 +196,7 @@ export async function decryptWithFileKey(ciphertext: Uint8Array, fileKey: string
   try {
     return await open(ciphertext, decodeDriveKey(fileKey));
   } catch {
-    throw failedDecryption();
+    throw failedDecryption('content');
   }
 }
 
@@ -215,7 +217,7 @@ export function decryptWithFileKeyStream(
       yield* openStream(source, key, expectedCiphertextBytes);
     } catch (error) {
       if (error instanceof CryptoStreamSourceError) throw error.sourceError;
-      throw failedDecryption();
+      throw failedDecryption('content');
     }
   })();
 }
@@ -248,7 +250,7 @@ export function openFrameRange(
       );
     } catch (error) {
       if (error instanceof CryptoStreamSourceError) throw error.sourceError;
-      throw failedDecryption();
+      throw failedDecryption('content');
     }
   })();
 }
