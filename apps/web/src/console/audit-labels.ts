@@ -2,6 +2,7 @@
 const LABELS: Record<string, string> = {
   'drive.put': 'Uploaded a file',
   'drive.commit': 'Finished an upload',
+  'drive.commit_job_claim': 'Claimed a submitted job',
   'drive.get': 'Downloaded a file',
   'drive.trace_inbox.read': 'Read the trace inbox',
   'drive.list': 'Listed files',
@@ -75,6 +76,7 @@ const ERROR_LABELS: Record<string, string> = {
   permission_denied: 'not allowed',
   not_found: 'not found',
   conflict: 'conflict',
+  job_approval_changed: 'job approval changed',
   quota_exceeded: 'over quota',
   payment_required: 'payment required',
   rate_limited: 'too many requests',
