@@ -121,7 +121,7 @@ describe('recent head cursor', () => {
   it('returns the newest committed event cursor and resumes with only newer events', async () => {
     const tail = (
       await pool.query(
-        'SELECT id, seq::text AS seq FROM file_events WHERE drive_id = $1 ORDER BY seq DESC LIMIT 1',
+        'SELECT id, seq::text AS seq FROM file_events WHERE drive_id = $1 ORDER BY file_events.seq DESC LIMIT 1',
         [driveId],
       )
     ).rows[0] as { id: string; seq: string };

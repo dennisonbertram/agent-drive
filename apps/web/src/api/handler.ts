@@ -103,6 +103,9 @@ type Row = QueryResultRow & Record<string, any>;
 // API-generated version ids are UUIDv4 values, so this sentinel cannot be a real version id.
 // upload_intents.base_version_id has no foreign key and external clients cannot set new version ids.
 const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
+// Postgres regex capturing the job id of /jobs/<id>/submitted.md; mirrors JOB_ID in
+// packages/agent-drive/src/jobs.ts (1-64 chars: alphanumeric, then alphanumeric, "_" or "-").
+const JOB_SUBMITTED_PATH_PATTERN = '^/jobs/([A-Za-z0-9][A-Za-z0-9_-]{0,63})/submitted\\.md$';
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
@@ -2705,8 +2708,13 @@ async function fileEndpoint(
     need(auth, 'read', driveId);
     const head = queryValue(url, 'head', 8);
     if (head !== null && head !== '1') throw new ApiError('validation_error', 'head must be 1.');
+    const jobSubmissions = queryValue(url, 'jobSubmissions', 8);
+    if (jobSubmissions !== null && jobSubmissions !== '1')
+      throw new ApiError('validation_error', 'jobSubmissions must be 1.');
     if (head === '1') {
       // Head mode reads only the newest committed event; cursor and since are ambiguous here.
+      if (jobSubmissions === '1')
+        throw new ApiError('validation_error', 'head cannot be combined with jobSubmissions.');
       if (url.searchParams.has('cursor') || url.searchParams.has('since'))
         throw new ApiError('validation_error', 'head cannot be combined with cursor or since.');
       const headLimit = url.searchParams.get('limit');
@@ -2742,11 +2750,31 @@ async function fileEndpoint(
       params.push(since);
       where = `e.created_at > $2`;
     }
+    const pending = jobSubmissions === '1';
+    if (pending) {
+      // Only the transactional absent-target move that marks a job submitted qualifies:
+      // /jobs/<id>/request.md -> /jobs/<same id>/submitted.md with the draft version pinned.
+      // The moved file must still live at that path (a newer version is fine; the event
+      // keeps the original), and a worker receipt file — even trashed — claims the job id.
+      where += ` AND e.operation = 'move' AND e.version_id IS NOT NULL
+        AND e.previous_path =
+          '/jobs/' || substring(e.path from '${JOB_SUBMITTED_PATH_PATTERN}') || '/request.md'
+        AND NOT EXISTS (
+          SELECT 1 FROM files r
+           WHERE r.drive_id = e.drive_id
+             AND r.path =
+               '/jobs/.agent-drive/claims/' || substring(e.path from '${JOB_SUBMITTED_PATH_PATTERN}') || '.json'
+        )`;
+    }
     params.push(limit + 1);
     const rows = await getPool().query(
       `SELECT e.id, e.operation, e.path, e.previous_path, e.version_id, e.agent_id,
               e.machine_id, e.user_id, e.created_at, e.seq::text AS seq, g.name AS agent_name
-         FROM file_events e LEFT JOIN agents g ON g.id = e.agent_id
+         FROM file_events e${
+           pending
+             ? ' JOIN files f ON f.id = e.file_id AND f.path = e.path AND f.deleted_at IS NULL'
+             : ''
+         } LEFT JOIN agents g ON g.id = e.agent_id
         WHERE e.drive_id = $1 AND ${where}
         ORDER BY e.seq LIMIT $${params.length}`,
       params,

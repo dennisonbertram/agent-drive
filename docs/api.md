@@ -327,11 +327,12 @@ curl -sS "$API/drives/$DRIVE/list?prefix=/notes&delimiter=/&sort=modified&limit=
 
 `GET /drives/:id/recent` returns file events, oldest first, so a client can poll for changes.
 
-- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`, `head`.
+- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`, `head`, `jobSubmissions`.
 - Each item: `{ id, operation, path, previousPath, versionId, agentId, agentName, machineId, userId, createdAt }`. `operation` is `put`, `copy`, `restore`, `move` or `delete`. `previousPath` is set for moves. `agentName` is `null` if the agent was removed.
 - The response also carries `latestCursor`. Pass it as `cursor` on the next call to get only newer events. With a cursor the order is exact and `since` is ignored. Without a cursor, `since` compares with the transaction start time, so it is approximate.
 - If there are no new events, `latestCursor` equals the cursor you sent (`null` if you sent none).
-- `head=1` returns only the tail: `{ items: [], nextCursor: null, latestCursor }`, where `latestCursor` is the cursor of the newest committed event on the drive (`null` when it has none). `head` cannot be combined with `cursor` or `since`, and accepts only `limit=1`.
+- `head=1` returns only the tail: `{ items: [], nextCursor: null, latestCursor }`, where `latestCursor` is the cursor of the newest committed event on the drive (`null` when it has none). `head` cannot be combined with `cursor`, `since` or `jobSubmissions`, and accepts only `limit=1`.
+- `jobSubmissions=1` filters the feed to job submissions still waiting for a worker. An item qualifies only when its event is the transactional move of `/jobs/<id>/request.md` to `/jobs/<same id>/submitted.md` (the rename recorded by `agent-drive jobs submit`, the dashboard Submit action, or a mounted absent-target `mv`), that file is still live at the submitted path, and no worker receipt file exists at `/jobs/.agent-drive/claims/<id>.json` — even in the trash. `versionId` is the draft version pinned by the submission event, which may differ from the file's current version. `jobSubmissions` accepts only the value `1`, combines with `cursor`, `since` and `limit`, and returns 400 with `head`.
 - Each poll counts as one `drive.recent` operation in plan usage.
 - Responses never contain object keys, wrapped keys or signed URLs.
 
