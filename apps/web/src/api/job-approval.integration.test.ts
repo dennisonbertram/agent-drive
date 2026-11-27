@@ -17,6 +17,7 @@ const accountIds: string[] = [];
 let driveId = '';
 let agentId = '';
 let token = '';
+let mainAccountId = '';
 let foreignDriveId = '';
 let foreignAgentId = '';
 let foreignToken = '';
@@ -145,6 +146,7 @@ beforeAll(async () => {
   driveId = main.driveId;
   agentId = main.agentId;
   token = main.token;
+  mainAccountId = main.accountId;
   const foreign = await fixture('job-approval-foreign', ['read', 'write', 'delete']);
   foreignDriveId = foreign.driveId;
   foreignAgentId = foreign.agentId;
@@ -316,5 +318,255 @@ describe('get jobApproval mode', () => {
     const body = await json(response);
     expect(body.id).toBe(draft.versionId);
     expect(body.jobApproval).toBeUndefined();
+  });
+});
+
+const CLAIM_PATH_PREFIX = '/jobs/.agent-drive/claims/';
+const newJobId = () => `job-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+const claimPath = (jobId: string) => `${CLAIM_PATH_PREFIX}${jobId}.json`;
+
+/** Stage and upload a put intent without committing it. Fields default to a create-only put. */
+async function stageIntent(
+  drive: string,
+  path: string,
+  fields: Record<string, unknown> = { ifVersionId: null },
+  bearer = token,
+) {
+  const intentResponse = await request(`/drives/${drive}/put`, bearer, 'POST', {
+    path,
+    ciphertextSize: 96,
+    wrappedKey: 'synthetic-wrapped-key',
+    ...fields,
+  });
+  expect(intentResponse.status).toBe(201);
+  const intent = await json(intentResponse);
+  const upload = await fetch(intent.uploadUrl as string, {
+    method: 'PUT',
+    body: new Uint8Array(96),
+  });
+  expect(upload.ok).toBe(true);
+  return intent.intentId as string;
+}
+
+async function commitJobClaim(
+  drive: string,
+  intentId: string,
+  versionId: string | null,
+  bearer = token,
+) {
+  const response = await request(`/drives/${drive}/commit-job-claim`, bearer, 'POST', {
+    intentId,
+    ifJobApprovalVersionId: versionId,
+  });
+  return { response, body: await json(response) };
+}
+
+async function committedVersionOf(intentId: string) {
+  const result = await pool.query('SELECT committed_version_id FROM upload_intents WHERE id = $1', [
+    intentId,
+  ]);
+  return (result.rows[0]?.committed_version_id as string | undefined) ?? null;
+}
+
+describe('commit-job-claim', () => {
+  it('commits a claim receipt while its pinned approval is still the newest', async () => {
+    const jobId = newJobId();
+    const draft = await seedFile(driveId, agentId, `/jobs/${jobId}/request.md`);
+    await submitByRename(
+      driveId,
+      `/jobs/${jobId}/request.md`,
+      `/jobs/${jobId}/submitted.md`,
+      draft.versionId,
+    );
+    // A direct write on submitted.md after the approval does not change it.
+    const edit = await seedVersion(draft.fileId, driveId, agentId);
+    await pool.query(
+      `INSERT INTO file_events (drive_id, file_id, operation, path, version_id, agent_id)
+       VALUES ($1, $2, 'put', $3, $4, $5)`,
+      [driveId, draft.fileId, `/jobs/${jobId}/submitted.md`, edit, agentId],
+    );
+    const intentId = await stageIntent(driveId, claimPath(jobId));
+
+    const committed = await commitJobClaim(driveId, intentId, draft.versionId);
+    expect(committed.response.status).toBe(201);
+    expect(committed.body.version.path).toBe(claimPath(jobId));
+
+    // Replaying the committed intent stays idempotent and returns the same version.
+    const replay = await commitJobClaim(driveId, intentId, draft.versionId);
+    expect(replay.response.status).toBe(200);
+    expect(replay.body.version.id).toBe(committed.body.version.id);
+  });
+
+  it('rejects a delayed claim whose approval was superseded, leaving no receipt', async () => {
+    const jobId = newJobId();
+    const draftA = await seedFile(driveId, agentId, `/jobs/${jobId}/request.md`);
+    await submitByRename(
+      driveId,
+      `/jobs/${jobId}/request.md`,
+      `/jobs/${jobId}/submitted.md`,
+      draftA.versionId,
+    );
+    const intentId = await stageIntent(driveId, claimPath(jobId));
+
+    // The submission is superseded before the claim commits: back to draft, a
+    // newer request version, submitted again.
+    await move(driveId, `/jobs/${jobId}/submitted.md`, `/jobs/${jobId}/request.md`);
+    const draftB = await seedVersion(draftA.fileId, driveId, agentId);
+    await move(driveId, `/jobs/${jobId}/request.md`, `/jobs/${jobId}/submitted.md`);
+
+    const rejected = await commitJobClaim(driveId, intentId, draftA.versionId);
+    expect(rejected.response.status).toBe(409);
+    expect(rejected.body.error.code).toBe('job_approval_changed');
+    const claim = await pool.query('SELECT 1 FROM files WHERE drive_id = $1 AND path = $2', [
+      driveId,
+      claimPath(jobId),
+    ]);
+    expect(claim.rowCount).toBe(0);
+    expect(await committedVersionOf(intentId)).toBeNull();
+
+    // The intent survives rejection: the current approval still claims the job.
+    const accepted = await commitJobClaim(driveId, intentId, draftB);
+    expect(accepted.response.status).toBe(201);
+  });
+
+  it('rejects a claim when no live submission has an approval', async () => {
+    // Never submitted: no approval exists at all.
+    const jobId = newJobId();
+    const intentId = await stageIntent(driveId, claimPath(jobId));
+    const missing = await commitJobClaim(driveId, intentId, randomUUID());
+    expect(missing.response.status).toBe(409);
+    expect(missing.body.error.code).toBe('job_approval_changed');
+
+    // Withdrawn after submission: the file left submitted.md, so the approval is absent.
+    const withdrawnJob = newJobId();
+    const draft = await seedFile(driveId, agentId, `/jobs/${withdrawnJob}/request.md`);
+    await submitByRename(
+      driveId,
+      `/jobs/${withdrawnJob}/request.md`,
+      `/jobs/${withdrawnJob}/submitted.md`,
+      draft.versionId,
+    );
+    const withdrawnIntent = await stageIntent(driveId, claimPath(withdrawnJob));
+    await move(driveId, `/jobs/${withdrawnJob}/submitted.md`, `/jobs/${withdrawnJob}/withdrawn.md`);
+    const withdrawn = await commitJobClaim(driveId, withdrawnIntent, draft.versionId);
+    expect(withdrawn.response.status).toBe(409);
+    expect(withdrawn.body.error.code).toBe('job_approval_changed');
+    expect(await committedVersionOf(withdrawnIntent)).toBeNull();
+  });
+
+  it('rejects intents that are not a create-only claim receipt', async () => {
+    const jobId = newJobId();
+    const draft = await seedFile(driveId, agentId, `/jobs/${jobId}/request.md`);
+    await submitByRename(
+      driveId,
+      `/jobs/${jobId}/request.md`,
+      `/jobs/${jobId}/submitted.md`,
+      draft.versionId,
+    );
+
+    // Ordinary create-only intents on other paths are not job claims.
+    for (const path of [
+      `/jobs/${jobId}/status.json`,
+      `/jobs/${jobId}/submitted.md`,
+      '/notes/plain.md',
+      `${CLAIM_PATH_PREFIX}not a job!.json`,
+      `${CLAIM_PATH_PREFIX}.hidden.json`,
+    ]) {
+      const intentId = await stageIntent(driveId, path);
+      expect((await commitJobClaim(driveId, intentId, draft.versionId)).response.status).toBe(400);
+    }
+
+    // Other conditional modes on a valid claims path are rejected too.
+    for (const fields of [
+      {},
+      { ifVersionId: randomUUID() },
+      { ifVersionId: null, allowTrashedCreate: true },
+    ]) {
+      const intentId = await stageIntent(driveId, claimPath(newJobId()), fields);
+      expect((await commitJobClaim(driveId, intentId, draft.versionId)).response.status).toBe(400);
+    }
+
+    // A committed ordinary intent is never replayed through the guarded route.
+    const ordinaryIntent = await stageIntent(driveId, '/notes/already.md');
+    const committed = await request(`/drives/${driveId}/commit`, token, 'POST', {
+      intentId: ordinaryIntent,
+    });
+    expect(committed.status).toBe(201);
+    expect((await commitJobClaim(driveId, ordinaryIntent, draft.versionId)).response.status).toBe(
+      400,
+    );
+  });
+
+  it('rejects malformed requests and unknown intents', async () => {
+    const post = (body: unknown) =>
+      request(`/drives/${driveId}/commit-job-claim`, token, 'POST', body);
+    for (const body of [
+      {},
+      { intentId: randomUUID() },
+      { ifJobApprovalVersionId: randomUUID() },
+      { intentId: 'nope', ifJobApprovalVersionId: randomUUID() },
+      { intentId: randomUUID(), ifJobApprovalVersionId: 'nope' },
+      { intentId: randomUUID(), ifJobApprovalVersionId: null },
+      { intentId: randomUUID(), ifJobApprovalVersionId: randomUUID(), extra: 1 },
+    ]) {
+      expect((await post(body)).status).toBe(400);
+    }
+    expect(
+      (await post({ intentId: randomUUID(), ifJobApprovalVersionId: randomUUID() })).status,
+    ).toBe(404);
+  });
+
+  it('enforces read and write scopes and key ownership of the intent', async () => {
+    const scoped = async (label: string, scopes: string[]) => {
+      const value = key();
+      await pool.query(
+        `INSERT INTO api_keys (account_id,agent_id,label,token_hash,drive_ids,scopes)
+         VALUES ($1,$2,$3,$4,$5::uuid[],$6::text[])`,
+        [mainAccountId, agentId, label, tokenHash(value), [driveId], scopes],
+      );
+      return value;
+    };
+    const writeOnly = await scoped('job-claim-write-only', ['write']);
+    const readOnly = await scoped('job-claim-read-only', ['read']);
+    const otherKey = await scoped('job-claim-other-key', ['read', 'write']);
+
+    const jobId = newJobId();
+    const draft = await seedFile(driveId, agentId, `/jobs/${jobId}/request.md`);
+    await submitByRename(
+      driveId,
+      `/jobs/${jobId}/request.md`,
+      `/jobs/${jobId}/submitted.md`,
+      draft.versionId,
+    );
+    const intentId = await stageIntent(driveId, claimPath(jobId));
+
+    expect((await commitJobClaim(driveId, intentId, draft.versionId, '')).response.status).toBe(
+      401,
+    );
+    expect(
+      (await commitJobClaim(driveId, intentId, draft.versionId, writeOnly)).response.status,
+    ).toBe(403);
+    expect(
+      (await commitJobClaim(driveId, intentId, draft.versionId, readOnly)).response.status,
+    ).toBe(403);
+    // A key not scoped to the drive is denied before the intent is considered.
+    expect(
+      (await commitJobClaim(driveId, intentId, draft.versionId, foreignToken)).response.status,
+    ).toBe(403);
+    // Another key, even on the same drive, cannot commit this key's intent.
+    expect(
+      (await commitJobClaim(driveId, intentId, draft.versionId, otherKey)).response.status,
+    ).toBe(404);
+    expect((await commitJobClaim(driveId, intentId, draft.versionId)).response.status).toBe(201);
+  });
+
+  it('leaves the generic commit route unchanged', async () => {
+    const intentId = await stageIntent(driveId, '/notes/generic-commit.md');
+    const first = await request(`/drives/${driveId}/commit`, token, 'POST', { intentId });
+    expect(first.status).toBe(201);
+    const firstBody = await json(first);
+    const again = await request(`/drives/${driveId}/commit`, token, 'POST', { intentId });
+    expect(again.status).toBe(200);
+    expect((await json(again)).version.id).toBe(firstBody.version.id);
   });
 });

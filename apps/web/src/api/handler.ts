@@ -108,6 +108,23 @@ const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
 const JOB_SUBMITTED_PATH_PATTERN = '^/jobs/([A-Za-z0-9][A-Za-z0-9_-]{0,63})/submitted\\.md$';
 // The JS equivalent, for exact path validation in the jobApproval metadata read.
 const JOB_SUBMITTED_PATH = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/submitted\.md$/u;
+// The exact claims receipt path commit-job-claim guards; the job id mirrors JOB_ID in
+// packages/agent-drive/src/jobs.ts.
+const JOB_CLAIM_PATH = /^\/jobs\/\.agent-drive\/claims\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.json$/u;
+// The newest authentic approval of the live submitted.md: the version pinned by that file's
+// newest qualifying request.md -> submitted.md move. The jobApproval metadata read and the
+// commit-job-claim guard share this SELECT so both resolve the same submission.
+const JOB_APPROVED_SUBMISSION_SQL = `SELECT v.*, f.path
+   FROM files f
+   JOIN file_events e
+     ON e.drive_id = f.drive_id AND e.file_id = f.id AND e.path = f.path
+   JOIN versions v ON v.id = e.version_id
+  WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL
+    AND e.operation = 'move'
+    AND e.version_id IS NOT NULL
+    AND e.previous_path = $3
+  ORDER BY e.seq DESC
+  LIMIT 1`;
 // jobApproval=1 is a metadata-only read; every other get option is an unsupported combination.
 const JOB_APPROVAL_EXCLUSIVE_OPTIONS = [
   'versionId',
@@ -125,6 +142,7 @@ const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
   'drive.commit',
+  'drive.commit_job_claim',
   'drive.mkdir',
   'drive.rmdir',
   'drive.get',
@@ -458,6 +476,7 @@ export function actionFor(method: string, parts: string[], bearer = false) {
   const actions: Record<string, string> = {
     'POST:put': 'drive.put',
     'POST:commit': 'drive.commit',
+    'POST:commit-job-claim': 'drive.commit_job_claim',
     'GET:get': 'drive.get',
     'GET:list': 'drive.list',
     'POST:move': 'drive.move',
@@ -2241,12 +2260,48 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   need(auth, 'write', driveId);
   const body = await jsonBody(request);
   const intentId = uuid(stringField(body, 'intentId', { required: true }), 'intentId');
+  return commitUploadIntent(auth, driveId, intentId);
+}
+
+// The guarded receipt commit a worker uses for /jobs/.agent-drive/claims/<id>.json. It runs the
+// ordinary commit flow plus one check: under the same locks, the pinned job approval must still
+// be the live submission's newest authentic approval.
+async function commitJobClaim(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'write', driveId);
+  need(auth, 'read', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['intentId', 'ifJobApprovalVersionId']);
+  const intentId = uuid(stringField(body, 'intentId', { required: true }), 'intentId');
+  const ifJobApprovalVersionId = uuid(
+    typeof body.ifJobApprovalVersionId === 'string' ? body.ifJobApprovalVersionId : undefined,
+    'ifJobApprovalVersionId',
+  ).toLowerCase();
+  return commitUploadIntent(auth, driveId, intentId, { ifJobApprovalVersionId });
+}
+
+async function commitUploadIntent(
+  auth: Auth,
+  driveId: string,
+  intentId: string,
+  jobClaim?: { ifJobApprovalVersionId: string },
+) {
   const intent = await getPool().query(
     `SELECT * FROM upload_intents WHERE id = $1 AND drive_id = $2 AND api_key_id = $3`,
     [intentId, driveId, auth.keyId],
   );
   const source = intent.rows[0] as Row | undefined;
   if (!source) throw new ApiError('not_found', 'Upload intent not found.');
+  // Validate guarded intent shape before replay using the same source row the shared commit
+  // routine already loaded; generic commit keeps its existing unguarded behavior.
+  const jobId = jobClaim ? JOB_CLAIM_PATH.exec(String(source.path))?.[1] : undefined;
+  if (
+    jobClaim &&
+    (jobId === undefined || source.conditional_mode !== 'create' || source.base_version_id)
+  )
+    throw new ApiError(
+      'validation_error',
+      'commit-job-claim commits only a create-only intent for /jobs/.agent-drive/claims/<id>.json.',
+    );
   if (source.committed_version_id) {
     const result = await getPool().query(
       `SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1`,
@@ -2337,6 +2392,22 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       Number(lockedIntent.ciphertext_size),
       Number(lockedDrive.rows[0].quota_bytes),
     );
+    if (jobClaim) {
+      // Under the same account and drive locks a rename takes, the pinned approval must still
+      // be the live submitted.md's newest qualifying submission. Absent or superseded means no
+      // receipt commits.
+      const approved = await client.query(JOB_APPROVED_SUBMISSION_SQL, [
+        driveId,
+        `/jobs/${jobId}/submitted.md`,
+        `/jobs/${jobId}/request.md`,
+      ]);
+      const approvedRow = approved.rows[0] as Row | undefined;
+      if (!approvedRow || String(approvedRow.id) !== jobClaim.ifJobApprovalVersionId)
+        throw new ApiError(
+          'job_approval_changed',
+          'The approved job submission changed before the claim committed.',
+        );
+    }
     return { lockedIntent, mode, file };
   };
   let copied = false;
@@ -2538,6 +2609,8 @@ async function fileEndpoint(
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
+  if (operation === 'commit-job-claim' && request.method === 'POST')
+    return commitJobClaim(request, auth, drive.id);
   if (operation === 'mkdir' && request.method === 'POST')
     return makeDirectory(request, auth, drive.id);
   if (operation === 'rmdir' && request.method === 'POST')
@@ -2565,20 +2638,11 @@ async function fileEndpoint(
           'jobApproval requires metadataOnly=1, the exact path /jobs/<id>/submitted.md, and no other options.',
         );
       }
-      const approved = await getPool().query(
-        `SELECT v.*, f.path
-           FROM files f
-           JOIN file_events e
-             ON e.drive_id = f.drive_id AND e.file_id = f.id AND e.path = f.path
-           JOIN versions v ON v.id = e.version_id
-          WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL
-            AND e.operation = 'move'
-            AND e.version_id IS NOT NULL
-            AND e.previous_path = $3
-          ORDER BY e.seq DESC
-          LIMIT 1`,
-        [driveId, path, `/jobs/${jobId}/request.md`],
-      );
+      const approved = await getPool().query(JOB_APPROVED_SUBMISSION_SQL, [
+        driveId,
+        path,
+        `/jobs/${jobId}/request.md`,
+      ]);
       const approvedRow = approved.rows[0] as Row | undefined;
       if (!approvedRow)
         throw new ApiError('not_found', 'No approved job submission exists for this file.');

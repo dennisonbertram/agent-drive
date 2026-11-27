@@ -31,14 +31,14 @@ Errors use one shape, described in [Errors and limits](errors.md):
 
 Every route except the public share route needs an API key. A key has a list of scopes, a list of drive IDs, and an optional list of write paths.
 
-| Scope      | Allows                                                                                                          |
-| ---------- | --------------------------------------------------------------------------------------------------------------- |
-| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                                     |
-| `write`    | Put, commit, move, rename, copy, restore, create directories and key-backup (copy and restore also need `read`) |
-| `delete`   | Move files to the trash, remove empty directories and guarded unlink; rename replacement also needs this scope  |
-| `share`    | Create, list and revoke share links (creating also needs `read`)                                                |
-| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                                               |
-| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md))                  |
+| Scope      | Allows                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                                                                         |
+| `write`    | Put, commit, commit-job-claim, move, rename, copy, restore, create directories and key-backup (copy, restore and commit-job-claim also need `read`) |
+| `delete`   | Move files to the trash, remove empty directories and guarded unlink; rename replacement also needs this scope                                      |
+| `share`    | Create, list and revoke share links (creating also needs `read`)                                                                                    |
+| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                                                                                   |
+| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md))                                                      |
 
 A drive route needs both the scope and the drive: the drive ID must be in the key's drive list. If it is not, the API returns 403 `permission_denied` with `The API key is not scoped to this drive.` A missing scope returns 403 `permission_denied` with `The API key lacks the "<scope>" scope.`
 
@@ -105,38 +105,39 @@ List routes return `{ "items": [...], "nextCursor": string | null }`.
 
 All paths are relative to `/api/v1`. `:id` is a drive ID (a UUID). File paths are canonical absolute POSIX paths: they start with `/`, are at most 1,024 characters, and contain no `//`, `.`, `..`, backslash or trailing `/`.
 
-| Method | Route                         | Scope                                            |
-| ------ | ----------------------------- | ------------------------------------------------ |
-| GET    | `/whoami`                     | any valid key                                    |
-| GET    | `/agents`                     | `manage`                                         |
-| POST   | `/agents`                     | `manage`                                         |
-| GET    | `/drives`                     | `manage`, or `read`                              |
-| POST   | `/drives`                     | `manage`                                         |
-| GET    | `/keys`                       | `manage`                                         |
-| POST   | `/keys`                       | `manage`, or `delegate`                          |
-| DELETE | `/keys/:id`                   | `manage`                                         |
-| POST   | `/drives/:id/put`             | `write`                                          |
-| POST   | `/drives/:id/commit`          | `write`                                          |
-| POST   | `/drives/:id/mkdir`           | `write`                                          |
-| POST   | `/drives/:id/rmdir`           | `delete`                                         |
-| GET    | `/drives/:id/get`             | `read`                                           |
-| GET    | `/drives/:id/list`            | `read`                                           |
-| GET    | `/drives/:id/versions`        | `read`                                           |
-| GET    | `/drives/:id/search`          | `read`                                           |
-| GET    | `/drives/:id/recent`          | `read`                                           |
-| POST   | `/drives/:id/move`            | `write`                                          |
-| POST   | `/drives/:id/rename`          | `write` (also `delete` to replace a destination) |
-| POST   | `/drives/:id/copy`            | `read` and `write`                               |
-| POST   | `/drives/:id/delete`          | `delete`                                         |
-| POST   | `/drives/:id/unlink`          | `delete`                                         |
-| POST   | `/drives/:id/restore`         | `read` and `write`                               |
-| POST   | `/drives/:id/key-backup`      | `write`                                          |
-| GET    | `/drives/:id/trace-inbox`     | `read`                                           |
-| POST   | `/drives/:id/shares`          | `share` and `read`                               |
-| GET    | `/drives/:id/shares`          | `share`                                          |
-| DELETE | `/drives/:id/shares/:shareId` | `share`                                          |
-| GET    | `/device/:code`               | `delegate`                                       |
-| POST   | `/device/:code/grant`         | `delegate`                                       |
+| Method | Route                          | Scope                                            |
+| ------ | ------------------------------ | ------------------------------------------------ |
+| GET    | `/whoami`                      | any valid key                                    |
+| GET    | `/agents`                      | `manage`                                         |
+| POST   | `/agents`                      | `manage`                                         |
+| GET    | `/drives`                      | `manage`, or `read`                              |
+| POST   | `/drives`                      | `manage`                                         |
+| GET    | `/keys`                        | `manage`                                         |
+| POST   | `/keys`                        | `manage`, or `delegate`                          |
+| DELETE | `/keys/:id`                    | `manage`                                         |
+| POST   | `/drives/:id/put`              | `write`                                          |
+| POST   | `/drives/:id/commit`           | `write`                                          |
+| POST   | `/drives/:id/commit-job-claim` | `read` and `write`                               |
+| POST   | `/drives/:id/mkdir`            | `write`                                          |
+| POST   | `/drives/:id/rmdir`            | `delete`                                         |
+| GET    | `/drives/:id/get`              | `read`                                           |
+| GET    | `/drives/:id/list`             | `read`                                           |
+| GET    | `/drives/:id/versions`         | `read`                                           |
+| GET    | `/drives/:id/search`           | `read`                                           |
+| GET    | `/drives/:id/recent`           | `read`                                           |
+| POST   | `/drives/:id/move`             | `write`                                          |
+| POST   | `/drives/:id/rename`           | `write` (also `delete` to replace a destination) |
+| POST   | `/drives/:id/copy`             | `read` and `write`                               |
+| POST   | `/drives/:id/delete`           | `delete`                                         |
+| POST   | `/drives/:id/unlink`           | `delete`                                         |
+| POST   | `/drives/:id/restore`          | `read` and `write`                               |
+| POST   | `/drives/:id/key-backup`       | `write`                                          |
+| GET    | `/drives/:id/trace-inbox`      | `read`                                           |
+| POST   | `/drives/:id/shares`           | `share` and `read`                               |
+| GET    | `/drives/:id/shares`           | `share`                                          |
+| DELETE | `/drives/:id/shares/:shareId`  | `share`                                          |
+| GET    | `/device/:code`                | `delegate`                                       |
+| POST   | `/device/:code/grant`          | `delegate`                                       |
 
 The two `/device` routes are described in [HTTP API: device login and delegation](api-device-login.md). One public route sits outside `/api/v1`: `GET /api/shares/:id` (see Shares).
 
@@ -233,6 +234,8 @@ Without `manage`, a key with `delegate` can create keys too, with `agentName` (1
 Response 201: `{ intentId, uploadUrl, expiresAt, ciphertextSize }`. It returns 413 `quota_exceeded` if the drive quota would be exceeded, and 402 `payment_required` if the plan storage allowance would be exceeded.
 
 `POST /drives/:id/commit` body: `{ "intentId": "<uuid>" }`. Only the key that created the intent can commit it, otherwise 404. Response 201: `{ "version": { ... } }`. Committing the same intent again returns the same version with 200. An expired intent, a missing upload, or an upload whose size differs from `ciphertextSize` returns 409 `conflict`. Start again with a new put.
+
+`POST /drives/:id/commit-job-claim` is the guarded variant a worker uses to land the job claim receipt at `/jobs/.agent-drive/claims/<jobId>.json`. Body: `{ "intentId": "<uuid>", "ifJobApprovalVersionId": "<uuid>" }`; no other fields are accepted. It needs `read` and `write`, and the intent must be a create-only put (`ifVersionId:null`, never `allowTrashedCreate`) for exactly that claims path — any other intent path or mode returns 400 `validation_error`, including intents that already committed, so the route never replays an ordinary intent. Otherwise it runs the same commit flow and returns the same response. Under the commit locks it resolves the live `/jobs/<jobId>/submitted.md`'s newest qualifying submission — the same approval a `get` with `jobApproval=1` returns — and when that approval is absent or no longer matches `ifJobApprovalVersionId` it returns 409 `job_approval_changed` and commits nothing. Repeating a committed claim intent returns its version with 200. A server without this route answers 404; worker clients must treat that as unsupported rather than fall back to `commit`, which has no approval check.
 
 A version object:
 
