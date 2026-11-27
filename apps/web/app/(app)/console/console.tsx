@@ -171,29 +171,30 @@ const itemKey = (item: FileEntry) =>
 const LAST_DRIVE = 'agent-drive:last-drive';
 const DEFAULT_SORT_DIR = { name: 'asc', modified: 'desc', size: 'desc' } as const;
 // A job lives in /jobs/<id> (one ASCII identifier, up to 64 chars): the user drafts
-// request.md, Submit renames it to submitted.md — the marker the runner waits for — and
-// the runner writes status.json once it picks the job up.
+// request.md, Submit renames it to submitted.md — the submission the runner looks
+// for — and the runner records its claim in /jobs/.agent-drive/claims/<id>.json.
 const JOB_FOLDER = /^\/jobs\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const JOB_REQUEST = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/request\.md$/;
 
 // What a row inside an open /jobs/<id> folder shows: Submit on the draft, or the one
-// queue/pickup indicator on submitted.md — or on the draft when it is the only marker.
-// status.json stays a normal openable file: it is encrypted, so "picked" is as far as the
-// listing can honestly go.
+// submission/pickup indicator on submitted.md — or on the draft when it is the only
+// marker. The claims receipt is authoritative: a submitted.md or status.json file can
+// exist without any worker claiming the job, so only `claimed` marks pickup and
+// status.json stays a normal openable file.
 function jobRowState(
   file: FileEntry,
   folder: string,
   submitted: boolean,
-  picked: boolean,
-): 'submit' | 'queued' | 'picked' | null {
+  claimed: boolean,
+): 'submit' | 'submitted' | 'picked' | null {
   const cut = file.path.lastIndexOf('/');
   if ((file.path.slice(0, cut) || ROOT) !== folder) return null;
   const name = file.path.slice(cut + 1);
-  if (name === 'submitted.md') return picked ? 'picked' : 'queued';
+  if (name === 'submitted.md') return claimed ? 'picked' : 'submitted';
   if (name !== 'request.md') return null;
-  // A draft coexisting with a queued or claimed job never submits again.
+  // A draft coexisting with a submitted or claimed job never submits again.
   if (submitted) return null;
-  return picked ? 'picked' : 'submit';
+  return claimed ? 'picked' : 'submit';
 }
 
 function rememberedDrive() {
@@ -663,6 +664,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The "driveId:path" pair a job Submit is running for; the click pinned both and the version.
   const [jobSubmitting, setJobSubmitting] = useState('');
   const jobSubmittingNow = useRef('');
+  // The open /jobs/<id> folder's receipt answer, scoped to `${driveId}:${folder}`
+  // and the listing scope it answered: true = a worker claimed the id, false =
+  // confirmed free, null = unknown. A non-404 answer or a lookup failure is
+  // "unknown" — never queued, never claimed.
+  const [jobClaim, setJobClaim] = useState<{
+    key: string;
+    scope: string;
+    held: boolean | null;
+  } | null>(null);
   const [memoryDownloadFile, setMemoryDownloadFile] = useState<FileEntry | null>(null);
   const [pickerRetry, setPickerRetry] = useState<FileEntry | null>(null);
   // The row whose Download or Preview asked for the key; it continues once the key loads.
@@ -793,20 +803,27 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }
   // Only inside one canonical /jobs/<id> folder in ordinary browse — never root, Recent,
   // Shares, Trash, or a nested folder — inspect that folder's own loaded rows for the
-  // queue/pickup markers. A marker the server has not sent yet — another page, a
-  // filtered-out sibling — cannot veto a submit; it just lets the server answer a conflict.
+  // submission markers. A marker the server has not sent yet — another page, a
+  // filtered-out sibling — cannot veto a submit; the click-time receipt check and the
+  // server's if-version guards decide instead.
   const inJobFolder = tab === 'Files' && view === 'browse' && JOB_FOLDER.test(folder);
   let jobSubmitted = false;
-  let jobPicked = false;
+  let jobDraft = false;
   if (inJobFolder)
     for (const file of loadedFiles) {
       const cut = file.path.lastIndexOf('/');
       if ((file.path.slice(0, cut) || ROOT) !== folder) continue;
       const name = file.path.slice(cut + 1);
       if (name === 'submitted.md') jobSubmitted = true;
-      else if (name === 'status.json') jobPicked = true;
-      if (jobSubmitted && jobPicked) break;
+      else if (name === 'request.md') jobDraft = true;
+      if (jobSubmitted && jobDraft) break;
     }
+  // The claims receipt answers "picked up" for this one open folder — one metadata
+  // lookup per folder view, never a per-row check. It is keyed to the drive and
+  // folder it was asked about, so a late answer can never label another job.
+  const jobMarkerNeeded = inJobFolder && (jobSubmitted || jobDraft);
+  const jobClaimKey = `${selected}:${folder}`;
+  const jobClaimed = jobClaim?.key === jobClaimKey ? jobClaim.held : null;
   const drive = drives.find((item) => item.id === selected);
   // Storage by folder: drives pending deletion still count in the account total but are
   // not offered here — the folders endpoint already refuses them. The select defaults to
@@ -1073,6 +1090,40 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       active = false;
     };
   }, [selected, tab, view, folder, fileScope, sharedView, searchTerm, deepLinkPending]);
+  // One metadata-only receipt lookup per open job folder and listing refresh.
+  // The worker writes its claims receipt before status.json and it survives both
+  // visible markers, so it is the only honest "picked up" signal — a listing can
+  // carry a moved-aside submitted.md or an orphaned status.json. A confirmed
+  // claim is sticky for this folder: a durable receipt never legitimately
+  // disappears, while any other answer is rechecked on the next refresh.
+  useEffect(() => {
+    if (!jobMarkerNeeded || !selected) return;
+    if (jobClaim?.key === jobClaimKey && (jobClaim.scope === fileScope || jobClaim.held === true))
+      return;
+    const key = jobClaimKey;
+    const scope = fileScope;
+    const jobId = folder.slice('/jobs/'.length);
+    const query = new URLSearchParams({
+      path: `/jobs/.agent-drive/claims/${jobId}.json`,
+      metadataOnly: '1',
+    });
+    let active = true;
+    api(`drives/${selected}/get?${query}`)
+      .then(() => {
+        if (active) setJobClaim({ key, scope, held: true });
+      })
+      .catch((reason: unknown) => {
+        if (active)
+          setJobClaim({
+            key,
+            scope,
+            held: (reason as { status?: number }).status === 404 ? false : null,
+          });
+      });
+    return () => {
+      active = false;
+    };
+  }, [jobMarkerNeeded, jobClaim, jobClaimKey, fileScope, selected, folder]);
   // Load more: the next page of this folder, added below the rows already shown.
   async function loadMore() {
     const page = filePage;
@@ -1909,10 +1960,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     restoredToast(driveId, path);
   }
 
-  // Submit renames the draft to submitted.md — the queue marker the runner waits for. The
-  // click pinned the drive, path and observed version; the server still has the final say
-  // through the if-version checks, so a stale row or an existing submitted.md answers a
-  // conflict. Browsing alone never submits; only this explicit click does.
+  // Submit renames the draft to submitted.md — the submission the runner looks for.
+  // The click pinned the drive, path and observed version; the server still has the
+  // final say through the if-version checks, so a stale row or an existing
+  // submitted.md answers a conflict. Browsing alone never submits; only this
+  // explicit click does.
   async function submitJob(file: FileEntry) {
     const job = JOB_REQUEST.exec(file.path);
     const driveId = selected;
@@ -1930,6 +1982,35 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     const stillHere = () =>
       selectedNow.current === driveId && folderNow.current === folder && tabNow.current === 'Files';
     try {
+      // The claims receipt is authoritative for "already picked up" and the listing
+      // may predate it, so the click checks it fresh — no dedupe, no cached answer.
+      // Only 404 proves the id is free; any other failure leaves it unknown and an
+      // unknown job never gets a new submission.
+      try {
+        const query = new URLSearchParams({
+          path: `/jobs/.agent-drive/claims/${jobId}.json`,
+          metadataOnly: '1',
+        });
+        await send(`drives/${driveId}/get?${query}`, 'GET');
+        if (stillHere()) {
+          setJobClaim({ key: `${driveId}:${folder}`, scope: fileScope, held: true });
+          showToast(`Job ${jobId} is already picked up — a worker claimed it.`, {
+            tone: 'error',
+          });
+        }
+        return;
+      } catch (reason) {
+        if ((reason as { status?: number }).status !== 404) {
+          if (stillHere())
+            showToast(
+              `Could not check whether job ${jobId} is already claimed. ${
+                reason instanceof Error ? reason.message : 'Try again.'
+              } The list was refreshed.`,
+              { tone: 'error' },
+            );
+          return;
+        }
+      }
       await api(`drives/${driveId}/rename`, 'POST', {
         path: file.path,
         destinationPath,
@@ -1937,16 +2018,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         ifDestinationVersionId: null,
         operationId: crypto.randomUUID(),
       });
-      if (stillHere()) showToast(`Job ${jobId} queued — the runner can pick it up now.`);
+      if (stillHere()) showToast(`Job ${jobId} submitted — the runner can pick it up now.`);
     } catch (reason) {
       if (stillHere()) {
         const status = (reason as { status?: number }).status;
         showToast(
           status === 409
-            ? `Could not queue job ${jobId}: request.md changed or the job is already queued. The list was refreshed.`
+            ? `Could not submit job ${jobId}: request.md changed or the job was already submitted. The list was refreshed.`
             : `Could not confirm the submit for job ${jobId}. ${
                 reason instanceof Error ? reason.message : 'Try again.'
-              } The list was refreshed — a submitted.md row means it queued.`,
+              } The list was refreshed — a submitted.md row means it went through.`,
           { tone: 'error' },
         );
       }
@@ -3121,7 +3202,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               );
                               const meta = `${size(Number(file.ciphertext_size ?? 0))} · ${shortDate(file.created_at)} · ${author}`;
                               const jobState = inJobFolder
-                                ? jobRowState(file, folder, jobSubmitted, jobPicked)
+                                ? jobRowState(file, folder, jobSubmitted, jobClaimed === true)
                                 : null;
                               return (
                                 <tr key={row.key} role="row" data-kind="file">
@@ -3175,7 +3256,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                           }
                                           title={
                                             file.version_id
-                                              ? 'Queue this request for the job runner — it becomes submitted.md'
+                                              ? 'Submit this request to the job runner — it becomes submitted.md'
                                               : 'Reload the file list before submitting — this row has no version to pin.'
                                           }
                                           onClick={() => void submitJob(file)}
@@ -3183,18 +3264,18 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                           Submit job
                                         </button>
                                       )}
-                                      {jobState === 'queued' && (
+                                      {jobState === 'submitted' && (
                                         <span
                                           className="muted"
-                                          title="submitted.md is queued for the runner."
+                                          title="submitted.md — submitted; Picked up appears once a worker claims it."
                                         >
-                                          Queued
+                                          Submitted
                                         </span>
                                       )}
                                       {jobState === 'picked' && (
                                         <span
                                           className="muted"
-                                          title="status.json exists — the runner has picked this job up."
+                                          title="A worker claimed this job — its execution receipt exists."
                                         >
                                           Picked up
                                         </span>
