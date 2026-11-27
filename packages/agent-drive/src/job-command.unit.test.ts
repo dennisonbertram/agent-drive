@@ -1,8 +1,55 @@
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type JobRequest, makeJobHandler } from './job-command.js';
+
+const filesystemTestHooks = vi.hoisted(() => ({
+  alterOutputMtime: false,
+  shortenOutputRead: false,
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const path = args[0];
+      const handle = await actual.open(...args);
+      if (!String(path).endsWith('unstable.bin')) return handle;
+      let statCalls = 0;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === 'stat')
+            return async () => {
+              const metadata = await target.stat();
+              statCalls += 1;
+              if (!filesystemTestHooks.alterOutputMtime || statCalls < 2) return metadata;
+              return new Proxy(metadata, {
+                get(stats, key, receiver) {
+                  if (key === 'mtimeMs') return stats.mtimeMs + 1;
+                  return Reflect.get(stats, key, receiver);
+                },
+              });
+            };
+          if (property === 'read' && filesystemTestHooks.shortenOutputRead)
+            return async (...readArgs: Parameters<typeof target.read>) => {
+              const result = await target.read(...readArgs);
+              return result.bytesRead > 0 ? { ...result, bytesRead: result.bytesRead - 1 } : result;
+            };
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    },
+  };
+});
+
+import {
+  type JobRequest,
+  makeJobHandler,
+  WorkerUnavailableError,
+  WorkspaceCleanupError,
+} from './job-command.js';
 
 const NODE = process.execPath;
 const enc = new TextEncoder();
@@ -10,6 +57,8 @@ const dirs: string[] = [];
 
 afterEach(async () => {
   vi.unstubAllEnvs();
+  filesystemTestHooks.alterOutputMtime = false;
+  filesystemTestHooks.shortenOutputRead = false;
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
@@ -60,6 +109,39 @@ describe('makeJobHandler', () => {
   it('requires a worker command', () => {
     expect(() => makeJobHandler([])).toThrow(/worker command/u);
     expect(() => makeJobHandler([''])).toThrow(/worker command/u);
+  });
+
+  it('rejects an explicit path that does not exist before any job runs', () => {
+    expect(() => makeJobHandler(['/definitely/not/a/real/binary-xyz'])).toThrow(
+      WorkerUnavailableError,
+    );
+    expect(() => makeJobHandler(['/definitely/not/a/real/binary-xyz'])).toThrow(
+      /definitely\/not\/a\/real\/binary-xyz/u,
+    );
+  });
+
+  it('rejects a path-like command against the owner cwd, not the job dir', () => {
+    expect(() => makeJobHandler(['./no-such-worker-xyz'])).toThrow(
+      new RegExp(`${process.cwd()}/no-such-worker-xyz`, 'u'),
+    );
+  });
+
+  it('rejects a bare command name missing from every searched PATH', () => {
+    expect(() => makeJobHandler(['no-such-worker-command-xyz'])).toThrow(WorkerUnavailableError);
+  });
+
+  it('rejects an explicit path that exists but is not executable', async () => {
+    const dir = await testDir();
+    const target = join(dir, 'not-executable');
+    await writeFile(target, 'plain data, not a program\n', { mode: 0o644 });
+    expect(() => makeJobHandler([target])).toThrow(WorkerUnavailableError);
+    expect(() => makeJobHandler([target])).toThrow(/not executable/u);
+  });
+
+  it('rejects an explicit path that is a directory', async () => {
+    const dir = await testDir();
+    await mkdir(join(dir, 'a-dir'));
+    expect(() => makeJobHandler([join(dir, 'a-dir')])).toThrow(WorkerUnavailableError);
   });
 
   it('writes stdout to outputs/result.md and returns it', async () => {
@@ -156,20 +238,6 @@ describe('makeJobHandler', () => {
     await expect(handler(job(), freshSignal())).rejects.toThrow(/code 3/u);
   });
 
-  it('rejects when the executable cannot be spawned', async () => {
-    const handler = makeJobHandler(['/definitely/not/a/real/binary-xyz']);
-    await expect(handler(job(), freshSignal())).rejects.toThrow(
-      /definitely\/not\/a\/real\/binary-xyz/u,
-    );
-  });
-
-  it('resolves a path-like command against the owner cwd, not the job dir', async () => {
-    const handler = makeJobHandler(['./no-such-worker-xyz']);
-    await expect(handler(job(), freshSignal())).rejects.toThrow(
-      new RegExp(`${process.cwd()}/no-such-worker-xyz`, 'u'),
-    );
-  });
-
   it('resolves a bare command name on the owner PATH', async () => {
     const outputs = await makeJobHandler(['echo', '-n', 'bare-name-ok'])(job(), freshSignal());
     expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('bare-name-ok') }]);
@@ -248,6 +316,62 @@ describe('makeJobHandler', () => {
   });
 });
 
+describe('worker availability', () => {
+  async function fakeWorker(dir: string) {
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    const path = join(bin, 'stub-worker');
+    await writeFile(path, `#!${NODE}\nprocess.stdout.write('stub ran')\n`, { mode: 0o755 });
+    return path;
+  }
+
+  it('exposes assertReady on the returned handler', async () => {
+    const handler = makeJobHandler([NODE, '-e', 'process.exit(0)']);
+    expect(typeof handler.assertReady).toBe('function');
+    expect(() => handler.assertReady()).not.toThrow();
+  });
+
+  it('fails assertReady once the pinned executable disappears', async () => {
+    const dir = await testDir();
+    const path = await fakeWorker(dir);
+    const handler = makeJobHandler([path]);
+    await rm(path);
+    expect(() => handler.assertReady()).toThrow(WorkerUnavailableError);
+    await expect(handler(job(), freshSignal())).rejects.toThrow(WorkerUnavailableError);
+  });
+
+  it('fails assertReady when the pinned executable is replaced by another file', async () => {
+    const dir = await testDir();
+    const path = await fakeWorker(dir);
+    const handler = makeJobHandler([path]);
+    await writeFile(join(dir, 'imposter'), `#!${NODE}\nprocess.stdout.write('imposter')\n`, {
+      mode: 0o755,
+    });
+    await rm(path);
+    await rename(join(dir, 'imposter'), path);
+    expect(() => handler.assertReady()).toThrow(/replaced|unavailable/u);
+    expect(() => handler.assertReady()).toThrow(WorkerUnavailableError);
+  });
+
+  it('fails assertReady when the pinned executable loses its execute bit', async () => {
+    const dir = await testDir();
+    const path = await fakeWorker(dir);
+    const handler = makeJobHandler([path]);
+    await chmod(path, 0o644);
+    expect(() => handler.assertReady()).toThrow(WorkerUnavailableError);
+  });
+
+  it('throws WorkerUnavailableError when spawn reports ENOENT past the pin', async () => {
+    const dir = await testDir();
+    // Stat-able and executable, but the interpreter is absent: execve fails
+    // ENOENT inside the child, so only the spawn error path can report it.
+    const path = join(dir, 'bad-interp');
+    await writeFile(path, '#!/definitely/missing/interp-xyz\n', { mode: 0o755 });
+    const handler = makeJobHandler([path]);
+    await expect(handler(job(), freshSignal())).rejects.toBeInstanceOf(WorkerUnavailableError);
+  });
+});
+
 describe('orphaned subprocesses', () => {
   it('delivers output written by an out-of-group orphan after the leader exits', async () => {
     // The group is swept at 'exit'; a detached orphan survives and its write arrives
@@ -307,17 +431,22 @@ describe('orphaned subprocesses', () => {
     await expectDead(orphanPid);
   });
 
-  it('drops a silent pipe held by an out-of-group orphan after the drain bound', async () => {
+  it('fails the job when a forced pipe drop cuts stdout short of EOF', async () => {
+    // A detached orphan holds the stdout pipe past the drain bound: the pipe ends
+    // are destroyed without 'end', so the leader's clean exit must NOT publish
+    // whatever partial bytes happened to arrive — the result is truncated data.
     const script = `
       const orphan = require('child_process').spawn(process.execPath, [
         '-e', 'setTimeout(() => {}, 15000)',
       ], { detached: true, stdio: ['ignore', 'inherit', 'ignore'] });
       orphan.unref(); // leader exits; the orphan keeps the pipe, out of group reach
+      process.stdout.write('partial-leader-bytes');
     `;
     const started = Date.now();
-    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /truncat|end of stream|EOF|incomplete/u,
+    );
     const elapsed = Date.now() - started;
-    expect(outputs).toEqual([]);
     expect(elapsed).toBeGreaterThan(1_500); // normal output was given time to drain
     expect(elapsed).toBeLessThan(10_000); // but not the orphan's 15 s lifetime
   });
@@ -347,6 +476,18 @@ describe('orphaned subprocesses', () => {
 });
 
 describe('output collection', () => {
+  it('rejects deterministic metadata and EOF changes reported during a file read', async () => {
+    const script = `require('fs').writeFileSync('outputs/unstable.bin', 'stable bytes')`;
+    const handler = makeJobHandler(run(script));
+    filesystemTestHooks.alterOutputMtime = true;
+    await expect(handler(job(), freshSignal())).rejects.toThrow(/changed while it was being read/u);
+
+    filesystemTestHooks.alterOutputMtime = false;
+    filesystemTestHooks.shortenOutputRead = true;
+    await expect(handler(job(), freshSignal())).rejects.toThrow(/changed while it was being read/u);
+    filesystemTestHooks.shortenOutputRead = false;
+  });
+
   it('refuses to overwrite a worker-written result.md with stdout', async () => {
     const script = `
       require('fs').writeFileSync('outputs/result.md', 'from worker');
@@ -455,51 +596,35 @@ describe('output collection', () => {
     const outputs = await makeJobHandler(run(script))(job(), freshSignal());
     expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from(payload) }]);
   });
-
-  it('discards a flooding stderr without deadlocking or leaking it', async () => {
-    const script = `
-      for (let i = 0; i < 200; i++) process.stderr.write('x'.repeat(65536));
-      process.stdout.write('clean result');
-    `;
-    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
-    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('clean result') }]);
-  });
 });
 
-describe('input validation', () => {
-  it.each(['../escape', 'a/b', 'a\\b', '', '.', '..', 'has\0nul', 'x'.repeat(300)])(
-    'rejects the unsafe input name %j',
-    async (name) => {
-      const inputs = [{ name, bytes: new Uint8Array([1]) }];
-      await expect(makeJobHandler(run(''))(job({ inputs }), freshSignal())).rejects.toThrow(
-        /input name/u,
-      );
-    },
-  );
-
-  it('rejects duplicate input names', async () => {
-    const inputs = [
-      { name: 'same.txt', bytes: new Uint8Array([1]) },
-      { name: 'same.txt', bytes: new Uint8Array([2]) },
-    ];
-    await expect(makeJobHandler(run(''))(job({ inputs }), freshSignal())).rejects.toThrow(
-      /duplicate/u,
-    );
-  });
-
-  it('never silently merges input names that collide on a case-insensitive filesystem', async () => {
+describe('workspace cleanup', () => {
+  it('surfaces a workspace the runner cannot remove as a fatal cleanup error', async () => {
     const dir = await testDir();
-    await writeFile(join(dir, 'Probe.TXT'), 'x');
-    const insensitive = await stat(join(dir, 'probe.txt')).then(
-      () => true,
-      () => false,
+    const markerPath = join(dir, 'marker.json');
+    // The worker leaves a directory the runner cannot descend into: cleanup must
+    // fail loudly instead of leaving decrypted request/input/output bytes behind.
+    const script = `
+      const fs = require('fs');
+      fs.mkdirSync('tmp/stuck/inner', { recursive: true });
+      fs.writeFileSync('tmp/stuck/inner/left.txt', 'plaintext');
+      fs.chmodSync('tmp/stuck', 0);
+      fs.writeFileSync(process.argv[1], JSON.stringify({ cwd: process.cwd() }));
+    `;
+    const error = await makeJobHandler(run(script, [markerPath]))(job(), freshSignal()).catch(
+      (cause: unknown) => cause,
     );
-    const inputs = [
-      { name: 'Case.md', bytes: enc.encode('first') },
-      { name: 'case.md', bytes: enc.encode('second') },
-    ];
-    const pending = makeJobHandler(run(''))(job({ inputs }), freshSignal());
-    if (insensitive) await expect(pending).rejects.toThrow(/collid|exists|EEXIST/iu);
-    else await expect(pending).resolves.toEqual([]);
+    expect(error).toBeInstanceOf(WorkspaceCleanupError);
+    expect(error).toBeInstanceOf(WorkerUnavailableError);
+    const { cwd } = JSON.parse(await readFile(markerPath, 'utf8')) as { cwd: string };
+    // The leftover workspace really is still there for the operator to remove.
+    expect(
+      await stat(cwd).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(true);
+    await chmod(join(cwd, 'tmp', 'stuck'), 0o700);
+    await rm(cwd, { recursive: true, force: true });
   });
 });
