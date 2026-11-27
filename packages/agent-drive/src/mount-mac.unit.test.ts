@@ -442,6 +442,7 @@ process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
     });
     let finishDispatch!: (value: unknown) => void;
     let dispatchCalls = 0;
+    let closeWriteCalls = 0;
     const dispatchResult = new Promise<unknown>((resolve) => {
       finishDispatch = resolve;
     });
@@ -449,7 +450,12 @@ process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
       driveId: 'synthetic-drive',
       requestedMountpoint: join(directory, 'requested-mount'),
       dispatch: async (request) => {
-        if ((request as Record<string, unknown>).op === 'stat') {
+        const rpc = request as Record<string, unknown>;
+        if (rpc.op === 'closeWrite') {
+          closeWriteCalls += 1;
+          return { id: rpc.id, ok: true };
+        }
+        if (rpc.op === 'stat') {
           finishUnrelated();
           return { id: (request as Record<string, unknown>).id, ok: true, entry: {} };
         }
@@ -488,6 +494,7 @@ process.exit(result.ok && result.version?.id === 'committed-v1' ? 0 : 42);
       expect(startup.port).toBeGreaterThan(0);
       expect(startup.token).toBeTruthy();
       expect(dispatchCalls).toBe(1);
+      expect(closeWriteCalls).toBe(1);
     } finally {
       vi.useRealTimers();
       await handle.close();

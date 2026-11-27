@@ -122,6 +122,7 @@ export type MountWriteback = {
   readStaged(handleId: string, offset: number, size: number): Promise<MountWritebackRead>;
   flush(handleId: string): Promise<WritebackVersion>;
   release(handleId: string): Promise<{ recoveryPath?: string }>;
+  closeWithoutFlush(handleId: string): Promise<{ recoveryPath?: string }>;
   listStaged(prefix?: string): Promise<MountWritebackStagedEntry[]>;
   recover(): Promise<MountWritebackRecovery[]>;
   close(): Promise<void>;
@@ -784,6 +785,13 @@ export async function createMountWriteback(
   const commitSession = async (session: ActiveSession): Promise<WritebackVersion> => {
     const record = session.record;
     if (record.pendingMutation) await applyPendingMutation(session);
+    if (record.errorCode === 'MANUAL_RECOVERY') {
+      throw new MountWritebackError(
+        'EINPROGRESS',
+        'This staged copy was retained for manual recovery and will not be uploaded automatically.',
+        { path: record.path, recoveryPath: session.dataPath },
+      );
+    }
     if (record.producerComplete === false) {
       throw new MountWritebackError(
         'EINPROGRESS',
@@ -942,7 +950,7 @@ export async function createMountWriteback(
         record.state === 'uploaded' ||
         record.state === 'conflict' ||
         record.generation !== record.committedGeneration;
-      if (hasPendingData) {
+      if (hasPendingData && record.errorCode !== 'MANUAL_RECOVERY') {
         throw new MountWritebackError('EBUSY', `Recover local edits before opening this path.`, {
           path,
           recoveryPath: stagePath(scopePath, id),
@@ -1110,6 +1118,26 @@ export async function createMountWriteback(
       const session = requireSession(handleId);
       return await serialized(session, async () => await releaseSession(session, true));
     },
+    async closeWithoutFlush(handleId) {
+      const session = requireSession(handleId);
+      return await serialized(session, async () => {
+        try {
+          if (
+            session.record.generation !== session.record.committedGeneration &&
+            session.record.state !== 'uploaded' &&
+            session.record.state !== 'conflict'
+          ) {
+            session.record.producerComplete = false;
+            session.record.errorCode = 'MANUAL_RECOVERY';
+            await persistRecord(scopePath, session.record);
+          }
+          return await releaseSession(session, false);
+        } catch (error) {
+          await releaseSession(session, false).catch(() => undefined);
+          throw error;
+        }
+      });
+    },
     async listStaged(folderPath) {
       const folder = folderPath ?? '/';
       if (folder !== '/') checkRemotePath(folder);
@@ -1127,6 +1155,7 @@ export async function createMountWriteback(
         if (
           record.state === 'clean' ||
           record.state === 'hydrating' ||
+          record.errorCode === 'MANUAL_RECOVERY' ||
           parentRemotePath(record.path) !== folder
         )
           continue;

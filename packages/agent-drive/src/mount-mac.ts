@@ -127,6 +127,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'flush',
       'flushStatus',
       'release',
+      'closeWrite',
       'completeWrite',
       'mkdir',
       'rmdir',
@@ -144,6 +145,7 @@ function validRpcRequest(value: unknown): value is Record<string, unknown> {
       'flush',
       'flushStatus',
       'release',
+      'closeWrite',
       'completeWrite',
     ].includes(value.op)
   ) {
@@ -479,10 +481,10 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
       [...flushOperations.values()].filter((operation) => operation.result === undefined).length >=
       MAX_PENDING_FLUSHES
     )
-      return { id: rpc.id, ok: false, errno: 'EBUSY' };
+      return { id: rpc.id, ok: false, errno: 'EBUSY', mutationOutcome: 'notSubmitted' };
     pruneFlushOperations();
     if (flushOperations.size >= MAX_FLUSH_OPERATIONS)
-      return { id: rpc.id, ok: false, errno: 'EBUSY' };
+      return { id: rpc.id, ok: false, errno: 'EBUSY', mutationOutcome: 'notSubmitted' };
 
     const operation: FlushOperation = {
       handleId,
@@ -494,17 +496,29 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     void Promise.resolve()
       .then(() => options.dispatch(rpc))
       .then(
-        (result) => {
+        async (result) => {
           const validResult =
             isRecord(result) && result.id === rpc.id && typeof result.ok === 'boolean';
           const encodedResult = validResult ? JSON.stringify(result) : '';
-          operation.result =
+          const settledResult =
             validResult && Buffer.byteLength(encodedResult) <= MAX_RESPONSE_BYTES
               ? result
               : { id: rpc.id, ok: false, errno: validResult ? 'EOVERFLOW' : 'EIO' };
+          try {
+            await closeWriteAfterFlush(operation);
+          } catch {
+            // Flush outcome remains authoritative. A future close or bridge shutdown can
+            // still release a handle if local journal cleanup itself failed.
+          }
+          operation.result = settledResult;
           operation.completedAt = Date.now();
         },
-        () => {
+        async () => {
+          try {
+            await closeWriteAfterFlush(operation);
+          } catch {
+            // Keep the original operation failure for reconciliation.
+          }
           operation.result = { id: rpc.id, ok: false, errno: 'EIO' };
           operation.completedAt = Date.now();
         },
@@ -517,6 +531,14 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     if (!operation || operation.handleId !== handleId)
       return { id, ok: false, errno: 'ESTALE', mutationOutcome: 'unknown', operationId };
     return responseForFlushOperation(id, operation);
+  };
+  const closeWriteAfterFlush = async (operation: FlushOperation) => {
+    const closeId = `close-${operation.operationId}`;
+    return await options.dispatch({
+      id: closeId,
+      op: 'closeWrite',
+      handleId: operation.handleId,
+    });
   };
   const handleRequest = async (request: IncomingMessage, response: ServerResponse) => {
     const port = (server.address() as { port: number } | null)?.port;
@@ -562,7 +584,9 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
         );
       }
       if (rpc.op === 'flush') return jsonResponse(response, 200, startFlushOperation(rpc));
-      if (['write', 'truncate', 'completeWrite', 'release'].includes(rpc.op as string)) {
+      if (
+        ['write', 'truncate', 'completeWrite', 'release', 'closeWrite'].includes(rpc.op as string)
+      ) {
         const currentId = latestFlushByHandle.get(rpc.handleId as string);
         const current = currentId ? flushOperations.get(currentId) : undefined;
         if (current) latestFlushByHandle.delete(rpc.handleId as string);

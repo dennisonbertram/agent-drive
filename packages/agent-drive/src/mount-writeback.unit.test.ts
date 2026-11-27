@@ -226,6 +226,82 @@ describe('mount writeback journal protocol', () => {
     expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('partial');
   });
 
+  it('keeps a never-submitted stage as manual recovery data across remount', async () => {
+    const root = await fixture();
+    const fake = fakeClient({ baseVersionId: null });
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    const handle = await journal.openWrite('/doc.txt', null, 0, true, true);
+    await journal.truncate(handle.handleId, 6);
+    await journal.write(handle.handleId, 0, new TextEncoder().encode('staged'));
+
+    await expect(journal.closeWithoutFlush(handle.handleId)).resolves.toMatchObject({
+      recoveryPath: handle.recoveryPath,
+    });
+    expect(fake.uploads).toHaveLength(0);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('staged');
+    await journal.close();
+
+    const restarted = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    await expect(restarted.recover()).resolves.toMatchObject([
+      { path: '/doc.txt', state: 'pending', recoveryPath: handle.recoveryPath },
+    ]);
+    expect(fake.uploads).toHaveLength(0);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('staged');
+    const next = await restarted.openWrite('/doc.txt', null, 0, true);
+    await expect(restarted.listStaged('/')).resolves.toEqual([
+      expect.objectContaining({ path: '/doc.txt', handleId: next.handleId }),
+    ]);
+    await restarted.write(next.handleId, 0, new TextEncoder().encode('fresh'));
+    await expect(restarted.flush(next.handleId)).resolves.toMatchObject({
+      id: 'committed-intent-1',
+      path: '/doc.txt',
+    });
+    expect(fake.uploads).toHaveLength(1);
+    expect(new TextDecoder().decode(await readFile(handle.recoveryPath))).toBe('staged');
+    await restarted.close();
+  });
+
+  it('reconciles an uploaded intent on no-flush close without starting another upload', async () => {
+    const root = await fixture();
+    const fake = fakeClient({ loseFirstCommitAck: true });
+    const journal = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    const handle = await journal.openWrite('/doc.txt', 'base-version');
+    await journal.write(handle.handleId, 0, new TextEncoder().encode('new'));
+
+    await expect(journal.flush(handle.handleId)).rejects.toMatchObject({
+      recoveryPath: handle.recoveryPath,
+    });
+    await expect(journal.closeWithoutFlush(handle.handleId)).resolves.toMatchObject({
+      recoveryPath: handle.recoveryPath,
+    });
+    expect(fake.uploads).toHaveLength(1);
+    await journal.close();
+
+    const restarted = await createMountWriteback({
+      client: fake.client,
+      driveId: 'drive-a',
+      journalRoot: root,
+    });
+    await expect(restarted.recover()).resolves.toMatchObject([
+      { path: '/doc.txt', state: 'committed', versionId: 'committed-intent-1' },
+    ]);
+    expect(fake.uploads).toHaveLength(1);
+    expect(fake.commits).toEqual(['intent-1']);
+    await restarted.close();
+  });
+
   it('recovers a Finder copy after the producer persisted completion but before upload', async () => {
     const root = await fixture();
     const fake = fakeClient();

@@ -692,6 +692,7 @@ async function run(command: string, raw: string[]) {
               'flush',
               'flushStatus',
               'release',
+              'closeWrite',
               'completeWrite',
               'mkdir',
               'rename',

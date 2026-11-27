@@ -55,6 +55,7 @@ export type MountResponse =
   | { id: string | number; ok: true; bytesWritten: number }
   | { id: string | number; ok: true; size: number }
   | { id: string | number; ok: true; version: { id: string; path: string } }
+  | { id: string | number; ok: true; recoveryPath?: string }
   | { id: string | number; ok: true }
   | {
       id: string | number;
@@ -140,6 +141,7 @@ type MountWriteback = {
   ): Promise<{ data: Uint8Array; eof: boolean }>;
   flush(handleId: string): Promise<{ id: string; path: string }>;
   release(handleId: string): Promise<{ recoveryPath?: string }>;
+  closeWithoutFlush(handleId: string): Promise<{ recoveryPath?: string }>;
   listStaged(prefix?: string): Promise<MountStagedEntry[]>;
   recover(): Promise<unknown[]>;
   close(): Promise<void>;
@@ -916,6 +918,29 @@ export async function createMountBridge(
           if (result.recoveryPath)
             return { id: request.id, ok: false, errno: 'EIO', recoveryPath: result.recoveryPath };
           return { id: request.id, ok: true } as MountResponse;
+        }
+        if (request.op === 'closeWrite') {
+          if (typeof request.handleId !== 'string')
+            throw Object.assign(new Error('Invalid write-handle close request.'), {
+              code: 'EINVAL',
+            });
+          const stage = stagedHandles.get(request.handleId);
+          if (!stage) {
+            activeWriteHandles.delete(request.handleId);
+            return { id: request.id, ok: true } as MountResponse;
+          }
+          let result: { recoveryPath?: string };
+          try {
+            result = await requireWriteback().closeWithoutFlush(request.handleId);
+          } finally {
+            activeWriteHandles.delete(request.handleId);
+          }
+          stagedHandles.delete(request.handleId);
+          return {
+            id: request.id,
+            ok: true,
+            ...(result.recoveryPath ? { recoveryPath: result.recoveryPath } : {}),
+          } as MountResponse;
         }
         if (request.op === 'mkdir') {
           const target = requestPath(request);
