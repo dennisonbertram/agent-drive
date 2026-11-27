@@ -5,7 +5,6 @@ import { resolve } from 'node:path';
 import { Pool } from 'pg';
 import { S3Client, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { ModuleKind, ScriptTarget, transpile } from 'typescript';
-import { reverificationErrorResponse } from '@clerk/nextjs/server';
 
 const EMPTY_DRIVE = /This drive has no files yet\. Load its recovery file or credentials bundle/;
 
@@ -255,7 +254,7 @@ test('traces: the dialog cannot be closed while a token is being created, and re
   }
 });
 
-test('traces: a Clerk response suspends the native dialog without issuing a token', async ({
+test('traces: a Clerk response marker suspends the native dialog without issuing a token', async ({
   page,
   context,
   baseURL,
@@ -292,11 +291,10 @@ test('traces: a Clerk response suspends the native dialog without issuing a toke
     await page.route('**/trace-inbox/challenge', async (route) => {
       if (route.request().method() === 'POST' && !challenged) {
         challenged = true;
-        const body = await reverificationErrorResponse('strict').json();
         await route.fulfill({
           status: 403,
           contentType: 'application/json',
-          body: JSON.stringify(body),
+          body: JSON.stringify({ clerk_error: { reverification: 'strict' } }),
         });
         return;
       }
@@ -349,7 +347,7 @@ test('native dialog suspension exposes an external prompt and restores focus in 
     dialog.showModal();
     continueButton.focus();
     const resume = (
-      window as Window & {
+      window as unknown as Window & {
         suspendNativeDialog: (value: HTMLDialogElement) => () => void;
       }
     ).suspendNativeDialog(dialog);
