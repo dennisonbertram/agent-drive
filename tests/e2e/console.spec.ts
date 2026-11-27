@@ -2283,8 +2283,13 @@ test('console preview: owner-opened MP4 and WebM play in the panel; undecodable 
       await video.evaluate((el: HTMLVideoElement) => el.pause());
       const box = (await video.boundingBox())!;
       const dialog = (await preview(name).boundingBox())!;
-      expect(box.width).toBeLessThanOrEqual(dialog.width);
+      const body = (await preview(name).locator('.preview-body').boundingBox())!;
+      expect(box.width).toBeLessThanOrEqual(body.width);
       expect(box.height).toBeLessThanOrEqual(dialog.height);
+      // The 160x90 clip must fill the body (letterboxed), not sit at intrinsic
+      // size — the regression rendered it 160px wide inside a ~960px dialog.
+      expect(box.width).toBeGreaterThan(body.width * 0.9);
+      expect(box.height).toBeGreaterThan(body.height * 0.8);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog')).toHaveCount(0);
       expect(
@@ -2318,6 +2323,10 @@ test('console preview: owner-opened MP4 and WebM play in the panel; undecodable 
     expect(fit.width).toBeLessThanOrEqual(dialogBox.width);
     expect(fit.height).toBeLessThanOrEqual(dialogBox.height);
     expect(fit.width).toBeLessThanOrEqual(390);
+    expect(fit.width).toBeGreaterThan(dialogBox.width * 0.8);
+    const footerBox = (await preview('clip.webm').locator('.preview-footer').boundingBox())!;
+    expect(footerBox.y).toBeGreaterThanOrEqual(fit.y + fit.height);
+    expect(footerBox.y + footerBox.height).toBeLessThanOrEqual(844);
     await page.keyboard.press('Escape');
     await page.setViewportSize({ width: 1280, height: 720 });
 
