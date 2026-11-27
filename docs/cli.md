@@ -157,12 +157,11 @@ helper from `/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder`; if 
 another location, set `AGENT_DRIVE_FINDER_HELPER` to its absolute executable path. See the
 [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare the companion app.
 
-On a new mount the drive appears under **Locations** in the Finder sidebar, and macOS may keep it
-turned off. Open the drive's `Agent Drive` entry there (or open the requested mountpoint) and click
-**Enable** if Finder shows the banner "Agent Drive is not enabled. To access Agent Drive click
-Enable." If the CLI reports `file-provider-domain-disabled-in-system-settings [bootstrap:5]`, the
-domain already exists but is turned off — click **Enable** on the same banner in the drive's Finder
-location, then run the mount command again.
+On a new mount, Finder adds the provider under **Locations**. Match the Finder location to the mountpoint path you passed to `agent-drive mount MOUNTPOINT`. The Finder row may read `Agent
+Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive
+ID in the row name. If mount startup fails and Finder shows the banner "Agent Drive is not enabled.
+To access Agent Drive click Enable.", open the Agent Drive row in the sidebar, click **Enable**, and
+run the mount command again.
 
 Use an absolute mountpoint path, such as `"$HOME/AgentDrive"`. Finder chooses the actual provider
 location. When the requested path differs and is free, the CLI creates a symlink there and removes
