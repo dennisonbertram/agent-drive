@@ -59,8 +59,8 @@ describe('workspace mount readiness', () => {
     });
 
     await rm(mountpoint);
-    await symlink(join(cloudStorage, 'Agent Drive deadbeef'), mountpoint);
-    await mkdir(join(cloudStorage, 'Agent Drive deadbeef'));
+    await symlink(join(cloudStorage, 'AgentDrive-AgentDrivedeadbeef'), mountpoint);
+    await mkdir(join(cloudStorage, 'AgentDrive-AgentDrivedeadbeef'));
     expect(
       await inspectWorkspaceMountReadiness({
         platform: 'darwin',
@@ -69,6 +69,51 @@ describe('workspace mount readiness', () => {
         io: { home },
       }),
     ).toMatchObject({ ready: false });
+  });
+
+  it('accepts the File Provider Finder URL alias for the selected domain', async () => {
+    const home = await temporaryRoot();
+    const cloudStorage = join(home, 'Library', 'CloudStorage');
+    const actualPath = join(cloudStorage, 'AgentDrive-AgentDriveabcdef01');
+    const mountpoint = join(home, 'Workspaces', 'coordinator');
+    await mkdir(actualPath, { recursive: true });
+    await mkdir(join(home, 'Workspaces'), { recursive: true });
+    await symlink(actualPath, mountpoint);
+
+    await expect(
+      inspectWorkspaceMountReadiness({
+        platform: 'darwin',
+        mountpoint,
+        expectedDomainId: 'abcdef01-2345-4234-9234-abcdef012345',
+        io: { home },
+      }),
+    ).resolves.toMatchObject({ ready: true, actualPath, evidence: 'file-provider-domain-alias' });
+
+    await rm(mountpoint);
+    const cachedPath = join(cloudStorage, 'AgentDrive-AgentDriveabcdef01 2026-11-27 12.00.00');
+    await mkdir(cachedPath, { recursive: true });
+    await symlink(cachedPath, mountpoint);
+    await expect(
+      inspectWorkspaceMountReadiness({
+        platform: 'darwin',
+        mountpoint,
+        expectedDomainId: 'abcdef01-2345-4234-9234-abcdef012345',
+        io: { home },
+      }),
+    ).resolves.toMatchObject({ ready: false });
+
+    await rm(mountpoint);
+    const nestedPath = join(cloudStorage, 'Cached', 'AgentDrive-AgentDriveabcdef01');
+    await mkdir(nestedPath, { recursive: true });
+    await symlink(nestedPath, mountpoint);
+    await expect(
+      inspectWorkspaceMountReadiness({
+        platform: 'darwin',
+        mountpoint,
+        expectedDomainId: 'abcdef01-2345-4234-9234-abcdef012345',
+        io: { home },
+      }),
+    ).resolves.toMatchObject({ ready: false });
   });
 
   it('waits for a local Linux mount signal and reports an attachment timeout distinctly', async () => {

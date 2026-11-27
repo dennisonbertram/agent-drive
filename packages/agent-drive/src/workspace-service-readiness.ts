@@ -1,6 +1,6 @@
 import { lstat, readFile, readlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
 export type WorkspaceReadinessPlatform = 'darwin' | 'linux';
 export type WorkspaceMountReadiness =
@@ -68,11 +68,6 @@ export function linuxMountInfoHasAgentDriveMount(mountpoint: string, mountInfo: 
   });
 }
 
-function withinDirectory(directory: string, candidate: string): boolean {
-  const path = relative(directory, candidate);
-  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`));
-}
-
 export async function inspectWorkspaceMountReadiness(
   options: Pick<WorkspaceReadinessOptions, 'mountpoint' | 'platform' | 'expectedDomainId'> & {
     io?: WorkspaceReadinessIO;
@@ -112,11 +107,16 @@ export async function inspectWorkspaceMountReadiness(
   const linkTarget = await ioReadlink(mountpoint);
   const actualPath = resolve(dirname(mountpoint), linkTarget);
   const cloudStorage = resolve(io.home ?? homedir(), 'Library', 'CloudStorage');
-  const domainName = `Agent Drive ${options.expectedDomainId.slice(0, 8)}`;
+  const domainSuffix = options.expectedDomainId.slice(0, 8);
+  // File Provider's user-visible URL can include the provider name before its
+  // domain display name. Keep both accepted spellings exact and domain-bound.
+  const expectedDomainNames = new Set([
+    `Agent Drive ${domainSuffix}`,
+    `AgentDrive-AgentDrive${domainSuffix}`,
+  ]);
   if (
-    !withinDirectory(cloudStorage, actualPath) ||
-    actualPath === cloudStorage ||
-    actualPath.split(sep).at(-1) !== domainName
+    dirname(actualPath) !== cloudStorage ||
+    !expectedDomainNames.has(basename(actualPath))
   )
     return {
       ready: false,

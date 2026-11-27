@@ -421,13 +421,12 @@ async function installAndWaitForWorkspaceService(
   const { waitForWorkspaceMountReadiness } = await import('./workspace-service-readiness.js');
   const readinessOptions = {
     mountpoint: entry.mountpoint,
-    ...(entry.kind === 'live-workspace'
-      ? {
-          expectedDomainId: (
-            await import('./workspace-mount.js')
-          ).workspaceMountDomainId(JSON.stringify([entry.sandboxId, entry.root])),
-        }
-      : {}),
+    expectedDomainId:
+      entry.kind === 'live-workspace'
+        ? (await import('./workspace-mount.js')).workspaceMountDomainId(
+            JSON.stringify([entry.sandboxId, entry.root]),
+          )
+        : entry.driveId,
   };
   await waitForWorkspaceMountReadiness(readinessOptions);
   return runtime;
@@ -895,13 +894,12 @@ async function run(command: string, raw: string[]) {
         );
         await waitForWorkspaceMountReadiness({
           mountpoint: entry.mountpoint,
-          ...(entry.kind === 'live-workspace'
-            ? {
-                expectedDomainId: (
-                  await import('./workspace-mount.js')
-                ).workspaceMountDomainId(JSON.stringify([entry.sandboxId, entry.root])),
-              }
-            : {}),
+          expectedDomainId:
+            entry.kind === 'live-workspace'
+              ? (await import('./workspace-mount.js')).workspaceMountDomainId(
+                  JSON.stringify([entry.sandboxId, entry.root]),
+                )
+              : entry.driveId,
         });
         output(current);
         return;
