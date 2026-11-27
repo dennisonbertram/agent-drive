@@ -117,6 +117,19 @@ function validMountpoint(value: unknown) {
   return resolve(value);
 }
 
+export function linuxMountInfoContainsPath(mountInfo: string, mountpoint: string): boolean {
+  const expectedPath = resolve(mountpoint);
+  return mountInfo.split('\n').some((line) => {
+    const mountPath = line.split(' ')[4];
+    if (mountPath === undefined) return false;
+    // mountinfo encodes path whitespace and backslashes as three-digit octal escapes.
+    const decodedPath = mountPath.replace(/\\([0-7]{3})/g, (_match, octal: string) =>
+      String.fromCharCode(Number.parseInt(octal, 8)),
+    );
+    return decodedPath === expectedPath;
+  });
+}
+
 /** Validate Finder alias prerequisites before `connect` reserves its registry name. */
 export async function validateLiveWorkspaceMountpoint(
   value: unknown,

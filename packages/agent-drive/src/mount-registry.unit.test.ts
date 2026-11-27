@@ -15,6 +15,7 @@ import {
   registerMount,
   validateLiveWorkspaceMountpoint,
   unregisterLiveWorkspaceIfUnchanged,
+  linuxMountInfoContainsPath,
 } from './mount-registry.js';
 
 const API = 'https://x.test/api';
@@ -58,6 +59,18 @@ function input(dir: string, extra: Record<string, unknown> = {}) {
 }
 
 describe('mount registry storage', () => {
+  it('matches Linux mountinfo paths after decoding kernel escapes', () => {
+    const mountpoint = '/tmp/Agent Drive/agent\\folder\twith space';
+    const encodedMountpoint = mountpoint
+      .replace(/\\/g, '\\134')
+      .replace(/ /g, '\\040')
+      .replace(/\t/g, '\\011');
+    const mountInfo = `36 25 0:32 / ${encodedMountpoint} rw,nosuid,nodev - fuse.agent-drive agent-drive rw\n`;
+
+    expect(linuxMountInfoContainsPath(mountInfo, mountpoint)).toBe(true);
+    expect(linuxMountInfoContainsPath(mountInfo, '/tmp/Agent Drive/other')).toBe(false);
+  });
+
   it('stores mounts.json next to the config file', async () => {
     const dir = await isolatedConfig();
     expect(mountRegistryPath()).toBe(join(dir, 'mounts.json'));

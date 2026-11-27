@@ -2,7 +2,6 @@
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
 import { decodeDriveKey, generateDriveKey } from './crypto.js';
@@ -984,20 +983,8 @@ async function run(command: string, raw: string[]) {
           const mountInfo = await readFile('/proc/self/mountinfo', 'utf8').catch(() => {
             throw new Error(`Cannot safely verify whether '${name}' is mounted.`);
           });
-          const escapedPath = resolve(entry.mountpoint)
-            .replace(/\\/g, '\\134')
-            .replace(/ /g, '\\040')
-            .replace(/\t/g, '\\011')
-            .replace(/\n/g, '\\012');
-          const isMounted = mountInfo.split('\n').some((line) => {
-            const fields = line.split(' ');
-            return (
-              fields[4]?.replace(/\\([0-7]{3})/g, (_match, octal: string) =>
-                String.fromCharCode(Number.parseInt(octal, 8)),
-              ) === escapedPath
-            );
-          });
-          if (isMounted) throw new Error(`Cannot forget '${name}' while its mountpoint is active.`);
+          if (registry.linuxMountInfoContainsPath(mountInfo, entry.mountpoint))
+            throw new Error(`Cannot forget '${name}' while its mountpoint is active.`);
         }
       } else if (process.platform !== 'darwin' && filesystem.state !== 'free') {
         throw new Error(`Cannot safely verify the mountpoint for '${name}'.`);
