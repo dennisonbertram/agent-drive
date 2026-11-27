@@ -41,6 +41,16 @@ export type PutOptions = {
   userId?: string;
   mode?: 'create' | 'overwrite';
   ifVersionId?: string;
+  /**
+   * Atomic job pickup: commits this create-only write of the exact protected path
+   * /jobs/.agent-drive/claims/<job id>.json only while the job's newest approved
+   * submission still pins this version. The commit goes to the dedicated
+   * commit-job-claim endpoint — never the generic commit — so a server that does
+   * not know it leaves the claim uncommitted rather than silently committing
+   * unguarded. job_approval_changed is returned unchanged. If replaying a known
+   * guarded intent, persist and pass this same version to replayCommit explicitly.
+   */
+  ifJobApprovalVersionId?: string;
   /** Allow create-only writes over the exact trashed state observed by the upload intent. */
   allowTrashedCreate?: boolean;
   /** Aborts an in-flight upload (used by capture shutdown). */
@@ -191,6 +201,29 @@ export type ConflictState = 'exists' | 'changed' | 'trashed' | 'absent';
 const conflictStates: unknown[] = ['exists', 'changed', 'trashed', 'absent'];
 // Same pattern as uuid() in apps/web/src/api/validation.ts; keep in sync.
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+// Same pattern as JOB_ID in packages/agent-drive/src/jobs.ts; keep in sync.
+const jobIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// Same protected receipt path as CLAIM_PREFIX in packages/agent-drive/src/jobs.ts.
+const jobClaimPath = /^\/jobs\/\.agent-drive\/claims\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.json$/;
+
+/**
+ * A job-claim guard is only valid on a create-only write of the exact protected
+ * claims receipt path. Rejected before any request or upload: a guarded write to
+ * anything else could not get its atomic approval check.
+ */
+function checkJobClaimGuard(options: PutOptions, path: string) {
+  if (options.ifJobApprovalVersionId === undefined) return;
+  if (typeof options.ifJobApprovalVersionId !== 'string' || options.ifJobApprovalVersionId === '')
+    throw new TypeError('A valid job approval version id is required.');
+  if (options.mode !== 'create' || options.allowTrashedCreate)
+    throw new TypeError(
+      'ifJobApprovalVersionId requires create-only mode without allowTrashedCreate.',
+    );
+  if (!jobClaimPath.test(path))
+    throw new TypeError(
+      'ifJobApprovalVersionId requires the exact path /jobs/.agent-drive/claims/<job id>.json.',
+    );
+}
 
 function fileEntry(item: FileEntryWire): FileEntry {
   return {
@@ -697,12 +730,14 @@ export class AgentDriveClient {
     limit?: number,
     cursor?: string,
     filters?: { tag?: string; agentId?: string; machine?: string; user?: string },
+    signal?: AbortSignal,
   ): Promise<Page<FileEntry>> {
     const page = await this.request<Page<FileEntryWire>>(
       this.pagePath(`drives/${encode(driveId)}/list`, limit, cursor, {
         ...(prefix ? { prefix } : {}),
         ...filters,
       }),
+      signal ? { signal } : {},
     );
     return {
       ...page,
@@ -732,6 +767,42 @@ export class AgentDriveClient {
       ),
       signal ? { signal } : {},
     );
+  }
+
+  /**
+   * Job submissions still waiting for a worker: the transactional move events that renamed
+   * /jobs/<id>/request.md to /jobs/<same id>/submitted.md while the submitted file is still at
+   * that path and no worker receipt claims the job id. Each item carries the event's pinned
+   * versionId (the submitted draft version), oldest first; page with `cursor`. Servers that do
+   * not know `jobSubmissions` ignore it and return the ordinary event feed — the caller must
+   * still revalidate each event's path, version and receipt before acting on it.
+   */
+  async pendingJobSubmissions(
+    driveId: string,
+    limit?: number,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<RecentPage> {
+    return this.request<RecentPage>(
+      this.pagePath(`drives/${encode(driveId)}/recent`, limit, cursor, {
+        jobSubmissions: '1',
+      }),
+      signal ? { signal } : {},
+    );
+  }
+
+  /**
+   * The cursor of the newest committed event on the drive, or null when it has none. Pass it to
+   * `recent` as `cursor` to see only later events. Servers that support `head=1` answer with one
+   * indexed row; older servers ignore it and return the first page, whose latestCursor is still a
+   * safe (if older) resume point — the caller just sees more events.
+   */
+  async recentHead(driveId: string, signal?: AbortSignal): Promise<string | null> {
+    const page = await this.request<RecentPage>(
+      `drives/${encode(driveId)}/recent?head=1&limit=1`,
+      signal ? { signal } : {},
+    );
+    return page.latestCursor ?? null;
   }
 
   /**
@@ -869,6 +940,38 @@ export class AgentDriveClient {
     );
   }
 
+  /**
+   * The request version the file at /jobs/<id>/submitted.md was last submitted at: the version
+   * pinned by that live file's newest qualifying /jobs/<id>/request.md -> submitted.md move.
+   * Any earlier queued submission event for the same file resolves to this same version at
+   * pickup, so a stale candidate can never run a superseded approval, and a file that merely
+   * appeared at submitted.md (a put, copy or restore) is never an approval — the answer is 404.
+   * Metadata only; the response must carry `jobApproval: true` because older servers answer the
+   * same GET with ordinary unmarked metadata for whatever version they select. Unmarked
+   * metadata is rejected as an unsupported worker API, never used as a fallback.
+   */
+  async getJobApproval(driveId: string, jobId: string, signal?: AbortSignal): Promise<Version> {
+    if (!jobIdPattern.test(jobId)) {
+      throw new TypeError(
+        'A job id is 1-64 ASCII characters: alphanumeric, then alphanumeric, "_" or "-".',
+      );
+    }
+    const path = `/jobs/${jobId}/submitted.md`;
+    const query = new URLSearchParams({ path, metadataOnly: '1', jobApproval: '1' });
+    const result = await this.request<Version & { jobApproval?: unknown }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+      signal ? { signal } : {},
+    );
+    if (result.jobApproval !== true || result.path !== path || !isVersionMetadata(result)) {
+      throw new AgentDriveApiError(
+        'worker_api_unsupported',
+        502,
+        'The server does not support job approval lookups (worker API not supported).',
+      );
+    }
+    return versionCopy(result);
+  }
+
   async put(driveId: string, path: string, plaintext: Uint8Array, options: PutOptions = {}) {
     if (options.mode === 'create' && options.ifVersionId !== undefined) {
       throw new TypeError('Create-only writes cannot include ifVersionId.');
@@ -876,6 +979,7 @@ export class AgentDriveClient {
     if (options.allowTrashedCreate && options.mode !== 'create') {
       throw new TypeError('allowTrashedCreate requires create-only mode.');
     }
+    checkJobClaimGuard(options, path);
     const encrypted = await encryptFile(plaintext, this.keyFor(driveId));
     return this.putEncrypted(driveId, path, encrypted.ciphertext, encrypted.wrappedKey, options);
   }
@@ -894,6 +998,7 @@ export class AgentDriveClient {
     if (options.allowTrashedCreate && options.mode !== 'create') {
       throw new TypeError('allowTrashedCreate requires create-only mode.');
     }
+    checkJobClaimGuard(options, path);
     const encrypted = await encryptFileStream(plaintext, plaintextBytes, this.keyFor(driveId));
     const body: Record<string, unknown> = {
       path,
@@ -960,23 +1065,54 @@ export class AgentDriveClient {
     } as RequestInit);
     await uploadFinished;
     await options.onUploadComplete?.(intent.intentId);
-    return this.replayCommit(
-      driveId,
-      intent.intentId,
-      options.signal ? { signal: options.signal } : {},
-    );
+    return this.replayCommit(driveId, intent.intentId, options);
   }
 
-  /** Idempotently retry commit for a durable intent whose acknowledgement may have been lost. */
-  async replayCommit(driveId: string, intentId: string, options: Pick<PutOptions, 'signal'> = {}) {
+  /** Idempotently commits an intent; a supplied job guard always uses its dedicated endpoint. */
+  async replayCommit(
+    driveId: string,
+    intentId: string,
+    options: Pick<PutOptions, 'signal' | 'ifJobApprovalVersionId'> = {},
+  ) {
     if (typeof intentId !== 'string' || intentId.length === 0 || intentId.length > 128) {
       throw new TypeError('A valid upload intent ID is required.');
     }
-    const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
-      method: 'POST',
-      body: JSON.stringify({ intentId }),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
+    const ifJobApprovalVersionId = options.ifJobApprovalVersionId;
+    let committed: { version: Version };
+    try {
+      committed = await this.request<{ version: Version }>(
+        `drives/${encode(driveId)}/${ifJobApprovalVersionId === undefined ? 'commit' : 'commit-job-claim'}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(
+            ifJobApprovalVersionId === undefined
+              ? { intentId }
+              : { intentId, ifJobApprovalVersionId },
+          ),
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
+    } catch (error) {
+      // A guarded commit only exists on servers with the dedicated route; an
+      // older server answers its exact route-miss 404, which is a fatal
+      // capability gap rather than a claim outcome — never a reason to retry
+      // or fall back to the unguarded commit. Every other failure (a missing
+      // intent or drive, an approval change) keeps its own code and message.
+      if (
+        ifJobApprovalVersionId !== undefined &&
+        error instanceof AgentDriveApiError &&
+        error.status === 404 &&
+        error.code === 'not_found' &&
+        error.message === 'Endpoint not found.'
+      ) {
+        throw new AgentDriveApiError(
+          'worker_api_unsupported',
+          502,
+          'Guarded job claims are not supported on this server. Upgrade the Agent Drive server to run this worker.',
+        );
+      }
+      throw error;
+    }
     return committed.version;
   }
 
@@ -994,6 +1130,7 @@ export class AgentDriveClient {
     if (options.allowTrashedCreate && options.mode !== 'create') {
       throw new TypeError('allowTrashedCreate requires create-only mode.');
     }
+    checkJobClaimGuard(options, path);
     const body: Record<string, unknown> = {
       path,
       ciphertextSize: ciphertext.byteLength,
@@ -1020,12 +1157,7 @@ export class AgentDriveClient {
       headers: { 'content-type': 'application/octet-stream' },
       ...(options.signal ? { signal: options.signal } : {}),
     });
-    const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
-      method: 'POST',
-      body: JSON.stringify({ intentId: intent.intentId }),
-      ...(options.signal ? { signal: options.signal } : {}),
-    });
-    return committed.version;
+    return this.replayCommit(driveId, intent.intentId, options);
   }
 
   async get(driveId: string, path: string, options: GetOptions = {}) {

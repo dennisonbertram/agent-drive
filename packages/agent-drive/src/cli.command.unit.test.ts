@@ -29,7 +29,7 @@ type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 async function cli(
   argv: string[],
   saved: Saved,
-  respond: (path: string, init?: RequestInit) => unknown = (path) =>
+  respond: (path: string, init?: RequestInit, search?: string) => unknown = (path) =>
     path === 'account-key' ? { accountKey: null } : {},
   env: Record<string, string> = {},
 ) {
@@ -83,7 +83,8 @@ async function cli(
         authorization: new Headers(init?.headers).get('authorization'),
         ...(typeof init?.body === 'string' ? { body: init.body } : {}),
       });
-      const response = respond(path, init);
+      const response = respond(path, init, parsed.search);
+      if (response instanceof Response) return response;
       const hasAccountKey =
         response !== null &&
         typeof response === 'object' &&
@@ -1303,5 +1304,229 @@ describe('CLI startup import isolation', () => {
       vi.doUnmock('./mount.js');
       vi.resetModules();
     }
+  });
+});
+
+describe('jobs CLI', () => {
+  it('lists the explicit init, submit, and worker commands in help', async () => {
+    const r = await cli(['help'], one);
+    expect(r.out).toContain('jobs init [--drive ID]');
+    expect(r.out).toContain('jobs submit ID [--drive ID]');
+    expect(r.out).toContain('jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+  });
+
+  it('rejects malformed modes and ignored options before connecting', async () => {
+    const invalidCases: [string[], string][] = [
+      [['jobs', 'work', '--once'], 'Usage: jobs work'],
+      [['jobs', 'work', '--force', '--', 'true'], 'Unsupported jobs option'],
+      [['jobs', 'init', '--force'], 'Unsupported jobs option'],
+      [['jobs', 'submit', '../invalid'], 'Usage: jobs submit'],
+      [['version', '--once'], '--once is only supported by `jobs work`'],
+    ];
+    for (const [argv, message] of invalidCases) {
+      const r = await cli(argv, one);
+      expect(r.exitCode).toBe(1);
+      expect(r.err).toContain(message);
+      expect(r.paths).toEqual([]);
+      process.exitCode = undefined;
+    }
+  });
+
+  it('treats --once after the -- terminator as a positional, not the jobs flag', async () => {
+    // A local file literally named --once must reach `put` as a filename.
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-once-'));
+    dirs.push(dir);
+    await writeFile(join(dir, '--once'), 'x');
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const r = await cli(['put', '--', '--once', '/x.md', '--drive', A], one, (path, init) => {
+        if (path.endsWith('/put'))
+          return {
+            intentId: 'i1',
+            uploadUrl: 'https://s3.test/x',
+            ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+              .ciphertextSize,
+          };
+        if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/x.md' } };
+        return {};
+      });
+      expect(r.err).toBe('');
+      expect(r.paths.some((p) => p.includes(`drives/${A}/commit`))).toBe(true);
+    } finally {
+      process.chdir(cwd);
+    }
+
+    // A drive path of the same name reaches `mv` as a positional too.
+    const move = await cli(['mv', '--', '--once', '/b.md', '--drive', A], one, (path) =>
+      path.endsWith('/move') ? { id: 'f1', path: '/b.md' } : {},
+    );
+    expect(move.err).toBe('');
+    const rename = move.calls.find((call) => call.path.endsWith('/move'));
+    expect(JSON.parse(rename?.body ?? '{}')).toMatchObject({ path: '--once' });
+  });
+
+  it('dispatches init, submit, and one local worker with the parsed command and lifecycle options', async () => {
+    const initJobs = vi.fn(async () => ({ path: '/jobs/README.md', created: true }));
+    const submitJob = vi.fn(async () => ({ id: 'monthly-close', state: 'submitted' }));
+    const runJobs = vi.fn(async (...args: unknown[]) => {
+      const options = args[3] as { once: boolean; signal: AbortSignal };
+      process.emit('SIGTERM');
+      expect(options.signal.aborted).toBe(true);
+    });
+    const makeJobHandler = vi.fn((command: string[]) => ({ command }));
+    vi.doMock('./jobs.js', () => ({ initJobs, submitJob, runJobs }));
+    vi.doMock('./job-command.js', () => ({ makeJobHandler }));
+    const respond = (path: string) => (path === 'account-key' ? { accountKey: null } : {});
+    try {
+      const init = await cli(['jobs', 'init', '--drive', A], one, respond);
+      expect(init.exitCode).toBeUndefined();
+      expect(initJobs).toHaveBeenCalledWith(expect.anything(), A);
+      expect(init.out).toContain('/jobs/README.md');
+
+      const submit = await cli(['jobs', 'submit', 'monthly-close', '--drive', A], one, respond);
+      expect(submit.exitCode).toBeUndefined();
+      expect(submitJob).toHaveBeenCalledWith(expect.anything(), A, 'monthly-close');
+
+      const cliHelp = await cli(['jobs', 'work', '--help'], one, respond);
+      expect(cliHelp.out).toContain('jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+      expect(cliHelp.paths).toEqual([]);
+
+      const signalListeners = process.listenerCount('SIGINT');
+      const termListeners = process.listenerCount('SIGTERM');
+      const work = await cli(
+        ['jobs', 'work', '--drive', A, '--once', '--', process.execPath, 'worker.js', '--review'],
+        one,
+        respond,
+      );
+      expect(work.exitCode).toBe(143);
+      expect(makeJobHandler).toHaveBeenCalledWith([process.execPath, 'worker.js', '--review']);
+      expect(runJobs).toHaveBeenCalledWith(
+        expect.anything(),
+        A,
+        { command: [process.execPath, 'worker.js', '--review'] },
+        { once: true, signal: expect.any(AbortSignal) },
+      );
+      expect(process.listenerCount('SIGINT')).toBe(signalListeners);
+      expect(process.listenerCount('SIGTERM')).toBe(termListeners);
+
+      process.exitCode = undefined;
+      const forwarded = await cli(
+        [
+          'jobs',
+          'work',
+          '--drive',
+          A,
+          '--',
+          process.execPath,
+          'worker.js',
+          '--help',
+          '--once',
+          '--version',
+        ],
+        one,
+        respond,
+      );
+      expect(forwarded.exitCode).toBe(143);
+      const childArgs = [process.execPath, 'worker.js', '--help', '--once', '--version'];
+      expect(makeJobHandler).toHaveBeenLastCalledWith(childArgs);
+      expect(runJobs.mock.calls.at(-1)?.[3]).toEqual({
+        once: false,
+        signal: expect.any(AbortSignal),
+      });
+    } finally {
+      vi.doUnmock('./jobs.js');
+      vi.doUnmock('./job-command.js');
+      vi.resetModules();
+    }
+  });
+
+  it('submits with metadata and a guarded rename when the CLI has no local drive key', async () => {
+    const noDriveKey: Saved = { keys: {}, origins: {} };
+    const draftPath = '/jobs/monthly-close/request.md';
+    const submittedPath = '/jobs/monthly-close/submitted.md';
+    const metadata = {
+      id: 'draft-version-1',
+      path: draftPath,
+      ciphertextSize: 42,
+      wrappedKey: 'not-used-by-submit',
+      agentId: 'agent-1',
+      machineId: null,
+      userId: null,
+      tags: [],
+      description: null,
+      createdAt: '2026-11-26T00:00:00.000Z',
+    };
+    const r = await cli(
+      ['jobs', 'submit', 'monthly-close', '--drive', A],
+      noDriveKey,
+      (path, init, search = '') => {
+        if (path === `drives/${A}/get`) {
+          const target = new URLSearchParams(search).get('path');
+          if (
+            target === submittedPath ||
+            target === '/jobs/.agent-drive/claims/monthly-close.json' ||
+            target === '/jobs/monthly-close/status.json'
+          )
+            return Response.json(
+              { error: { code: 'not_found', message: 'File not found.' } },
+              { status: 404 },
+            );
+          if (target === draftPath) {
+            expect(search).toContain('metadataOnly=1');
+            return metadata;
+          }
+          throw new Error(`Unexpected metadata lookup in jobs submit test: ${target}`);
+        }
+        if (path === `drives/${A}/rename`) {
+          expect(init?.method).toBe('POST');
+          const body = JSON.parse(String(init?.body ?? '{}'));
+          expect(body).toMatchObject({
+            path: draftPath,
+            destinationPath: submittedPath,
+            ifSourceVersionId: metadata.id,
+            ifDestinationVersionId: null,
+          });
+          expect(body.operationId).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+          );
+          return { id: 'file-1', path: submittedPath, versionId: 'submitted-version-1' };
+        }
+        if (path === 'account-key') return { accountKey: null };
+        throw new Error(`Unexpected API call in jobs submit test: ${path}`);
+      },
+    );
+
+    expect(r.exitCode).toBeUndefined();
+    expect(r.err).toBe('');
+    const metadataQueries = r.queries.filter((query) => query.includes('metadataOnly=1'));
+    expect(metadataQueries.length).toBeGreaterThan(0);
+    expect(metadataQueries).toHaveLength(
+      r.paths.filter((path) => path === `drives/${A}/get`).length,
+    );
+    const rename = r.calls.find((call) => call.path === `drives/${A}/rename`);
+    expect(rename?.method).toBe('POST');
+    expect(rename?.authorization).toBe('Bearer tok');
+    expect(JSON.parse(rename?.body ?? '{}')).toMatchObject({
+      path: draftPath,
+      destinationPath: submittedPath,
+      ifSourceVersionId: 'draft-version-1',
+      ifDestinationVersionId: null,
+    });
+    expect(JSON.parse(rename?.body ?? '{}').operationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+    );
+    expect(r.calls.filter((call) => call.path === `drives/${A}/rename`)).toHaveLength(1);
+    const metadataPaths = r.paths
+      .map((path, index) =>
+        path === `drives/${A}/get` ? new URLSearchParams(r.queries[index]).get('path') : null,
+      )
+      .filter((path): path is string => path !== null);
+    expect(metadataPaths).toEqual([
+      submittedPath,
+      '/jobs/.agent-drive/claims/monthly-close.json',
+      '/jobs/monthly-close/status.json',
+      draftPath,
+    ]);
   });
 });

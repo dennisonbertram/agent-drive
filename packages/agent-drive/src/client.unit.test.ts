@@ -884,6 +884,247 @@ describe('AgentDriveClient.putEncrypted', () => {
   });
 });
 
+describe('AgentDriveClient job-approval guarded claim writes', () => {
+  const driveKey = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+  const approvalId = '33333333-3333-4333-8333-333333333333';
+  const claimPath = '/jobs/.agent-drive/claims/job-9.json';
+  const guarded = { mode: 'create' as const, ifJobApprovalVersionId: approvalId };
+  const version = {
+    id: approvalId,
+    path: claimPath,
+    ciphertextSize: 44,
+    wrappedKey: 'wrapped',
+    agentId: 'a',
+    machineId: null,
+    userId: null,
+    tags: [],
+    description: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+  const makeClient = (fetcher: typeof fetch) =>
+    new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+
+  it('commits a guarded byte put through the dedicated claim endpoint, never plain commit', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), ...(init ? { init } : {}) });
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(JSON.stringify({ version }), { status: 201 });
+    });
+    const client = makeClient(fetcher);
+
+    const committed = await client.put(
+      'd',
+      claimPath,
+      new TextEncoder().encode('{"state":"running"}'),
+      guarded,
+    );
+
+    expect(committed).toEqual(version);
+    expect(calls).toHaveLength(3);
+    const apiPaths = calls.map((call) => new URL(call.url).pathname);
+    expect(apiPaths[2]).toBe('/api/v1/drives/d/commit-job-claim');
+    expect(apiPaths.some((path) => path.endsWith('/commit'))).toBe(false);
+    expect(JSON.parse(String(calls[2]?.init?.body))).toEqual({
+      intentId: 'claim-intent',
+      ifJobApprovalVersionId: approvalId,
+    });
+    // The guard is a commit-time check: the staged intent body never carries it.
+    expect(String(calls[0]?.init?.body)).not.toContain('ifJobApprovalVersionId');
+  });
+
+  it('rejects the guard outside create-only mode or the claims path before any request', async () => {
+    const fetcher = vi.fn();
+    const client = makeClient(fetcher as unknown as typeof fetch);
+    const bytes = new TextEncoder().encode('x');
+
+    await expect(
+      client.put('d', claimPath, bytes, { ...guarded, mode: 'overwrite' }),
+    ).rejects.toThrow(TypeError);
+    await expect(
+      client.put('d', claimPath, bytes, { ...guarded, allowTrashedCreate: true }),
+    ).rejects.toThrow(TypeError);
+    await expect(client.put('d', '/jobs/job-9/claims/job-9.json', bytes, guarded)).rejects.toThrow(
+      TypeError,
+    );
+    await expect(
+      client.put('d', '/jobs/.agent-drive/claims/bad id.json', bytes, guarded),
+    ).rejects.toThrow(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('propagates job_approval_changed without falling back to the generic commit', async () => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      calls.push(url.pathname);
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(
+        JSON.stringify({
+          error: { code: 'job_approval_changed', message: 'The job approval changed.' },
+        }),
+        { status: 409 },
+      );
+    });
+    const client = makeClient(fetcher);
+
+    await expect(client.put('d', claimPath, new Uint8Array([1]), guarded)).rejects.toMatchObject({
+      code: 'job_approval_changed',
+      status: 409,
+    });
+    expect(calls.some((path) => path.endsWith('/commit'))).toBe(false);
+    expect(calls.filter((path) => path.endsWith('/commit-job-claim'))).toHaveLength(1);
+  });
+
+  it('routes a guarded stream and its same-intent replay through the claim endpoint only', async () => {
+    const calls: { pathname: string; body?: unknown }[] = [];
+    let commits = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ pathname: url.pathname, body: init?.body });
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'claim-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+              .ciphertextSize,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') {
+        const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
+        while (!(await reader.read()).done) {}
+        return new Response('', { status: 200 });
+      }
+      commits += 1;
+      if (commits === 1) return new Response('lost acknowledgement', { status: 502 });
+      return new Response(JSON.stringify({ version }), { status: 200 });
+    });
+    const client = makeClient(fetcher);
+    const source = (async function* () {
+      yield new TextEncoder().encode('{"state":"running"}');
+    })();
+
+    await expect(client.putStream('d', claimPath, source, 19, guarded)).rejects.toMatchObject({
+      status: 502,
+    });
+    // A failed commit must not leave a per-client cache that grows for the life of
+    // a worker. A restarted caller recovers the intent and carries the saved guard.
+    expect('jobClaimGuards' in client).toBe(false);
+    const restartedClient = makeClient(fetcher);
+    await expect(
+      restartedClient.replayCommit('d', 'claim-intent', {
+        ifJobApprovalVersionId: approvalId,
+      }),
+    ).resolves.toEqual(version);
+
+    const apiPaths = calls.map((call) => call.pathname);
+    expect(apiPaths.some((path) => path.endsWith('/commit'))).toBe(false);
+    const claimCommits = calls.filter((call) => call.pathname.endsWith('/commit-job-claim'));
+    expect(claimCommits).toHaveLength(2);
+    for (const call of claimCommits)
+      expect(JSON.parse(String(call.body))).toEqual({
+        intentId: 'claim-intent',
+        ifJobApprovalVersionId: approvalId,
+      });
+  });
+
+  it('classifies only the exact missing-route 404 on a guarded commit as an unsupported worker API', async () => {
+    const routeMissing = { error: { code: 'not_found', message: 'Endpoint not found.' } };
+    const intentMissing = { error: { code: 'not_found', message: 'Upload intent not found.' } };
+    const responses = [routeMissing, intentMissing, routeMissing];
+    const paths: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      paths.push(new URL(String(input)).pathname);
+      return Response.json(responses[paths.length - 1], { status: 404 });
+    });
+    const client = makeClient(fetcher);
+
+    // An older server has no commit-job-claim route: its generic route miss is
+    // a fatal capability gap, not a claim failure — never retried or replayed
+    // through the unguarded endpoint.
+    await expect(
+      client.replayCommit('d', 'claim-intent', { ifJobApprovalVersionId: approvalId }),
+    ).rejects.toMatchObject({
+      code: 'worker_api_unsupported',
+      status: 502,
+      message: expect.stringContaining('not supported'),
+    });
+    // A real 404 from the guarded endpoint — a missing intent or drive — keeps
+    // its own code and message.
+    await expect(
+      client.replayCommit('d', 'claim-intent', { ifJobApprovalVersionId: approvalId }),
+    ).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+      message: 'Upload intent not found.',
+    });
+    // The identical route-miss reply on the plain endpoint is just a 404.
+    await expect(client.replayCommit('d', 'plain-intent')).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+      message: 'Endpoint not found.',
+    });
+
+    expect(paths.filter((path) => path.endsWith('/commit-job-claim'))).toHaveLength(2);
+    expect(paths.filter((path) => path.endsWith('/commit'))).toHaveLength(1);
+  });
+
+  it('keeps ordinary puts and replays on the generic commit endpoint', async () => {
+    const calls: { pathname: string; body?: unknown }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ pathname: url.pathname, body: init?.body });
+      if (url.pathname.endsWith('/put'))
+        return new Response(
+          JSON.stringify({
+            intentId: 'plain-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 44,
+          }),
+          { status: 201 },
+        );
+      if (url.origin === 'http://localhost:9000') return new Response('', { status: 200 });
+      return new Response(JSON.stringify({ version }), { status: 201 });
+    });
+    const client = makeClient(fetcher);
+
+    await client.put('d', '/jobs/job-9/status.json', new Uint8Array([1]), { mode: 'create' });
+    await client.replayCommit('d', 'plain-intent');
+
+    const commits = calls.filter((call) => call.pathname.endsWith('/commit'));
+    expect(commits).toHaveLength(2);
+    for (const call of commits)
+      expect(JSON.parse(String(call.body))).toEqual({ intentId: 'plain-intent' });
+    expect(calls.some((call) => call.pathname.endsWith('/commit-job-claim'))).toBe(false);
+  });
+});
+
 describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
   const driveA = '11111111-2222-4333-8444-555555555555';
   const driveB = '22222222-2222-4333-8444-555555555555';
@@ -1060,5 +1301,190 @@ describe('AgentDriveClient reads of trace-inbox (v2) files', () => {
     await expect(client.get(driveA, '/t')).rejects.toMatchObject({ code: 'internal_error' });
     expect((await client.get(driveA, '/t')).bytes).toEqual(plaintext);
     expect(inboxCalls).toBe(2);
+  });
+});
+
+describe('AgentDriveClient.recentHead', () => {
+  const make = (body: unknown) => {
+    const calls: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return Response.json(body);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client };
+  };
+
+  it('asks for the head row and returns latestCursor', async () => {
+    const { calls, client } = make({ items: [], nextCursor: null, latestCursor: 'cursor-1' });
+    await expect(client.recentHead('drive-1')).resolves.toBe('cursor-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('/api/v1/drives/drive-1/recent?head=1&limit=1');
+  });
+
+  it('returns null when the drive has no events', async () => {
+    const { client } = make({ items: [], nextCursor: null, latestCursor: null });
+    await expect(client.recentHead('drive-1')).resolves.toBeNull();
+  });
+
+  it('falls back to the page latestCursor on servers without head support', async () => {
+    const { client } = make({
+      items: [{ id: 'e1' }],
+      nextCursor: 'page-2',
+      latestCursor: 'first-page-cursor',
+    });
+    await expect(client.recentHead('drive-1')).resolves.toBe('first-page-cursor');
+  });
+});
+
+describe('AgentDriveClient.pendingJobSubmissions', () => {
+  const page = { items: [{ id: 'e1' }], nextCursor: 'c2', latestCursor: 'c2' };
+  const make = (body: unknown = page) => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json(body);
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client };
+  };
+
+  it('requests the submissions feed with limit, cursor and an abort signal', async () => {
+    const { calls, client } = make();
+    const controller = new AbortController();
+    await expect(
+      client.pendingJobSubmissions('drive-1', 25, 'cursor-1', controller.signal),
+    ).resolves.toEqual(page);
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/drive-1/recent');
+    expect(url.searchParams.get('jobSubmissions')).toBe('1');
+    expect(url.searchParams.get('limit')).toBe('25');
+    expect(url.searchParams.get('cursor')).toBe('cursor-1');
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
+  it('sends only the flag when no options are given', async () => {
+    const { calls, client } = make();
+    await client.pendingJobSubmissions('drive-1');
+    const url = new URL(calls[0]!.url);
+    expect(url.searchParams.get('jobSubmissions')).toBe('1');
+    expect(url.searchParams.has('limit')).toBe(false);
+    expect(url.searchParams.has('cursor')).toBe(false);
+    expect(calls[0]?.init?.signal).toBeUndefined();
+  });
+});
+
+describe('AgentDriveClient.list signal', () => {
+  it('forwards an optional signal as the sixth argument', async () => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json({ items: [], nextCursor: null });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    const controller = new AbortController();
+    await client.list('d', '/jobs/', 10, 'cursor-1', { tag: 'job' }, controller.signal);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/d/list');
+    expect(url.searchParams.get('prefix')).toBe('/jobs/');
+    expect(url.searchParams.get('tag')).toBe('job');
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+    await client.list('d');
+    expect(calls[1]?.init?.signal).toBeUndefined();
+  });
+});
+
+describe('AgentDriveClient.getJobApproval', () => {
+  const approved = {
+    id: '11111111-1111-4111-8111-111111111111',
+    path: '/jobs/job-1/submitted.md',
+    ciphertextSize: 64,
+    wrappedKey: 'wrapped',
+    agentId: 'a',
+    machineId: null,
+    userId: null,
+    tags: [],
+    description: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    jobApproval: true,
+  };
+  const make = (body: unknown = approved, status = 200) => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json(body, { status });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client, fetcher };
+  };
+
+  it('requests the approval mode metadata get and returns the pinned version', async () => {
+    const { calls, client } = make();
+    const controller = new AbortController();
+    const version = await client.getJobApproval('drive-1', 'job-1', controller.signal);
+    expect(version.id).toBe(approved.id);
+    expect(version.path).toBe('/jobs/job-1/submitted.md');
+    expect(version).not.toHaveProperty('jobApproval');
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/drive-1/get');
+    expect(url.searchParams.get('path')).toBe('/jobs/job-1/submitted.md');
+    expect(url.searchParams.get('metadataOnly')).toBe('1');
+    expect(url.searchParams.get('jobApproval')).toBe('1');
+    expect(url.searchParams.has('versionId')).toBe(false);
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
+  it('rejects unmarked ordinary metadata as an unsupported worker API', async () => {
+    const { client } = make({ ...approved, jobApproval: undefined });
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      name: 'AgentDriveApiError',
+      code: 'worker_api_unsupported',
+      status: 502,
+      message: expect.stringContaining('not supported'),
+    });
+  });
+
+  it('rejects a marker on metadata for the wrong path', async () => {
+    const { client } = make({ ...approved, path: '/jobs/job-2/submitted.md' });
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      code: 'worker_api_unsupported',
+      status: 502,
+    });
+  });
+
+  it('rejects invalid job ids before any request', async () => {
+    const { client, fetcher } = make();
+    for (const id of ['', 'bad id', '/jobs/x', 'nested/deep', '-lead', `x`.repeat(65)])
+      await expect(client.getJobApproval('drive-1', id)).rejects.toBeInstanceOf(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('propagates a 404 when no qualifying submission exists', async () => {
+    const { client } = make(
+      { error: { code: 'not_found', message: 'No approved job submission exists.' } },
+      404,
+    );
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+    });
   });
 });

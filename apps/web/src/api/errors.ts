@@ -10,6 +10,7 @@ export type ErrorCode =
   | 'share_revoked'
   | 'share_expired'
   | 'share_unavailable'
+  | 'job_approval_changed'
   | 'internal_error';
 
 const statuses: Record<ErrorCode, number> = {
@@ -24,6 +25,7 @@ const statuses: Record<ErrorCode, number> = {
   share_revoked: 410,
   share_expired: 410,
   share_unavailable: 410,
+  job_approval_changed: 409,
   internal_error: 500,
 };
 

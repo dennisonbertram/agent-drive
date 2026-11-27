@@ -4,6 +4,7 @@ import {
   decryptFile,
   DriveCryptoError,
   decodeDriveKey,
+  decryptWithFileKeyStream,
   encryptedSize,
   plaintextSize,
   decryptWithFileKey,
@@ -65,6 +66,37 @@ describe('permanent encryption format regression guards', () => {
     await expect(decryptFile(result.ciphertext, changed, key)).rejects.toMatchObject({
       code: 'decryption_failed',
     });
+  });
+
+  it('marks body authentication separately while keeping stream interruptions retryable', async () => {
+    const key = generateDriveKey();
+    const result = await encryptFile(sequence(100), key);
+    const damaged = result.ciphertext.slice();
+    damaged[damaged.length - 1] = damaged[damaged.length - 1]! ^ 1;
+    await expect(decryptFile(damaged, result.wrappedKey, key)).rejects.toMatchObject({
+      code: 'decryption_failed',
+      origin: 'content',
+      message: 'Unable to decrypt: the drive key is wrong, or the file is damaged or incomplete.',
+    });
+    await expect(
+      decryptFile(result.ciphertext, result.wrappedKey, generateDriveKey()),
+    ).rejects.toMatchObject({
+      code: 'decryption_failed',
+      origin: undefined,
+      message: 'Unable to decrypt: the drive key is wrong, or the file is damaged or incomplete.',
+    });
+
+    const interrupted = new Error('synthetic read interruption');
+    const source = async function* () {
+      throw interrupted;
+    };
+    await expect(
+      (async () => {
+        for await (const _chunk of decryptWithFileKeyStream(source(), key)) {
+          // The source fails before it can yield any ciphertext.
+        }
+      })(),
+    ).rejects.toBe(interrupted);
   });
 
   it('rejects tampering, truncation, appended data, and reordered chunks', async () => {

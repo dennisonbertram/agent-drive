@@ -31,14 +31,14 @@ Errors use one shape, described in [Errors and limits](errors.md):
 
 Every route except the public share route needs an API key. A key has a list of scopes, a list of drive IDs, and an optional list of write paths.
 
-| Scope      | Allows                                                                                                          |
-| ---------- | --------------------------------------------------------------------------------------------------------------- |
-| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                                     |
-| `write`    | Put, commit, move, rename, copy, restore, create directories and key-backup (copy and restore also need `read`) |
-| `delete`   | Move files to the trash, remove empty directories and guarded unlink; rename replacement also needs this scope  |
-| `share`    | Create, list and revoke share links (creating also needs `read`)                                                |
-| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                                               |
-| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md))                  |
+| Scope      | Allows                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`     | List drives; get, list, search, versions, recent and trace-inbox on a drive                                                                         |
+| `write`    | Put, commit, commit-job-claim, move, rename, copy, restore, create directories and key-backup (copy, restore and commit-job-claim also need `read`) |
+| `delete`   | Move files to the trash, remove empty directories and guarded unlink; rename replacement also needs this scope                                      |
+| `share`    | Create, list and revoke share links (creating also needs `read`)                                                                                    |
+| `manage`   | Create agents, drives and keys; list agents and keys; revoke keys                                                                                   |
+| `delegate` | Hand access to other agents (see [HTTP API: device login and delegation](api-device-login.md))                                                      |
 
 A drive route needs both the scope and the drive: the drive ID must be in the key's drive list. If it is not, the API returns 403 `permission_denied` with `The API key is not scoped to this drive.` A missing scope returns 403 `permission_denied` with `The API key lacks the "<scope>" scope.`
 
@@ -105,38 +105,39 @@ List routes return `{ "items": [...], "nextCursor": string | null }`.
 
 All paths are relative to `/api/v1`. `:id` is a drive ID (a UUID). File paths are canonical absolute POSIX paths: they start with `/`, are at most 1,024 characters, and contain no `//`, `.`, `..`, backslash or trailing `/`.
 
-| Method | Route                         | Scope                                            |
-| ------ | ----------------------------- | ------------------------------------------------ |
-| GET    | `/whoami`                     | any valid key                                    |
-| GET    | `/agents`                     | `manage`                                         |
-| POST   | `/agents`                     | `manage`                                         |
-| GET    | `/drives`                     | `manage`, or `read`                              |
-| POST   | `/drives`                     | `manage`                                         |
-| GET    | `/keys`                       | `manage`                                         |
-| POST   | `/keys`                       | `manage`, or `delegate`                          |
-| DELETE | `/keys/:id`                   | `manage`                                         |
-| POST   | `/drives/:id/put`             | `write`                                          |
-| POST   | `/drives/:id/commit`          | `write`                                          |
-| POST   | `/drives/:id/mkdir`           | `write`                                          |
-| POST   | `/drives/:id/rmdir`           | `delete`                                         |
-| GET    | `/drives/:id/get`             | `read`                                           |
-| GET    | `/drives/:id/list`            | `read`                                           |
-| GET    | `/drives/:id/versions`        | `read`                                           |
-| GET    | `/drives/:id/search`          | `read`                                           |
-| GET    | `/drives/:id/recent`          | `read`                                           |
-| POST   | `/drives/:id/move`            | `write`                                          |
-| POST   | `/drives/:id/rename`          | `write` (also `delete` to replace a destination) |
-| POST   | `/drives/:id/copy`            | `read` and `write`                               |
-| POST   | `/drives/:id/delete`          | `delete`                                         |
-| POST   | `/drives/:id/unlink`          | `delete`                                         |
-| POST   | `/drives/:id/restore`         | `read` and `write`                               |
-| POST   | `/drives/:id/key-backup`      | `write`                                          |
-| GET    | `/drives/:id/trace-inbox`     | `read`                                           |
-| POST   | `/drives/:id/shares`          | `share` and `read`                               |
-| GET    | `/drives/:id/shares`          | `share`                                          |
-| DELETE | `/drives/:id/shares/:shareId` | `share`                                          |
-| GET    | `/device/:code`               | `delegate`                                       |
-| POST   | `/device/:code/grant`         | `delegate`                                       |
+| Method | Route                          | Scope                                            |
+| ------ | ------------------------------ | ------------------------------------------------ |
+| GET    | `/whoami`                      | any valid key                                    |
+| GET    | `/agents`                      | `manage`                                         |
+| POST   | `/agents`                      | `manage`                                         |
+| GET    | `/drives`                      | `manage`, or `read`                              |
+| POST   | `/drives`                      | `manage`                                         |
+| GET    | `/keys`                        | `manage`                                         |
+| POST   | `/keys`                        | `manage`, or `delegate`                          |
+| DELETE | `/keys/:id`                    | `manage`                                         |
+| POST   | `/drives/:id/put`              | `write`                                          |
+| POST   | `/drives/:id/commit`           | `write`                                          |
+| POST   | `/drives/:id/commit-job-claim` | `read` and `write`                               |
+| POST   | `/drives/:id/mkdir`            | `write`                                          |
+| POST   | `/drives/:id/rmdir`            | `delete`                                         |
+| GET    | `/drives/:id/get`              | `read`                                           |
+| GET    | `/drives/:id/list`             | `read`                                           |
+| GET    | `/drives/:id/versions`         | `read`                                           |
+| GET    | `/drives/:id/search`           | `read`                                           |
+| GET    | `/drives/:id/recent`           | `read`                                           |
+| POST   | `/drives/:id/move`             | `write`                                          |
+| POST   | `/drives/:id/rename`           | `write` (also `delete` to replace a destination) |
+| POST   | `/drives/:id/copy`             | `read` and `write`                               |
+| POST   | `/drives/:id/delete`           | `delete`                                         |
+| POST   | `/drives/:id/unlink`           | `delete`                                         |
+| POST   | `/drives/:id/restore`          | `read` and `write`                               |
+| POST   | `/drives/:id/key-backup`       | `write`                                          |
+| GET    | `/drives/:id/trace-inbox`      | `read`                                           |
+| POST   | `/drives/:id/shares`           | `share` and `read`                               |
+| GET    | `/drives/:id/shares`           | `share`                                          |
+| DELETE | `/drives/:id/shares/:shareId`  | `share`                                          |
+| GET    | `/device/:code`                | `delegate`                                       |
+| POST   | `/device/:code/grant`          | `delegate`                                       |
 
 The two `/device` routes are described in [HTTP API: device login and delegation](api-device-login.md). One public route sits outside `/api/v1`: `GET /api/shares/:id` (see Shares).
 
@@ -234,6 +235,8 @@ Response 201: `{ intentId, uploadUrl, expiresAt, ciphertextSize }`. It returns 4
 
 `POST /drives/:id/commit` body: `{ "intentId": "<uuid>" }`. Only the key that created the intent can commit it, otherwise 404. Response 201: `{ "version": { ... } }`. Committing the same intent again returns the same version with 200. An expired intent, a missing upload, or an upload whose size differs from `ciphertextSize` returns 409 `conflict`. Start again with a new put.
 
+`POST /drives/:id/commit-job-claim` is the guarded variant a worker uses to land the job claim receipt at `/jobs/.agent-drive/claims/<jobId>.json`. Body: `{ "intentId": "<uuid>", "ifJobApprovalVersionId": "<uuid>" }`; no other fields are accepted. It needs `read` and `write`, and the intent must be a create-only put (`ifVersionId:null`, never `allowTrashedCreate`) for exactly that claims path — any other intent path or mode returns 400 `validation_error`, including intents that already committed, so the route never replays an ordinary intent. Otherwise it runs the same commit flow and returns the same response. Under the commit locks it resolves the live `/jobs/<jobId>/submitted.md`'s newest qualifying submission — the same approval a `get` with `jobApproval=1` returns — and when that approval is absent or no longer matches `ifJobApprovalVersionId` it returns 409 `job_approval_changed` and commits nothing. Repeating a committed claim intent returns its version with 200. A server without this route answers 404; worker clients must treat that as unsupported rather than fall back to `commit`, which has no approval check.
+
 A version object:
 
 ```json
@@ -260,6 +263,7 @@ A version object:
 - `maxPlaintextBytes=<integer>` optionally caps the selected version's plaintext size (a non-negative safe integer). Without `metadataOnly`, an in-limit request returns a signed URL as usual; if the file exceeds the cap, the API returns that version's metadata without a URL, before signing a storage request.
 - `metadataOnly=1&maxPlaintextBytes=<integer>&authorizeIfWithinLimit=1` explicitly negotiates a bounded download. New servers return a signed URL when the selected version fits the cap, and metadata without a URL when it exceeds the cap. `authorizeIfWithinLimit=1` is valid only with `metadataOnly=1` and a valid cap. Older servers ignore this opt-in and return metadata only; clients check its size locally and make one additional GET pinned to that version if it fits. The fallback costs one extra `drive.get` operation on older servers. Clients must still check the returned size before fetching ciphertext because older servers ignore `maxPlaintextBytes`.
 - `versionId=<uuid>&metadataOnly=1&authorizeRange=1&range=bytes=<start>-<end>` explicitly authorizes one closed, inclusive ciphertext byte range for that pinned version. The range must fit inside `ciphertextSize` and may contain at most 8 MiB + 128 bytes. Suffix, open-ended, multiple, duplicate, reversed, or out-of-bounds ranges are rejected with 400 `validation_error`. Range authorization is incompatible with `max*` parameters and `authorizeIfWithinLimit`. On success, the response includes `downloadRange` with the exact range and a presigned `downloadUrl` valid for 60 seconds. Send the URL with `Range: <downloadRange>` and no API key; the Range header is part of the signature. The URL can be replayed until expiry, but each response is limited to the signed range. Older servers ignore `authorizeRange` and return metadata only because `metadataOnly=1`; clients must fail closed when no matching `downloadRange` and URL are returned and must not fall back to a whole-file GET.
+- `metadataOnly=1&jobApproval=1` with `path=/jobs/<id>/submitted.md` resolves a worker pickup: the version pinned by the live file's newest qualifying `/jobs/<same id>/request.md -> /jobs/<same id>/submitted.md` move. The response is that version's metadata marked `"jobApproval": true` and never carries a signed URL. A later re-approval supersedes every earlier queued submission for the same file — the read always resolves the newest qualifying event on the file currently at that path, never a direct write at submitted.md — so a stale queued candidate cannot run a superseded request. `jobApproval` accepts only `1`, requires `metadataOnly=1`, and cannot combine with `versionId`, `authorizeRange`, `range`, `maxPlaintextBytes` or `authorizeIfWithinLimit`; any other combination or a non-`/jobs/<id>/submitted.md` path returns 400 `validation_error`. A live file with no qualifying submission — or no live file — returns 404 `not_found`. Older servers ignore `jobApproval` and return ordinary unmarked metadata; worker clients must treat that as unsupported rather than fall back to the file's latest version.
 - Each bounded GET request uses one `drive.get` operation. Download authorization reserves the whole ciphertext size for a whole-file URL and the requested ciphertext bytes for a range URL. When egress metering is configured, actual transferred bytes are accounted from storage access logs.
 - A path that does not exist or is in the trash returns 404 `not_found`.
 - The plan's download allowance can return 402 `payment_required`.
@@ -327,10 +331,12 @@ curl -sS "$API/drives/$DRIVE/list?prefix=/notes&delimiter=/&sort=modified&limit=
 
 `GET /drives/:id/recent` returns file events, oldest first, so a client can poll for changes.
 
-- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`.
+- Query: `since` (ISO timestamp, exclusive), `cursor`, `limit`, `head`, `jobSubmissions`.
 - Each item: `{ id, operation, path, previousPath, versionId, agentId, agentName, machineId, userId, createdAt }`. `operation` is `put`, `copy`, `restore`, `move` or `delete`. `previousPath` is set for moves. `agentName` is `null` if the agent was removed.
 - The response also carries `latestCursor`. Pass it as `cursor` on the next call to get only newer events. With a cursor the order is exact and `since` is ignored. Without a cursor, `since` compares with the transaction start time, so it is approximate.
 - If there are no new events, `latestCursor` equals the cursor you sent (`null` if you sent none).
+- `head=1` returns only the tail: `{ items: [], nextCursor: null, latestCursor }`, where `latestCursor` is the cursor of the newest committed event on the drive (`null` when it has none). `head` cannot be combined with `cursor`, `since` or `jobSubmissions`, and accepts only `limit=1`.
+- `jobSubmissions=1` filters the feed to job submissions still waiting for a worker. An item qualifies only when its event is the transactional move of `/jobs/<id>/request.md` to `/jobs/<same id>/submitted.md` (the rename recorded by `agent-drive jobs submit`, the dashboard Submit action, or a mounted absent-target `mv`), that file is still live at the submitted path, and no worker receipt file exists at `/jobs/.agent-drive/claims/<id>.json` — even in the trash. `versionId` is the draft version pinned by the submission event, which may differ from the file's current version. `jobSubmissions` accepts only the value `1`, combines with `cursor`, `since` and `limit`, and returns 400 with `head`.
 - Each poll counts as one `drive.recent` operation in plan usage.
 - Responses never contain object keys, wrapped keys or signed URLs.
 

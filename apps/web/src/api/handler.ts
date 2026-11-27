@@ -103,6 +103,36 @@ type Row = QueryResultRow & Record<string, any>;
 // API-generated version ids are UUIDv4 values, so this sentinel cannot be a real version id.
 // upload_intents.base_version_id has no foreign key and external clients cannot set new version ids.
 const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
+// Postgres regex capturing the job id of /jobs/<id>/submitted.md; mirrors JOB_ID in
+// packages/agent-drive/src/jobs.ts (1-64 chars: alphanumeric, then alphanumeric, "_" or "-").
+const JOB_SUBMITTED_PATH_PATTERN = '^/jobs/([A-Za-z0-9][A-Za-z0-9_-]{0,63})/submitted\\.md$';
+// The JS equivalent, for exact path validation in the jobApproval metadata read.
+const JOB_SUBMITTED_PATH = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/submitted\.md$/u;
+// The exact claims receipt path commit-job-claim guards; the job id mirrors JOB_ID in
+// packages/agent-drive/src/jobs.ts.
+const JOB_CLAIM_PATH = /^\/jobs\/\.agent-drive\/claims\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\.json$/u;
+// The newest authentic approval of the live submitted.md: the version pinned by that file's
+// newest qualifying request.md -> submitted.md move. The jobApproval metadata read and the
+// commit-job-claim guard share this SELECT so both resolve the same submission.
+const JOB_APPROVED_SUBMISSION_SQL = `SELECT v.*, f.path
+   FROM files f
+   JOIN file_events e
+     ON e.drive_id = f.drive_id AND e.file_id = f.id AND e.path = f.path
+   JOIN versions v ON v.id = e.version_id
+  WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL
+    AND e.operation = 'move'
+    AND e.version_id IS NOT NULL
+    AND e.previous_path = $3
+  ORDER BY e.seq DESC
+  LIMIT 1`;
+// jobApproval=1 is a metadata-only read; every other get option is an unsupported combination.
+const JOB_APPROVAL_EXCLUSIVE_OPTIONS = [
+  'versionId',
+  'authorizeRange',
+  'range',
+  'maxPlaintextBytes',
+  'authorizeIfWithinLimit',
+];
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
@@ -112,6 +142,7 @@ const quotaControlledActions = new Set([
   'drives.create',
   'drive.put',
   'drive.commit',
+  'drive.commit_job_claim',
   'drive.mkdir',
   'drive.rmdir',
   'drive.get',
@@ -445,6 +476,7 @@ export function actionFor(method: string, parts: string[], bearer = false) {
   const actions: Record<string, string> = {
     'POST:put': 'drive.put',
     'POST:commit': 'drive.commit',
+    'POST:commit-job-claim': 'drive.commit_job_claim',
     'GET:get': 'drive.get',
     'GET:list': 'drive.list',
     'POST:move': 'drive.move',
@@ -2228,12 +2260,48 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
   need(auth, 'write', driveId);
   const body = await jsonBody(request);
   const intentId = uuid(stringField(body, 'intentId', { required: true }), 'intentId');
+  return commitUploadIntent(auth, driveId, intentId);
+}
+
+// The guarded receipt commit a worker uses for /jobs/.agent-drive/claims/<id>.json. It runs the
+// ordinary commit flow plus one check: under the same locks, the pinned job approval must still
+// be the live submission's newest authentic approval.
+async function commitJobClaim(request: Request, auth: Auth, driveId: string) {
+  need(auth, 'write', driveId);
+  need(auth, 'read', driveId);
+  const body = await jsonBody(request);
+  onlyFields(body, ['intentId', 'ifJobApprovalVersionId']);
+  const intentId = uuid(stringField(body, 'intentId', { required: true }), 'intentId');
+  const ifJobApprovalVersionId = uuid(
+    typeof body.ifJobApprovalVersionId === 'string' ? body.ifJobApprovalVersionId : undefined,
+    'ifJobApprovalVersionId',
+  ).toLowerCase();
+  return commitUploadIntent(auth, driveId, intentId, { ifJobApprovalVersionId });
+}
+
+async function commitUploadIntent(
+  auth: Auth,
+  driveId: string,
+  intentId: string,
+  jobClaim?: { ifJobApprovalVersionId: string },
+) {
   const intent = await getPool().query(
     `SELECT * FROM upload_intents WHERE id = $1 AND drive_id = $2 AND api_key_id = $3`,
     [intentId, driveId, auth.keyId],
   );
   const source = intent.rows[0] as Row | undefined;
   if (!source) throw new ApiError('not_found', 'Upload intent not found.');
+  // Validate guarded intent shape before replay using the same source row the shared commit
+  // routine already loaded; generic commit keeps its existing unguarded behavior.
+  const jobId = jobClaim ? JOB_CLAIM_PATH.exec(String(source.path))?.[1] : undefined;
+  if (
+    jobClaim &&
+    (jobId === undefined || source.conditional_mode !== 'create' || source.base_version_id)
+  )
+    throw new ApiError(
+      'validation_error',
+      'commit-job-claim commits only a create-only intent for /jobs/.agent-drive/claims/<id>.json.',
+    );
   if (source.committed_version_id) {
     const result = await getPool().query(
       `SELECT v.*, f.path FROM versions v JOIN files f ON f.id = v.file_id WHERE v.id = $1`,
@@ -2324,6 +2392,22 @@ async function commitIntent(request: Request, auth: Auth, driveId: string) {
       Number(lockedIntent.ciphertext_size),
       Number(lockedDrive.rows[0].quota_bytes),
     );
+    if (jobClaim) {
+      // Under the same account and drive locks a rename takes, the pinned approval must still
+      // be the live submitted.md's newest qualifying submission. Absent or superseded means no
+      // receipt commits.
+      const approved = await client.query(JOB_APPROVED_SUBMISSION_SQL, [
+        driveId,
+        `/jobs/${jobId}/submitted.md`,
+        `/jobs/${jobId}/request.md`,
+      ]);
+      const approvedRow = approved.rows[0] as Row | undefined;
+      if (!approvedRow || String(approvedRow.id) !== jobClaim.ifJobApprovalVersionId)
+        throw new ApiError(
+          'job_approval_changed',
+          'The approved job submission changed before the claim committed.',
+        );
+    }
     return { lockedIntent, mode, file };
   };
   let copied = false;
@@ -2525,6 +2609,8 @@ async function fileEndpoint(
   if (operation === 'put' && request.method === 'POST') return putIntent(request, auth, drive.id);
   if (operation === 'commit' && request.method === 'POST')
     return commitIntent(request, auth, drive.id);
+  if (operation === 'commit-job-claim' && request.method === 'POST')
+    return commitJobClaim(request, auth, drive.id);
   if (operation === 'mkdir' && request.method === 'POST')
     return makeDirectory(request, auth, drive.id);
   if (operation === 'rmdir' && request.method === 'POST')
@@ -2532,6 +2618,36 @@ async function fileEndpoint(
   if (operation === 'get' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
+    const jobApproval = queryValue(url, 'jobApproval', 8);
+    if (jobApproval !== null) {
+      // Worker pickup mode: the version pinned by the live file's newest qualifying
+      // request.md -> submitted.md submission. Metadata only — it never signs a URL, so a
+      // re-approval on a later feed page supersedes every earlier queued candidate.
+      const jobId = JOB_SUBMITTED_PATH.exec(path)?.[1];
+      const metadataOnlyValues = url.searchParams.getAll('metadataOnly');
+      if (
+        jobApproval !== '1' ||
+        url.searchParams.getAll('jobApproval').length !== 1 ||
+        jobId === undefined ||
+        metadataOnlyValues.length !== 1 ||
+        metadataOnlyValues[0] !== '1' ||
+        JOB_APPROVAL_EXCLUSIVE_OPTIONS.some((name) => url.searchParams.has(name))
+      ) {
+        throw new ApiError(
+          'validation_error',
+          'jobApproval requires metadataOnly=1, the exact path /jobs/<id>/submitted.md, and no other options.',
+        );
+      }
+      const approved = await getPool().query(JOB_APPROVED_SUBMISSION_SQL, [
+        driveId,
+        path,
+        `/jobs/${jobId}/request.md`,
+      ]);
+      const approvedRow = approved.rows[0] as Row | undefined;
+      if (!approvedRow)
+        throw new ApiError('not_found', 'No approved job submission exists for this file.');
+      return response({ ...rowVersion(approvedRow), jobApproval: true });
+    }
     const rangeOptInPresent =
       url.searchParams.has('authorizeRange') || url.searchParams.has('range');
     let downloadRange: string | undefined;
@@ -2703,6 +2819,32 @@ async function fileEndpoint(
   }
   if (operation === 'recent' && request.method === 'GET') {
     need(auth, 'read', driveId);
+    const head = queryValue(url, 'head', 8);
+    if (head !== null && head !== '1') throw new ApiError('validation_error', 'head must be 1.');
+    const jobSubmissions = queryValue(url, 'jobSubmissions', 8);
+    if (jobSubmissions !== null && jobSubmissions !== '1')
+      throw new ApiError('validation_error', 'jobSubmissions must be 1.');
+    if (head === '1') {
+      // Head mode reads only the newest committed event; cursor and since are ambiguous here.
+      if (jobSubmissions === '1')
+        throw new ApiError('validation_error', 'head cannot be combined with jobSubmissions.');
+      if (url.searchParams.has('cursor') || url.searchParams.has('since'))
+        throw new ApiError('validation_error', 'head cannot be combined with cursor or since.');
+      const headLimit = url.searchParams.get('limit');
+      if (headLimit !== null && headLimit !== '1')
+        throw new ApiError('validation_error', 'head only accepts limit=1.');
+      const tail = await getPool().query(
+        `SELECT e.id, e.seq::text AS seq FROM file_events e
+          WHERE e.drive_id = $1 ORDER BY e.seq DESC LIMIT 1`,
+        [driveId],
+      );
+      const latest = tail.rows[0] as Row | undefined;
+      return response({
+        items: [],
+        nextCursor: null,
+        latestCursor: latest ? encodeCursor({ value: latest.seq, id: latest.id }) : null,
+      });
+    }
     const sinceValue = queryValue(url, 'since', 128);
     const since = sinceValue ?? new Date(0).toISOString();
     const { limit, cursor } = page(url);
@@ -2721,11 +2863,31 @@ async function fileEndpoint(
       params.push(since);
       where = `e.created_at > $2`;
     }
+    const pending = jobSubmissions === '1';
+    if (pending) {
+      // Only the transactional absent-target move that marks a job submitted qualifies:
+      // /jobs/<id>/request.md -> /jobs/<same id>/submitted.md with the draft version pinned.
+      // The moved file must still live at that path (a newer version is fine; the event
+      // keeps the original), and a worker receipt file — even trashed — claims the job id.
+      where += ` AND e.operation = 'move' AND e.version_id IS NOT NULL
+        AND e.previous_path =
+          '/jobs/' || substring(e.path from '${JOB_SUBMITTED_PATH_PATTERN}') || '/request.md'
+        AND NOT EXISTS (
+          SELECT 1 FROM files r
+           WHERE r.drive_id = e.drive_id
+             AND r.path =
+               '/jobs/.agent-drive/claims/' || substring(e.path from '${JOB_SUBMITTED_PATH_PATTERN}') || '.json'
+        )`;
+    }
     params.push(limit + 1);
     const rows = await getPool().query(
       `SELECT e.id, e.operation, e.path, e.previous_path, e.version_id, e.agent_id,
               e.machine_id, e.user_id, e.created_at, e.seq::text AS seq, g.name AS agent_name
-         FROM file_events e LEFT JOIN agents g ON g.id = e.agent_id
+         FROM file_events e${
+           pending
+             ? ' JOIN files f ON f.id = e.file_id AND f.path = e.path AND f.deleted_at IS NULL'
+             : ''
+         } LEFT JOIN agents g ON g.id = e.agent_id
         WHERE e.drive_id = $1 AND ${where}
         ORDER BY e.seq LIMIT $${params.length}`,
       params,

@@ -110,6 +110,7 @@ function parse(raw: string[]) {
       target: { type: 'string' },
       'agent-only': { type: 'boolean' },
       repin: { type: 'boolean' },
+      once: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: true,
@@ -265,6 +266,15 @@ function limit(value: string | undefined) {
   return value === undefined ? undefined : Number(value);
 }
 
+function validateJobOptions(args: ReturnType<typeof parse>, allowed: readonly string[]) {
+  const unknown = Object.keys(args.values).filter((name) => !allowed.includes(name));
+  if (unknown.length)
+    throw new Error(
+      `Unsupported jobs option${unknown.length === 1 ? '' : 's'}: ${unknown.map((name) => `--${name}`).join(', ')}.`,
+    );
+  if ((args.values.drive?.length ?? 0) > 1) throw new Error('Pass only one --drive ID.');
+}
+
 export function parseShareExpiry(value: string, now?: number): string;
 export function parseShareExpiry(value: undefined, now?: number): undefined;
 export function parseShareExpiry(value: string | undefined, now = Date.now()) {
@@ -305,6 +315,85 @@ async function run(command: string, raw: string[]) {
     return;
   }
   const args = parse(raw);
+  if (command === 'jobs') {
+    const mode = args.positionals[0];
+    if (mode === 'work') {
+      const separator = raw.indexOf('--');
+      if (separator < 0)
+        throw new Error('Usage: jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+      const flags = parse(raw.slice(0, separator));
+      const child = raw.slice(separator + 1);
+      validateJobOptions(flags, ['drive', 'api', 'key-file', 'once']);
+      if (
+        flags.positionals.length !== 1 ||
+        flags.positionals[0] !== 'work' ||
+        !child.length ||
+        !child[0]?.trim()
+      )
+        throw new Error('Usage: jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+      const { client } = await connect(flags, { requireDriveKey: true });
+      const driveId = requiredDrive(flags);
+      const [{ runJobs }, { makeJobHandler }] = await Promise.all([
+        import('./jobs.js'),
+        import('./job-command.js'),
+      ]);
+      const controller = new AbortController();
+      let interruptedBy: 'SIGINT' | 'SIGTERM' | undefined;
+      const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+        if (interruptedBy) {
+          process.exit(signal === 'SIGINT' ? 130 : 143);
+          return;
+        }
+        interruptedBy = signal;
+        controller.abort(signal);
+      };
+      const onSigint = () => onSignal('SIGINT');
+      const onSigterm = () => onSignal('SIGTERM');
+      process.on('SIGINT', onSigint);
+      process.on('SIGTERM', onSigterm);
+      try {
+        await runJobs(client, driveId, makeJobHandler(child), {
+          once: flags.values.once ?? false,
+          signal: controller.signal,
+        });
+        if (interruptedBy) process.exitCode = interruptedBy === 'SIGINT' ? 130 : 143;
+      } finally {
+        process.off('SIGINT', onSigint);
+        process.off('SIGTERM', onSigterm);
+      }
+      return;
+    }
+    if (mode === 'init') {
+      validateJobOptions(args, ['drive', 'api', 'key-file']);
+      if (args.positionals.length !== 1 || args.values.once)
+        throw new Error('Usage: jobs init [--drive ID]');
+      const { client } = await connect(args, { requireDriveKey: true });
+      const driveId = requiredDrive(args);
+      const { initJobs } = await import('./jobs.js');
+      output(await initJobs(client, driveId));
+      return;
+    }
+    if (mode === 'submit') {
+      validateJobOptions(args, ['drive', 'api', 'key-file']);
+      const id = args.positionals[1];
+      if (
+        args.positionals.length !== 2 ||
+        !id ||
+        !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(id) ||
+        args.values.once
+      )
+        throw new Error('Usage: jobs submit ID [--drive ID]');
+      const { client } = await connect(args);
+      const driveId = requiredDrive(args);
+      const { submitJob } = await import('./jobs.js');
+      output(await submitJob(client, driveId, id));
+      return;
+    }
+    throw new Error(
+      'Usage: jobs init [--drive ID] | jobs submit ID [--drive ID] | jobs work [--drive ID] [--once] -- COMMAND [ARGS...]',
+    );
+  }
+  if (args.values.once) throw new Error('--once is only supported by `jobs work`.');
   if (args.values['token-stdin'] && command !== 'login')
     throw new Error('--token-stdin is only supported by `login`.');
   if (args.values['read-only'] && command !== 'mount' && command !== 'grant')
@@ -1155,6 +1244,10 @@ Commands:
                                         Without it, stdin is spooled first; upload and commit then have 10 minutes.
   get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
   mount MOUNTPOINT --drive ID [--read-only]  Mount a drive; write scope enables edits
+  jobs init [--drive ID]                    Create the /jobs guide in a drive
+  jobs submit ID [--drive ID]               Explicitly submit one drafted job
+  jobs work [--drive ID] [--once] -- COMMAND [ARGS...]
+                                        Run one configured local worker for submitted jobs
   ls --drive ID [--prefix PATH | --folder PATH] [--sort path|modified] [--tag TAG] [--agent ID] [--machine NAME] [--user ID]
   mv SOURCE DESTINATION --drive ID
   cp SOURCE DESTINATION --drive ID
@@ -1195,11 +1288,17 @@ Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
 memory, never written to disk; its drives count as backed up).
 `;
-// For `capture`, only flags before `--` are ours; the rest belongs to the wrapped command.
-const ownArgs = name === 'capture' && raw.includes('--') ? raw.slice(0, raw.indexOf('--')) : raw;
+// Arguments after the `--` terminator are positionals — for `capture` and `jobs
+// work`, the delegated command — never this CLI's own flags.
+const terminator = raw.indexOf('--');
+const ownArgs = terminator < 0 ? raw : raw.slice(0, terminator);
 let done: Promise<void>;
 if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);
+  done = Promise.resolve();
+} else if (name !== 'jobs' && ownArgs.includes('--once')) {
+  process.stderr.write('--once is only supported by `jobs work`.\n');
+  process.exitCode = 1;
   done = Promise.resolve();
 } else if (name === 'version' || name === '--version') {
   process.stdout.write(`${cliVersion}\n`);

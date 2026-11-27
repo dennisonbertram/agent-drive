@@ -227,30 +227,40 @@ it('replays a report with its original UUID and commits provider success plus au
     last_error: 'Operator replay did not receive a successful Stripe response.',
   });
 
-  providerMocks.sendMeterReportWithResponse.mockResolvedValue({
-    lastResponse: { requestId: 'req_providerfixture' },
+  let signalProviderEntry!: () => void;
+  let releaseProviderResponse!: (response: { lastResponse: { requestId: string } }) => void;
+  const providerEntered = new Promise<void>((resolve) => {
+    signalProviderEntry = resolve;
+  });
+  const providerResponse = new Promise<{ lastResponse: { requestId: string } }>((resolve) => {
+    releaseProviderResponse = resolve;
+  });
+  providerMocks.sendMeterReportWithResponse.mockImplementationOnce(() => {
+    signalProviderEntry();
+    return providerResponse;
   });
 
-  const results = await Promise.allSettled([
-    replayMeterReport(reportId, 'operator-fixture'),
-    replayMeterReport(reportId, 'operator-fixture'),
-  ]);
-  expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(2);
-  expect(results).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        status: 'fulfilled',
-        value: expect.objectContaining({ status: 'replayed' }),
-      }),
-    ]),
-  );
+  const primary = replayMeterReport(reportId, 'operator-fixture');
+  try {
+    await providerEntered;
+    const providerDispatches = providerMocks.sendMeterReportWithResponse.mock.calls.length;
+    await expect(replayMeterReport(reportId, 'operator-fixture')).rejects.toThrow(
+      'Another billing worker currently holds this report lease.',
+    );
+    expect(providerMocks.sendMeterReportWithResponse).toHaveBeenCalledTimes(providerDispatches);
+  } finally {
+    releaseProviderResponse({ lastResponse: { requestId: 'req_providerfixture' } });
+  }
+
+  await expect(primary).resolves.toMatchObject({ status: 'replayed', reportId });
   expect(providerMocks.sendMeterReportWithResponse).toHaveBeenCalledTimes(2);
-  expect(providerMocks.sendMeterReportWithResponse).toHaveBeenCalledWith(
+  expect(providerMocks.sendMeterReportWithResponse).toHaveBeenLastCalledWith(
     expect.objectContaining({ id: reportId, customer: 'cus_reconcile_fixture', cents: '55' }),
   );
   await expect(replayMeterReport(reportId, 'operator-fixture')).resolves.toMatchObject({
     status: 'already-reported',
   });
+  expect(providerMocks.sendMeterReportWithResponse).toHaveBeenCalledTimes(2);
   const audit = await pool.query<{ action: string; external_reference: string }>(
     'SELECT action,external_reference FROM billing_reconciliation_events WHERE meter_report_id=$1',
     [reportId],
