@@ -822,6 +822,7 @@ describe('mount bridge', () => {
     };
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -895,6 +896,7 @@ describe('mount bridge', () => {
     };
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -974,6 +976,7 @@ describe('mount bridge', () => {
     };
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -1057,6 +1060,7 @@ describe('mount bridge', () => {
   it('does not flush a newer staged edit for an unlink pinned to an older version', async () => {
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -1107,6 +1111,7 @@ describe('mount bridge', () => {
   it('rejects rename while the source has an active staged writer', async () => {
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'active-writer',
         recoveryPath: '/private/stage',
@@ -1178,6 +1183,7 @@ describe('mount bridge', () => {
     const unlink = vi.fn(async () => ({ id: 'file', path: '/docs/file.txt' }));
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -1238,6 +1244,7 @@ describe('mount bridge', () => {
     );
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -1326,6 +1333,7 @@ describe('mount bridge', () => {
     let destination = 'original destination bytes';
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'temp-handle',
         recoveryPath: '/private/temp',
@@ -1417,6 +1425,7 @@ describe('mount bridge', () => {
   it('returns conflict version and durable recovery path after a failed flush', async () => {
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'conflict-handle',
         recoveryPath: '/private/recovery.bin',
@@ -1473,6 +1482,7 @@ describe('mount bridge', () => {
   it('maps structured billing and storage limits to quota errors while keeping recovery paths', async () => {
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'limit-handle',
         recoveryPath: '/private/recovery.bin',
@@ -1861,6 +1871,7 @@ async function request(value) {
     const expected = Buffer.alloc(1024 * 1024, 0xa5);
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'large-handle',
         recoveryPath: '/private/stage',
@@ -1974,6 +1985,7 @@ require('node:fs').writeFileSync(${JSON.stringify(started)}, 'started');
     const mountPoint = join(root, 'created-mountpoint');
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(),
       write: vi.fn(),
       truncate: vi.fn(),
@@ -2179,6 +2191,7 @@ setInterval(() => {}, 1000);
     await chmod(helper, 0o700);
     const writeback = {
       closeWithoutFlush: vi.fn(async () => ({})),
+      finalize: vi.fn(async () => ({ id: VERSION, path: '/docs/file.txt' })),
       openWrite: vi.fn(async () => ({
         handleId: 'busy-handle',
         recoveryPath: '/private/busy-stage',
