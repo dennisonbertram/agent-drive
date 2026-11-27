@@ -142,7 +142,7 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `put LOCAL REMOTE [--overwrite | --if-version ID] [--tag T] [--description D]`
 - `put - REMOTE [--size N] [--overwrite | --if-version ID]` reads bytes from stdin; `--size` enables direct streaming but starts the 10-minute upload-intent window before stdin, while omitting it uses a private temporary spool before that window
 - `get REMOTE [--version ID] [--output FILE|-]`; use `--output FILE` for an atomic, fully verified result. `--output -` writes raw bytes to stdout without JSON or a newline, but can send partial bytes before a later verification error
-- `mount MOUNTPOINT [--drive ID] [--read-only]` mounts on Linux or macOS. Use a key with read access to the drive. Omit `--drive` only when one drive key is saved for the API. A `write` scope enables edits unless `--read-only` is passed; `delete` is also needed to delete or replace files. Linux needs FUSE and the matching helper. On macOS, download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP, drag `Agent Drive.app` to `/Applications`, and open it once before mounting. Install the CLI separately. Use the mountpoint passed to `agent-drive mount MOUNTPOINT` to identify the requested drive. Finder's Locations row may read `Agent Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive ID. If mount startup fails and Finder shows an "Agent Drive is not enabled" banner, open the Agent Drive row in the sidebar, click Enable, and rerun the mount.
+- `mount MOUNTPOINT [--drive ID] [--read-only]` mounts on Linux or macOS. Use a key with read access to the drive. Omit `--drive` only when one drive key is saved for the API. A `write` scope enables edits unless `--read-only` is passed; `delete` is also needed to delete or replace files. Linux needs FUSE and the matching helper. On macOS, download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip), open the ZIP, drag `Agent Drive.app` to `/Applications`, and open it once before mounting. Install the CLI separately. Use the mountpoint passed to `agent-drive mount MOUNTPOINT` to identify the requested drive. Finder's Locations row may read `Agent Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive ID. If mount startup fails and Finder shows an "Agent Drive is not enabled" banner, open the Agent Drive row in the sidebar, click Enable, and rerun the mount.
 - `ls [--prefix P]`, `search [--query Q] [--tag T]`, `recent [--since ISO] [--cursor C] [--wait S]`
 - `versions PATH`, `restore PATH [--version ID]`, `mv`, `cp`, `rm`
 - `share PATH [--expires-in 24h]`, `share list`, `share revoke SHARE_ID`
@@ -155,6 +155,27 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `capture [--drive ID] [--agent NAME] -- COMMAND ...` runs an agent (for example `claude` or `codex` in API-key mode) and saves its model calls as encrypted traces under `/traces/<agent>/`. Run it yourself only when the user asks; it falls back to running COMMAND unwrapped with one warning.
 - `whoami`, `check`, `credentials ...`, `account seal`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
+
+### Live Instabox workspaces
+
+Connect to the intended sandbox and absolute folder path using values from the current workspace:
+
+```sh
+mkdir -p "$HOME/AgentWorkspaces"
+agent-drive connect "$WORKSPACE_NAME" "$HOME/AgentWorkspaces/$WORKSPACE_NAME" \
+  --sandbox "$SANDBOX_ID" --root "$WORKSPACE_ROOT" --persist
+cp -n "$LOCAL_ENV_FILE" "$HOME/AgentWorkspaces/$WORKSPACE_NAME/.env"
+```
+
+`connect` starts the mount in the foreground by default. `--persist` starts it through a per-user
+login service. New connections wake the selected sandbox on first filesystem access; use
+`--no-wake-on-access` to opt out, or `agent-drive mounts wake "$WORKSPACE_NAME" off` to change a
+saved setting. Changing the setting restarts an active managed service after a graceful stop; a
+foreground mount uses the setting loaded at startup and must be stopped and started again. Listing
+names and checking mount status do not wake a sandbox. The mount exposes
+existing files in place, including hidden `.env` files; do not print or copy secret contents into
+logs or chat. Live mounts currently create new files only; replacing existing files returns a
+read-only error.
 
 The mount runs in the foreground. Press Ctrl+C once and wait for it to exit cleanly; Linux can be
 unmounted with `fusermount3 -u MOUNTPOINT` if needed. Reads are authenticated ranges pinned to a

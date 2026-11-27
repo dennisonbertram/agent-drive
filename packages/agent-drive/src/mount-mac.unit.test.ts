@@ -49,6 +49,57 @@ const hold = setInterval(() => {}, 1000);
 `;
 
 describe('macOS Finder mount bridge', () => {
+  it('explains the allowlisted disabled File Provider startup diagnostic', async () => {
+    const directory = await fixture();
+    const helper = await writeHelper(
+      directory,
+      `process.stderr.write('Agent Drive Finder could not connect (file-provider-domain-disabled-in-system-settings [bootstrap:5]).\\n'); process.exit(1);`,
+    );
+    vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+
+    await expect(
+      startMacMount({
+        driveId: 'synthetic-drive',
+        requestedMountpoint: join(directory, 'requested-mount'),
+        dispatch: async () => ({}),
+      }),
+    ).rejects.toThrow(/File Provider extension is disabled.*System Settings/u);
+  }, 20_000);
+
+  it.each([
+    { label: 'missing', stderr: '' },
+    {
+      label: 'unknown token-bearing',
+      stderr:
+        'Agent Drive Finder failed token=do-not-leak path=/Users/private/work [bootstrap:999].\\n',
+    },
+  ])(
+    'does not expose $label helper stderr in startup errors',
+    async ({ stderr }) => {
+      const directory = await fixture();
+      const helper = await writeHelper(
+        directory,
+        `process.stderr.write(${JSON.stringify(stderr)}); process.exit(1);`,
+      );
+      vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+      let message = '';
+      try {
+        await startMacMount({
+          driveId: 'synthetic-drive',
+          requestedMountpoint: join(directory, 'requested-mount'),
+          dispatch: async () => ({}),
+        });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toMatch(/Finder helper exited before reporting its mount path \(code 1\)/u);
+      expect(message).not.toContain('do-not-leak');
+      expect(message).not.toContain('/Users/private/work');
+      expect(message).not.toContain('bootstrap:999');
+    },
+    20_000,
+  );
+
   it('keeps the helper control pipe open after the startup line', async () => {
     const directory = await fixture();
     const actualPath = join(directory, 'finder-root');

@@ -406,7 +406,9 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
                 }
                 var entry = current
                 if contentChanged {
-                    guard mountCapabilities.allowsWrite(oldPath) else { throw BridgeClientError.rejected }
+                    guard current.readOnly != true,
+                          mountCapabilities.allowsWrite(oldPath)
+                    else { throw BridgeClientError.rejected }
                     let committed = try await stageAndCommit(
                         client: client,
                         path: oldPath,
@@ -701,7 +703,7 @@ private final class FileProviderItem: NSObject, NSFileProviderItem {
         if entry.kind == "directory" && mountCapabilities.allowsCreatingChildren(of: path) {
             itemCapabilities.insert(.allowsWriting)
         }
-        if entry.kind == "file" && mountCapabilities.allowsWrite(path) {
+        if entry.kind == "file" && entry.readOnly != true && mountCapabilities.allowsWrite(path) {
             itemCapabilities.insert(.allowsWriting)
         }
         if mountCapabilities.allowsDelete(path) { itemCapabilities.insert(.allowsDeleting) }
@@ -712,9 +714,12 @@ private final class FileProviderItem: NSObject, NSFileProviderItem {
         capabilities = itemCapabilities
         documentSize = entry.kind == "file" ? NSNumber(value: entry.size) : nil
         contentModificationDate = Date(timeIntervalSince1970: Double(entry.mtimeMs) / 1_000)
+        let metadataVersion = entry.readOnly.map {
+            "\(entry.name):\(entry.size):\(entry.mtimeMs):\($0)"
+        } ?? "\(entry.name):\(entry.size):\(entry.mtimeMs)"
         itemVersion = NSFileProviderItemVersion(
             contentVersion: Data((entry.versionId ?? "folder:\(path)").utf8),
-            metadataVersion: Data("\(entry.name):\(entry.size):\(entry.mtimeMs)".utf8)
+            metadataVersion: Data(metadataVersion.utf8)
         )
     }
 

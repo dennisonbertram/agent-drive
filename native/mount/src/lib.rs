@@ -29,6 +29,12 @@ pub struct Entry {
     pub mtime_ms: i64,
     #[serde(default)]
     pub version_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub read_only: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Debug, Deserialize)]
@@ -540,6 +546,7 @@ struct Node {
     size: u64,
     mtime_ms: i64,
     version_id: Option<String>,
+    read_only: bool,
     observed_at: Instant,
     mode: u16,
     uid: u32,
@@ -647,6 +654,7 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
             size: 0,
             mtime_ms: 0,
             version_id: None,
+            read_only: false,
             observed_at: Instant::now(),
             mode: root_mode,
             uid,
@@ -716,11 +724,11 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
     fn can_change_directory(&self, path: &str) -> bool {
         self.read_write && self.capabilities.can_change_directory(path)
     }
-    fn entry_mode(&self, path: &str, kind: FileType) -> u16 {
+    fn entry_mode(&self, path: &str, kind: FileType, read_only: bool) -> u16 {
         match kind {
             FileType::Directory if self.can_change_directory(path) => 0o700,
             FileType::Directory => 0o500,
-            FileType::RegularFile if self.can_write_path(path) => 0o600,
+            FileType::RegularFile if !read_only && self.can_write_path(path) => 0o600,
             FileType::RegularFile => 0o400,
             _ => 0,
         }
@@ -887,7 +895,8 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
                         } else {
                             None
                         };
-                        existing.mode = self.entry_mode(&child_path, kind);
+                        existing.read_only = entry.read_only;
+                        existing.mode = self.entry_mode(&child_path, kind, existing.read_only);
                     }
                     existing.observed_at = now;
                     existing.clone()
@@ -913,8 +922,9 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
                     } else {
                         None
                     },
+                    read_only: entry.read_only,
                     observed_at: now,
-                    mode: self.entry_mode(&child_path, kind),
+                    mode: self.entry_mode(&child_path, kind, entry.read_only),
                     uid: self.uid,
                     gid: self.gid,
                 };
@@ -1065,6 +1075,9 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
         writable: bool,
         initially_dirty: bool,
     ) -> Result<u64, i32> {
+        if node.read_only {
+            return Err(libc::EROFS);
+        }
         if !self.can_write_path(&node.path)
             || !self.capabilities.supports("openWrite")
             || !self.capabilities.supports("write")
@@ -1082,7 +1095,7 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
             .map_err(Self::errno)?;
         node.size = opened.size;
         node.observed_at = Instant::now();
-        node.mode = self.entry_mode(&node.path, node.kind);
+        node.mode = self.entry_mode(&node.path, node.kind, node.read_only);
         let mut state = self.state.write().unwrap();
         let fh = state.next_handle;
         state.next_handle = state.next_handle.saturating_add(1);
@@ -1229,7 +1242,7 @@ impl<R: BufRead + Send, W: Write + Send> DriveFs<R, W> {
         if !handle.writable {
             return Err(libc::EACCES);
         }
-        if !self.can_write_path(&handle.node.path) {
+        if handle.node.read_only || !self.can_write_path(&handle.node.path) {
             return Err(libc::EACCES);
         }
         let Some(stage) = handle.staged else {
@@ -1746,6 +1759,7 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
             size: 0,
             mtime_ms: 0,
             version_id: None,
+            read_only: false,
             observed_at: Instant::now(),
             mode: (mode & !umask & 0o777) as u16,
             uid: owner.uid,
@@ -1831,7 +1845,10 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
             reply.error(Errno::EROFS);
             return;
         };
-        if !self.capabilities.supports("write") || !self.can_write_path(&handle.node.path) {
+        if handle.node.read_only
+            || !self.capabilities.supports("write")
+            || !self.can_write_path(&handle.node.path)
+        {
             reply.error(Errno::EACCES);
             return;
         }
@@ -2063,6 +2080,7 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
             size: 0,
             mtime_ms: 0,
             version_id: None,
+            read_only: false,
             observed_at: Instant::now(),
             mode: (mode & !umask & 0o777) as u16,
             uid: owner.uid,
@@ -2335,7 +2353,7 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Filesystem for Driv
             moved.path = destination_path.clone();
             moved.name = destination_name;
             moved.observed_at = Instant::now();
-            moved.mode = self.entry_mode(&moved.path, moved.kind);
+            moved.mode = self.entry_mode(&moved.path, moved.kind, moved.read_only);
             moved.version_id = renamed
                 .as_ref()
                 .and_then(|entry| entry.get("versionId"))
@@ -2540,6 +2558,7 @@ mod tests {
             size: 4,
             mtime_ms: 100,
             version_id: Some("v1".into()),
+            read_only: false,
             observed_at: now,
             mode: 0o600,
             uid: 1000,
@@ -2704,6 +2723,7 @@ mod tests {
             size: 8,
             mtime_ms: 10,
             version_id: Some("remote-v1".into()),
+            read_only: false,
             observed_at: Instant::now(),
             mode: 0o600,
             uid: 1000,
@@ -3097,6 +3117,80 @@ mod tests {
         let sent = String::from_utf8(b.writer).unwrap();
         assert!(sent.contains("\"op\":\"read\""));
         assert!(sent.contains("\"versionId\":\"v1\""));
+    }
+
+    #[test]
+    fn per_entry_read_only_disables_file_writes_without_disabling_parent_creation() {
+        let legacy_entry: Entry = serde_json::from_str(
+            r#"{"name":"legacy.txt","kind":"file","size":3,"mtimeMs":4,"versionId":"v1"}"#,
+        )
+        .unwrap();
+        assert!(!legacy_entry.read_only);
+        assert!(serde_json::to_value(&legacy_entry)
+            .unwrap()
+            .get("readOnly")
+            .is_none());
+
+        let input = b"{\"id\":1,\"ok\":true,\"entries\":[{\"name\":\"locked.txt\",\"kind\":\"file\",\"size\":3,\"mtimeMs\":4,\"versionId\":\"v1\",\"readOnly\":true}],\"nextCursor\":null}\n";
+        let bridge = Bridge::new(BufReader::new(&input[..]), Vec::new());
+        let capabilities = MountCapabilities {
+            read_only: false,
+            write: true,
+            delete: false,
+            write_paths: vec!["/".into()],
+            max_read_bytes: MAX_READ,
+            max_write_bytes: MAX_WRITE,
+            ops: vec!["openWrite".into(), "write".into()],
+        };
+        let fs = DriveFs::with_capabilities(bridge, 1000, 1000, capabilities, true);
+        let locked = fs.ensure_child("/", "locked.txt").unwrap().unwrap();
+
+        assert!(locked.read_only);
+        assert_eq!(locked.mode, 0o400);
+        assert_eq!(fs.node(ROOT_INO).unwrap().mode, 0o700);
+        assert!(fs.can_write_path("/new-sibling.txt"));
+        assert_eq!(
+            fs.open_write_handle(locked, true, true, false),
+            Err(libc::EROFS)
+        );
+        assert_eq!(
+            String::from_utf8(fs.bridge.lock().unwrap().writer.clone())
+                .unwrap()
+                .lines()
+                .count(),
+            1,
+            "the read-only open must not send openWrite"
+        );
+    }
+
+    #[test]
+    fn absent_per_entry_read_only_preserves_existing_write_behavior() {
+        let input = concat!(
+            "{\"id\":1,\"ok\":true,\"entries\":[{\"name\":\"normal.txt\",\"kind\":\"file\",\"size\":3,\"mtimeMs\":4,\"versionId\":\"v1\"}],\"nextCursor\":null}\n",
+            "{\"id\":2,\"ok\":true,\"handleId\":\"stage-1\",\"size\":3}\n"
+        );
+        let bridge = Bridge::new(BufReader::new(input.as_bytes()), Vec::new());
+        let capabilities = MountCapabilities {
+            read_only: false,
+            write: true,
+            delete: false,
+            write_paths: vec!["/".into()],
+            max_read_bytes: MAX_READ,
+            max_write_bytes: MAX_WRITE,
+            ops: vec!["openWrite".into(), "write".into()],
+        };
+        let fs = DriveFs::with_capabilities(bridge, 1000, 1000, capabilities, true);
+        let normal = fs.ensure_child("/", "normal.txt").unwrap().unwrap();
+
+        assert!(!normal.read_only);
+        assert_eq!(normal.mode, 0o600);
+        assert!(fs.open_write_handle(normal, true, true, false).is_ok());
+        let requests: Vec<serde_json::Value> = String::from_utf8(fs.bridge.lock().unwrap().writer.clone())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(requests[1]["op"], "openWrite");
     }
 
     #[test]
