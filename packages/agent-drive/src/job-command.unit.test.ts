@@ -394,13 +394,15 @@ describe('worker availability', () => {
 
   it('surfaces an interpreter that cannot exec as WorkerUnavailableError at job time', async () => {
     const dir = await testDir();
-    // Stat-able and executable, but execve fails ENOEXEC inside the child, so
-    // only the spawn error path can report it.
-    const interp = join(dir, 'nonexec-interp');
-    await writeFile(interp, 'plain data, not a program\n', { mode: 0o755 });
-    const path = join(dir, 'enoexec-worker');
+    // Present and executable, so readiness passes — but its own shebang names
+    // a runtime missing inside this dir, so exec fails ENOENT only at spawn,
+    // on macOS and Linux alike.
+    const interp = join(dir, 'nested-interp');
+    await writeFile(interp, `#!${join(dir, 'missing-runtime')}\n`, { mode: 0o755 });
+    const path = join(dir, 'nested-interp-worker');
     await writeFile(path, `#!${interp}\n`, { mode: 0o755 });
     const handler = makeJobHandler([path]);
+    expect(() => handler.assertReady()).not.toThrow();
     await expect(handler(job(), freshSignal())).rejects.toBeInstanceOf(WorkerUnavailableError);
   });
 });
