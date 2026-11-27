@@ -46,16 +46,22 @@ export type LiveWorkspaceOptions = {
   beforeIO?: (machineId: string, signal?: AbortSignal) => Promise<unknown>;
 };
 
-const PYTHON_HELPER = String.raw`import base64, errno, hashlib, json, os, re, secrets, stat, sys, uuid
+const PYTHON_HELPER = String.raw`import base64, errno, hashlib, json, os, secrets, stat, sys, time, uuid
 
 MAX_IO = 1024 * 1024
 MAX_FILE = 5 * 1024 * 1024 * 1024
+MAX_PAGE = 60000
+MAX_LIST_NAMES = 20000
+MAX_LIST_BYTES = 4 * 1024 * 1024
+MAX_LISTINGS = 32
+LIST_TTL = 60
 STAGE_PREFIX = '.agent-drive-live-staging-v1-'
-STAGE = STAGE_PREFIX + secrets.token_hex(16)
 ROOT = None
-STAGE_FD = None
+ROOT_PATH = None
+ROOT_IDENTITY = None
 HANDLES = {}
 COMMITS = {}
+LISTINGS = {}
 
 def fail(code):
     raise OSError(getattr(errno, code, errno.EIO), code)
@@ -66,7 +72,7 @@ def canonical(path):
     if path == '/': return []
     parts = path[1:].split('/')
     if any(not p or p in ('.', '..') for p in parts): fail('EINVAL')
-    if parts[0].startswith(STAGE_PREFIX): fail('EACCES')
+    if any(p.startswith(STAGE_PREFIX) for p in parts): fail('EACCES')
     return parts
 
 def parent_for(path):
@@ -78,6 +84,16 @@ def parent_for(path):
             nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
             os.close(fd); fd = nxt
         return fd, parts[-1]
+    except Exception:
+        os.close(fd); raise
+
+def dir_for(path):
+    fd = os.dup(ROOT)
+    try:
+        for part in canonical(path):
+            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd); fd = nxt
+        return fd
     except Exception:
         os.close(fd); raise
 
@@ -94,9 +110,12 @@ def version(info):
     return str(uuid.UUID(bytes=bytes(raw)))
 
 def open_root(path):
+    if not isinstance(path,str) or not path.startswith('/') or '\0' in path or '\\' in path or len(path.encode())>4096: fail('EINVAL')
+    parts=path.split('/')[1:]
+    if any(p in ('.','..') for p in parts): fail('EINVAL')
     fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_CLOEXEC)
     try:
-        for part in path.split('/')[1:]:
+        for part in parts:
             if not part: continue
             nxt=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=fd)
             os.close(fd); fd=nxt
@@ -104,13 +123,33 @@ def open_root(path):
     except Exception:
         os.close(fd); raise
 
-def ensure_stage():
-    global STAGE_FD
-    if STAGE_FD is not None: return
-    os.mkdir(STAGE, 0o700, dir_fd=ROOT)
-    stage_info = os.stat(STAGE, dir_fd=ROOT, follow_symlinks=False)
-    if not stat.S_ISDIR(stage_info.st_mode) or stage_info.st_uid != os.getuid() or (stage_info.st_mode & 0o077): fail('EACCES')
-    STAGE_FD = os.open(STAGE, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=ROOT)
+def recovery(record):
+    suffix=record['parentPath'].strip('/')
+    return ROOT_PATH.rstrip('/')+'/'+(suffix+'/' if suffix else '')+record['stageDir']+'/'+record['stage']
+
+def create_stage(parent):
+    name=STAGE_PREFIX+secrets.token_hex(16)
+    os.mkdir(name,0o700,dir_fd=parent)
+    fd=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+    try:
+        info=os.fstat(fd)
+        if info.st_uid!=os.getuid() or info.st_mode&0o077: fail('EACCES')
+        ignore=os.open('.gitignore',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=fd)
+        try:
+            os.write(ignore,b'*\n'); os.fsync(ignore)
+        finally: os.close(ignore)
+        os.fsync(fd)
+        return name,fd
+    except Exception:
+        os.close(fd)
+        try:
+            cleanup=os.open(name,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+            try: os.unlink('.gitignore',dir_fd=cleanup)
+            finally: os.close(cleanup)
+        except Exception: pass
+        try: os.rmdir(name,dir_fd=parent)
+        except Exception: pass
+        raise
 
 def current(parent, name):
     try: info = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -124,192 +163,253 @@ def entry(name, info):
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: return None
     return {'name': name, 'kind': 'file', 'size': info.st_size, 'mtimeMs': int(info.st_mtime_ns / 1000000), 'versionId': version(info), 'readOnly': True}
 
-def respond(request):
-    global ROOT, STAGE_FD
-    op = request.get('op')
-    if op == 'init':
-        root = request.get('root')
-        if not isinstance(root, str) or not os.path.isabs(root) or '\0' in root: fail('EINVAL')
-        real = os.path.realpath(root)
-        ROOT = open_root(real)
-        os.fchdir(ROOT)
-        return {'ok': True}
-    if ROOT is None: fail('EIO')
-    if op == 'capabilities':
-        return {'capabilities': {'readOnly': False, 'write': True, 'delete': False, 'writePaths': ['/'], 'maxReadBytes': MAX_IO, 'maxWriteBytes': MAX_IO, 'ops': ['stat','list','read','capabilities','openWrite','write','truncate','readStaged','finalizeWrite','flushStatus','completeWrite','flush','release','closeWrite']}}
-    if op == 'list':
-        path = request.get('path'); parts = canonical(path)
-        fd = os.dup(ROOT)
+def expire_listings():
+    now=time.monotonic()
+    for key,value in list(LISTINGS.items()):
+        if now-value['created']>LIST_TTL: LISTINGS.pop(key,None)
+    while len(LISTINGS)>MAX_LISTINGS: LISTINGS.pop(next(iter(LISTINGS)))
+
+def list_page(request):
+    path=request.get('path'); parts=canonical(path); cursor=request.get('cursor')
+    if cursor is None:
+        fd=dir_for(path)
         try:
-            for part in parts:
-                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
-                os.close(fd); fd = nxt
-            values = []
+            info=os.fstat(fd); names=[]; total=0
             for name in sorted(os.listdir(fd)):
-                if not parts and name.startswith(STAGE_PREFIX):
-                    try:
-                        os.stat(name,dir_fd=fd,follow_symlinks=False)
-                        continue
-                    except OSError: pass
-                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-                value = entry(name, info)
-                if value is not None: values.append(value)
-            cursor=request.get('cursor')
-            if cursor is None: start=0
-            elif isinstance(cursor,str) and cursor.isdecimal() and len(cursor)<=8: start=int(cursor)
-            else: fail('EINVAL')
-            if start>len(values): fail('EINVAL')
-            page=values[start:start+500]
-            end=start+len(page)
-            return {'entries': page, 'nextCursor': str(end) if end<len(values) else None}
+                if name.startswith(STAGE_PREFIX): continue
+                total+=len(name.encode())
+                if len(names)>=MAX_LIST_NAMES or total>MAX_LIST_BYTES: fail('EOVERFLOW')
+                names.append(name)
+            listing_id=secrets.token_urlsafe(12)
+            LISTINGS[listing_id]={'path':path,'dev':info.st_dev,'ino':info.st_ino,'mtime':info.st_mtime_ns,'names':names,'created':time.monotonic()}
+            start=0
         finally: os.close(fd)
-    if op == 'stat':
-        path = request.get('path'); parts = canonical(path)
-        if not parts:
-            info = os.fstat(ROOT)
-            return {'entry': {'name':'', 'kind':'directory', 'size':0, 'mtimeMs':int(info.st_mtime_ns / 1000000)}}
-        parent, name = parent_for(path)
+    else:
+        if not isinstance(cursor,str) or len(cursor)>80 or '.' not in cursor: fail('EINVAL')
+        listing_id,offset=cursor.rsplit('.',1)
+        if not offset.isdecimal() or len(offset)>8: fail('EINVAL')
+        start=int(offset); listing=LISTINGS.get(listing_id)
+        if listing is None or listing['path']!=path: fail('ESTALE')
+        names=listing['names']
+    expire_listings()
+    listing=LISTINGS.get(listing_id)
+    if listing is None: fail('ESTALE')
+    fd=dir_for(path)
+    try:
+        info=os.fstat(fd)
+        if (info.st_dev,info.st_ino,info.st_mtime_ns)!=(listing['dev'],listing['ino'],listing['mtime']): fail('ESTALE')
+        values=[]; consumed=0
+        for name in listing['names'][start:]:
+            try: item=entry(name,os.stat(name,dir_fd=fd,follow_symlinks=False))
+            except FileNotFoundError: fail('ESTALE')
+            if item is None:
+                consumed+=1
+                continue
+            candidate=values+[item]
+            end=start+consumed+1
+            next_cursor=listing_id+'.'+str(end) if end<len(listing['names']) else None
+            payload={'id':request['id'],'ok':True,'entries':candidate,'nextCursor':next_cursor}
+            if len(json.dumps(payload,separators=(',',':')).encode())>MAX_PAGE:
+                if not values: fail('EOVERFLOW')
+                break
+            values=candidate; consumed+=1
+        end=start+consumed
+        return {'entries':values,'nextCursor':listing_id+'.'+str(end) if end<len(listing['names']) else None}
+    finally: os.close(fd)
+
+def cleanup_record(handle,record):
+    parent=dir_for(record['parentPath'] or '/')
+    try:
+        stagefd=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
         try:
-            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            value = entry(name, info)
-            if value is None: fail('EINVAL')
-            return {'entry': value}
+            try: os.unlink(record['stage'],dir_fd=stagefd)
+            except FileNotFoundError: pass
+            try: os.unlink('.gitignore',dir_fd=stagefd)
+            except FileNotFoundError: pass
+            try: os.fsync(stagefd)
+            except OSError: pass
+        finally: os.close(stagefd)
+        try: os.rmdir(record['stageDir'],dir_fd=parent)
+        except FileNotFoundError: pass
+        try: os.fsync(parent)
+        except OSError: pass
+    finally: os.close(parent)
+    HANDLES.pop(handle,None)
+
+def respond(request):
+    global ROOT, ROOT_PATH, ROOT_IDENTITY
+    op=request.get('op')
+    if op=='init':
+        path=request.get('root'); fd=open_root(path); info=os.fstat(fd)
+        identity='%x-%x'%(info.st_dev,info.st_ino)
+        expected=request.get('rootIdentity')
+        if expected is not None and expected!=identity:
+            os.close(fd); fail('ESTALE')
+        if ROOT is not None: os.close(ROOT)
+        ROOT=fd; ROOT_PATH=path.rstrip('/') or '/'; ROOT_IDENTITY=identity
+        return {'ok':True,'rootIdentity':identity}
+    if ROOT is None: fail('EIO')
+    if op=='capabilities':
+        return {'capabilities':{'readOnly':False,'write':True,'delete':False,'writePaths':['/'],'maxReadBytes':MAX_IO,'maxWriteBytes':MAX_IO,'ops':['stat','list','read','mkdir','capabilities','openWrite','write','truncate','readStaged','finalizeWrite','flushStatus','completeWrite','flush','release','closeWrite']}}
+    if op=='mkdir':
+        parent,name=parent_for(request.get('path'))
+        try: os.mkdir(name,0o700,dir_fd=parent); os.fsync(parent); return {}
         finally: os.close(parent)
-    if op == 'read':
-        path = request.get('path'); off=request.get('offset'); size=request.get('size')
-        if not isinstance(off, int) or isinstance(off, bool) or off < 0 or not isinstance(size, int) or isinstance(size, bool) or size < 0 or size > MAX_IO: fail('EINVAL')
-        parent, name = parent_for(path)
+    if op=='list': return list_page(request)
+    if op=='stat':
+        path=request.get('path'); parts=canonical(path)
+        if not parts:
+            info=os.fstat(ROOT); return {'entry':{'name':'','kind':'directory','size':0,'mtimeMs':int(info.st_mtime_ns/1000000)}}
+        parent,name=parent_for(path)
         try:
-            fd = file_fd(parent, name)
+            value=entry(name,os.stat(name,dir_fd=parent,follow_symlinks=False))
+            if value is None: fail('EINVAL')
+            return {'entry':value}
+        finally: os.close(parent)
+    if op=='read':
+        off=request.get('offset'); size=request.get('size')
+        if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
+        parent,name=parent_for(request.get('path'))
+        try:
+            fd=file_fd(parent,name)
             try:
                 info=os.fstat(fd)
-                if request.get('versionId') != version(info): fail('ESTALE')
-                data=os.pread(fd, size, off)
-                return {'data':base64.b64encode(data).decode('ascii')}
+                if request.get('versionId')!=version(info): fail('ESTALE')
+                return {'data':base64.b64encode(os.pread(fd,size,off)).decode('ascii')}
             finally: os.close(fd)
         finally: os.close(parent)
-    if op == 'openWrite':
+    if op=='openWrite':
         path=request.get('path'); parent,name=parent_for(path)
         try:
             base=request.get('baseVersionId')
             if base is not None and (not isinstance(base,str) or len(base)>64): fail('EINVAL')
             actual=current(parent,name)
-            if actual != base: fail('ESTALE')
+            if actual!=base: fail('ESTALE')
             if base is not None: fail('EROFS')
-            ensure_stage()
-            handle=secrets.token_urlsafe(24)
-            stage_name='stage-'+secrets.token_hex(16)
-            stage_fd=os.open(stage_name, os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC, 0o600, dir_fd=STAGE_FD)
+            parts=canonical(path); parent_path='/'+'/'.join(parts[:-1]) if len(parts)>1 else '/'
+            stage_dir,stage_dir_fd=create_stage(parent)
+            stage='stage-'+secrets.token_hex(16)
             try:
-                if actual is not None and not request.get('truncateOnOpen',False):
-                    src=file_fd(parent,name)
-                    try:
-                        pos=0
-                        while True:
-                            block=os.pread(src,MAX_IO,pos)
-                            if not block: break
-                            os.write(stage_fd,block); pos += len(block)
-                    finally: os.close(src)
-                os.fsync(stage_fd)
-                size=os.fstat(stage_fd).st_size
-            finally: os.close(stage_fd)
-            HANDLES[handle]={'path':path,'base':base,'stage':stage_name,'size':size,'result':None}
-            return {'handleId':handle,'recoveryPath':STAGE+'/'+stage_name,'size':size}
+                fd=os.open(stage,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=stage_dir_fd)
+                os.fsync(fd); size=0
+                os.close(fd)
+            except Exception:
+                os.close(stage_dir_fd)
+                raise
+            os.close(stage_dir_fd)
+            handle=secrets.token_urlsafe(24)
+            HANDLES[handle]={'path':path,'parentPath':parent_path,'base':None,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
+            return {'handleId':handle,'recoveryPath':recovery(HANDLES[handle]),'size':size}
         finally: os.close(parent)
-    if op == 'finalizeWrite': op='flush'
-    if op in ('write','truncate','readStaged','flush','release','closeWrite','completeWrite'):
+    if op=='finalizeWrite':
+        handle=request.get('handleId'); operation=request.get('operationId')
+        record=HANDLES.get(handle)
+        if record is None:
+            prior=COMMITS.get((handle,operation))
+            if prior is not None: return {'version':prior}
+            fail('EBADF')
+        result=commit_record(handle,record,operation)
+        COMMITS[(handle,operation)]=result
+        while len(COMMITS)>128: COMMITS.pop(next(iter(COMMITS)))
+        cleanup_record(handle,record)
+        return {'version':result}
+    if op in ('write','truncate','readStaged','flush','release','closeWrite','completeWrite','flushStatus'):
         handle=request.get('handleId'); record=HANDLES.get(handle)
-        if not record: fail('EBADF')
-        fd=os.open(record['stage'], os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC, dir_fd=STAGE_FD)
+        if record is None: fail('EBADF')
+        if op in ('write','truncate') and record['committed']: fail('EROFS')
+        if op=='flushStatus' and record['committed']: return {'flushed':True,'version':record['result']}
+        if op in ('flush','release') and record['committed']:
+            result=record['result']
+            if op=='release': cleanup_record(handle,record)
+            return {'version':result}
+        parentfd=dir_for(record['parentPath'] or '/')
+        try: stagefd=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parentfd)
+        finally: os.close(parentfd)
         try:
-            info=os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or (info.st_mode & 0o077): fail('EACCES')
-            if op == 'write':
-                off=request.get('offset'); raw=request.get('data')
-                if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(raw,str) or len(raw)>((MAX_IO+2)//3)*4: fail('EINVAL')
-                try: data=base64.b64decode(raw,validate=True)
-                except Exception: fail('EINVAL')
-                if base64.b64encode(data).decode('ascii') != raw: fail('EINVAL')
-                if len(data)>MAX_IO or off+len(data)>MAX_FILE: fail('EFBIG')
-                written=os.pwrite(fd,data,off); record['size']=max(record['size'],off+written)
-                return {'bytesWritten':written}
-            if op == 'truncate':
-                size=request.get('size')
-                if not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_FILE: fail('EINVAL')
-                os.ftruncate(fd,size); record['size']=size; return {'size':size}
-            if op == 'readStaged':
-                off=request.get('offset'); size=request.get('size')
-                if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
-                data=os.pread(fd,size,off)
-                return {'data':base64.b64encode(data).decode('ascii'),'eof':off+len(data)>=os.fstat(fd).st_size}
-            if op == 'completeWrite': return {}
-            if op in ('flush','release'):
-                operation=request.get('operationId','')
-                if record['result'] is not None:
-                    if op != 'release' and operation != record.get('operation'): fail('ESTALE')
-                    if op == 'release':
-                        os.unlink(record['stage'], dir_fd=STAGE_FD)
-                        HANDLES.pop(handle, None)
-                    return {'version':record['result']}
-                parent,name=parent_for(record['path'])
-                try:
-                    if current(parent,name) != record['base']: fail('ESTALE')
-                    temp='commit-'+secrets.token_hex(16)
-                    target=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=parent)
-                    try:
-                        pos=0
-                        while True:
-                            block=os.pread(fd,MAX_IO,pos)
-                            if not block: break
-                            view=memoryview(block)
-                            while view:
-                                n=os.write(target,view); view=view[n:]
-                            pos+=len(block)
-                        os.fchmod(target,0o600); os.fsync(target)
-                    finally: os.close(target)
-                    if record['base'] is None:
-                        os.link(temp,name,src_dir_fd=parent,dst_dir_fd=parent,follow_symlinks=False)
-                        os.unlink(temp,dir_fd=parent)
-                    else:
-                        os.unlink(temp,dir_fd=parent)
-                        if current(parent,name) != record['base']: fail('ESTALE')
-                        fail('EROFS')
-                    os.fsync(parent)
-                    committed=os.stat(name,dir_fd=parent,follow_symlinks=False)
-                    result={'id':version(committed),'path':record['path']}
-                    record['result']=result; record['operation']=operation; record['base']=result['id']
-                    if op == 'release':
-                        os.unlink(record['stage'], dir_fd=STAGE_FD)
-                        HANDLES.pop(handle, None)
+            fd=os.open(record['stage'],os.O_RDWR|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stagefd)
+            try:
+                info=os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_uid!=os.getuid() or info.st_mode&0o077: fail('EACCES')
+                if op=='write':
+                    off=request.get('offset'); raw=request.get('data')
+                    if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(raw,str) or len(raw)>((MAX_IO+2)//3)*4: fail('EINVAL')
+                    try: data=base64.b64decode(raw,validate=True)
+                    except Exception: fail('EINVAL')
+                    if base64.b64encode(data).decode('ascii')!=raw: fail('EINVAL')
+                    if len(data)>MAX_IO or off+len(data)>MAX_FILE: fail('EFBIG')
+                    pos=0
+                    while pos<len(data):
+                        n=os.pwrite(fd,data[pos:],off+pos)
+                        if n<=0: fail('EIO')
+                        pos+=n
+                    record['size']=max(record['size'],off+pos); return {'bytesWritten':pos}
+                if op=='truncate':
+                    size=request.get('size')
+                    if not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_FILE: fail('EINVAL')
+                    os.ftruncate(fd,size); record['size']=size; return {'size':size}
+                if op=='readStaged':
+                    off=request.get('offset'); size=request.get('size')
+                    if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
+                    data=os.pread(fd,size,off); return {'data':base64.b64encode(data).decode('ascii'),'eof':off+len(data)>=os.fstat(fd).st_size}
+                if op=='completeWrite': return {}
+                if op=='flushStatus': return {'flushed':record['committed'],'version':record['result']}
+                if op in ('flush','release'):
+                    result=record['result'] if record['committed'] else commit_record(handle,record,request.get('operationId',''))
+                    if op=='release': cleanup_record(handle,record)
                     return {'version':result}
-                finally: os.close(parent)
-            if op == 'closeWrite':
-                HANDLES.pop(handle, None)
-                return {'recoveryPath': STAGE+'/'+record['stage']}
-        finally: os.close(fd)
-    if op == 'init-stop': return {}
+                if op=='closeWrite':
+                    record['retained']=True; HANDLES.pop(handle,None)
+                    return {'recoveryPath':recovery(record)}
+            finally: os.close(fd)
+        finally: os.close(stagefd)
+    if op=='init-stop': return {}
     fail('EINVAL')
 
-try: os.unlink(sys.argv[0])
-except OSError: pass
-try: os.rmdir(os.path.dirname(sys.argv[0]))
-except OSError: pass
+def commit_record(handle,record,operation):
+    if record['committed']: return record['result']
+    root_path=record['parentPath'] or '/'; parent=dir_for(root_path)
+    stageparent=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+    try:
+        if current(parent,record['path'].split('/')[-1])!=record['base']: fail('ESTALE')
+        stagefile=os.open(record['stage'],os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stageparent)
+        try: os.fsync(stagefile)
+        finally: os.close(stagefile)
+        try: os.link(record['stage'],record['path'].split('/')[-1],src_dir_fd=stageparent,dst_dir_fd=parent,follow_symlinks=False)
+        except FileExistsError: fail('ESTALE')
+        os.unlink(record['stage'],dir_fd=stageparent)
+        os.fsync(stageparent); os.fsync(parent)
+        committed=os.stat(record['path'].split('/')[-1],dir_fd=parent,follow_symlinks=False)
+        result={'id':version(committed),'path':record['path']}
+        record['result']=result; record['operation']=operation; record['committed']=True
+        return result
+    except Exception:
+        record['retained']=True
+        raise
+    finally: os.close(stageparent); os.close(parent)
+
 for raw in sys.stdin.buffer:
+    request={}
     try:
         if len(raw)>1536*1024: fail('EOVERFLOW')
         request=json.loads(raw)
         if not isinstance(request,dict) or not isinstance(request.get('id'),(str,int)) or isinstance(request.get('id'),bool): fail('EINVAL')
-        response={'id':request['id'],'ok':True}
-        response.update(respond(request))
+        response={'id':request['id'],'ok':True}; response.update(respond(request))
     except OSError as e:
         code=errno.errorcode.get(e.errno,'EIO')
         response={'id':request.get('id') if isinstance(request,dict) else '', 'ok':False,'errno':code}
         record=HANDLES.get(request.get('handleId')) if isinstance(request,dict) else None
-        if record is not None: response['recoveryPath']=STAGE+'/'+record['stage']
+        if record is not None: response['recoveryPath']=recovery(record)
     except Exception:
         response={'id':request.get('id') if isinstance(request,dict) else '', 'ok':False,'errno':'EIO'}
     try: sys.stdout.write(json.dumps(response,separators=(',',':'))+'\n'); sys.stdout.flush()
     except Exception: break
+for handle,record in list(HANDLES.items()):
+    if not record.get('retained'):
+        try: cleanup_record(handle,record)
+        except Exception: pass
+if ROOT is not None:
+    try: os.close(ROOT)
+    except OSError: pass
 `;
 
 export const LIVE_WORKSPACE_HELPER_SOURCE = PYTHON_HELPER;
