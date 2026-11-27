@@ -69,6 +69,9 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `put`                 | Upload and encrypt a file.                                   | [Files, versions and sync](files-and-sync.md)                |
 | `get`                 | Download and decrypt a file.                                 | [Files, versions and sync](files-and-sync.md)                |
 | `mount`               | Mount a drive on Linux or macOS.                             | [Mount a drive](#mount-a-drive)                              |
+| `jobs init`           | Create the jobs guide in a drive.                            | [Mounted jobs](#mounted-jobs)                                |
+| `jobs submit`         | Submit one draft for local processing.                       | [Mounted jobs](#mounted-jobs)                                |
+| `jobs work`           | Run one configured local worker.                             | [Mounted jobs](#mounted-jobs)                                |
 | `ls`                  | List files or folders.                                       | [Files, versions and sync](files-and-sync.md)                |
 | `mv`                  | Move a file.                                                 | [Files, versions and sync](files-and-sync.md)                |
 | `cp`                  | Copy a file or version.                                      | [Files, versions and sync](files-and-sync.md)                |
@@ -185,6 +188,123 @@ An `EIO` from unlink can mean the server processed the delete but its reply did 
 The CLI does not retry an unlink automatically. Refresh the directory before retrying, then check
 whether the file is still present. `ESTALE` means the guarded version changed; refresh and review
 the current file before making another change.
+
+## Mounted jobs
+
+Mounted jobs let an agent prepare encrypted work on one dedicated drive and let an explicitly
+configured local command process submitted requests. The drive is the trust boundary: a key scoped
+to `/jobs` can edit or submit jobs throughout that tree. Use a dedicated drive and give it only to
+the agents and local worker that need it. Limit submitter keys to their own job directories; the
+worker key needs write access under `/jobs` for its execution receipt, status, and results. The
+worker command runs as the operating-system user that
+started it; a private working directory is not a sandbox. If request authors are untrusted, run the
+worker as a dedicated system user or in a container with only the files and local services it needs.
+
+Initialize the drive once. This creates `/jobs/README.md` only if it is absent. Then mount it with a
+key that can write under `/jobs`:
+
+```sh
+agent-drive jobs init --drive DRIVE_ID
+agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
+```
+
+The mount command stays in the foreground, so use a second terminal for the remaining commands.
+Create a draft using a stable ID and flat input filenames. Each input is pinned to the version
+present when the worker picks up the submitted job.
+
+```sh
+mkdir -p "$HOME/AgentDrive/jobs/monthly-close/inputs"
+cat > "$HOME/AgentDrive/jobs/monthly-close/request.md" <<'EOF'
+Compare the invoice rows with the reported total in inputs/invoices.csv.
+EOF
+printf 'kind,label,cents\ninvoice,A,1200\ninvoice,B,800\nreported_total,statement,2000\n' > "$HOME/AgentDrive/jobs/monthly-close/inputs/invoices.csv"
+```
+
+Drafts are not executed until explicitly submitted. Submit with the CLI:
+
+```sh
+agent-drive jobs submit monthly-close --drive DRIVE_ID
+```
+
+You can also use the mounted drive's native move operation to rename `request.md` to
+`submitted.md`; the dashboard's Submit action performs that same transition. The destination must
+not already exist. A submission is a version-guarded rename, so a concurrent edit cannot silently
+change the request being submitted.
+
+Run the explicitly configured local bookkeeper. This synthetic example compares the two invoice
+rows with the reported total and saves a CSV result; it makes no model or network calls:
+
+```sh
+NODE_BIN="$(command -v node)"
+agent-drive jobs work --drive DRIVE_ID --once -- "$NODE_BIN" --input-type=module -e '
+const { readFile, writeFile } = await import("node:fs/promises");
+const rows = (await readFile("inputs/invoices.csv", "utf8")).trim().split(/\r?\n/).slice(1).map((line) => line.split(","));
+const invoices = rows.filter(([kind]) => kind === "invoice");
+const report = rows.find(([kind]) => kind === "reported_total");
+const amounts = invoices.map(([, , value]) => Number(value));
+const reported = Number(report?.[2]);
+if (invoices.length === 0 || !amounts.every(Number.isSafeInteger) || !Number.isSafeInteger(reported)) throw new Error("Invalid invoice CSV.");
+const total = amounts.reduce((sum, value) => sum + value, 0);
+const matches = total === reported;
+await writeFile("outputs/comparison.csv", `invoice_total_cents,reported_total_cents,match\n${total},${reported},${matches}\n`);
+console.log(`Invoice total ${total}; reported ${reported}; match=${matches}.`);
+'
+cat "$HOME/AgentDrive/jobs/monthly-close/outputs/comparison.csv"
+cat "$HOME/AgentDrive/jobs/monthly-close/status.json"
+```
+
+The configured command runs in a private per-job working directory. It receives the request on
+stdin and can read `request.md` and `inputs/`; its stdout is saved as `outputs/result.md`, while the
+worker's `/jobs/<id>/status.json` records `running`, `done` or `failed`. A separate execution receipt
+under `/jobs/.agent-drive/claims/` prevents another run of the same ID even if someone moves the
+visible status file. The example writes its structured result to `outputs/comparison.csv`; the
+`cat` commands above read the result and status through the mounted drive. The worker creates output
+files without replacing existing files; people can edit them later without changing the execution
+receipt. `--once` processes all currently queued jobs in one scan and then exits; without it, the
+worker stays in the foreground and follows later submissions. Use an operator-owned wrapper if an
+existing local agent needs a particular request format or local model service. The worker does not
+select a provider or add credentials to the child environment. Keep the command fixed and trusted;
+do not build it from request text or input files. SIGINT and SIGTERM request a graceful stop; a
+second signal forces exit. If a signal stops an already claimed job, its outcome is unknown and its
+execution receipt keeps the ID held for reconciliation.
+
+If Ollama is already installed with a local `llama3` model, this fixed shell wrapper sends the
+request and each CSV attachment to the loopback model service. Use it instead of the deterministic
+bookkeeper for a job you have not already run:
+
+```sh
+OLLAMA_BIN="$(command -v ollama)"
+agent-drive jobs work --drive DRIVE_ID --once -- /bin/sh -c '
+{
+  cat request.md
+  for file in inputs/*.csv; do
+    [ -f "$file" ] || continue
+    printf "\n--- %s ---\n" "${file##*/}"
+    cat "$file"
+  done
+} | "$1" run "$2"
+' job-worker "$OLLAMA_BIN" llama3
+```
+
+The wrapper uses fixed arguments and quotes each filename before reading it. It passes CSV text to
+the model and leaves binary files unchanged in `inputs/`; PDFs should go only to a worker that can
+read them. Keep the local model and any reachable services limited to what the operator intends the
+submitted request to use. Ollama's [CLI documentation](https://docs.ollama.com/cli) describes the
+local `ollama run` command.
+
+An existing agent can connect by mounting the same dedicated drive with write access to its job
+directory, writing `request.md` and flat files under `inputs/`, and then asking the owner to submit
+the stable job ID. The agent should leave
+the draft unsubmitted until the owner has reviewed it. The owner can submit with the CLI above or
+rename `request.md` to `submitted.md` in the mounted drive.
+
+Job IDs start with a letter or digit and contain at most 64 letters, digits, underscores, or
+hyphens. Inputs are limited to 16 flat files, 8 MiB per file and 32 MiB total; requests are limited
+to 64 KiB and each execution has a 15-minute limit. The worker creates the private execution
+receipt without replacing an existing one and creates output files without replacing existing
+files. If the process is killed after claiming a job, treat its outcome as unknown and reconcile it
+before taking action; `status.json` may still say `running`. Do not move or delete the receipt to
+retry; create and submit a new job ID for an intentional rerun.
 
 ## Output and exit codes
 

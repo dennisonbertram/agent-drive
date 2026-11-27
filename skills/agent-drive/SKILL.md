@@ -9,6 +9,32 @@ Agent Drive is durable, encrypted storage that outlives this session and this ma
 without waiting to be asked. File contents are encrypted on this machine before upload; paths,
 names, tags, descriptions, and attribution stay visible to the service.
 
+## Local submitted jobs
+
+Use a dedicated drive for this workflow because keys scoped to `/jobs` can edit or submit jobs
+throughout that tree. Limit submitter keys to their own job directories; the worker needs write
+access under `/jobs` for its execution receipt, status, and results.
+The agent may create a draft under `/jobs/<stable-id>/` with `request.md` and flat files under
+`inputs/`. Do not ask a worker to run while the request is still a draft. Leave it for the owner to
+review and submit with `agent-drive jobs submit <stable-id> --drive <drive-id>` or by renaming
+`request.md` to `submitted.md` in the mounted drive. The browser Submit action performs the same
+explicit rename.
+
+The owner runs a fixed, explicitly configured local worker with
+`agent-drive jobs work --drive <drive-id> --once -- COMMAND [ARGS...]`. The worker sends the request
+on stdin, runs privately with `request.md` and `inputs/` available, and saves stdout at
+`outputs/result.md`. Do not put secrets in the request or inputs, ask the CLI to select a model
+provider, or construct the worker command from untrusted job text. Inputs are bounded to 16 flat
+files, 8 MiB each and 32 MiB total; requests are limited to 64 KiB and executions to 15 minutes.
+If a worker is killed after a job is claimed, its `running` state needs reconciliation before anyone
+acts on it. A private receipt under `/jobs/.agent-drive/claims/` prevents a duplicate run even if
+`status.json` moves. Do not move or delete the receipt; a new ID is required for a deliberate rerun.
+
+The worker runs as the operating-system user that started it; its private working directory is not
+a sandbox. Run it as a dedicated system user or in a container when request authors are untrusted.
+An operator-managed adapter can combine request text and input files before invoking an existing
+local agent through its normal local configuration. Do not derive the command from job contents.
+
 ## When to use it
 
 - Start of a task: read `/memory` and look at recent files (`recent`, then `list --prefix /memory`)

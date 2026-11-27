@@ -1305,3 +1305,104 @@ describe('CLI startup import isolation', () => {
     }
   });
 });
+
+describe('jobs CLI', () => {
+  it('lists the explicit init, submit, and worker commands in help', async () => {
+    const r = await cli(['help'], one);
+    expect(r.out).toContain('jobs init [--drive ID]');
+    expect(r.out).toContain('jobs submit ID [--drive ID]');
+    expect(r.out).toContain('jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+  });
+
+  it('rejects malformed modes and ignored options before connecting', async () => {
+    const invalidCases: [string[], string][] = [
+      [['jobs', 'work', '--once'], 'Usage: jobs work'],
+      [['jobs', 'work', '--force', '--', 'true'], 'Unsupported jobs option'],
+      [['jobs', 'init', '--force'], 'Unsupported jobs option'],
+      [['jobs', 'submit', '../invalid'], 'Usage: jobs submit'],
+      [['version', '--once'], '--once is only supported by `jobs work`'],
+    ];
+    for (const [argv, message] of invalidCases) {
+      const r = await cli(argv, one);
+      expect(r.exitCode).toBe(1);
+      expect(r.err).toContain(message);
+      expect(r.paths).toEqual([]);
+      process.exitCode = undefined;
+    }
+  });
+
+  it('dispatches init, submit, and one local worker with the parsed command and lifecycle options', async () => {
+    const initJobs = vi.fn(async () => ({ path: '/jobs/README.md', created: true }));
+    const submitJob = vi.fn(async () => ({ id: 'monthly-close', state: 'submitted' }));
+    const runJobs = vi.fn(async (...args: unknown[]) => {
+      const options = args[3] as { once: boolean; signal: AbortSignal };
+      process.emit('SIGTERM');
+      expect(options.signal.aborted).toBe(true);
+    });
+    const makeJobHandler = vi.fn((command: string[]) => ({ command }));
+    vi.doMock('./jobs.js', () => ({ initJobs, submitJob, runJobs }));
+    vi.doMock('./job-command.js', () => ({ makeJobHandler }));
+    const respond = (path: string) => (path === 'account-key' ? { accountKey: null } : {});
+    try {
+      const init = await cli(['jobs', 'init', '--drive', A], one, respond);
+      expect(init.exitCode).toBeUndefined();
+      expect(initJobs).toHaveBeenCalledWith(expect.anything(), A);
+      expect(init.out).toContain('/jobs/README.md');
+
+      const submit = await cli(['jobs', 'submit', 'monthly-close', '--drive', A], one, respond);
+      expect(submit.exitCode).toBeUndefined();
+      expect(submitJob).toHaveBeenCalledWith(expect.anything(), A, 'monthly-close');
+
+      const cliHelp = await cli(['jobs', 'work', '--help'], one, respond);
+      expect(cliHelp.out).toContain('jobs work [--drive ID] [--once] -- COMMAND [ARGS...]');
+      expect(cliHelp.paths).toEqual([]);
+
+      const signalListeners = process.listenerCount('SIGINT');
+      const termListeners = process.listenerCount('SIGTERM');
+      const work = await cli(
+        ['jobs', 'work', '--drive', A, '--once', '--', process.execPath, 'worker.js', '--review'],
+        one,
+        respond,
+      );
+      expect(work.exitCode).toBe(143);
+      expect(makeJobHandler).toHaveBeenCalledWith([process.execPath, 'worker.js', '--review']);
+      expect(runJobs).toHaveBeenCalledWith(
+        expect.anything(),
+        A,
+        { command: [process.execPath, 'worker.js', '--review'] },
+        { once: true, signal: expect.any(AbortSignal) },
+      );
+      expect(process.listenerCount('SIGINT')).toBe(signalListeners);
+      expect(process.listenerCount('SIGTERM')).toBe(termListeners);
+
+      process.exitCode = undefined;
+      const forwarded = await cli(
+        [
+          'jobs',
+          'work',
+          '--drive',
+          A,
+          '--',
+          process.execPath,
+          'worker.js',
+          '--help',
+          '--once',
+          '--version',
+        ],
+        one,
+        respond,
+      );
+      expect(forwarded.exitCode).toBe(143);
+      const childArgs = [process.execPath, 'worker.js', '--help', '--once', '--version'];
+      expect(makeJobHandler).toHaveBeenLastCalledWith(childArgs);
+      expect(runJobs.mock.calls.at(-1)?.[3]).toEqual({
+        once: false,
+        signal: expect.any(AbortSignal),
+      });
+    } finally {
+      vi.doUnmock('./jobs.js');
+      vi.doUnmock('./job-command.js');
+      vi.resetModules();
+    }
+  });
+});
