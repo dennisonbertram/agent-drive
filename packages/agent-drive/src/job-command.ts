@@ -366,7 +366,7 @@ function shebangLine(executable: string): string | null {
     const head = Buffer.alloc(512);
     const bytes = readSync(fd, head, 0, head.length, 0);
     if (bytes < 2 || head[0] !== 0x23 || head[1] !== 0x21) return null;
-    const text = head.subarray(0, bytes).toString('latin1');
+    const text = head.subarray(0, bytes).toString('utf8');
     const end = text.search(/[\r\n]/u);
     return end === -1 ? text : text.slice(0, end);
   } finally {

@@ -473,6 +473,20 @@ describe('launcher interpreters', () => {
     await writeFile(launcher, '#!node\n', { mode: 0o755 });
     expect(() => makeJobHandler([launcher])).toThrow(/unsupported|absolute/u);
   });
+
+  it('runs a script whose shebang names a UTF-8 interpreter path', async () => {
+    const dir = await testDir();
+    // A valid UTF-8 filesystem path: read as latin1 the accented bytes garble
+    // into a name that does not exist, so the interpreter check must decode UTF-8.
+    const interp = join(dir, 'nódé');
+    await symlink(NODE, interp);
+    const path = join(dir, 'utf8-worker');
+    await writeFile(path, `#!${interp}\nprocess.stdout.write('utf8 interp ran')\n`, {
+      mode: 0o755,
+    });
+    const outputs = await makeJobHandler([path])(job(), freshSignal());
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('utf8 interp ran') }]);
+  });
 });
 
 describe('orphaned subprocesses', () => {
