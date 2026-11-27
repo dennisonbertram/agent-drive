@@ -20,6 +20,45 @@ const FLUSH_OPERATION_TTL_MS = 20 * 60_000;
 const HELPER_START_TIMEOUT_MS = 15_000;
 const HELPER_STOP_TIMEOUT_MS = 5_000;
 const HELPER_PROTOCOL_VERSION = 2;
+const MAX_HELPER_STARTUP_STDERR_CHARS = 1024;
+
+const SAFE_HELPER_STARTUP_DIAGNOSTICS = new Map<string, string>([
+  [
+    'shared-container-unavailable [bootstrap:4]',
+    'Agent Drive Finder cannot access its shared container. Reinstall Agent Drive.app from the official download, then retry.',
+  ],
+  [
+    'file-provider-domain-disabled-in-system-settings [bootstrap:5]',
+    'The Agent Drive File Provider extension is disabled. Enable it in System Settings, then retry.',
+  ],
+  [
+    'file-provider-registration-failed [bootstrap:6]',
+    'macOS could not register the Agent Drive File Provider. Open Agent Drive.app from /Applications and retry.',
+  ],
+  [
+    'invalid-startup-connection [bridge:invalid-connection]',
+    'The Finder app and CLI could not establish their local connection. Update or reinstall Agent Drive.app, then retry.',
+  ],
+  [
+    'file-provider-service-unavailable [bridge:unavailable]',
+    'The macOS File Provider service is unavailable. Check the Agent Drive extension in System Settings and retry.',
+  ],
+  [
+    'file-provider-not-authenticated [FileProviderErrorDomain:-1000]',
+    'macOS has not authenticated the Agent Drive File Provider. Open Agent Drive.app and retry.',
+  ],
+  [
+    'file-provider-server-unreachable [FileProviderErrorDomain:-1004]',
+    'macOS cannot reach the Agent Drive File Provider. Check the extension in System Settings and retry.',
+  ],
+  ...([-2001, -2002, -2003, -2004, -2014] as const).map(
+    (code) =>
+      [
+        `file-provider-extension-unavailable [FileProviderErrorDomain:${code}]`,
+        'macOS could not start the Agent Drive File Provider extension. Enable it in System Settings, then retry.',
+      ] as [string, string],
+  ),
+]);
 
 export type MacMountExit = { code: number | null; signal: NodeJS.Signals | null };
 
@@ -62,6 +101,35 @@ function safeEqual(expected: string, received: string | undefined): boolean {
   const left = Buffer.from(expected);
   const right = Buffer.from(received);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+type HelperStartupDiagnosticCapture = {
+  read(): string | undefined;
+  stop(): void;
+};
+
+function collectSafeHelperStartupDiagnostic(child: ChildProcess): HelperStartupDiagnosticCapture {
+  let output = '';
+  child.stderr?.setEncoding('utf8');
+  const onData = (chunk: string | Buffer) => {
+    if (output.length >= MAX_HELPER_STARTUP_STDERR_CHARS) return;
+    const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    output += text.slice(0, MAX_HELPER_STARTUP_STDERR_CHARS - output.length);
+  };
+  child.stderr?.on('data', onData);
+  return {
+    read() {
+      const line = output.replace(/\r?\n$/u, '');
+      output = '';
+      const match = /^Agent Drive Finder could not connect \(([^()\r\n]{1,192})\)\.$/u.exec(line);
+      return match ? SAFE_HELPER_STARTUP_DIAGNOSTICS.get(match[1] ?? '') : undefined;
+    },
+    stop() {
+      output = '';
+      child.stderr?.removeListener('data', onData);
+      child.stderr?.resume();
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -347,9 +415,15 @@ async function readHelperPath(): Promise<string> {
   return normalized;
 }
 
-async function receiveHelperPath(child: ChildProcess): Promise<string> {
+async function receiveHelperPath(
+  child: ChildProcess,
+  startupDiagnostic: HelperStartupDiagnosticCapture,
+): Promise<string> {
   const stdout = child.stdout;
-  if (!stdout) throw new Error('Finder helper stdout is unavailable');
+  if (!stdout) {
+    startupDiagnostic.stop();
+    throw new Error('Finder helper stdout is unavailable');
+  }
   return await new Promise((resolvePath, reject) => {
     let data = '';
     let settled = false;
@@ -357,6 +431,7 @@ async function receiveHelperPath(child: ChildProcess): Promise<string> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      startupDiagnostic.stop();
       stdout.removeAllListeners('data');
       stdout.removeAllListeners('end');
       child.removeListener('error', onError);
@@ -365,12 +440,12 @@ async function receiveHelperPath(child: ChildProcess): Promise<string> {
       else resolvePath(path!);
     };
     const onError = (error: Error) => finish(error);
-    const onClose = (code: number | null) =>
-      finish(
-        new Error(
-          `Finder helper exited before reporting its mount path (code ${code ?? 'unknown'})`,
-        ),
-      );
+    const exitedBeforeReady = (code: number | null) => {
+      const message = `Finder helper exited before reporting its mount path (code ${code ?? 'unknown'})`;
+      const diagnostic = startupDiagnostic.read();
+      return new Error(diagnostic ? `${message}: ${diagnostic}` : message);
+    };
+    const onClose = (code: number | null) => finish(exitedBeforeReady(code));
     const timer = setTimeout(
       () => finish(new Error('Finder helper startup timed out')),
       HELPER_START_TIMEOUT_MS,
@@ -417,9 +492,7 @@ async function receiveHelperPath(child: ChildProcess): Promise<string> {
         } else {
           child.once('close', (code, signal) => resolveExit({ code, signal }));
         }
-      }).then((exit) =>
-        finish(new Error(`Finder helper exited during startup (code ${exit.code ?? 'unknown'})`)),
-      );
+      }).then((exit) => finish(exitedBeforeReady(exit.code)));
     });
     child.once('error', onError);
     child.once('close', onClose);
@@ -668,7 +741,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
   });
-  child.stderr?.resume();
+  const safeStartupDiagnostic = collectSafeHelperStartupDiagnostic(child);
   let childExit: MacMountExit | undefined;
   const exitPromise = new Promise<MacMountExit>((resolveExit) => {
     child.once('error', () => {
@@ -686,7 +759,7 @@ export async function startMacMount(options: StartMacMountOptions): Promise<MacM
   let actualPath: string;
   let alias: AliasOwnership | undefined;
   try {
-    actualPath = await receiveHelperPath(child);
+    actualPath = await receiveHelperPath(child, safeStartupDiagnostic);
     const actualMetadata = await stat(actualPath);
     if (!actualMetadata.isDirectory()) throw new Error('Finder helper path is not a directory');
     alias = await prepareAlias(requestedPath, actualPath);

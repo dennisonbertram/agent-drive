@@ -1243,6 +1243,14 @@ function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   ) as NodeJS.ProcessEnv;
 }
 
+export type LinuxMountExit = { code: number | null; signal: NodeJS.Signals | null };
+
+/** The request surface the native Linux helper consumes; mirrors `createMountBridge`'s `request`. */
+export type LinuxMountBridge = {
+  request(input: unknown, requestSignal?: AbortSignal): Promise<MountResponse>;
+  close?(): Promise<void>;
+};
+
 export async function runLinuxMount(
   client: MountClient,
   driveId: string,
@@ -1254,7 +1262,33 @@ export async function runLinuxMount(
     capabilities?: MountCapabilities;
     writeback?: MountWriteback;
   } = {},
-) {
+): Promise<void> {
+  await runLinuxMountBridge(
+    mountPoint,
+    (signal) =>
+      createMountBridge(client, driveId, {
+        signal,
+        ...(options.capabilities ? { capabilities: options.capabilities } : {}),
+        ...(options.writeback ? { writeback: options.writeback } : {}),
+      }),
+    options,
+  );
+}
+
+/**
+ * Runs the native Linux mount, unmount and error lifecycle against a
+ * caller-provided bridge. `createBridge` runs after the helper checks, before
+ * the mountpoint is prepared, and receives the internal shutdown signal.
+ */
+export async function runLinuxMountBridge(
+  mountPoint: string,
+  createBridge: (signal: AbortSignal) => LinuxMountBridge | Promise<LinuxMountBridge>,
+  options: {
+    helperPath?: string;
+    signal?: AbortSignal;
+    readWrite?: boolean;
+  } = {},
+): Promise<LinuxMountExit | undefined> {
   const helperPath = options.helperPath ?? resolveMountHelper();
   if (!isAbsolute(helperPath)) throw new Error('The mount helper path must be absolute.');
   try {
@@ -1263,7 +1297,7 @@ export async function runLinuxMount(
   } catch {
     throw new Error('The Agent Drive mount helper is missing or not executable.');
   }
-  if (options.signal?.aborted) return;
+  if (options.signal?.aborted) return undefined;
   const abortController = new AbortController();
   let child: ChildProcess | undefined;
   let shutdownNotice: NodeJS.Timeout | undefined;
@@ -1293,11 +1327,7 @@ export async function runLinuxMount(
       shutdownNotice.unref();
     }
   };
-  const bridge = await createMountBridge(client, driveId, {
-    signal: abortController.signal,
-    ...(options.capabilities ? { capabilities: options.capabilities } : {}),
-    ...(options.writeback ? { writeback: options.writeback } : {}),
-  });
+  const bridge = await createBridge(abortController.signal);
   options.signal?.addEventListener('abort', requestStop, { once: true });
   let closed = false;
   let mountPointCleanup: (() => Promise<void>) | undefined;
@@ -1310,10 +1340,10 @@ export async function runLinuxMount(
     return error;
   };
   try {
-    if (options.signal?.aborted || abortController.signal.aborted) return;
+    if (options.signal?.aborted || abortController.signal.aborted) return undefined;
     const prepared = await prepareMountPoint(mountPoint);
     mountPointCleanup = prepared.cleanup;
-    if (options.signal?.aborted || abortController.signal.aborted) return;
+    if (options.signal?.aborted || abortController.signal.aborted) return undefined;
     const runningChild = spawn(
       helperPath,
       [prepared.path, ...(options.readWrite ? ['--read-write'] : [])],
@@ -1440,11 +1470,12 @@ export async function runLinuxMount(
     await queue;
     if (protocolFailure) throw protocolFailure;
     if (exitResult.error) throw exitResult.error;
-    if (options.signal?.aborted) return;
+    if (options.signal?.aborted) return { code: exitResult.code, signal: exitResult.signal };
     if (exitResult.code !== 0)
       throw new Error(
         `Mount helper exited (${exitResult.signal ?? exitResult.code ?? 'unknown'}).`,
       );
+    return { code: exitResult.code, signal: exitResult.signal };
   } finally {
     closed = true;
     clearShutdownNotice();
@@ -1452,7 +1483,7 @@ export async function runLinuxMount(
     options.signal?.removeEventListener('abort', requestStop);
     abortController.abort(new Error('Mount bridge closed.'));
     try {
-      await bridge.close();
+      await bridge.close?.();
     } finally {
       await mountPointCleanup?.();
     }
