@@ -272,3 +272,52 @@ describe('MCP streaming file tools', () => {
     }
   });
 });
+
+describe('MCP put folder link', () => {
+  it('adds the private console folder link to text and file puts', async () => {
+    const textStub = {
+      apiOrigin: 'https://x.test',
+      put: async (_drive: string, savedPath: string) => ({ ...fileVersion, path: savedPath }),
+    } as unknown as AgentDriveClient;
+    const textPut = await callTool(textStub, 'put', {
+      driveId: 'd1',
+      path: '/outputs/report/final notes.md',
+      text: 'done',
+    });
+    expect(textPut.isError).not.toBe(true);
+    const textData = JSON.parse(textPut.content[0]!.text) as {
+      data: Record<string, unknown>;
+    };
+    expect(textData.data.folderUrl).toBe(
+      'https://x.test/console?drive=d1&path=%2Foutputs%2Freport',
+    );
+    expect(textData.data.wrappedKey).toBeUndefined();
+
+    const directory = await mkdtemp(join(tmpdir(), 'agent-drive-mcp-putlink-'));
+    try {
+      const local = join(directory, 'draft.mp4');
+      await writeFile(local, 'frames');
+      const fileStub = {
+        apiOrigin: 'http://127.0.0.1:3000',
+        putStream: async (_drive: string, savedPath: string) => ({
+          ...fileVersion,
+          path: savedPath,
+        }),
+      } as unknown as AgentDriveClient;
+      const filePut = await callTool(fileStub, 'put', {
+        driveId: 'd2',
+        path: '/outputs/report/draft.mp4',
+        localPath: local,
+      });
+      expect(filePut.isError).not.toBe(true);
+      const fileData = JSON.parse(filePut.content[0]!.text) as {
+        data: Record<string, unknown>;
+      };
+      expect(fileData.data.folderUrl).toBe(
+        'http://127.0.0.1:3000/console?drive=d2&path=%2Foutputs%2Freport',
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

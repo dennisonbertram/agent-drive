@@ -9,6 +9,7 @@ import {
   StreamSizeLimitError,
 } from './client.js';
 import { conflictHint } from './check.js';
+import { consoleFolderUrl } from './console-link.js';
 import {
   resolveConnection,
   resolveDriveId,
@@ -244,7 +245,8 @@ export function createMcpServer(client: AgentDriveClient, resolveDrive?: DriveRe
           args.text !== undefined
             ? await client.put(driveId, args.path, new TextEncoder().encode(args.text), options)
             : await putFile(client, driveId, args.localPath!, args.path, options);
-        return version;
+        const folderUrl = consoleFolderUrl(client.apiOrigin, driveId, version.path);
+        return folderUrl ? { ...version, folderUrl } : version;
       }),
   );
   server.registerTool(

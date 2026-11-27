@@ -95,7 +95,7 @@ Encrypts and uploads text or a local file. It is create-only by default.
 | `description` | string, optional       |                                                  |
 | `userId`      | string, optional       |                                                  |
 
-Rules: provide exactly one of `text` and `localPath`. `overwrite` and `ifVersionId` are mutually exclusive. Result: the new version record. Annotations: `readOnlyHint: false`, `destructiveHint: true`.
+Rules: provide exactly one of `text` and `localPath`. `overwrite` and `ifVersionId` are mutually exclusive. Result: the new version record, including `folderUrl` — a private link to the saved file's folder in the owner's signed-in console. It is not a share link and grants no access. Annotations: `readOnlyHint: false`, `destructiveHint: true`.
 
 Do not put secrets in `path`, `tags` or `description`. The service can see them.
 

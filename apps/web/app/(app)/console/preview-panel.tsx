@@ -5,15 +5,15 @@ import { looksBinary, previewMime } from '@/src/console/preview';
 
 export type PreviewView =
   | { status: 'loading' }
-  | { status: 'ready'; kind: 'text' | 'image' | 'pdf'; bytes: Uint8Array }
+  | { status: 'ready'; kind: 'text' | 'image' | 'pdf' | 'video'; bytes: Uint8Array }
   | { status: 'too-large'; sizeLabel: string }
   | { status: 'unsupported' }
   | { status: 'error'; message: string };
 
 /**
  * Body of the preview dialog. The file is untrusted: text is rendered as a React text child
- * (escaped), HTML and SVG are text, and the only blob URLs are images and PDFs whose MIME type
- * comes from the console's fixed allowlist by file name, never from the bytes.
+ * (escaped), HTML and SVG are text, and the only blob URLs are images, PDFs and videos whose
+ * MIME type comes from the console's fixed allowlist by file name, never from the bytes.
  */
 export function PreviewBody({ name, view }: { name: string; view: PreviewView }) {
   // The one place blob URLs are created. The cleanup revokes the URL on close, on switching
@@ -78,6 +78,29 @@ export function PreviewBody({ name, view }: { name: string; view: PreviewView })
       ) : (
         url && (
           <img className="preview-image" src={url} alt={name} onError={() => setFailedUrl(url)} />
+        )
+      );
+  } else if (view.kind === 'video') {
+    // Native controls only: no autoplay, no remote playback, and the footer's Download button
+    // stays the one way the decrypted bytes leave the tab. A container on the allowlist can
+    // still hold a codec this browser lacks, so a decode error offers the download instead.
+    body =
+      failedUrl === url ? (
+        <p className="preview-note">
+          This video can’t be played in this browser. Download it to open it on your computer.
+        </p>
+      ) : (
+        url && (
+          <video
+            className="preview-video"
+            src={url}
+            controls
+            playsInline
+            preload="metadata"
+            controlsList="nodownload"
+            disableRemotePlayback
+            onError={() => setFailedUrl(url)}
+          />
         )
       );
   } else {

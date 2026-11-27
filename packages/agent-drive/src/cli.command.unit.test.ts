@@ -1530,3 +1530,68 @@ describe('jobs CLI', () => {
     ]);
   });
 });
+
+describe('put folder link', () => {
+  const responder = (savedPath: string) => (path: string, init?: RequestInit) => {
+    if (path.endsWith('/put'))
+      return {
+        intentId: 'i1',
+        uploadUrl: 'https://s3.test/x',
+        ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+          .ciphertextSize,
+      };
+    if (path.endsWith('/commit')) return { version: { id: 'v1', path: savedPath } };
+    return {};
+  };
+
+  it('prints the private console folder link after a file upload', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-putlink-'));
+    dirs.push(dir);
+    const local = join(dir, 'final.mp4');
+    await writeFile(local, 'frames');
+    const r = await cli(
+      ['put', local, '/outputs/launch/video final.mp4', '--drive', A],
+      one,
+      responder('/outputs/launch/video final.mp4'),
+    );
+    expect(r.err).toBe('');
+    const out = JSON.parse(r.out) as Record<string, unknown>;
+    expect(out.id).toBe('v1');
+    expect(out.path).toBe('/outputs/launch/video final.mp4');
+    expect(out.folderUrl).toBe(`https://x.test/console?drive=${A}&path=%2Foutputs%2Flaunch`);
+    expect(String(out.folderUrl)).not.toContain('@');
+    expect(r.out).not.toContain('tok');
+    expect(r.out).not.toContain('WRAPPED');
+  });
+
+  it('uses the returned canonical path and links the drive root after a stdin upload', async () => {
+    const input = Readable.from([Buffer.from('x')]);
+    vi.spyOn(process.stdin, Symbol.asyncIterator).mockReturnValue(input[Symbol.asyncIterator]());
+    const r = await cli(['put', '-', '/draft.md', '--drive', A], one, responder('/final notes.md'));
+    expect(r.err).toBe('');
+    const out = JSON.parse(r.out) as Record<string, unknown>;
+    expect(out.folderUrl).toBe(`https://x.test/console?drive=${A}&path=%2F`);
+  });
+
+  it('prints no link and keeps the failure when the upload cannot commit', async () => {
+    const input = Readable.from([Buffer.from('x')]);
+    vi.spyOn(process.stdin, Symbol.asyncIterator).mockReturnValue(input[Symbol.asyncIterator]());
+    const r = await cli(['put', '-', '/x.md', '--drive', A], one, (path, init) => {
+      if (path.endsWith('/put'))
+        return {
+          intentId: 'i1',
+          uploadUrl: 'https://s3.test/x',
+          ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+            .ciphertextSize,
+        };
+      if (path.endsWith('/commit'))
+        return new Response(JSON.stringify({ error: { code: 'conflict', message: 'changed' } }), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        });
+      return {};
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.out).not.toContain('folderUrl');
+  });
+});

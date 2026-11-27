@@ -48,7 +48,7 @@ If you skip the passphrase, the agent can instead write the bundle to a file on 
 
 With the drive unlocked you can:
 
-- Preview a file. Text and images show in a dialog. Large files, binary files and unknown types show a message instead. Use Download for those.
+- Preview a file. Text and images show in a dialog, and MP4 and WebM videos play there with the browser's own controls (no autoplay). A video your browser cannot decode shows a message instead — use Download for it. Large files, binary files and unknown types show a message instead. Use Download for those.
 - Download a file. It is decrypted in the browser.
 - Open Versions from the row menu. Each version shows its time, size and author. "Restore this version" makes an older version the current one by creating a new version. Existing history stays.
 - Trash a file from the row menu.
