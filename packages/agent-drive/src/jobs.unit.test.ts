@@ -487,7 +487,7 @@ class FakeDrive {
     if (!intent) throw new Error('synthetic upload intent not found');
     if (intent.version) {
       if (this.unavailableReplayPaths.has(intent.path))
-        throw conflict('exists', intent.version.id, 'The commit response was unavailable.');
+        throw new AgentDriveApiError('forbidden', 403, 'The replay returned no version.');
       return intent.version;
     }
     this.fail(`put:${intent.path}`);
