@@ -416,7 +416,13 @@ describe('mount --name', () => {
       );
     } else {
       expect(createMountBridge).not.toHaveBeenCalled();
-      expect(r.calls).toContainEqual({ path: 'whoami', method: 'GET' });
+      expect(r.calls).toContainEqual(
+        expect.objectContaining({
+          path: 'whoami',
+          method: 'GET',
+          authorization: 'Bearer tok',
+        }),
+      );
       expect(runLinuxMount).toHaveBeenCalledWith(
         expect.anything(),
         A,

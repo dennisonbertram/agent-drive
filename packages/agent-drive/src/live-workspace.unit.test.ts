@@ -6,6 +6,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rm,
   stat,
   symlink,
@@ -18,17 +19,14 @@ import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  createLiveWorkspaceProvider,
-  createInstaboxLiveWorkspaceTransport,
-  LIVE_WORKSPACE_HELPER_SOURCE,
-} from './live-workspace.js';
+import { createLiveWorkspaceProvider, LIVE_WORKSPACE_HELPER_SOURCE } from './live-workspace.js';
 
 const roots: string[] = [];
 
 async function startHelper(root: string) {
   const helperDir = await mkdtemp(join(tmpdir(), 'agent-drive-helper-'));
   roots.push(helperDir);
+  const resolvedRoot = await realpath(root);
   const script = join(helperDir, '.helper.py');
   await writeFile(script, LIVE_WORKSPACE_HELPER_SOURCE, { mode: 0o600 });
   const child = spawn('python3', ['-u', script], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -44,7 +42,7 @@ async function startHelper(root: string) {
     if (result.done) throw new Error(`helper exited without a response: ${stderr}`);
     return JSON.parse(result.value) as Record<string, unknown>;
   };
-  const init = await send({ id: 'init', op: 'init', root });
+  const init = await send({ id: 'init', op: 'init', root: resolvedRoot });
   if (!init.ok) throw new Error(`helper init failed: ${JSON.stringify(init)}`);
   return { child, send };
 }
@@ -58,8 +56,11 @@ describe('live workspace helper', () => {
   it('filters Agent Drive credentials from setup and SSH child processes', async () => {
     vi.stubEnv('AGENT_DRIVE_API_KEY', 'synthetic-drive-secret');
     vi.stubEnv('AGENT_DRIVE_CREDENTIALS', 'synthetic-drive-bundle');
+    vi.stubEnv('AGENT_DRIVE_INSTABOX_CLI', '/opt/instabox/bin/instabox');
     vi.stubEnv('INSTABOX_API_KEY', 'ibk_synthetic-test-key');
     const environments: Array<Record<string, string | undefined>> = [];
+    const invokedCommands: string[] = [];
+    const cliPath = process.env.AGENT_DRIVE_INSTABOX_CLI!;
     class FakeChild extends EventEmitter {
       stdin = new PassThrough();
       stdout = new PassThrough();
@@ -74,7 +75,8 @@ describe('live workspace helper', () => {
         return true;
       }
     }
-    const fakeSpawn = ((_: string, args: readonly string[], options: SpawnOptions) => {
+    const fakeSpawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      invokedCommands.push(command);
       environments.push(options.env ?? {});
       const child = new FakeChild();
       const isHelper = args.includes('python3');
@@ -91,14 +93,21 @@ describe('live workspace helper', () => {
             };
             pending = pending.slice(newline + 1);
             child.stdout.write(
-              `${JSON.stringify({ id: request.id, ok: true, ...(request.op === 'list' ? { entries: [], nextCursor: null } : {}) })}\n`,
+              `${JSON.stringify({
+                id: request.id,
+                ok: true,
+                ...(request.op === 'init' ? { rootIdentity: 'synthetic-root-identity' } : {}),
+                ...(request.op === 'list' ? { entries: [], nextCursor: null } : {}),
+              })}\n`,
             );
           }
         });
       } else {
         const output = args.includes('sha256sum')
           ? `${createHash('sha256').update(LIVE_WORKSPACE_HELPER_SOURCE).digest('hex')}  ${args.at(-1)}\n`
-          : '';
+          : args[0] === 'get'
+            ? JSON.stringify({ id: 'm_synthetic', status: 'running' })
+            : '';
         setImmediate(() => {
           child.stdout.end(output);
           child.exitCode = 0;
@@ -107,14 +116,16 @@ describe('live workspace helper', () => {
       }
       return child as unknown as ReturnType<typeof spawn>;
     }) as typeof spawn;
-    const transport = createInstaboxLiveWorkspaceTransport({
+    const provider = await createLiveWorkspaceProvider({
       sandboxId: 'synthetic-sandbox',
       root: '/tmp/synthetic-workspace',
+      beforeIO: async () => undefined,
       spawnProcess: fakeSpawn,
     });
     try {
-      await transport.request({ id: 1, op: 'list', path: '/' });
-      expect(environments.length).toBe(4);
+      await provider.dispatch({ id: 1, op: 'list', path: '/' });
+      expect(environments.length).toBe(5);
+      expect(invokedCommands).toEqual(Array.from({ length: 5 }, () => cliPath));
       for (const environment of environments) {
         expect(environment).not.toHaveProperty('AGENT_DRIVE_API_KEY');
         expect(environment).not.toHaveProperty('AGENT_DRIVE_CREDENTIALS');
@@ -124,7 +135,7 @@ describe('live workspace helper', () => {
         });
       }
     } finally {
-      await transport.close();
+      await provider.close();
     }
   });
 
@@ -273,6 +284,64 @@ describe('live workspace helper', () => {
       child.kill();
       await once(child, 'exit').catch(() => undefined);
       await rm(outside, { force: true });
+    }
+  });
+
+  it('keeps an open staged handle readable after flush until release', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'agent-drive-live-'));
+    roots.push(root);
+    const { child, send } = await startHelper(root);
+    const bytes = Buffer.from('FILE=written-and-flushed\n');
+    try {
+      const opened = await send({
+        id: 1,
+        op: 'openWrite',
+        path: '/draft.env',
+        baseVersionId: null,
+        truncateOnOpen: true,
+      });
+      expect(opened.ok).toBe(true);
+      expect(
+        await send({
+          id: 2,
+          op: 'write',
+          handleId: opened.handleId,
+          offset: 0,
+          data: bytes.toString('base64'),
+        }),
+      ).toMatchObject({ ok: true, bytesWritten: bytes.length });
+      const flushed = await send({
+        id: 3,
+        op: 'flush',
+        handleId: opened.handleId,
+        operationId: 'linux-flush-readback',
+      });
+      expect(flushed.ok).toBe(true);
+      expect(await readFile(join(root, 'draft.env'))).toEqual(bytes);
+
+      const staged = await send({
+        id: 4,
+        op: 'readStaged',
+        handleId: opened.handleId,
+        offset: 0,
+        size: bytes.length,
+      });
+      expect(staged.ok).toBe(true);
+      expect(Buffer.from(staged.data as string, 'base64')).toEqual(bytes);
+      expect(staged.eof).toBe(true);
+
+      expect(
+        await send({
+          id: 5,
+          op: 'release',
+          handleId: opened.handleId,
+          operationId: 'linux-flush-readback',
+        }),
+      ).toMatchObject({ ok: true, version: flushed.version });
+      expect(await readdir(root)).toEqual(['draft.env']);
+    } finally {
+      child.kill();
+      await once(child, 'exit').catch(() => undefined);
     }
   });
 
