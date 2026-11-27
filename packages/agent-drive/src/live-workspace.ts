@@ -759,16 +759,8 @@ export function createInstaboxLiveWorkspaceTransport(
       if (!child?.stdin || child.killed)
         return reject(new Error('Instabox workspace transport is unavailable.'));
       const active = child;
-      let waiter: (typeof responseQueue)[number];
       const removeAbort = () => signal?.removeEventListener('abort', abort);
-      const abort = () => {
-        const index = responseQueue.indexOf(waiter);
-        if (index >= 0) responseQueue.splice(index, 1);
-        failSession(active, new DOMException('Canceled', 'AbortError'));
-        reject(new DOMException('Canceled', 'AbortError'));
-      };
-      signal?.addEventListener('abort', abort, { once: true });
-      waiter = {
+      const waiter: (typeof responseQueue)[number] = {
         id: payload.id,
         resolve: (response) => {
           removeAbort();
@@ -779,6 +771,13 @@ export function createInstaboxLiveWorkspaceTransport(
           reject(error);
         },
       };
+      const abort = () => {
+        const index = responseQueue.indexOf(waiter);
+        if (index >= 0) responseQueue.splice(index, 1);
+        failSession(active, new DOMException('Canceled', 'AbortError'));
+        reject(new DOMException('Canceled', 'AbortError'));
+      };
+      signal?.addEventListener('abort', abort, { once: true });
       responseQueue.push(waiter);
       const line = `${JSON.stringify(payload)}\n`;
       active.stdin!.write(line, (error) => {
