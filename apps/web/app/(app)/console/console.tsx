@@ -184,16 +184,22 @@ const JOB_REQUEST = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/request\.md$/;
 function jobRowState(
   file: FileEntry,
   folder: string,
-  submitted: boolean,
+  submittedMarker: boolean,
+  submitted: boolean | null,
   claimed: boolean,
-): 'submit' | 'submitted' | 'picked' | null {
+): 'submit' | 'submitted' | 'not-submitted' | 'picked' | null {
   const cut = file.path.lastIndexOf('/');
   if ((file.path.slice(0, cut) || ROOT) !== folder) return null;
   const name = file.path.slice(cut + 1);
-  if (name === 'submitted.md') return claimed ? 'picked' : 'submitted';
+  if (name === 'submitted.md') {
+    if (claimed) return 'picked';
+    if (submitted === true) return 'submitted';
+    if (submitted === false) return 'not-submitted';
+    return null;
+  }
   if (name !== 'request.md') return null;
   // A draft coexisting with a submitted or claimed job never submits again.
-  if (submitted) return null;
+  if (submittedMarker) return null;
   return claimed ? 'picked' : 'submit';
 }
 
@@ -246,13 +252,19 @@ function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   inflight.set(path, { request, at: Date.now() });
   return request;
 }
-async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function send<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   let result: Response;
   try {
     result = await fetch(`/api/console/${path}`, {
       method,
       credentials: 'same-origin',
       cache: 'no-store',
+      ...(signal ? { signal } : {}),
       ...(body === undefined
         ? {}
         : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
@@ -672,6 +684,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     key: string;
     scope: string;
     held: boolean | null;
+    submitted: boolean | null;
+    markerPresent: boolean;
   } | null>(null);
   const [memoryDownloadFile, setMemoryDownloadFile] = useState<FileEntry | null>(null);
   const [pickerRetry, setPickerRetry] = useState<FileEntry | null>(null);
@@ -823,7 +837,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // folder it was asked about, so a late answer can never label another job.
   const jobMarkerNeeded = inJobFolder && (jobSubmitted || jobDraft);
   const jobClaimKey = `${selected}:${folder}`;
-  const jobClaimed = jobClaim?.key === jobClaimKey ? jobClaim.held : null;
+  const jobClaimed =
+    jobClaim?.key === jobClaimKey && (jobClaim.scope === fileScope || jobClaim.held === true)
+      ? jobClaim.held
+      : null;
+  const jobSubmission =
+    jobClaim?.key === jobClaimKey && jobClaim.scope === fileScope ? jobClaim.submitted : null;
   const drive = drives.find((item) => item.id === selected);
   // Storage by folder: drives pending deletion still count in the account total but are
   // not offered here — the folders endpoint already refuses them. The select defaults to
@@ -1090,40 +1109,100 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       active = false;
     };
   }, [selected, tab, view, folder, fileScope, sharedView, searchTerm, deepLinkPending]);
-  // One metadata-only receipt lookup per open job folder and listing refresh.
-  // The worker writes its claims receipt before status.json and it survives both
-  // visible markers, so it is the only honest "picked up" signal — a listing can
-  // carry a moved-aside submitted.md or an orphaned status.json. A confirmed
-  // claim is sticky for this folder: a durable receipt never legitimately
-  // disappears, while any other answer is rechecked on the next refresh.
+  // Check the durable claim first; only its 404 allows a submitted.md approval
+  // probe. Both answers belong to this drive, folder and listing generation.
   useEffect(() => {
     if (!jobMarkerNeeded || !selected) return;
-    if (jobClaim?.key === jobClaimKey && (jobClaim.scope === fileScope || jobClaim.held === true))
+    if (
+      jobClaim?.key === jobClaimKey &&
+      (jobClaim.held === true ||
+        (jobClaim.scope === fileScope && jobClaim.markerPresent === jobSubmitted))
+    )
       return;
     const key = jobClaimKey;
     const scope = fileScope;
     const jobId = folder.slice('/jobs/'.length);
-    const query = new URLSearchParams({
+    const receiptQuery = new URLSearchParams({
       path: `/jobs/.agent-drive/claims/${jobId}.json`,
       metadataOnly: '1',
     });
+    const approvalQuery = new URLSearchParams({
+      path: `/jobs/${jobId}/submitted.md`,
+      metadataOnly: '1',
+      jobApproval: '1',
+    });
+    const controller = new AbortController();
     let active = true;
-    api(`drives/${selected}/get?${query}`)
-      .then(() => {
-        if (active) setJobClaim({ key, scope, held: true });
-      })
-      .catch((reason: unknown) => {
+    void (async () => {
+      try {
+        await send(`drives/${selected}/get?${receiptQuery}`, 'GET', undefined, controller.signal);
         if (active)
           setJobClaim({
             key,
             scope,
-            held: (reason as { status?: number }).status === 404 ? false : null,
+            held: true,
+            submitted: null,
+            markerPresent: jobSubmitted,
           });
-      });
+        return;
+      } catch (reason) {
+        if ((reason as { status?: number }).status !== 404) {
+          if (active)
+            setJobClaim({
+              key,
+              scope,
+              held: null,
+              submitted: null,
+              markerPresent: jobSubmitted,
+            });
+          return;
+        }
+      }
+
+      if (!jobSubmitted) {
+        if (active)
+          setJobClaim({
+            key,
+            scope,
+            held: false,
+            submitted: null,
+            markerPresent: false,
+          });
+        return;
+      }
+
+      try {
+        const approval = await send<{
+          path?: string;
+          jobApproval?: boolean;
+        }>(`drives/${selected}/get?${approvalQuery}`, 'GET', undefined, controller.signal);
+        if (active)
+          setJobClaim({
+            key,
+            scope,
+            held: false,
+            submitted:
+              approval.path === `/jobs/${jobId}/submitted.md` && approval.jobApproval === true
+                ? true
+                : null,
+            markerPresent: true,
+          });
+      } catch (reason) {
+        if (active)
+          setJobClaim({
+            key,
+            scope,
+            held: false,
+            submitted: (reason as { status?: number }).status === 404 ? false : null,
+            markerPresent: true,
+          });
+      }
+    })();
     return () => {
       active = false;
+      controller.abort();
     };
-  }, [jobMarkerNeeded, jobClaim, jobClaimKey, fileScope, selected, folder]);
+  }, [jobMarkerNeeded, jobSubmitted, jobClaim, jobClaimKey, fileScope, selected, folder]);
   // Load more: the next page of this folder, added below the rows already shown.
   async function loadMore() {
     const page = filePage;
@@ -1993,7 +2072,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         });
         await send(`drives/${driveId}/get?${query}`, 'GET');
         if (stillHere()) {
-          setJobClaim({ key: `${driveId}:${folder}`, scope: fileScope, held: true });
+          setJobClaim({
+            key: `${driveId}:${folder}`,
+            scope: fileScope,
+            held: true,
+            submitted: null,
+            markerPresent: jobSubmitted,
+          });
           showToast(`Job ${jobId} is already picked up — a worker claimed it.`, {
             tone: 'error',
           });
@@ -2024,10 +2109,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         const status = (reason as { status?: number }).status;
         showToast(
           status === 409
-            ? `Could not submit job ${jobId}: request.md changed or the job was already submitted. The list was refreshed.`
+            ? `Could not submit job ${jobId}: request.md changed or submitted.md already exists. The list was refreshed.`
             : `Could not confirm the submit for job ${jobId}. ${
                 reason instanceof Error ? reason.message : 'Try again.'
-              } The list was refreshed — a submitted.md row means it went through.`,
+              } The list was refreshed, but the submit result is still unconfirmed.`,
           { tone: 'error' },
         );
       }
@@ -3202,7 +3287,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               );
                               const meta = `${size(Number(file.ciphertext_size ?? 0))} · ${shortDate(file.created_at)} · ${author}`;
                               const jobState = inJobFolder
-                                ? jobRowState(file, folder, jobSubmitted, jobClaimed === true)
+                                ? jobRowState(
+                                    file,
+                                    folder,
+                                    jobSubmitted,
+                                    jobSubmission,
+                                    jobClaimed === true,
+                                  )
                                 : null;
                               return (
                                 <tr key={row.key} role="row" data-kind="file">
@@ -3267,9 +3358,17 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                       {jobState === 'submitted' && (
                                         <span
                                           className="muted"
-                                          title="submitted.md — submitted; Picked up appears once a worker claims it."
+                                          title="This request was explicitly submitted; Picked up appears once a worker claims it."
                                         >
                                           Submitted
+                                        </span>
+                                      )}
+                                      {jobState === 'not-submitted' && (
+                                        <span
+                                          className="muted"
+                                          title="This marker was not created by submitting request.md. Submit a draft request.md to create a runnable job."
+                                        >
+                                          Not submitted
                                         </span>
                                       )}
                                       {jobState === 'picked' && (
