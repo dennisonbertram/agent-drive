@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgentDriveApiError, StreamSizeLimitError } from './client.js';
 import type { FileEntry, RecentEvent, RecentPage, Version } from './client.js';
 import { encryptedSize } from './crypto-format.js';
+import { WorkerUnavailableError, WorkspaceCleanupError } from './job-command.js';
 import { initJobs, JOB_LIMITS, runJobs, submitJob } from './jobs.js';
 import type { JobFile, JobInput } from './jobs.js';
 
@@ -224,6 +225,10 @@ class FakeDrive {
     if (options.signal) this.signalSeen.add(`meta:${path}`);
     const file = options.versionId ? this.history.get(options.versionId) : this.live.get(path);
     if (!file || file.path !== path) throw notFound();
+    if (options.versionId) {
+      const current = this.live.get(path);
+      if (!current || current.fileId !== file.fileId) throw notFound();
+    }
     return versionObject(file);
   }
 
@@ -557,24 +562,24 @@ describe('submitJob', () => {
     expect(drive.calls).toHaveLength(0);
   });
 
-  it('reports an existing submission as queued without a duplicate rename', async () => {
+  it('reports an existing submission as present without claiming it is queued', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
     await seedSubmission(drive, 'job-2');
 
     const again = await submitJob(client, DRIVE, 'job-2');
-    expect(again.state).toBe('queued');
+    expect(again.state).toBe('present');
     expect(drive.calls.filter((call) => call.startsWith('rename:')).length).toBe(1); // only the original submission renamed
   });
 
-  it('reports a claimed job instead of queued when a status file exists', async () => {
+  it('does not treat a visible status file without a receipt as proof of pickup', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
     await seedSubmission(drive, 'job-3');
     await drive.put(DRIVE, '/jobs/job-3/status.json', textBytes('{"state":"running"}'));
 
     const result = await submitJob(client, DRIVE, 'job-3');
-    expect(result.state).toBe('claimed');
+    expect(result.state).toBe('present');
   });
 
   it('reports claimed when the receipt exists but visible status is missing', async () => {
@@ -591,12 +596,12 @@ describe('submitJob', () => {
     expect(result.state).toBe('claimed');
   });
 
-  it('propagates an API or auth failure on the status check instead of reporting queued', async () => {
+  it('propagates an API or auth failure on the receipt check instead of reporting present', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
     await seedSubmission(drive, 'job-3b');
     drive.inject.set(
-      'meta:/jobs/job-3b/status.json',
+      'meta:/jobs/.agent-drive/claims/job-3b.json',
       () => new AgentDriveApiError('permission_denied', 403, 'denied'),
     );
 
@@ -1155,6 +1160,23 @@ describe('runJobs once', () => {
     expect(invoked).toBe(0);
     expect(drive.has('/jobs/.agent-drive/claims/job-gone.json')).toBe(false);
     expect(drive.has('/jobs/job-gone/status.json')).toBe(false);
+  });
+
+  it('drops a submission when its pinned version no longer belongs to the live file', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-replaced', { viaSubmit: false });
+    drive.move('/jobs/job-replaced/submitted.md', '/jobs/job-replaced/submitted.moved.md');
+    await drive.put(DRIVE, '/jobs/job-replaced/submitted.md', textBytes('replacement'));
+
+    let invoked = 0;
+    await runJobs(client, DRIVE, async () => ((invoked += 1), []), { once: true });
+
+    expect(invoked).toBe(0);
+    expect(drive.has('/jobs/.agent-drive/claims/job-replaced.json')).toBe(false);
+    expect(
+      drive.calls.filter((call) => call === 'meta:/jobs/job-replaced/submitted.md'),
+    ).toHaveLength(1);
   });
 
   it('pins attachment versions at pickup', async () => {
@@ -1847,6 +1869,52 @@ describe('worker receipt as the authoritative record', () => {
 });
 
 describe('terminal persistence reporting', () => {
+  it('keeps visible state running when the authoritative done receipt fails, then drains peers', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-receipt-fail');
+    await seedSubmission(drive, 'job-peer');
+    let receiptPuts = 0;
+    drive.before = (call) => {
+      if (call === 'put:/jobs/.agent-drive/claims/job-receipt-fail.json') {
+        receiptPuts += 1;
+        if (receiptPuts === 2) throw outage();
+      }
+    };
+
+    await expect(runJobs(client, DRIVE, okHandler, { once: true })).rejects.toThrow(
+      /job-receipt-fail/u,
+    );
+    expect(drive.receipt('job-receipt-fail')?.state).toBe('running');
+    expect(drive.status('job-receipt-fail')?.state).toBe('running');
+    expect(drive.receipt('job-peer')?.state).toBe('done');
+    expect(drive.status('job-peer')?.state).toBe('done');
+  });
+
+  it('stops watch mode with a safe diagnostic when a terminal receipt write fails', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-watch-persist');
+    let receiptPuts = 0;
+    drive.before = (call) => {
+      if (call === 'put:/jobs/.agent-drive/claims/job-watch-persist.json') {
+        receiptPuts += 1;
+        if (receiptPuts === 2) throw outage();
+      }
+    };
+    const controller = new AbortController();
+
+    await expect(
+      runJobs(client, DRIVE, okHandler, {
+        once: false,
+        signal: controller.signal,
+        sleep: async () => {
+          controller.abort();
+        },
+      }),
+    ).rejects.toThrow(/job-watch-persist.*terminal state may not have persisted/u);
+  });
+
   it('surfaces a failed-state persistence outage instead of silently holding', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
@@ -1908,14 +1976,29 @@ describe('terminal persistence reporting', () => {
     expect(receipt?.reason).toBe('handler_error');
     expect(drive.status('job-visfail')?.state).toBe('running');
   });
+
+  it('preserves a durable done receipt and reports when the visible status write fails', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-done-status-fail');
+    let statusPuts = 0;
+    drive.before = (call) => {
+      if (call === 'put:/jobs/job-done-status-fail/status.json') {
+        statusPuts += 1;
+        if (statusPuts === 2) throw outage();
+      }
+    };
+
+    await expect(runJobs(client, DRIVE, okHandler, { once: true })).rejects.toThrow(
+      /job-done-status-fail/u,
+    );
+    expect(drive.receipt('job-done-status-fail')?.state).toBe('done');
+    expect(drive.status('job-done-status-fail')?.state).toBe('running');
+  });
 });
 
 describe('worker availability', () => {
-  const unavailable = () => {
-    const error = new Error('worker executable unavailable');
-    error.name = 'WorkerUnavailableError';
-    return error;
-  };
+  const unavailable = () => new WorkerUnavailableError('worker executable unavailable');
 
   it('does not claim any job when assertReady reports the worker unavailable', async () => {
     const drive = new FakeDrive();
@@ -1971,6 +2054,21 @@ describe('worker availability', () => {
     // The claim stays held as running; no 'failed' is persisted for a dead worker.
     expect(drive.status('job-dead')?.state).toBe('running');
     expect(drive.receipt('job-dead')?.state).toBe('running');
+  });
+
+  it('stops for an adapter cleanup subclass while preserving the held claim', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-cleanup-failed');
+    const handler = async (): Promise<JobFile[]> => {
+      throw new WorkspaceCleanupError('operator must inspect the private workspace');
+    };
+
+    await expect(runJobs(client, DRIVE, handler, { once: true })).rejects.toBeInstanceOf(
+      WorkspaceCleanupError,
+    );
+    expect(drive.status('job-cleanup-failed')?.state).toBe('running');
+    expect(drive.receipt('job-cleanup-failed')?.state).toBe('running');
   });
 
   it('stops a watching worker when the executable dies mid-job', async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AgentDriveApiError, StreamSizeLimitError } from './client.js';
+import { WorkerUnavailableError } from './job-command.js';
 import type { AgentDriveClient, FileEntry, RecentEvent, RecentPage, Version } from './client.js';
 import { plaintextSize } from './crypto-format.js';
 
@@ -47,29 +48,8 @@ export type InitJobsClient = Pick<AgentDriveClient, 'put'>;
 export type SubmitJobClient = Pick<AgentDriveClient, 'getVersionMetadata' | 'rename'>;
 export type RunJobsClient = Pick<
   AgentDriveClient,
-  'get' | 'getVersionMetadata' | 'put' | 'recent' | 'recentHead'
-> & {
-  /** `list` with the trailing signal parameter (parallel client addition). */
-  list(
-    driveId: string,
-    prefix?: string,
-    limit?: number,
-    cursor?: string,
-    filters?: Parameters<AgentDriveClient['list']>[4],
-    signal?: AbortSignal,
-  ): ReturnType<AgentDriveClient['list']>;
-  /**
-   * Newest-first durable submission events (GET /recent?jobSubmissions=1, a
-   * parallel API addition). A server that ignores the flag returns unfiltered
-   * events, so every event is re-qualified before dispatch.
-   */
-  pendingJobSubmissions(
-    driveId: string,
-    limit?: number,
-    cursor?: string,
-    signal?: AbortSignal,
-  ): Promise<RecentPage>;
-};
+  'get' | 'getVersionMetadata' | 'put' | 'list' | 'recent' | 'recentHead' | 'pendingJobSubmissions'
+>;
 
 export const JOBS_README_PATH = '/jobs/README.md';
 
@@ -120,10 +100,10 @@ export type SubmitJobResult = {
   path: string;
   /**
    * submitted — the draft was moved by this call (or its lost acknowledgement
-   * reconciled); queued — a submission already existed; claimed — a status.json
-   * already exists, so a worker owns or finished the job.
+   * reconciled); present — submitted.md exists but pickup cannot be proven;
+   * claimed — the protected worker receipt exists.
    */
-  state: 'submitted' | 'queued' | 'claimed';
+  state: 'submitted' | 'present' | 'claimed';
   versionId: string;
 };
 
@@ -174,11 +154,9 @@ worker executes it, and results land as ordinary encrypted files.
    it pins. A file that merely appears at submitted.md (a put, copy or restore)
    is never picked up, and if the pinned version is gone the job is dropped —
    the worker never substitutes a different version.
-4. A normal queued job has a pending submit event and no receipt. The worker
-   creates its receipt before status.json; a receipt without status.json is
-   still claimed. Submitting again never creates a duplicate run: submit checks
-   the receipt, so a held id reports claimed (or conflicts when no submission
-   is visible) instead of renaming the draft into a rerun.
+4. A queued job has a pending submit event and no receipt. Submitting again
+   reports present unless the protected receipt proves pickup; status.json by
+   itself does not prove a claim. A receipt without status.json is still claimed.
 
 Job ids: ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$
 Limits: request 64KiB; up to 16 inputs of 8MiB each, 32MiB total.
@@ -227,12 +205,9 @@ function isPermanentAuthorizationFailure(error: unknown) {
   return error instanceof AgentDriveApiError && (error.status === 401 || error.status === 403);
 }
 
-/**
- * The job-adapter's WorkerUnavailableError, detected by name: the class lives
- * in ./job-command.js and matching structurally survives package duplication.
- */
+/** The adapter's shared error base; subclasses such as cleanup failures are fatal too. */
 function isWorkerUnavailable(error: unknown) {
-  return error instanceof Error && error.name === 'WorkerUnavailableError';
+  return error instanceof WorkerUnavailableError;
 }
 
 /**
@@ -336,8 +311,8 @@ export async function initJobs(client: InitJobsClient, driveId: string): Promise
 
 /**
  * Submits a draft: atomically renames /jobs/<id>/request.md to submitted.md,
- * guarded by the draft's current version and an absent destination. A submission
- * that already exists is reported queued (or claimed) and never duplicated; a
+ * guarded by the draft's current version and an absent destination. An existing
+ * submission is reported present unless its protected receipt proves pickup; a
  * lost acknowledgement is reconciled only when the destination carries the
  * pinned draft version — anything else is a conflict owned by someone else.
  */
@@ -363,13 +338,13 @@ export async function submitJob(
 
   const existing = await metadata(submittedPath);
   if (existing) {
-    // The status check must answer truthfully: an API or auth failure is not a queue.
-    const status = await metadata(statusPath);
-    const receipt = status ? null : await metadata(receiptPath);
+    // status.json is visible and can be copied or forged; only the protected
+    // receipt proves that the worker claimed this id.
+    const receipt = await metadata(receiptPath);
     return {
       id,
       path: submittedPath,
-      state: status || receipt ? 'claimed' : 'queued',
+      state: receipt ? 'claimed' : 'present',
       versionId: existing.id,
     };
   }
@@ -473,6 +448,8 @@ export async function runJobs(
   const backoff = new Map<string, { at: number; delay: number; versionId: string }>();
   /** First discovery/acquisition error; once mode reports it after the drain. */
   let firstError: unknown;
+  /** A terminal receipt could not be saved; watch mode must stop with its diagnosis. */
+  let terminalPersistenceFailure: Error | undefined;
 
   const enqueue = (submission: { id: string; versionId: string }) => {
     const { id, versionId } = submission;
@@ -508,6 +485,12 @@ export async function runJobs(
       `Job "${id}": its terminal state may not have persisted; check status.json ` +
         'and the claims receipt before any manual recovery.',
     );
+
+  const recordPersistenceError = (id: string) => {
+    const error = persistenceError(id);
+    terminalPersistenceFailure ??= error;
+    recordError(error);
+  };
 
   const nap = async (ms: number) => {
     if (!signal) return sleep(ms);
@@ -545,24 +528,9 @@ export async function runJobs(
     const inputsPrefix = `${dir}/inputs/`;
     const receiptPath = `${CLAIM_PREFIX}${id}.json`;
 
-    // Liveness check: a submission deleted before pickup is dropped; anything
-    // else is a recoverable discovery error.
-    try {
-      await client.getVersionMetadata(driveId, submittedPath, {
-        ...(signal ? { signal } : {}),
-      });
-    } catch (error) {
-      if (isNotFound(error)) {
-        backoff.delete(id);
-        return;
-      }
-      if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
-      throw error;
-    }
-
-    // The run executes the exact request version the submit event pinned. If
-    // that version is missing or no longer applies, the job is dropped — a
-    // different version is never substituted.
+    // This pinned metadata query also proves that the current live file at this
+    // path still owns the submitted version. A missing, moved, trashed, or
+    // replaced file is dropped without an unpinned metadata request.
     let requestMeta: Version;
     try {
       requestMeta = await client.getVersionMetadata(driveId, submittedPath, {
@@ -665,21 +633,26 @@ export async function runJobs(
         finishedAt,
         ...(state === 'done' ? { outputs: committed.map((output) => output.name) } : { reason }),
       };
-      let persisted = true;
-      for (const [path, body, guard] of [
-        [receiptPath, receiptBody, receipt.id],
-        [statusPath, statusBody, claim.id],
-      ] as const) {
-        try {
-          await client.put(driveId, path, utf8.encode(`${JSON.stringify(body)}\n`), {
-            ifVersionId: guard,
-            ...(signal ? { signal } : {}),
-          });
-        } catch {
-          persisted = false;
-        }
+      try {
+        await client.put(driveId, receiptPath, utf8.encode(`${JSON.stringify(receiptBody)}\n`), {
+          ifVersionId: receipt.id,
+          ...(signal ? { signal } : {}),
+        });
+      } catch {
+        // Never publish a terminal visible state without its authoritative receipt.
+        recordPersistenceError(id);
+        return;
       }
-      if (!persisted) recordError(persistenceError(id));
+      try {
+        await client.put(driveId, statusPath, utf8.encode(`${JSON.stringify(statusBody)}\n`), {
+          ifVersionId: claim.id,
+          ...(signal ? { signal } : {}),
+        });
+      } catch {
+        // The receipt is already durable. Preserve it and report the visible
+        // status discrepancy rather than trying to roll back the receipt.
+        recordPersistenceError(id);
+      }
     };
 
     type Stage = 'request' | 'inputs' | 'handler' | 'outputs' | 'finalize';
@@ -839,9 +812,15 @@ export async function runJobs(
       } catch (error) {
         // Acquisition errors are remembered for the once-mode report; a single
         // bad job — buggy or not — never kills the worker or starves the next.
-        if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
+        if (
+          isWorkerUnavailable(error) ||
+          isPermanentAuthorizationFailure(error) ||
+          error === terminalPersistenceFailure
+        )
+          throw error;
         recordError(error);
       }
+      if (!options.once && terminalPersistenceFailure) throw terminalPersistenceFailure;
     }
   };
 
@@ -919,7 +898,12 @@ export async function runJobs(
       pollMs = idle ? Math.min(pollMs * 2, pollMaxMs) : basePollMs;
     } catch (error) {
       if (signal?.aborted) return;
-      if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
+      if (
+        isWorkerUnavailable(error) ||
+        isPermanentAuthorizationFailure(error) ||
+        error === terminalPersistenceFailure
+      )
+        throw error;
       // Timeout or transport outage: pace, then reconcile from a fresh head
       // captured before the recovery scan plus the authoritative cursor.
       await nap(retryMs);
@@ -928,7 +912,12 @@ export async function runJobs(
         await reconcile();
       } catch (error) {
         if (signal?.aborted) return;
-        if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
+        if (
+          isWorkerUnavailable(error) ||
+          isPermanentAuthorizationFailure(error) ||
+          error === terminalPersistenceFailure
+        )
+          throw error;
         // Still down; the outer loop keeps the paced cadence.
       }
     }
