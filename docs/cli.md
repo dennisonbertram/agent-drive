@@ -17,6 +17,8 @@ Run it without installing by putting `npx -y @dennisonbertram/agent-drive@latest
 npx -y @dennisonbertram/agent-drive@latest whoami
 ```
 
+The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS requires the separate signed Agent Drive app, which is not yet available as a public binary. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it. Until a notarized zip is available from GitHub Releases, use the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare it from source; the CLI does not install it.
+
 The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on `login`, or with `AGENT_DRIVE_API_URL`.
 
 ### Config file
@@ -51,7 +53,7 @@ The CLI looks for a drive key in this order:
 
 ### The `--drive` default
 
-Every command that works on a drive takes `--drive ID`. If you leave it out, the CLI uses the only drive key saved for the current API origin. With none or several, it exits with code 1 and lists the configured IDs. `backup` and `check` follow the same rule; `check` picks the only usable drive.
+Drive commands accept an optional `--drive ID`. If you leave it out, the CLI uses the only drive key saved for the current API origin. With none or several, it exits with code 1 and lists the configured IDs; it does not guess between drives. `backup` and `check` follow the same rule; `check` picks the only usable drive.
 
 ## Command index
 
@@ -66,6 +68,7 @@ Every command that works on a drive takes `--drive ID`. If you leave it out, the
 | `key revoke`          | Revoke an API key.                                           | [Connect an agent](connect-an-agent.md)                      |
 | `put`                 | Upload and encrypt a file.                                   | [Files, versions and sync](files-and-sync.md)                |
 | `get`                 | Download and decrypt a file.                                 | [Files, versions and sync](files-and-sync.md)                |
+| `mount`               | Mount a drive on Linux or macOS.                             | [Mount a drive](#mount-a-drive)                              |
 | `ls`                  | List files or folders.                                       | [Files, versions and sync](files-and-sync.md)                |
 | `mv`                  | Move a file.                                                 | [Files, versions and sync](files-and-sync.md)                |
 | `cp`                  | Copy a file or version.                                      | [Files, versions and sync](files-and-sync.md)                |
@@ -92,6 +95,96 @@ Every command that works on a drive takes `--drive ID`. If you leave it out, the
 | `mcp`                 | Run the MCP server on stdio.                                 | [MCP server and tools](mcp-tools.md)                         |
 
 `agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list. `agent-drive --version` and `agent-drive version` print the CLI version.
+
+## Mount a drive
+
+```sh
+agent-drive mount MOUNTPOINT [--drive ID] [--read-only]
+```
+
+For example:
+
+```sh
+agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
+# Force browse-only access even when the key has write scope.
+agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID --read-only
+```
+
+You can omit `--drive` only when exactly one drive key is saved for the selected API origin. If
+there are no saved keys or the choice is ambiguous, the CLI exits with an error; pass the intended
+drive ID explicitly.
+
+The API key needs read access to the selected drive. The CLI checks its granted scopes before
+starting the mount. A key with `write` scope is writable by
+default, subject to its `writePaths`; without `write`, the mount is read-only. `--read-only` always
+forces read-only mode. File creation, edits, and file renames require `write` and an allowed path.
+Deleting files, removing directories, or replacing an existing file during rename also requires
+`delete`. Directory creation requires `write`. Directory rename is not supported. On Linux,
+`rmdir` removes only an empty directory; Finder's macOS directory deletion walks children and is
+not an atomic subtree operation.
+
+### Linux requirements and unmounting
+
+Linux x64 and arm64 are supported when the installed package contains the matching native helper.
+The system needs working FUSE support, access to `/dev/fuse`, and a usable `fusermount3` or
+compatible `fusermount` helper when the process cannot mount directly. The mount is for the current
+user; it does not enable `allow_other`.
+
+The mountpoint must be an empty directory owned by the current user and must not be a symlink. If
+the final directory does not exist, the CLI creates it with mode `0700` when its parent exists. It
+removes that directory on exit only if it created it; an existing mountpoint is left in place.
+
+The command stays in the foreground. Press Ctrl+C once and wait for the CLI to exit; it stops the
+helper and flushes dirty staged files during shutdown. If shutdown waits for open handles, close
+files using the mount and wait for them to flush. A second Ctrl+C forces the CLI to exit and can
+interrupt pending writes. If the mount remains attached after the CLI has stopped, unmount it with:
+
+```sh
+fusermount3 -u "$HOME/AgentDrive"
+```
+
+Use `fusermount -u` if that is the helper installed by your distribution. Do not force-kill the CLI
+while a save is in progress. If a process or machine stops unexpectedly, the next mount attempts to
+recover any pending local edits.
+
+### macOS requirements and unmounting
+
+Install and run the signed `Agent Drive.app` on the same Mac as the CLI. The CLI launches the Finder
+helper from `/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder`; if you keep the app in
+another location, set `AGENT_DRIVE_FINDER_HELPER` to its absolute executable path. See the
+[macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md) to prepare the companion app. If the CLI reports
+`file-provider-domain-disabled-in-system-settings [bootstrap:5]`, enable the Agent Drive File
+Provider extension in System Settings and run the mount command again.
+
+Use an absolute mountpoint path, such as `"$HOME/AgentDrive"`. Finder chooses the actual provider
+location. When the requested path differs and is free, the CLI creates a symlink there and removes
+only that link when the command exits. Press Ctrl+C once and wait for it to disconnect the Finder
+domain and return.
+
+### Reads, saves, and recovery
+
+Reads use authenticated, version-pinned ciphertext ranges: opening an existing file does not
+download its entire body, and an already-open file continues to read the version it opened even if
+another client saves a newer version. Existing ADRV v1 files remain readable without re-uploading.
+
+Edits are first journaled locally as plaintext, then uploaded as a new encrypted version guarded by
+the version observed when the file was opened. Local journal directories use mode `0700` and staged
+files use mode `0600`. By default they live under
+`~/.config/agent-drive/mount-writeback/`; if `AGENT_DRIVE_CONFIG` points elsewhere, the journal is
+created next to that config file. Protect these files with the same care as other local plaintext.
+
+Each local write is synced to the journal before the filesystem acknowledges it. `fsync` waits for
+the remote upload and version-checked commit; a successful `fsync` means the server acknowledged
+that version. Closing a dirty file also flushes it. If a save conflicts, the journal copy is kept;
+macOS errors include its recovery path, and the next mount retries pending recovery. On Linux, an
+application may show only `ESTALE` or `EIO`; while mounted, the staged copy remains visible at its
+drive path, so copy it to an ordinary local directory before resolving the conflict. Do not remove
+the journal while recovery is pending.
+
+An `EIO` from unlink can mean the server processed the delete but its reply did not reach the CLI.
+The CLI does not retry an unlink automatically. Refresh the directory before retrying, then check
+whether the file is still present. `ESTALE` means the guarded version changed; refresh and review
+the current file before making another change.
 
 ## Output and exit codes
 

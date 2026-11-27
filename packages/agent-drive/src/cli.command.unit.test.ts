@@ -444,6 +444,282 @@ describe('binary stdin size validation', () => {
   });
 });
 
+describe('mount command validation', () => {
+  it('requires a nonempty mountpoint before connecting to the API', async () => {
+    const result = await cli(['mount'], one);
+    expect(result.exitCode).toBe(1);
+    expect(result.err).toContain('Usage: mount MOUNTPOINT [--drive ID] [--read-only]');
+    expect(result.calls).toEqual([]);
+  });
+
+  it.each([
+    {
+      label: 'write-only key',
+      scopes: ['write'],
+      driveIds: [A],
+      message: 'read access to the selected drive',
+    },
+    {
+      label: 'key scoped to another drive',
+      scopes: ['read', 'write'],
+      driveIds: [B],
+      message: 'not scoped to the selected drive',
+    },
+  ])('rejects a mount before startup for a $label', async ({ scopes, driveIds, message }) => {
+    const runLinuxMount = vi.fn(async () => {});
+    const createMountBridge = vi.fn(async () => ({
+      request: vi.fn(async () => ({})),
+      close: vi.fn(async () => {}),
+    }));
+    const startMacMount = vi.fn(async () => ({
+      close: vi.fn(async () => {}),
+      waitForExit: vi.fn(async () => ({ code: 0, signal: null })),
+    }));
+    vi.doMock('./mount.js', () => ({
+      MOUNT_MAX_READ_BYTES: 1024 * 1024,
+      MOUNT_MAX_WRITE_BYTES: 1024 * 1024,
+      createMountBridge,
+      resolveMountHelper: () => '/synthetic/agent-drive-mount',
+      runLinuxMount,
+    }));
+    vi.doMock('./mount-mac.js', () => ({ startMacMount }));
+
+    const result = await cli(['mount', '/mnt/drive', '--drive', A], one, (path) =>
+      path === 'whoami'
+        ? { accountId: 'account', agentId: 'agent', keyId: 'key', scopes, driveIds }
+        : {},
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.err).toContain(message);
+    expect(result.err).toContain('Use a key with read access to the selected drive.');
+    expect(result.paths).toContain('whoami');
+    expect(runLinuxMount).not.toHaveBeenCalled();
+    expect(createMountBridge).not.toHaveBeenCalled();
+    expect(startMacMount).not.toHaveBeenCalled();
+  });
+
+  it('accepts the documented null drive list for a management key that also has read access', async () => {
+    const runLinuxMount = vi.fn(async () => {});
+    const createMountBridge = vi.fn(async () => ({
+      request: vi.fn(async () => ({})),
+      close: vi.fn(async () => {}),
+    }));
+    vi.doMock('./mount.js', () => ({
+      MOUNT_MAX_READ_BYTES: 1024 * 1024,
+      MOUNT_MAX_WRITE_BYTES: 1024 * 1024,
+      createMountBridge,
+      resolveMountHelper: () => '/synthetic/agent-drive-mount',
+      runLinuxMount,
+    }));
+    vi.doMock('./mount-mac.js', () => ({
+      startMacMount: vi.fn(async () => ({
+        close: vi.fn(async () => {}),
+        waitForExit: vi.fn(async () => ({ code: 0, signal: null })),
+      })),
+    }));
+
+    const result = await cli(['mount', '/mnt/drive', '--drive', A], one, (path) =>
+      path === 'whoami'
+        ? {
+            accountId: 'account',
+            agentId: 'agent',
+            keyId: 'management-key',
+            scopes: ['read', 'manage'],
+            driveIds: null,
+          }
+        : {},
+    );
+
+    expect(result.exitCode).toBeUndefined();
+    if (process.platform === 'darwin') expect(createMountBridge).toHaveBeenCalledOnce();
+    else expect(runLinuxMount).toHaveBeenCalledOnce();
+  });
+
+  it('does not treat a null drive list as global for a non-management key', async () => {
+    const runLinuxMount = vi.fn(async () => {});
+    const createMountBridge = vi.fn(async () => ({
+      request: vi.fn(async () => ({})),
+      close: vi.fn(async () => {}),
+    }));
+    vi.doMock('./mount.js', () => ({
+      MOUNT_MAX_READ_BYTES: 1024 * 1024,
+      MOUNT_MAX_WRITE_BYTES: 1024 * 1024,
+      createMountBridge,
+      resolveMountHelper: () => '/synthetic/agent-drive-mount',
+      runLinuxMount,
+    }));
+    vi.doMock('./mount-mac.js', () => ({
+      startMacMount: vi.fn(async () => ({
+        close: vi.fn(async () => {}),
+        waitForExit: vi.fn(async () => ({ code: 0, signal: null })),
+      })),
+    }));
+
+    const result = await cli(['mount', '/mnt/drive', '--drive', A], one, (path) =>
+      path === 'whoami'
+        ? {
+            accountId: 'account',
+            agentId: 'agent',
+            keyId: 'read-key',
+            scopes: ['read'],
+            driveIds: null,
+          }
+        : {},
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.err).toContain('mount drive permissions returned by the API are invalid');
+    expect(runLinuxMount).not.toHaveBeenCalled();
+    expect(createMountBridge).not.toHaveBeenCalled();
+  });
+
+  it('uses current API scopes for writable mode and lets --read-only force browse-only', async () => {
+    const invocations: unknown[][] = [];
+    const runLinuxMount = vi.fn(async (...args: unknown[]) => {
+      invocations.push(args);
+    });
+    const bridgeOptions: unknown[] = [];
+    const createMountBridge = vi.fn(
+      async (_client: unknown, _driveId: string, options: unknown) => {
+        bridgeOptions.push(options);
+        return { request: vi.fn(async () => ({})), close: vi.fn(async () => {}) };
+      },
+    );
+    vi.doMock('./mount.js', () => ({
+      MOUNT_MAX_READ_BYTES: 1024 * 1024,
+      MOUNT_MAX_WRITE_BYTES: 1024 * 1024,
+      createMountBridge,
+      resolveMountHelper: () => '/synthetic/agent-drive-mount',
+      runLinuxMount,
+    }));
+    vi.doMock('./mount-mac.js', () => ({
+      startMacMount: vi.fn(async () => ({
+        close: vi.fn(async () => {}),
+        waitForExit: vi.fn(async () => ({ code: 0, signal: null })),
+      })),
+    }));
+    const respond =
+      (scopes: string[], writePaths: string[] = []) =>
+      (path: string) =>
+        path === 'whoami'
+          ? {
+              accountId: 'account',
+              agentId: 'agent',
+              keyId: 'key',
+              scopes,
+              writePaths,
+              driveIds: [A],
+            }
+          : {};
+    try {
+      const writable = await cli(
+        ['mount', '/mnt/drive', '--drive', A],
+        one,
+        respond(['read', 'write'], ['/docs']),
+      );
+      const restricted = await cli(
+        ['mount', '/mnt/drive', '--drive', A, '--read-only'],
+        one,
+        respond(['read', 'write']),
+      );
+      const readKey = await cli(['mount', '/mnt/drive', '--drive', A], one, respond(['read']));
+
+      expect(writable.err).toBe('');
+      expect(restricted.err).toBe('');
+      expect(readKey.err).toBe('');
+      expect(writable.paths.filter((path) => path === 'whoami')).toHaveLength(1);
+      expect(restricted.paths.filter((path) => path === 'whoami')).toHaveLength(1);
+      expect(readKey.paths.filter((path) => path === 'whoami')).toHaveLength(1);
+      const options =
+        process.platform === 'darwin' ? bridgeOptions : invocations.map((call) => call[3]);
+      const readOnlyOps = ['capabilities', 'stat', 'list', 'read'];
+      const sharedWriteOps = ['openWrite', 'write', 'truncate', 'readStaged', 'mkdir', 'rename'];
+      const writableOps = [
+        ...readOnlyOps,
+        ...sharedWriteOps,
+        ...(process.platform === 'darwin'
+          ? ['finalizeWrite', 'flushStatus', 'closeWrite']
+          : ['flush', 'release']),
+      ];
+      expect(options).toEqual([
+        expect.objectContaining({
+          ...(process.platform === 'darwin' ? {} : { readWrite: true }),
+          capabilities: expect.objectContaining({
+            readOnly: false,
+            write: true,
+            writePaths: ['/docs'],
+            ops: writableOps,
+          }),
+        }),
+        expect.objectContaining({
+          ...(process.platform === 'darwin' ? {} : { readWrite: false }),
+          capabilities: expect.objectContaining({ readOnly: true, write: false, ops: readOnlyOps }),
+        }),
+        expect.objectContaining({
+          ...(process.platform === 'darwin' ? {} : { readWrite: false }),
+          capabilities: expect.objectContaining({ readOnly: true, write: false, ops: readOnlyOps }),
+        }),
+      ]);
+    } finally {
+      vi.doUnmock('./mount.js');
+      vi.doUnmock('./mount-mac.js');
+      vi.resetModules();
+    }
+  });
+
+  it('rejects --read-only outside mount before connecting', async () => {
+    const result = await cli(['ls', '--read-only'], one);
+    expect(result.err).toContain('--read-only is only supported by `mount` and `grant`');
+    expect(result.calls).toEqual([]);
+  });
+});
+
+describe('grant command read-only permission', () => {
+  it('preserves read-only offers while rejecting the flag on unrelated commands', async () => {
+    const devicePair = await webcrypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      ['deriveBits'],
+    );
+    const publicKey = Buffer.from(
+      await webcrypto.subtle.exportKey('raw', devicePair.publicKey),
+    ).toString('base64url');
+    const code = 'ABCD-EFGH';
+    const granted = await cli(['grant', code, '--read-only'], one, (path) => {
+      if (path === 'whoami')
+        return {
+          accountId: 'account',
+          agentId: 'agent',
+          keyId: 'key',
+          scopes: ['read', 'write'],
+          writePaths: [],
+          driveIds: [A],
+        };
+      if (path === `device/${code}`)
+        return {
+          user_code: code,
+          client_name: 'synthetic-agent',
+          machine: null,
+          created_at: 'now',
+          expires_at: 'later',
+          public_key: publicKey,
+        };
+      if (path === `device/${code}/grant`) return { status: 'offered', revision: 1 };
+      return {};
+    });
+
+    expect(granted.exitCode).toBeUndefined();
+    expect(granted.err).toBe('');
+    const request = granted.calls.find((call) => call.path === `device/${code}/grant`);
+    expect(request).toBeDefined();
+    expect(JSON.parse(request!.body!).scopes).toEqual(['read']);
+    const unrelated = await cli(['ls', '--read-only'], one);
+    expect(unrelated.err).toContain('--read-only is only supported by `mount` and `grant`');
+    expect(unrelated.calls).toEqual([]);
+  });
+});
+
 describe('pipe command guard validation', () => {
   it('rejects --token-stdin outside login before connecting or consuming put stdin', async () => {
     const input = Readable.from([Buffer.from('synthetic-api-token')]);
@@ -999,6 +1275,9 @@ describe('CLI startup import isolation', () => {
     vi.doMock('./capture.js', () => {
       throw new Error('capture module was loaded outside the capture command');
     });
+    vi.doMock('./mount.js', () => {
+      throw new Error('mount module was loaded outside the mount command');
+    });
 
     try {
       const version = await cli(['--version'], one);
@@ -1021,6 +1300,7 @@ describe('CLI startup import isolation', () => {
     } finally {
       vi.doUnmock('./mcp.js');
       vi.doUnmock('./capture.js');
+      vi.doUnmock('./mount.js');
       vi.resetModules();
     }
   });

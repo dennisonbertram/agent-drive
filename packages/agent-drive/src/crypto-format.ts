@@ -4,6 +4,19 @@ const TAG_SIZE = 16;
 const MAGIC = new Uint8Array([65, 68, 82, 86, 1]);
 const MAX_CHUNKS = 0x1_0000_0000;
 
+export interface AdrV1Header {
+  readonly plaintextBytes: number;
+  readonly ciphertextBytes: number;
+  readonly frameCount: number;
+}
+
+export interface CiphertextFrameRange {
+  /** Absolute offset into the ciphertext, including the ADRV1 header. */
+  readonly offset: number;
+  /** Number of contiguous ciphertext bytes covering the requested frames. */
+  readonly length: number;
+}
+
 export class CryptoStreamSourceError extends Error {
   constructor(readonly sourceError: unknown) {
     super('The ciphertext source failed.');
@@ -206,6 +219,123 @@ function parseHeader(header: Uint8Array) {
   return { size, ciphertextBytes };
 }
 
+/** Validate an ADRv1 header, optionally against the server-declared ciphertext length. */
+export function inspectHeader(header: Uint8Array, expectedCiphertextBytes?: number): AdrV1Header {
+  const { size, ciphertextBytes } = parseHeader(header);
+  if (
+    expectedCiphertextBytes !== undefined &&
+    (!Number.isSafeInteger(expectedCiphertextBytes) ||
+      expectedCiphertextBytes < HEADER_SIZE + TAG_SIZE ||
+      expectedCiphertextBytes !== ciphertextBytes)
+  )
+    throw new Error('Incorrect ciphertext length.');
+  return {
+    plaintextBytes: size,
+    ciphertextBytes,
+    frameCount: countChunks(size),
+  };
+}
+
+/** Compute the exact contiguous ciphertext range for one or more ADRv1 frames. */
+export function ciphertextFrameRange(
+  header: AdrV1Header,
+  firstFrameIndex: number,
+  frameCount: number,
+): CiphertextFrameRange {
+  if (
+    !Number.isSafeInteger(header.plaintextBytes) ||
+    header.plaintextBytes < 0 ||
+    !Number.isSafeInteger(header.ciphertextBytes) ||
+    header.ciphertextBytes !== encryptedSize(header.plaintextBytes) ||
+    header.frameCount !== countChunks(header.plaintextBytes) ||
+    !Number.isSafeInteger(firstFrameIndex) ||
+    !Number.isSafeInteger(frameCount) ||
+    firstFrameIndex < 0 ||
+    frameCount < 1 ||
+    firstFrameIndex + frameCount > header.frameCount
+  )
+    throw new Error('Invalid ciphertext frame range.');
+
+  const offset = HEADER_SIZE + firstFrameIndex * (CHUNK_SIZE + TAG_SIZE);
+  const lastExclusiveIndex = firstFrameIndex + frameCount;
+  const end =
+    HEADER_SIZE +
+    Math.min(lastExclusiveIndex * CHUNK_SIZE, header.plaintextBytes) +
+    lastExclusiveIndex * TAG_SIZE;
+  const length = end - offset;
+  if (
+    !Number.isSafeInteger(offset) ||
+    !Number.isSafeInteger(length) ||
+    length < TAG_SIZE ||
+    offset + length > header.ciphertextBytes
+  )
+    throw new Error('Invalid ciphertext frame range.');
+  return { offset, length };
+}
+
+async function readAndDecryptFrame(
+  reader: FragmentReader,
+  key: CryptoKey,
+  header: Uint8Array,
+  plaintextBytes: number,
+  frameIndex: number,
+  frameCount: number,
+) {
+  const framePlaintextBytes = Math.min(CHUNK_SIZE, plaintextBytes - frameIndex * CHUNK_SIZE);
+  const encrypted = await reader.read(framePlaintextBytes + TAG_SIZE);
+  const plaintext = new Uint8Array(
+    await crypto.subtle.decrypt(
+      chunkParameters(header, frameIndex, frameIndex === frameCount - 1),
+      key,
+      encrypted,
+    ),
+  );
+  return { plaintext, ciphertextBytes: encrypted.length };
+}
+
+/**
+ * Decode a contiguous selection of ADRv1 frames. The source must contain exactly
+ * the selected ciphertext bytes; each frame is yielded only after GCM verifies it.
+ */
+export async function* openFrameRange(
+  source: AsyncIterable<Uint8Array>,
+  key: CryptoKey,
+  header: Uint8Array,
+  firstFrameIndex: number,
+  frameCount: number,
+  expectedCiphertextBytes?: number,
+): AsyncGenerator<Uint8Array> {
+  const parsed = inspectHeader(header, expectedCiphertextBytes);
+  const range = ciphertextFrameRange(parsed, firstFrameIndex, frameCount);
+  const ownedHeader = owned(header);
+  const reader = new FragmentReader(source, true);
+  let failed = false;
+  try {
+    let consumed = 0;
+    for (let relativeIndex = 0; relativeIndex < frameCount; relativeIndex++) {
+      const index = firstFrameIndex + relativeIndex;
+      const frame = await readAndDecryptFrame(
+        reader,
+        key,
+        ownedHeader,
+        parsed.plaintextBytes,
+        index,
+        parsed.frameCount,
+      );
+      consumed += frame.ciphertextBytes;
+      yield frame.plaintext;
+    }
+    if (consumed !== range.length) throw new Error('Incorrect ciphertext length.');
+    await reader.expectEnd();
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    if (failed) await reader.cancel().catch(() => undefined);
+    else await reader.cancel();
+  }
+}
+
 /** Decode ADRv1 incrementally, yielding only complete authenticated chunks. */
 export async function* openStream(
   source: AsyncIterable<Uint8Array>,
@@ -216,30 +346,21 @@ export async function* openStream(
   let failed = false;
   try {
     const header = await reader.read(HEADER_SIZE);
-    const { size, ciphertextBytes } = parseHeader(header);
-    if (
-      expectedCiphertextBytes !== undefined &&
-      (!Number.isSafeInteger(expectedCiphertextBytes) ||
-        expectedCiphertextBytes < HEADER_SIZE + TAG_SIZE ||
-        expectedCiphertextBytes !== ciphertextBytes)
-    )
-      throw new Error('Incorrect ciphertext length.');
-    const chunks = countChunks(size);
+    const parsed = inspectHeader(header, expectedCiphertextBytes);
     let consumed = HEADER_SIZE;
-    for (let index = 0; index < chunks; index++) {
-      const length = Math.min(CHUNK_SIZE, size - index * CHUNK_SIZE);
-      const encrypted = await reader.read(length + TAG_SIZE);
-      consumed += encrypted.length;
-      const plaintext = new Uint8Array(
-        await crypto.subtle.decrypt(
-          chunkParameters(header, index, index === chunks - 1),
-          key,
-          encrypted,
-        ),
+    for (let index = 0; index < parsed.frameCount; index++) {
+      const frame = await readAndDecryptFrame(
+        reader,
+        key,
+        header,
+        parsed.plaintextBytes,
+        index,
+        parsed.frameCount,
       );
-      yield plaintext;
+      consumed += frame.ciphertextBytes;
+      yield frame.plaintext;
     }
-    if (consumed !== ciphertextBytes) throw new Error('Incorrect ciphertext length.');
+    if (consumed !== parsed.ciphertextBytes) throw new Error('Incorrect ciphertext length.');
     await reader.expectEnd();
   } catch (error) {
     failed = true;

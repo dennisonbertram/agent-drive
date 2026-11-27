@@ -256,23 +256,58 @@ current value.
 The Vercel project is connected to GitHub with `prod` as its production branch.
 `apps/web/vercel.json` turns Git deploys off for every branch except `prod`
 (`"deploymentEnabled": { "**": false, "prod": true }`), so merges to `main`, task branches and
-pull requests never deploy. Pushing to `prod` builds and deploys to production. To release, wait
-for CI to pass on `main`, then fast-forward `prod`:
+pull requests never deploy. Pushing to `prod` builds and deploys to production. After `main` CI
+passes, pin its SHA and use that clean checkout for the manifest, preflight and release. The
+production build verifies the exact `@dennisonbertram/agent-drive` version against npm's SHA-512
+integrity, package manifest and Linux helpers; it fails closed without an older-version fallback.
 
 ```sh
-git push origin origin/main:prod
+unset RELEASE_SHA
+git fetch origin &&
+test -z "$(git status --porcelain)" &&
+RELEASE_SHA=$(git rev-parse origin/main) &&
+git switch --detach "$RELEASE_SHA" &&
+test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 ```
 
-That path does not run the staged smoke checks. When a release needs them, use the repository's
-release entry point instead (after linking the project and authenticating an approved Vercel CLI):
+If `packages/agent-drive/package.json` changed version from `origin/prod`, get npm release approval,
+then run this in the same shell and wait for the `release-cli.yml` workflow to succeed. Skip the tag
+when the version is unchanged:
 
 ```sh
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+CLI_VERSION=$(node -p "require('./packages/agent-drive/package.json').version") &&
+git tag "cli-v${CLI_VERSION}" "$RELEASE_SHA" &&
+git push origin "cli-v${CLI_VERSION}"
+```
+
+Choose one production path below. Each command stops on a failed SHA or clean-checkout guard, or
+if the exact npm artifact preflight fails. The preflight uses the verified CLI version and writes
+the tarball under ignored `apps/web/public/cli/`.
+
+Direct fast-forward (does not run staged smoke checks):
+
+```sh
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs &&
+git push origin "$RELEASE_SHA:refs/heads/prod"
+```
+
+Staged release (after linking the project and authenticating an approved Vercel CLI):
+
+```sh
+test -n "$RELEASE_SHA" && test "$(git rev-parse HEAD)" = "$RELEASE_SHA" &&
+test -z "$(git status --porcelain)" &&
+VERCEL_ENV=production node apps/web/scripts/prepare-cli-tarball.mjs &&
 pnpm release --production-url https://YOUR-PRODUCTION-ORIGIN
 ```
 
 It runs `pnpm verify`, creates a staged production build using `vercel deploy --prod --skip-domain`,
 runs deployed smoke acceptance, promotes only on success, then repeats smoke on the production
-origin. No GitHub Actions are invoked.
+origin. The Vercel production build repeats the exact npm artifact check, so the preflight does not
+replace the build-time gate. No GitHub Actions are invoked.
 The release checks must run on a workstation with local test services and a Playwright browser.
 They are interactive: complete signup with a NEW disposable identity when the browser opens.
 The smoke requires an observed completed Clerk signup, not just a successful HTML response.
@@ -282,6 +317,8 @@ Deployment protection that requires interactive Vercel login prevents CLI smoke 
 blocks promotion; arrange approved candidate access rather than disabling organization-wide
 protection or claiming the test passed. Production-environment staging may use production resources:
 only synthetic payloads and a disposable isolated workspace are created.
+If a preflight or build fails, do not retry around the gate; the existing healthy production
+deployment remains live. A staged release promotes only after its candidate smoke succeeds.
 
 To run smoke independently against a deployed preview:
 

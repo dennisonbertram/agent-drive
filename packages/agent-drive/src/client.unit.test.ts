@@ -343,6 +343,152 @@ describe('AgentDriveClient streaming transfers', () => {
     expect(String(calls[2]?.url)).toContain('/commit');
   });
 
+  it('persists upload identity before commit and can replay the same intent after a lost acknowledgement', async () => {
+    const events: string[] = [];
+    const commitBodies: unknown[] = [];
+    let commits = 0;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/put')) {
+        return new Response(
+          JSON.stringify({
+            intentId: 'stable-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: 52,
+          }),
+          { status: 201 },
+        );
+      }
+      if (url === 'http://localhost:9000/u') {
+        const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
+        while (!(await reader.read()).done) {}
+        events.push('storage-uploaded');
+        return new Response('', { status: 200 });
+      }
+      commitBodies.push(JSON.parse(String(init?.body)));
+      commits += 1;
+      events.push(`commit-${commits}`);
+      if (commits === 1) return new Response('lost acknowledgement', { status: 502 });
+      return new Response(JSON.stringify({ version }), { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const source = (async function* () {
+      yield new TextEncoder().encode('stream data');
+    })();
+
+    await expect(
+      client.putStream('d', '/x', source, 11, {
+        onIntent: async (intentId) => {
+          expect(intentId).toBe('stable-intent');
+          events.push('intent-durable');
+        },
+        onUploadComplete: async (intentId) => {
+          expect(intentId).toBe('stable-intent');
+          events.push('upload-state-durable');
+        },
+      }),
+    ).rejects.toMatchObject({ status: 502 });
+
+    expect(events).toEqual([
+      'intent-durable',
+      'storage-uploaded',
+      'upload-state-durable',
+      'commit-1',
+    ]);
+    await expect(client.replayCommit('d', 'stable-intent')).resolves.toEqual(version);
+    expect(commitBodies).toEqual([{ intentId: 'stable-intent' }, { intentId: 'stable-intent' }]);
+  });
+
+  it('sends trashed-create only as an explicit create-only null-version guard', async () => {
+    let putBody: Record<string, unknown> | undefined;
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/put')) {
+        putBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(
+          JSON.stringify({
+            intentId: 'create-intent',
+            uploadUrl: 'http://localhost:9000/u',
+            ciphertextSize: putBody.ciphertextSize,
+          }),
+          { status: 201 },
+        );
+      }
+      if (url === 'http://localhost:9000/u') {
+        const reader = (init?.body as ReadableStream<Uint8Array>).getReader();
+        while (!(await reader.read()).done) {}
+        return new Response('', { status: 200 });
+      }
+      return new Response(JSON.stringify({ version }), { status: 200 });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      driveKey,
+      fetch: fetcher,
+    });
+    const source = async function* () {
+      yield new TextEncoder().encode('new');
+    };
+
+    await client.putStream('d', '/new.txt', source(), 3, {
+      mode: 'create',
+      allowTrashedCreate: true,
+    });
+
+    expect(putBody).toMatchObject({
+      path: '/new.txt',
+      ifVersionId: null,
+      allowTrashedCreate: true,
+    });
+    await expect(
+      client.putStream('d', '/new.txt', source(), 3, {
+        mode: 'overwrite',
+        allowTrashedCreate: true,
+      }),
+    ).rejects.toThrow('allowTrashedCreate requires create-only mode.');
+  });
+
+  it('derives an opaque writeback scope from API base, drive and credential identity', () => {
+    const makeClient = (apiUrl: string, apiKey: string) =>
+      new AgentDriveClient({ apiUrl, apiKey, driveKey });
+    const first = makeClient('http://localhost:3000', 'first-secret-token');
+
+    expect(first.writebackScopeId('d')).toMatch(/^[a-f0-9]{64}$/);
+    expect(first.writebackScopeId('d')).not.toContain('first-secret-token');
+    expect(
+      makeClient('http://localhost:3000', 'second-secret-token').writebackScopeId('d'),
+    ).not.toBe(first.writebackScopeId('d'));
+    expect(first.writebackScopeId('other-drive')).not.toBe(first.writebackScopeId('d'));
+    expect(
+      makeClient('http://localhost:3001', 'first-secret-token').writebackScopeId('d'),
+    ).not.toBe(first.writebackScopeId('d'));
+  });
+
+  it('fetches pinned metadata without requesting the ciphertext URL', async () => {
+    const urls: string[] = [];
+    const client = new AgentDriveClient({
+      apiUrl: 'http://localhost:3000',
+      apiKey: 'token',
+      fetch: async (input) => {
+        urls.push(String(input));
+        return new Response(JSON.stringify(version), { status: 200 });
+      },
+    });
+
+    await expect(client.getVersionMetadata('d', '/x', { versionId: version.id })).resolves.toEqual(
+      version,
+    );
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain('metadataOnly=1');
+    expect(urls[0]).toContain(`versionId=${version.id}`);
+  });
+
   it('does not commit when the plaintext stream ends before its declared size', async () => {
     const calls: string[] = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -1,12 +1,22 @@
+import { createHash } from 'node:crypto';
 import {
+  CHUNK_SIZE,
   DriveCryptoError,
   decryptWithFileKeyStream,
   encryptFile,
   encryptFileStream,
   envelopeVersion,
+  openFrameRange,
   unwrapFileKey,
 } from './crypto.js';
+import { ciphertextFrameRange, inspectHeader } from './crypto-format.js';
 import { plaintextSize } from './crypto-format.js';
+import {
+  readExactRangeBody,
+  sameVersion,
+  type RangeReader,
+  type RangeReaderOptions,
+} from './mount-range.js';
 import type { TraceInbox, TraceInboxRecord } from './trace-inbox.js';
 import type { SealedDriveKey } from './seal.js';
 
@@ -31,8 +41,17 @@ export type PutOptions = {
   userId?: string;
   mode?: 'create' | 'overwrite';
   ifVersionId?: string;
+  /** Allow create-only writes over the exact trashed state observed by the upload intent. */
+  allowTrashedCreate?: boolean;
   /** Aborts an in-flight upload (used by capture shutdown). */
   signal?: AbortSignal;
+};
+
+export type PutStreamOptions = PutOptions & {
+  /** Persist the stable intent ID before the ciphertext upload begins. */
+  onIntent?: (intentId: string) => void | Promise<void>;
+  /** Persist that storage accepted the full ciphertext before the commit request begins. */
+  onUploadComplete?: (intentId: string) => void | Promise<void>;
 };
 
 export type GetOptions = {
@@ -273,6 +292,39 @@ function driveKeyFor(
   return typeof value === 'function' ? value(driveId) : value;
 }
 
+function isVersionMetadata(value: unknown): value is Version {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<Version>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.path === 'string' &&
+    Number.isSafeInteger(candidate.ciphertextSize) &&
+    typeof candidate.wrappedKey === 'string' &&
+    typeof candidate.agentId === 'string' &&
+    (typeof candidate.machineId === 'string' || candidate.machineId === null) &&
+    (typeof candidate.userId === 'string' || candidate.userId === null) &&
+    Array.isArray(candidate.tags) &&
+    candidate.tags.every((tag) => typeof tag === 'string') &&
+    (typeof candidate.description === 'string' || candidate.description === null) &&
+    typeof candidate.createdAt === 'string'
+  );
+}
+
+function versionCopy(version: Version): Version {
+  return {
+    id: version.id,
+    path: version.path,
+    ciphertextSize: version.ciphertextSize,
+    wrappedKey: version.wrappedKey,
+    agentId: version.agentId,
+    machineId: version.machineId,
+    userId: version.userId,
+    tags: [...version.tags],
+    description: version.description,
+    createdAt: version.createdAt,
+  };
+}
+
 const RECENT_POLL_MS = 2000;
 
 function isAbort(error: unknown) {
@@ -309,6 +361,18 @@ export class AgentDriveClient {
 
   get apiOrigin() {
     return this.baseUrl.origin;
+  }
+
+  /** Opaque local-journal scope. It contains no API key or drive key. */
+  writebackScopeId(driveId: string) {
+    const credentialFingerprint = createHash('sha256').update(this.options.apiKey).digest('hex');
+    const scopedIdentity = JSON.stringify([
+      'agent-drive-mount-writeback-v1',
+      this.baseUrl.href,
+      driveId,
+      credentialFingerprint,
+    ]);
+    return createHash('sha256').update(scopedIdentity).digest('hex');
   }
 
   private async request<T>(path: string, init: RequestInit = {}) {
@@ -383,6 +447,70 @@ export class AgentDriveClient {
       );
     }
     return response;
+  }
+
+  private async authorizeRange(
+    driveId: string,
+    path: string,
+    versionId: string,
+    range: string,
+    signal: AbortSignal,
+    pinned?: Version,
+  ) {
+    const query = new URLSearchParams({
+      path,
+      metadataOnly: '1',
+      authorizeRange: '1',
+      versionId,
+      range,
+    });
+    const result = await this.request<Version & { downloadRange?: unknown; downloadUrl?: unknown }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+      { signal },
+    );
+    if (
+      !isVersionMetadata(result) ||
+      result.id !== versionId ||
+      result.path !== path ||
+      (pinned && !sameVersion(result, pinned))
+    )
+      throw new AgentDriveApiError('internal_error', 502, 'The pinned file metadata changed.');
+    if (result.downloadRange !== range)
+      throw new AgentDriveApiError(
+        'storage_error',
+        502,
+        'The server did not authorize the requested byte range.',
+      );
+    if (typeof result.downloadUrl !== 'string' || !result.downloadUrl)
+      throw new AgentDriveApiError(
+        'storage_error',
+        502,
+        'The server does not support authorized range downloads.',
+      );
+    return { version: versionCopy(result), downloadUrl: result.downloadUrl };
+  }
+
+  private async readAuthorizedRange(
+    downloadUrl: string,
+    range: string,
+    ciphertextBytes: number,
+    signal: AbortSignal,
+  ) {
+    const response = await this.fetcher(validateUrl(downloadUrl, false), {
+      headers: { range },
+      signal,
+      redirect: 'error',
+    });
+    try {
+      return await readExactRangeBody(response, range, ciphertextBytes, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      throw new AgentDriveApiError(
+        'storage_error',
+        502,
+        error instanceof Error ? error.message : 'The storage range response was invalid.',
+      );
+    }
   }
 
   private readonly inboxes = new Map<string, TraceInboxRecord>();
@@ -727,9 +855,26 @@ export class AgentDriveClient {
     );
   }
 
+  /** Fetch pinned file metadata without fetching ciphertext or plaintext. */
+  async getVersionMetadata(
+    driveId: string,
+    path: string,
+    options: Pick<GetOptions, 'versionId' | 'signal'> = {},
+  ) {
+    const query = new URLSearchParams({ path, metadataOnly: '1' });
+    if (options.versionId) query.set('versionId', options.versionId);
+    return this.request<Version>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+      options.signal ? { signal: options.signal } : {},
+    );
+  }
+
   async put(driveId: string, path: string, plaintext: Uint8Array, options: PutOptions = {}) {
     if (options.mode === 'create' && options.ifVersionId !== undefined) {
       throw new TypeError('Create-only writes cannot include ifVersionId.');
+    }
+    if (options.allowTrashedCreate && options.mode !== 'create') {
+      throw new TypeError('allowTrashedCreate requires create-only mode.');
     }
     const encrypted = await encryptFile(plaintext, this.keyFor(driveId));
     return this.putEncrypted(driveId, path, encrypted.ciphertext, encrypted.wrappedKey, options);
@@ -741,10 +886,13 @@ export class AgentDriveClient {
     path: string,
     plaintext: AsyncIterable<Uint8Array>,
     plaintextBytes: number,
-    options: PutOptions = {},
+    options: PutStreamOptions = {},
   ) {
     if (options.mode === 'create' && options.ifVersionId !== undefined) {
       throw new TypeError('Create-only writes cannot include ifVersionId.');
+    }
+    if (options.allowTrashedCreate && options.mode !== 'create') {
+      throw new TypeError('allowTrashedCreate requires create-only mode.');
     }
     const encrypted = await encryptFileStream(plaintext, plaintextBytes, this.keyFor(driveId));
     const body: Record<string, unknown> = {
@@ -757,6 +905,7 @@ export class AgentDriveClient {
     if (options.userId !== undefined) body.userId = options.userId;
     if (options.ifVersionId !== undefined) body.ifVersionId = options.ifVersionId;
     else if (options.mode !== 'overwrite') body.ifVersionId = null;
+    if (options.allowTrashedCreate) body.allowTrashedCreate = true;
     const intent = await this.request<{
       intentId: string;
       uploadUrl: string;
@@ -766,9 +915,13 @@ export class AgentDriveClient {
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
     });
+    if (typeof intent.intentId !== 'string' || intent.intentId.length === 0) {
+      throw new AgentDriveApiError('storage_error', 502, 'The upload intent ID was missing.');
+    }
     if (intent.ciphertextSize !== encrypted.ciphertextSize) {
       throw new AgentDriveApiError('storage_error', 502, 'The upload intent size did not match.');
     }
+    await options.onIntent?.(intent.intentId);
     const iterator = encrypted.ciphertext[Symbol.asyncIterator]();
     let resolveUpload!: () => void;
     let rejectUpload!: (reason?: unknown) => void;
@@ -806,9 +959,22 @@ export class AgentDriveClient {
       ...(options.signal ? { signal: options.signal } : {}),
     } as RequestInit);
     await uploadFinished;
+    await options.onUploadComplete?.(intent.intentId);
+    return this.replayCommit(
+      driveId,
+      intent.intentId,
+      options.signal ? { signal: options.signal } : {},
+    );
+  }
+
+  /** Idempotently retry commit for a durable intent whose acknowledgement may have been lost. */
+  async replayCommit(driveId: string, intentId: string, options: Pick<PutOptions, 'signal'> = {}) {
+    if (typeof intentId !== 'string' || intentId.length === 0 || intentId.length > 128) {
+      throw new TypeError('A valid upload intent ID is required.');
+    }
     const committed = await this.request<{ version: Version }>(`drives/${encode(driveId)}/commit`, {
       method: 'POST',
-      body: JSON.stringify({ intentId: intent.intentId }),
+      body: JSON.stringify({ intentId }),
       ...(options.signal ? { signal: options.signal } : {}),
     });
     return committed.version;
@@ -825,6 +991,9 @@ export class AgentDriveClient {
     if (options.mode === 'create' && options.ifVersionId !== undefined) {
       throw new TypeError('Create-only writes cannot include ifVersionId.');
     }
+    if (options.allowTrashedCreate && options.mode !== 'create') {
+      throw new TypeError('allowTrashedCreate requires create-only mode.');
+    }
     const body: Record<string, unknown> = {
       path,
       ciphertextSize: ciphertext.byteLength,
@@ -835,6 +1004,7 @@ export class AgentDriveClient {
     if (options.userId !== undefined) body.userId = options.userId;
     if (options.ifVersionId !== undefined) body.ifVersionId = options.ifVersionId;
     else if (options.mode !== 'overwrite') body.ifVersionId = null;
+    if (options.allowTrashedCreate) body.allowTrashedCreate = true;
     const intent = await this.request<{
       intentId: string;
       uploadUrl: string;
@@ -870,6 +1040,208 @@ export class AgentDriveClient {
       return { bytes, version: stream.version };
     } catch (error) {
       bytes.fill(0);
+      throw error;
+    }
+  }
+
+  /** Opens a version-pinned reader that fetches only complete authenticated ciphertext frames. */
+  async openRangeReader(
+    driveId: string,
+    path: string,
+    versionId: string,
+    options: RangeReaderOptions = {},
+  ): Promise<RangeReader> {
+    if (!versionId) throw new TypeError('A versionId is required for a ranged reader.');
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const headerRange = 'bytes=0-24';
+    let header = new Uint8Array(0);
+    let fileKey = '';
+    let closed = false;
+    try {
+      const authorized = await this.authorizeRange(driveId, path, versionId, headerRange, signal);
+      const selectedVersion = authorized.version;
+      const inbox = await this.inboxFor(driveId, selectedVersion.wrappedKey, signal);
+      fileKey = await unwrapFileKey(selectedVersion.wrappedKey, this.keyFor(driveId), inbox);
+      header = await this.readAuthorizedRange(
+        authorized.downloadUrl,
+        headerRange,
+        selectedVersion.ciphertextSize,
+        signal,
+      );
+
+      let headerInfo: ReturnType<typeof inspectHeader>;
+      try {
+        headerInfo = inspectHeader(header, selectedVersion.ciphertextSize);
+      } catch {
+        throw new AgentDriveApiError(
+          'storage_error',
+          502,
+          'The ciphertext header did not match the selected version.',
+        );
+      }
+
+      const cache = new Map<number, Uint8Array>();
+      const pendingFrames = new Map<number, Promise<Uint8Array>>();
+      let cacheBytes = 0;
+      const maxCacheBytes = 4 * CHUNK_SIZE;
+      const assertOpen = () => {
+        if (closed) throw new DOMException('The range reader is closed.', 'AbortError');
+        if (signal.aborted)
+          throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+      };
+      const cacheFrame = (index: number, frame: Uint8Array) => {
+        assertOpen();
+        const prior = cache.get(index);
+        if (prior) {
+          cacheBytes -= prior.byteLength;
+          prior.fill(0);
+          cache.delete(index);
+        }
+        cache.set(index, frame);
+        cacheBytes += frame.byteLength;
+        while (cacheBytes > maxCacheBytes) {
+          const oldest = cache.keys().next().value as number | undefined;
+          if (oldest === undefined) break;
+          const evicted = cache.get(oldest);
+          cache.delete(oldest);
+          if (evicted) {
+            cacheBytes -= evicted.byteLength;
+            evicted.fill(0);
+          }
+        }
+      };
+      const loadFrame = async (index: number): Promise<Uint8Array> => {
+        assertOpen();
+        const cached = cache.get(index);
+        if (cached) {
+          cache.delete(index);
+          cache.set(index, cached);
+          return cached;
+        }
+        const pending = pendingFrames.get(index);
+        if (pending) return pending;
+
+        const operation = (async () => {
+          const ciphertextRange = ciphertextFrameRange(headerInfo, index, 1);
+          const range = `bytes=${ciphertextRange.offset}-${ciphertextRange.offset + ciphertextRange.length - 1}`;
+          const frameAuthorization = await this.authorizeRange(
+            driveId,
+            path,
+            versionId,
+            range,
+            signal,
+            selectedVersion,
+          );
+          const ciphertext = await this.readAuthorizedRange(
+            frameAuthorization.downloadUrl,
+            range,
+            selectedVersion.ciphertextSize,
+            signal,
+          );
+          let frame: Uint8Array | undefined;
+          const source: AsyncIterable<Uint8Array> = {
+            async *[Symbol.asyncIterator]() {
+              yield ciphertext;
+            },
+          };
+          try {
+            for await (const plaintext of openFrameRange(
+              source,
+              fileKey,
+              header,
+              index,
+              1,
+              selectedVersion.ciphertextSize,
+            )) {
+              if (frame) {
+                plaintext.fill(0);
+                throw new Error('The frame decryptor returned more than one plaintext frame.');
+              }
+              frame = plaintext;
+            }
+            const expectedFrameBytes = Math.min(
+              CHUNK_SIZE,
+              headerInfo.plaintextBytes - index * CHUNK_SIZE,
+            );
+            if (!frame || frame.byteLength !== expectedFrameBytes)
+              throw new AgentDriveApiError(
+                'storage_error',
+                502,
+                'The authenticated frame length did not match the selected version.',
+              );
+            cacheFrame(index, frame);
+            return frame;
+          } catch (error) {
+            frame?.fill(0);
+            throw error;
+          } finally {
+            ciphertext.fill(0);
+          }
+        })();
+        pendingFrames.set(index, operation);
+        try {
+          return await operation;
+        } finally {
+          if (pendingFrames.get(index) === operation) pendingFrames.delete(index);
+        }
+      };
+
+      const close = async () => {
+        if (closed) return;
+        closed = true;
+        controller.abort(new DOMException('The range reader is closed.', 'AbortError'));
+        await Promise.allSettled(pendingFrames.values());
+        header.fill(0);
+        fileKey = '';
+        for (const frame of cache.values()) frame.fill(0);
+        cache.clear();
+        cacheBytes = 0;
+      };
+
+      return {
+        version: versionCopy(selectedVersion),
+        plaintextBytes: headerInfo.plaintextBytes,
+        read: async (offset: number, size: number) => {
+          assertOpen();
+          if (!Number.isSafeInteger(offset) || offset < 0 || offset > headerInfo.plaintextBytes)
+            throw new RangeError(
+              'offset must be a non-negative position within the selected file.',
+            );
+          if (!Number.isSafeInteger(size) || size < 0)
+            throw new RangeError('size must be a non-negative safe integer.');
+          if (size > maxCacheBytes)
+            throw new RangeError(`A ranged read cannot exceed ${maxCacheBytes} bytes.`);
+          if (offset + size > Number.MAX_SAFE_INTEGER)
+            throw new RangeError('The requested read range is too large.');
+          const end = Math.min(headerInfo.plaintextBytes, offset + size);
+          const result = new Uint8Array(end - offset);
+          let written = 0;
+          try {
+            while (offset + written < end) {
+              assertOpen();
+              const absoluteOffset = offset + written;
+              const frameIndex = Math.floor(absoluteOffset / CHUNK_SIZE);
+              const frame = await loadFrame(frameIndex);
+              const inFrameOffset = absoluteOffset - frameIndex * CHUNK_SIZE;
+              const count = Math.min(frame.byteLength - inFrameOffset, end - absoluteOffset);
+              result.set(frame.subarray(inFrameOffset, inFrameOffset + count), written);
+              written += count;
+            }
+            return result;
+          } catch (error) {
+            result.fill(0);
+            throw error;
+          }
+        },
+        close,
+      };
+    } catch (error) {
+      controller.abort(error);
+      header.fill(0);
+      fileKey = '';
       throw error;
     }
   }
@@ -1015,6 +1387,49 @@ export class AgentDriveClient {
       method: 'POST',
       body: JSON.stringify({ path, destinationPath, ...(userId ? { userId } : {}) }),
     });
+  }
+
+  async mkdir(driveId: string, path: string) {
+    return this.request<{ path: string; directory_id: string; created_at: string }>(
+      `drives/${encode(driveId)}/mkdir`,
+      { method: 'POST', body: JSON.stringify({ path }) },
+    );
+  }
+
+  async rmdir(driveId: string, path: string) {
+    return this.request<{ path: string }>(`drives/${encode(driveId)}/rmdir`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    });
+  }
+
+  async rename(
+    driveId: string,
+    path: string,
+    destinationPath: string,
+    options: {
+      ifSourceVersionId: string;
+      ifDestinationVersionId: string | null;
+      operationId: string;
+    },
+  ) {
+    return this.request<{ id: string; path: string; versionId: string }>(
+      `drives/${encode(driveId)}/rename`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ path, destinationPath, ...options }),
+      },
+    );
+  }
+
+  async unlink(driveId: string, path: string, ifVersionId: string) {
+    return this.request<{ id: string; path: string; deleted_at: string }>(
+      `drives/${encode(driveId)}/unlink`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ path, ifVersionId }),
+      },
+    );
   }
 
   async copy(

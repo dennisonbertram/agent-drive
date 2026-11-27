@@ -13,3 +13,5 @@ test-results/
 .vercel/
 .DS_Store
 apps/web/public/cli/
+packages/agent-drive/native/linux-*/
+native/mount/target/
