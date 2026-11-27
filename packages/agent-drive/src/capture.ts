@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import http, {
   type IncomingHttpHeaders,
   type IncomingMessage,
@@ -283,6 +283,11 @@ export async function startProxy(options: ProxyOptions) {
   const upstreams = options.upstreams ?? DEFAULT_UPSTREAMS;
   const budget = options.budgetBytes ?? 64 * MiB;
   const { drainer, log } = options;
+  // A fresh secret per run; without it any local process could relay through the proxy.
+  const secret = randomBytes(18).toString('base64url');
+  const secretHash = createHash('sha256').update(secret).digest();
+  const authorized = (presented: string) =>
+    timingSafeEqual(createHash('sha256').update(presented).digest(), secretHash);
   let reserved = 0;
   let peakReserved = 0;
   const dropped = new Map<string, number>();
@@ -328,7 +333,21 @@ export async function startProxy(options: ProxyOptions) {
   }
 
   function handle(req: IncomingMessage, res: ServerResponse) {
-    const match = /^\/(anthropic|openai)(\/.*)?$/u.exec(req.url ?? '');
+    const method = req.method ?? 'GET';
+    // The first path segment is the run secret: checked before any routing,
+    // recording or forwarding, and never carried upstream or into logs/traces.
+    const gate = /^\/([0-9A-Za-z_-]+)(\/.*)?$/u.exec(req.url ?? '');
+    if (!gate || !authorized(gate[1] ?? '')) {
+      drop('unauthorized');
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end('{"error":"unauthorized"}');
+      req.resume();
+      // Do not log unauthenticated request data: a caller can place the valid
+      // secret in another path segment or in the HTTP method.
+      log('capture: unauthorized 401');
+      return;
+    }
+    const match = /^\/(anthropic|openai)(\/.*)?$/u.exec(gate[2] ?? '/');
     if (!match) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{"error":"unknown route"}');
@@ -337,7 +356,6 @@ export async function startProxy(options: ProxyOptions) {
     }
     const provider = match[1] as 'anthropic' | 'openai';
     const path = match[2] ?? '/';
-    const method = req.method ?? 'GET';
     const upstream = upstreams[provider];
     const startedAt = Date.now();
     const capturing = reserved + RESERVATION <= budget;
@@ -456,6 +474,7 @@ export async function startProxy(options: ProxyOptions) {
 
   return {
     port,
+    secret,
     get reservedBytes() {
       return reserved;
     },
@@ -593,11 +612,13 @@ export async function runCapture(input: {
   const origin = `http://127.0.0.1:${proxy.port}`;
   const env = {
     ...process.env,
-    ANTHROPIC_BASE_URL: `${origin}/anthropic`,
-    OPENAI_BASE_URL: `${origin}/openai`,
+    ANTHROPIC_BASE_URL: `${origin}/${proxy.secret}/anthropic`,
+    OPENAI_BASE_URL: `${origin}/${proxy.secret}/openai`,
   };
   const args =
-    base === 'codex' ? [...codexProviderFlags(proxy.port), ...command.slice(1)] : command.slice(1);
+    base === 'codex'
+      ? [...codexProviderFlags(proxy.port, proxy.secret), ...command.slice(1)]
+      : command.slice(1);
   const code = await spawnChild(command, env, args);
   await proxy.close();
   log(await proxy.summary());

@@ -589,7 +589,7 @@ Copies the packaged `SKILL.md` to `~/.claude/skills/agent-drive/` if `~/.claude`
 agent-drive capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]
 ```
 
-Runs `COMMAND` with a local proxy and saves its Anthropic and OpenAI API calls as encrypted traces under `/traces/<agent>/`. Everything before `--` is parsed by `agent-drive`; everything after belongs to `COMMAND`. `--agent` defaults to the command's base name. The exit code is the wrapped command's exit code. If capture cannot start, the command still runs, with one `capture disabled: <reason>` line on stderr. See [Capture traces](trace-capture.md).
+Runs `COMMAND` with a local proxy and saves its Anthropic and OpenAI API calls as encrypted traces under `/traces/<agent>/`. The proxy serves only requests carrying a fresh per-run secret embedded in the base URL given to the child; other local callers get a 401. Everything before `--` is parsed by `agent-drive`; everything after belongs to `COMMAND`. `--agent` defaults to the command's base name. The exit code is the wrapped command's exit code. If capture cannot start, the command still runs, with one `capture disabled: <reason>` line on stderr. See [Capture traces](trace-capture.md).
 
 ## MCP
 

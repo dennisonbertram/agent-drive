@@ -9,6 +9,7 @@ This page states what Agent Drive protects, what the service can see, and what i
 - **The drive key.** It is generated on the client and is never sent to the API or to object storage.
 - **Passphrases and the account private key.** The console derives keys in the browser. The service stores the account public key, a private key it cannot unwrap, and sealed slots. It never receives the passphrase. An enrolled passkey wraps the same private key with its WebAuthn PRF output; the service stores only the public credential ID, an IV and the wrapped key, and never receives the PRF output.
 - **Share link keys.** The file key sits in the URL fragment (`#k=`). Browsers do not send the fragment to servers, so the service does not receive it.
+- **The capture proxy's local port.** `agent-drive capture` generates a fresh secret per run and requires it as the first path segment of every request to the proxy on `127.0.0.1`. Requests without it get a 401 and are never forwarded or recorded, and the segment is stripped before forwarding so it never reaches the model API. This keeps other local processes from relaying through the proxy; it does not protect against software that can read the child process's environment, command-line arguments, or memory.
 
 The formats are in [Encryption format](crypto.md).
 

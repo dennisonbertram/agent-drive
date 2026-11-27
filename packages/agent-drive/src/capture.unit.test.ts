@@ -88,6 +88,14 @@ async function setup(
 
 type Reply = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };
 function send(
+  proxy: { port: number; secret: string },
+  path: string,
+  options: { method?: string; headers?: http.OutgoingHttpHeaders; body?: Buffer | string } = {},
+  onChunk?: (chunk: Buffer, at: number) => void,
+) {
+  return sendRaw(proxy.port, `/${proxy.secret}${path}`, options, onChunk);
+}
+function sendRaw(
   port: number,
   path: string,
   options: { method?: string; headers?: http.OutgoingHttpHeaders; body?: Buffer | string } = {},
@@ -144,14 +152,14 @@ describe('routing', () => {
     const up = await fakeUpstream((_q, res) => jsonReply(res, { ok: true }));
     const s = await setup(up.upstreams);
     const headers = { 'content-type': 'application/json', 'x-custom': 'a', 'anthropic-beta': 'b' };
-    await send(s.proxy.port, '/anthropic/v1/messages?x=1', { headers, body: '{"model":"m"}' });
-    await send(s.proxy.port, '/openai/v1/responses', { headers, body: '{}' });
+    await send(s.proxy, '/anthropic/v1/messages?x=1', { headers, body: '{"model":"m"}' });
+    await send(s.proxy, '/openai/v1/responses', { headers, body: '{}' });
     expect(up.seen.map((x) => x.url)).toEqual(['/v1/messages?x=1', '/v1/responses']);
     expect(up.seen[0]!.headers.host).toBe(`127.0.0.1:${up.port}`);
     expect(up.seen[0]!.headers['x-custom']).toBe('a');
     expect(up.seen[0]!.headers['anthropic-beta']).toBe('b');
     const before = up.seen.length;
-    const miss = await send(s.proxy.port, '/foo', { headers, body: '{}' });
+    const miss = await send(s.proxy, '/foo', { headers, body: '{}' });
     expect(miss.status).toBe(404);
     expect(up.seen.length).toBe(before);
     await s.proxy.close({ taskMs: 1000, totalMs: 2000 });
@@ -159,6 +167,63 @@ describe('routing', () => {
       true,
     );
     expect((await spooled(s.dir)).length + s.uploads.length).toBe(2);
+  });
+});
+
+describe('authentication', () => {
+  it('rejects missing, wrong and foreign secrets before forwarding or recording', async () => {
+    const up = await fakeUpstream((_q, res) => jsonReply(res, { ok: true }));
+    const s = await setup(up.upstreams);
+    const other = await setup(up.upstreams);
+    const wrong = `${s.proxy.secret[0] === 'A' ? 'B' : 'A'}${s.proxy.secret.slice(1)}`;
+    const attempts = [
+      '/anthropic/v1/messages',
+      '/openai/v1/responses',
+      `/${'z'.repeat(24)}/anthropic/v1/messages`,
+      `/${other.proxy.secret}/anthropic/v1/messages`,
+      `/${wrong}/anthropic/v1/messages`,
+      `/${wrong}/${s.proxy.secret}/anthropic/v1/messages`,
+      `/${s.proxy.secret}extra/anthropic/v1/messages`,
+      '/',
+      'http://example.test/anthropic/v1/messages',
+    ];
+    for (const path of attempts) {
+      const reply = await sendRaw(s.proxy.port, path, { body: '{}' });
+      expect(reply.status, path).toBe(401);
+      expect(JSON.parse(reply.body.toString())).toEqual({ error: 'unauthorized' });
+    }
+    expect(up.seen.length).toBe(0);
+    expect(s.proxy.dropped.get('unauthorized')).toBe(attempts.length);
+    expect(s.logs.join('\n')).not.toContain(s.proxy.secret);
+    await s.proxy.close({ taskMs: 1000, totalMs: 500 });
+    expect((await spooled(s.dir)).length + s.uploads.length).toBe(0);
+  });
+
+  it('answers with a fresh per-run secret and never exposes it upstream, in logs or in traces', async () => {
+    const up = await fakeUpstream((_q, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'request-id': 'r1' });
+      res.end('{"ok":true}');
+    });
+    const s = await setup(up.upstreams, {
+      client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
+    });
+    const second = await setup(up.upstreams);
+    expect(s.proxy.secret).not.toBe(second.proxy.secret);
+    expect(s.proxy.secret).toMatch(/^[0-9A-Za-z_-]{20,}$/u);
+    const reply = await send(s.proxy, '/anthropic/v1/messages?x=1', {
+      headers: { authorization: 'Bearer SECRET-A', 'x-api-key': 'SECRET-B' },
+      body: '{"model":"m"}',
+    });
+    expect(reply.status).toBe(200);
+    expect(up.seen[0]!.url).toBe('/v1/messages?x=1');
+    expect(up.seen[0]!.headers.authorization).toBe('Bearer SECRET-A');
+    expect(up.seen[0]!.headers['x-api-key']).toBe('SECRET-B');
+    expect(JSON.stringify(up.seen[0]!.headers)).not.toContain(s.proxy.secret);
+    await s.proxy.close({ taskMs: 1000, totalMs: 500 });
+    expect(s.logs.join('\n')).not.toContain(s.proxy.secret);
+    const [trace] = await spooled(s.dir);
+    expect(trace!.text).not.toContain(s.proxy.secret);
+    expect(trace!.trace.request.path).toBe('/v1/messages?x=1');
   });
 });
 
@@ -186,7 +251,7 @@ describe('streaming', () => {
     });
     const arrivals: number[] = [];
     const reply = await send(
-      s.proxy.port,
+      s.proxy,
       '/anthropic/v1/messages',
       { body: '{"model":"m"}' },
       (_c, at) => arrivals.push(at),
@@ -210,7 +275,7 @@ describe('byte-identical under failure', () => {
     const request = { headers: { 'content-type': 'application/json' }, body: '{"model":"m"}' };
     const baseline = await (async () => {
       const s = await setup(up.upstreams);
-      const r = await send(s.proxy.port, '/anthropic/v1/messages', request);
+      const r = await send(s.proxy, '/anthropic/v1/messages', request);
       await s.proxy.close({ taskMs: 1000, totalMs: 1000 });
       return r;
     })();
@@ -258,7 +323,7 @@ describe('byte-identical under failure', () => {
     ];
     for (const c of cases) {
       const s = await setup(up.upstreams, c.options);
-      const r = await send(s.proxy.port, '/anthropic/v1/messages', request);
+      const r = await send(s.proxy, '/anthropic/v1/messages', request);
       expect(comparable(r), c.name).toEqual(comparable(baseline));
       await s.proxy.close({ taskMs: 1000, totalMs: 300 });
       await c.after(s);
@@ -268,8 +333,8 @@ describe('byte-identical under failure', () => {
     const dir = await mkdtemp(join(tmpdir(), 'capture-ro-'));
     const s = await setup(up.upstreams, { spoolDir: dir });
     await chmod(dir, 0o500);
-    const r = await send(s.proxy.port, '/anthropic/v1/messages', request);
-    await send(s.proxy.port, '/anthropic/v1/messages', request);
+    const r = await send(s.proxy, '/anthropic/v1/messages', request);
+    await send(s.proxy, '/anthropic/v1/messages', request);
     expect(comparable(r)).toEqual(comparable(baseline));
     await s.proxy.close({ taskMs: 1000, totalMs: 300 });
     expect(s.logs.filter((l) => l.startsWith('capture warning:')).length).toBe(1);
@@ -279,14 +344,14 @@ describe('byte-identical under failure', () => {
     const error = { type: 'error', error: { type: 'invalid_request_error', message: 'bad' } };
     const up = await fakeUpstream((_q, res) => jsonReply(res, error, 400));
     const s = await setup(up.upstreams);
-    const r = await send(s.proxy.port, '/anthropic/v1/messages', { body: '{}' });
+    const r = await send(s.proxy, '/anthropic/v1/messages', { body: '{}' });
     expect(r.status).toBe(400);
     expect(JSON.parse(r.body.toString())).toEqual(error);
     const dead = await setup({
       anthropic: { protocol: 'http', hostname: '127.0.0.1', port: 1 },
       openai: { protocol: 'http', hostname: '127.0.0.1', port: 1 },
     });
-    const bad = await send(dead.proxy.port, '/anthropic/v1/messages', { body: '{}' });
+    const bad = await send(dead.proxy, '/anthropic/v1/messages', { body: '{}' });
     expect(bad.status).toBe(502);
     expect(dead.logs.some((l) => l.includes(' 502 ') && l.includes('upstream error'))).toBe(true);
   });
@@ -322,7 +387,7 @@ describe('bounded memory', () => {
     const timer = setInterval(() => sample.push(s.proxy.reservedBytes), 2);
     const replies = await Promise.all(
       Array.from({ length: 6 }, () =>
-        send(s.proxy.port, '/anthropic/v1/messages', { body: Buffer.alloc(6 * MiB, 'q') }),
+        send(s.proxy, '/anthropic/v1/messages', { body: Buffer.alloc(6 * MiB, 'q') }),
       ),
     );
     clearInterval(timer);
@@ -363,7 +428,7 @@ describe('redaction', () => {
       cookie: 'a=SECRET-F',
       'anthropic-beta': 'oauth-2025-04-20',
     };
-    await send(s.proxy.port, '/anthropic/v1/messages', { headers, body: '{"model":"m"}' });
+    await send(s.proxy, '/anthropic/v1/messages', { headers, body: '{"model":"m"}' });
     await s.proxy.close({ taskMs: 1000, totalMs: 200 });
     const h = up.seen[0]!.headers;
     expect([h.authorization, h['x-api-key'], h['openai-api-key'], h['x-custom-token']]).toEqual([
@@ -396,7 +461,7 @@ describe('gzip and size rules', () => {
   };
   const capture = async (body: Buffer, headers: http.OutgoingHttpHeaders = {}) => {
     const { s } = await echo();
-    await send(s.proxy.port, '/anthropic/v1/messages', { body, headers });
+    await send(s.proxy, '/anthropic/v1/messages', { body, headers });
     await s.proxy.close({ taskMs: 5000, totalMs: 200 });
     const [t] = await spooled(s.dir);
     return t!;
@@ -410,13 +475,13 @@ describe('gzip and size rules', () => {
     const plain = { model: 'm', text: 'hi' };
     const gz = zlib.gzipSync(JSON.stringify(plain));
     const { up, s } = await echo();
-    await send(s.proxy.port, '/anthropic/v1/messages', {
+    await send(s.proxy, '/anthropic/v1/messages', {
       body: gz,
       headers: { 'content-encoding': 'gzip' },
     });
     const bomb = zlib.gzipSync(Buffer.alloc(8 * MiB, 'a'));
     expect(bomb.length).toBeLessThan(100_000);
-    await send(s.proxy.port, '/anthropic/v1/messages', {
+    await send(s.proxy, '/anthropic/v1/messages', {
       body: bomb,
       headers: { 'content-encoding': 'gzip' },
     });
@@ -451,7 +516,7 @@ describe('gzip and size rules', () => {
     const s = await setup(up.upstreams, {
       client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
     });
-    await send(s.proxy.port, '/anthropic/v1/messages', { body: big });
+    await send(s.proxy, '/anthropic/v1/messages', { body: big });
     await s.proxy.close({ taskMs: 10_000, totalMs: 200 });
     const [t] = await spooled(s.dir);
     expect(Buffer.byteLength(t!.text)).toBeLessThan(9 * MiB);
@@ -466,7 +531,7 @@ describe('shutdown ordering', () => {
     const s = await setup(up.upstreams, {
       proxy: { hooks: { beforeEncrypt: () => new Promise((r) => setTimeout(r, 300)) } },
     });
-    await send(s.proxy.port, '/anthropic/v1/messages', { body: '{"model":"m"}' });
+    await send(s.proxy, '/anthropic/v1/messages', { body: '{"model":"m"}' });
     await s.proxy.close({ taskMs: 5000, totalMs: 10_000 });
     expect(s.uploads.length).toBe(1);
     expect(await s.proxy.summary()).toContain('capture: 1 uploaded, 0 queued');
@@ -479,7 +544,7 @@ describe('review fixes', () => {
     const s = await setup({ anthropic: dead, openai: dead }, { proxy: { budgetBytes: 8 * MiB } });
     const replies = await Promise.all(
       Array.from({ length: 4 }, () =>
-        send(s.proxy.port, '/anthropic/v1/messages', { body: Buffer.alloc(4 * MiB, 'q') }),
+        send(s.proxy, '/anthropic/v1/messages', { body: Buffer.alloc(4 * MiB, 'q') }),
       ),
     );
     expect(replies.map((r) => r.status)).toEqual([502, 502, 502, 502]);
@@ -494,7 +559,7 @@ describe('review fixes', () => {
     const s = await setup(up.upstreams, {
       client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
     });
-    await send(s.proxy.port, '/anthropic/v1/messages?api_key=SECRET-Q&beta=true&x-Token=SECRET-T', {
+    await send(s.proxy, '/anthropic/v1/messages?api_key=SECRET-Q&beta=true&x-Token=SECRET-T', {
       body: '{"model":"m"}',
     });
     await s.proxy.close({ taskMs: 1000, totalMs: 200 });
@@ -519,7 +584,7 @@ describe('review fixes', () => {
       res.end('{}');
     });
     const s = await setup(up.upstreams);
-    const r = await send(s.proxy.port, '/anthropic/v1/messages', {
+    const r = await send(s.proxy, '/anthropic/v1/messages', {
       headers: { connection: 'x-hop, close', 'x-hop': 'a', 'x-other': 'b' },
       body: '{}',
     });

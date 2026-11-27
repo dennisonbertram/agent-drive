@@ -29,11 +29,12 @@ Everything after `--` belongs to COMMAND. Only the flags before `--` are read by
 
 What happens:
 
-1. The CLI starts a proxy on `127.0.0.1` on a random port.
-2. It starts COMMAND with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/anthropic` and `OPENAI_BASE_URL=http://127.0.0.1:<port>/openai` in the environment of that child process only. Your shell, shell profile, Claude settings and `~/.codex/config.toml` are not changed.
-3. The proxy forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives.
-4. For each exchange it builds a redacted copy, encrypts it with the drive key, and queues it for upload.
-5. When COMMAND exits, the CLI exits with the same exit code.
+1. The CLI starts a proxy on `127.0.0.1` on a random port and generates a fresh secret for the run.
+2. It starts COMMAND with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<secret>/anthropic` and `OPENAI_BASE_URL=http://127.0.0.1:<port>/<secret>/openai` in the environment of that child process only. Codex also receives the secret in a `-c` provider URL argument. Your shell, shell profile, Claude settings and `~/.codex/config.toml` are not changed.
+3. The proxy answers only requests whose first path segment is that run's secret. Anything else gets a 401 and is never forwarded or recorded, which keeps other local processes from relaying through the proxy. It does not protect against software that can read the child process's environment, command-line arguments, or memory.
+4. The proxy removes the secret segment, then forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives. The secret never reaches the API and is never written to logs or traces.
+5. For each exchange it builds a redacted copy, encrypts it with the drive key, and queues it for upload.
+6. When COMMAND exits, the CLI exits with the same exit code.
 
 `--drive` can be left out when there is only one drive key saved for the current API. `--agent` defaults to the command's base name, in lowercase. It must be 1 to 40 characters: lowercase letters, digits, `.`, `_` or `-`, starting with a letter or digit.
 
@@ -41,7 +42,7 @@ For a command named `codex`, the CLI adds these arguments before yours, because 
 
 ```text
 -c model_providers.agent_drive_capture.name="Agent Drive capture"
--c model_providers.agent_drive_capture.base_url="http://127.0.0.1:<port>/openai/v1"
+-c model_providers.agent_drive_capture.base_url="http://127.0.0.1:<port>/<secret>/openai/v1"
 -c model_providers.agent_drive_capture.env_key="OPENAI_API_KEY"
 -c model_providers.agent_drive_capture.wire_api="responses"
 -c model_providers.agent_drive_capture.supports_websockets=false
@@ -69,6 +70,7 @@ Limits and redaction:
 - Each body is cut at 4 MiB, and the whole file is kept under 9 MiB. Cut parts are named in the `truncated` list in the file.
 - In the saved path, the value of any query parameter whose name contains `key`, `token`, `secret`, `auth` or `signature` is replaced with `[redacted]`. Request URLs are never printed to the terminal with their query string.
 - The proxy holds at most 64 MiB of in-flight copies in memory. A request that would exceed that is still forwarded, but it is not captured (`not captured: memory`).
+- A request without the run secret, or with a wrong one, is refused with a 401 before it is handled and counts as `unauthorized` in the drop summary.
 - An upstream connection error returns 502 to the agent and is not captured.
 
 **Prompts are stored.** Everything you send to the model, including any secret you paste into a prompt, is saved in the trace. It is encrypted with your drive key, but it is there. Never put secrets in paths or tags.

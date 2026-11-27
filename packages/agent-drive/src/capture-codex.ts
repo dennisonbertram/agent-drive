@@ -1,10 +1,10 @@
 /** Codex needs a provider entry (not just an env var) to reach the local proxy over plain HTTP. */
 
-export function codexProviderFlags(port: number) {
+export function codexProviderFlags(port: number, secret: string) {
   const p = 'model_providers.agent_drive_capture';
   const settings = [
     `${p}.name="Agent Drive capture"`,
-    `${p}.base_url="http://127.0.0.1:${port}/openai/v1"`,
+    `${p}.base_url="http://127.0.0.1:${port}/${secret}/openai/v1"`,
     `${p}.env_key="OPENAI_API_KEY"`,
     `${p}.wire_api="responses"`,
     `${p}.supports_websockets=false`,
