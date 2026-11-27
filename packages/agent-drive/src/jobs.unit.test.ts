@@ -701,6 +701,8 @@ describe('submitJob', () => {
 
     await expect(submitJob(client, DRIVE, 'job-status-only')).rejects.toMatchObject({
       status: 409,
+      message:
+        'Job "job-status-only" has a visible status file without an execution receipt; refusing to submit.',
     });
     expect(drive.calls.filter((call) => call.startsWith('rename:'))).toHaveLength(0);
     expect(drive.has('/jobs/job-status-only/submitted.md')).toBe(false);

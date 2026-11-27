@@ -1460,19 +1460,40 @@ describe('jobs CLI', () => {
     const r = await cli(
       ['jobs', 'submit', 'monthly-close', '--drive', A],
       noDriveKey,
-      (path, _init, search = '') => {
+      (path, init, search = '') => {
         if (path === `drives/${A}/get`) {
           const target = new URLSearchParams(search).get('path');
-          if (target === submittedPath)
+          if (
+            target === submittedPath ||
+            target === '/jobs/.agent-drive/claims/monthly-close.json' ||
+            target === '/jobs/monthly-close/status.json'
+          )
             return Response.json(
               { error: { code: 'not_found', message: 'File not found.' } },
               { status: 404 },
             );
-          if (target === draftPath) return metadata;
+          if (target === draftPath) {
+            expect(search).toContain('metadataOnly=1');
+            return metadata;
+          }
+          throw new Error(`Unexpected metadata lookup in jobs submit test: ${target}`);
         }
-        if (path === `drives/${A}/rename`)
+        if (path === `drives/${A}/rename`) {
+          expect(init?.method).toBe('POST');
+          const body = JSON.parse(String(init?.body ?? '{}'));
+          expect(body).toMatchObject({
+            path: draftPath,
+            destinationPath: submittedPath,
+            ifSourceVersionId: metadata.id,
+            ifDestinationVersionId: null,
+          });
+          expect(body.operationId).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
+          );
           return { id: 'file-1', path: submittedPath, versionId: 'submitted-version-1' };
-        return path === 'account-key' ? { accountKey: null } : {};
+        }
+        if (path === 'account-key') return { accountKey: null };
+        throw new Error(`Unexpected API call in jobs submit test: ${path}`);
       },
     );
 
@@ -1495,5 +1516,19 @@ describe('jobs CLI', () => {
     expect(JSON.parse(rename?.body ?? '{}').operationId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu,
     );
+    expect(r.calls.filter((call) => call.path === `drives/${A}/rename`)).toHaveLength(1);
+    const metadataPaths = r.paths
+      .map((path, index) =>
+        path === `drives/${A}/get`
+          ? new URLSearchParams(r.queries[index]).get('path')
+          : null,
+      )
+      .filter((path): path is string => path !== null);
+    expect(metadataPaths).toEqual([
+      submittedPath,
+      '/jobs/.agent-drive/claims/monthly-close.json',
+      '/jobs/monthly-close/status.json',
+      draftPath,
+    ]);
   });
 });

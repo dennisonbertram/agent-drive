@@ -353,11 +353,18 @@ export async function submitJob(
   // were moved aside: a held id with no visible submission path is a clear
   // conflict, never an invitation to rename the draft into a duplicate run.
   const heldReceipt = await metadata(receiptPath);
-  const heldStatus = heldReceipt ? null : await metadata(statusPath);
-  if (heldReceipt || heldStatus)
+  if (heldReceipt)
     throw new AgentDriveApiError('conflict', 409, `Job "${id}" is already claimed.`, {
       state: 'exists',
     });
+  const heldStatus = await metadata(statusPath);
+  if (heldStatus)
+    throw new AgentDriveApiError(
+      'conflict',
+      409,
+      `Job "${id}" has a visible status file without an execution receipt; refusing to submit.`,
+      { state: 'exists' },
+    );
 
   const draft = await metadata(requestPath);
   if (!draft) throw new AgentDriveApiError('not_found', 404, `No job draft exists for "${id}".`);
