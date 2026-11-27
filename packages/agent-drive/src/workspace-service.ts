@@ -333,6 +333,7 @@ export function renderWorkspaceService(
     'Type=simple',
     `ExecStart=${[nodePath, options.cliPath, 'mount', '--name', options.name].map(systemdArg).join(' ')}`,
     'Restart=on-failure',
+    'SuccessExitStatus=143 130',
     // mixed mode signals only the mount process first, keeping the SSH transport
     // alive while open files drain; systemd kills remaining children at timeout.
     'KillMode=mixed',

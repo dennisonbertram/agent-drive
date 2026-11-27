@@ -49,6 +49,7 @@ describe('persistent workspace service definitions', () => {
     );
     expect(mac).not.toContain('sh -c');
     expect(mac).not.toContain('API_KEY');
+    expect(mac).not.toContain('SuccessExitStatus=143 130');
     const linux = renderWorkspaceService({
       platform: 'linux',
       cliPath: '/home/alice/Agent Drive/cli.js',
@@ -67,6 +68,7 @@ describe('persistent workspace service definitions', () => {
     expect(linux).toMatch(/^# agent-drive-workspace-service-registry:v1:[a-f0-9]{64}$/mu);
     expect(linux).toContain('KillMode=mixed');
     expect(linux).toContain('TimeoutStopSec=5min');
+    expect(linux).toContain('SuccessExitStatus=143 130');
     expect(linux).toContain(
       'Environment="AGENT_DRIVE_INSTABOX_CLI=/home/alice/.local/bin/instabox"',
     );
@@ -242,7 +244,9 @@ describe('persistent workspace service definitions', () => {
     expect(await installWorkspaceService(options)).toMatchObject({
       updated: true,
     });
-    expect(await readFile(path, 'utf8')).toContain('# agent-drive-workspace-service-registry:v1:');
+    const migrated = await readFile(path, 'utf8');
+    expect(migrated).toContain('# agent-drive-workspace-service-registry:v1:');
+    expect(migrated).toContain('SuccessExitStatus=143 130');
   });
 
   it('refuses service status, removal, and wake operations from a different config registry', async () => {
