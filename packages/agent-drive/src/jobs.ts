@@ -10,33 +10,66 @@ import { plaintextSize } from './crypto-format.js';
  * An agent writes a draft under /jobs/<id>/request.md plus flat attachments under
  * /jobs/<id>/inputs/, then submits by renaming request.md to submitted.md (a
  * version-guarded rename through `agent-drive jobs submit` or the dashboard's
- * Submit action). A worker discovers submitted.md files, claims each id with a
- * private create-only receipt under /jobs/.agent-drive/claims/ plus a visible
- * create-only /jobs/<id>/status.json, runs the handler, writes
- * /jobs/<id>/outputs/<name>, then marks the claim done or failed. The worker
- * never reads drafts, foreign paths or jobs on other drives, and never executes
- * anything derived from a request's contents.
+ * Submit action). That rename produces the durable submission event a worker
+ * dispatches on — the file at submitted.md is evidence, not the trigger, and
+ * the event pins the exact request version the run must execute. A worker
+ * claims each id with a private receipt under /jobs/.agent-drive/claims/ plus a
+ * visible create-only /jobs/<id>/status.json, runs the handler, writes
+ * /jobs/<id>/outputs/<name>, then marks the claim done or failed. The receipt
+ * is the authoritative record: it carries the claimed, running and terminal
+ * state, the approved request version and the committed output versions. The
+ * worker never reads drafts, foreign paths or jobs on other drives, and never
+ * executes anything derived from a request's contents.
  */
 
 export type JobFile = { name: string; bytes: Uint8Array };
 
 export type JobInput = {
   id: string;
-  /** The pinned plaintext of /jobs/<id>/submitted.md at pickup. */
+  /** The pinned plaintext of the submitted request version. */
   request: Uint8Array;
   /** Flat input attachments, pinned at pickup, sorted by path. */
   inputs: JobFile[];
 };
 
-export type JobHandler = (job: JobInput, signal: AbortSignal) => Promise<JobFile[]>;
+export type JobHandler = {
+  (job: JobInput, signal: AbortSignal): Promise<JobFile[]>;
+  /**
+   * Optional readiness probe run at startup and again before every claim. A
+   * throw stops claiming — including the adapter's WorkerUnavailableError,
+   * which is matched by name so the check survives package duplication.
+   */
+  assertReady?(): void;
+};
 
 /** Narrow client surfaces so each entry point can be used with a restricted client. */
 export type InitJobsClient = Pick<AgentDriveClient, 'put'>;
 export type SubmitJobClient = Pick<AgentDriveClient, 'getVersionMetadata' | 'rename'>;
 export type RunJobsClient = Pick<
   AgentDriveClient,
-  'get' | 'getVersionMetadata' | 'list' | 'put' | 'recent' | 'recentHead'
->;
+  'get' | 'getVersionMetadata' | 'put' | 'recent' | 'recentHead'
+> & {
+  /** `list` with the trailing signal parameter (parallel client addition). */
+  list(
+    driveId: string,
+    prefix?: string,
+    limit?: number,
+    cursor?: string,
+    filters?: Parameters<AgentDriveClient['list']>[4],
+    signal?: AbortSignal,
+  ): ReturnType<AgentDriveClient['list']>;
+  /**
+   * Newest-first durable submission events (GET /recent?jobSubmissions=1, a
+   * parallel API addition). A server that ignores the flag returns unfiltered
+   * events, so every event is re-qualified before dispatch.
+   */
+  pendingJobSubmissions(
+    driveId: string,
+    limit?: number,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<RecentPage>;
+};
 
 export const JOBS_README_PATH = '/jobs/README.md';
 
@@ -64,7 +97,6 @@ const CURSOR_TRACK_LIMIT = 16;
 
 const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const JOB_PATH = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/([^/].*)$/;
-const SUBMIT_OPERATIONS = new Set<RecentEvent['operation']>(['put', 'copy', 'restore', 'move']);
 
 const utf8 = new TextEncoder();
 
@@ -137,32 +169,43 @@ worker executes it, and results land as ordinary encrypted files.
    On Linux, mounted POSIX mv guards versions seen at the rename syscall, but may
    replace an existing destination when the key has delete. Prefer jobs submit or
    dashboard Submit when the destination must be absent.
-3. A normal queued job has submitted.md and neither status.json nor a receipt.
-   The worker creates its receipt before status.json; a receipt without status.json
-   is still claimed. Submitting again never creates a duplicate run.
+3. The durable submission is the request.md -> submitted.md MOVE EVENT, not the
+   file: the worker dispatches on that event and runs the exact request version
+   it pins. A file that merely appears at submitted.md (a put, copy or restore)
+   is never picked up, and if the pinned version is gone the job is dropped —
+   the worker never substitutes a different version.
+4. A normal queued job has a pending submit event and no receipt. The worker
+   creates its receipt before status.json; a receipt without status.json is
+   still claimed. Submitting again never creates a duplicate run: submit checks
+   the receipt, so a held id reports claimed (or conflicts when no submission
+   is visible) instead of renaming the draft into a rerun.
 
 Job ids: ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$
 Limits: request 64KiB; up to 16 inputs of 8MiB each, 32MiB total.
 Outputs are held to the same budget.
 The worker needs read+write scopes and a write path covering /jobs/, including
-.agent-drive/claims/. Submitter write paths should cover only their own job
-folders and must exclude .agent-drive/. Write paths limit writes, not reads: any
-read-scoped key on this drive can see file metadata and download ciphertext from
-other jobs; plaintext requires the drive key. Use separate drives for privacy.
+.agent-drive/claims/. A submitter's write paths should cover ONLY its own
+request.md, submitted.md and inputs/ — never status.json, outputs/ or
+.agent-drive/, which are worker-owned. Write paths limit writes, not reads: any
+read-scoped key on this drive can see file metadata and download ciphertext
+from other jobs; plaintext requires the drive key. Use separate drives for
+privacy.
 
 ## status.json and the claims receipt are worker-owned — never edit or move them
 
 The worker creates the execution receipt first, then status.json. The receipt is
 an ordinary encrypted file on the drive, not access-restricted: drive readers can
-see its metadata and ciphertext. It is the durable duplicate-run guard; keep it
-outside submitter write paths. If it exists, the id stays claimed even if status is
-missing or moved:
+see its metadata and ciphertext. It is the authoritative job record and durable
+duplicate-run guard; keep it outside submitter write paths. It records the
+approved requestVersionId, the running or terminal state, and each committed
+output as {name, versionId} — including a failure's partial commits:
 
 - {"state":"running"}    a worker claimed the job and may still be running
 - {"state":"done"}       every output under outputs/ is committed
 - {"state":"failed"}     a fixed "reason" code says why (no raw errors or secrets)
 
-A queued submission has neither status.json nor a receipt. Once the receipt
+status.json keeps the same state plus name-only "outputs" for compatibility. A
+queued submission has neither status.json nor a receipt. Once the receipt
 exists, missing status.json means the worker is still creating visible state or
 stopped before it could do so; the outcome is unknown and the id remains held.
 Moving status.json aside never reruns the job because the receipt remains.
@@ -182,6 +225,31 @@ function isNotFound(error: unknown) {
 
 function isPermanentAuthorizationFailure(error: unknown) {
   return error instanceof AgentDriveApiError && (error.status === 401 || error.status === 403);
+}
+
+/**
+ * The job-adapter's WorkerUnavailableError, detected by name: the class lives
+ * in ./job-command.js and matching structurally survives package duplication.
+ */
+function isWorkerUnavailable(error: unknown) {
+  return error instanceof Error && error.name === 'WorkerUnavailableError';
+}
+
+/**
+ * The durable submit signal: a `move` of /jobs/<id>/request.md to the same id's
+ * submitted.md carrying the submitted versionId. Every event is re-qualified —
+ * servers without the jobSubmissions flag may return unfiltered pages, and a
+ * file simply appearing at submitted.md (a put, copy or restore) is never a
+ * submission. Returns the id and the pinned request version, or null.
+ */
+function submissionOf(event: RecentEvent): { id: string; versionId: string } | null {
+  if (event.operation !== 'move' || event.versionId === null) return null;
+  const parts = jobPathParts(event.path);
+  if (!parts || parts[1] !== 'submitted.md') return null;
+  const id = parts[0];
+  return event.previousPath === `${JOBS_PREFIX}${id}/request.md`
+    ? { id, versionId: event.versionId }
+    : null;
 }
 
 /** A create-only collision that can only mean the id was claimed before. */
@@ -306,6 +374,16 @@ export async function submitJob(
     };
   }
 
+  // The receipt is the authoritative record even when the submission and status
+  // were moved aside: a held id with no visible submission path is a clear
+  // conflict, never an invitation to rename the draft into a duplicate run.
+  const heldReceipt = await metadata(receiptPath);
+  const heldStatus = heldReceipt ? null : await metadata(statusPath);
+  if (heldReceipt || heldStatus)
+    throw new AgentDriveApiError('conflict', 409, `Job "${id}" is already claimed.`, {
+      state: 'exists',
+    });
+
   const draft = await metadata(requestPath);
   if (!draft) throw new AgentDriveApiError('not_found', 404, `No job draft exists for "${id}".`);
 
@@ -373,6 +451,7 @@ export async function runJobs(
    */
   const settled = new Set<string>();
   const remember = (id: string) => {
+    backoff.delete(id);
     settled.delete(id);
     settled.add(id);
     const oldest = settled.keys().next().value;
@@ -383,23 +462,38 @@ export async function runJobs(
     remember(id);
     return true;
   };
-  const pending = new Map<string, true>();
-  /** Per-id exponential backoff for recoverable claim/discovery failures. */
-  const backoff = new Map<string, { at: number; delay: number }>();
+  /** Discovered submissions awaiting pickup, keyed by id and pinned version. */
+  const pending = new Map<string, { versionId: string }>();
+  /**
+   * Per-id exponential backoff for recoverable claim/discovery failures. The
+   * entry survives while a retry is queued so the delay keeps GROWING across
+   * attempts instead of resetting; it is cleared on success, on a permanent
+   * rejection, or when the id is remembered settled.
+   */
+  const backoff = new Map<string, { at: number; delay: number; versionId: string }>();
   /** First discovery/acquisition error; once mode reports it after the drain. */
   let firstError: unknown;
 
-  const enqueue = (id: string) => {
-    if (!JOB_ID.test(id) || isSettled(id) || pending.has(id)) return;
+  const enqueue = (submission: { id: string; versionId: string }) => {
+    const { id, versionId } = submission;
+    if (!JOB_ID.test(id) || isSettled(id)) return;
     const cool = backoff.get(id);
-    if (cool !== undefined && cool.at > Date.now()) return;
-    pending.set(id, true);
+    if (cool !== undefined) {
+      // A newer submit event supersedes: the retry pins the latest version.
+      cool.versionId = versionId;
+      if (cool.at > Date.now()) return;
+    }
+    pending.set(id, { versionId });
   };
 
-  const retryLater = (id: string) => {
+  const retryLater = (id: string, versionId: string) => {
     const prior = backoff.get(id);
-    const delay = Math.min((prior?.delay ?? retryMs) * 2, BACKOFF_MAX_MS);
-    backoff.set(id, { at: Date.now() + (prior?.delay ?? retryMs), delay });
+    const nextDelay = Math.min((prior?.delay ?? retryMs) * 2, BACKOFF_MAX_MS);
+    backoff.set(id, {
+      at: Date.now() + (prior?.delay ?? retryMs),
+      delay: nextDelay,
+      versionId,
+    });
     const oldest = backoff.keys().next().value;
     if (backoff.size > BACKOFF_LIMIT && oldest !== undefined) backoff.delete(oldest);
   };
@@ -407,6 +501,13 @@ export async function runJobs(
   const recordError = (error: unknown) => {
     if (firstError === undefined) firstError = error;
   };
+
+  /** Sanitized operator-facing error for an ambiguous terminal write. */
+  const persistenceError = (id: string) =>
+    new Error(
+      `Job "${id}": its terminal state may not have persisted; check status.json ` +
+        'and the claims receipt before any manual recovery.',
+    );
 
   const nap = async (ms: number) => {
     if (!signal) return sleep(ms);
@@ -430,59 +531,50 @@ export async function runJobs(
   let cursor: string | null = null;
 
   const observe = (event: RecentEvent) => {
-    const parts = jobPathParts(event.path);
-    if (!parts) return;
-    const [id, rest] = parts;
-    // Only a submission enqueues work. Draft writes, status writes, outputs and
-    // deletes are deliberately ignored — pickup verifies state truthfully.
-    if (rest === 'submitted.md' && SUBMIT_OPERATIONS.has(event.operation)) enqueue(id);
+    // Only the durable submit event enqueues work. Draft writes, status writes,
+    // outputs, deletes and files merely appearing at submitted.md are ignored.
+    const submission = submissionOf(event);
+    if (submission) enqueue(submission);
   };
 
-  const fail = async (
-    id: string,
-    statusPath: string,
-    claim: Version,
-    startedAt: string,
-    reason: JobFailureReason,
-  ) => {
-    try {
-      await client.put(
-        driveId,
-        statusPath,
-        utf8.encode(
-          `${JSON.stringify({
-            version: 1,
-            job: id,
-            state: 'failed',
-            claimedBy: claim.agentId,
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            reason,
-          })}\n`,
-        ),
-        { ifVersionId: claim.id, ...(signal ? { signal } : {}) },
-      );
-    } catch {
-      // The status is contested or the drive is unreachable: the running claim
-      // stays held for manual new-id recovery rather than being clobbered.
-    }
-  };
-
-  const runOne = async (id: string) => {
+  const runOne = async (id: string, versionId: string) => {
+    if (signal?.aborted) return;
     const dir = `/jobs/${id}`;
     const submittedPath = `${dir}/submitted.md`;
     const statusPath = `${dir}/status.json`;
     const inputsPrefix = `${dir}/inputs/`;
     const receiptPath = `${CLAIM_PREFIX}${id}.json`;
 
-    // Liveness check and request pin in one metadata call: a submission deleted
-    // before pickup is dropped; anything else is a recoverable discovery error.
+    // Liveness check: a submission deleted before pickup is dropped; anything
+    // else is a recoverable discovery error.
+    try {
+      await client.getVersionMetadata(driveId, submittedPath, {
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      if (isNotFound(error)) {
+        backoff.delete(id);
+        return;
+      }
+      if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
+      throw error;
+    }
+
+    // The run executes the exact request version the submit event pinned. If
+    // that version is missing or no longer applies, the job is dropped — a
+    // different version is never substituted.
     let requestMeta: Version;
     try {
-      requestMeta = await client.getVersionMetadata(driveId, submittedPath);
+      requestMeta = await client.getVersionMetadata(driveId, submittedPath, {
+        versionId,
+        ...(signal ? { signal } : {}),
+      });
     } catch (error) {
-      if (isNotFound(error)) return;
-      if (!isPermanentAuthorizationFailure(error)) retryLater(id);
+      if (isNotFound(error)) {
+        backoff.delete(id);
+        return;
+      }
+      if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
       throw error;
     }
 
@@ -492,19 +584,27 @@ export async function runJobs(
     // including a trashed receipt — means a previous worker owns the id forever.
     // An ambiguous error must never run: the job backs off and is rediscovered,
     // where a landed receipt surfaces as the conflict and a lost one can retry.
+    const claimedAt = new Date().toISOString();
+    let receipt: Version;
     try {
-      await client.put(
+      receipt = await client.put(
         driveId,
         receiptPath,
         utf8.encode(
-          `${JSON.stringify({ version: 1, job: id, claimedAt: new Date().toISOString() })}\n`,
+          `${JSON.stringify({
+            version: 1,
+            job: id,
+            state: 'running',
+            requestVersionId: versionId,
+            claimedAt,
+          })}\n`,
         ),
         { mode: 'create', ...(signal ? { signal } : {}) },
       );
     } catch (error) {
       if (isClaimed(error)) remember(id);
       else {
-        if (!isPermanentAuthorizationFailure(error)) retryLater(id);
+        if (!isPermanentAuthorizationFailure(error)) retryLater(id, versionId);
         throw error;
       }
       return;
@@ -535,6 +635,52 @@ export async function runJobs(
     }
     remember(id);
     const startedAt = new Date().toISOString();
+    /** Every output version committed so far; the receipt records all of them. */
+    const committed: { name: string; versionId: string }[] = [];
+
+    /**
+     * Guarded terminal updates: the authoritative receipt first, then the
+     * visible status. Either write failing leaves the outcome ambiguous — the
+     * running claim stays held, committed outputs are never rolled back, and
+     * the ambiguity is reported rather than guessed away.
+     */
+    const persistTerminal = async (state: 'done' | 'failed', reason?: JobFailureReason) => {
+      const finishedAt = new Date().toISOString();
+      const receiptBody = {
+        version: 1,
+        job: id,
+        state,
+        ...(reason !== undefined ? { reason } : {}),
+        requestVersionId: versionId,
+        claimedAt,
+        finishedAt,
+        outputs: committed,
+      };
+      const statusBody = {
+        version: 1,
+        job: id,
+        state,
+        claimedBy: claim.agentId,
+        startedAt,
+        finishedAt,
+        ...(state === 'done' ? { outputs: committed.map((output) => output.name) } : { reason }),
+      };
+      let persisted = true;
+      for (const [path, body, guard] of [
+        [receiptPath, receiptBody, receipt.id],
+        [statusPath, statusBody, claim.id],
+      ] as const) {
+        try {
+          await client.put(driveId, path, utf8.encode(`${JSON.stringify(body)}\n`), {
+            ifVersionId: guard,
+            ...(signal ? { signal } : {}),
+          });
+        } catch {
+          persisted = false;
+        }
+      }
+      if (!persisted) recordError(persistenceError(id));
+    };
 
     type Stage = 'request' | 'inputs' | 'handler' | 'outputs' | 'finalize';
     const reasonFor = (stage: Stage, error: unknown): JobFailureReason => {
@@ -566,7 +712,14 @@ export async function runJobs(
       const cursors = new Set<string>();
       do {
         if (signal?.aborted) return;
-        const page = await client.list(driveId, inputsPrefix, PAGE_LIMIT, pageCursor);
+        const page = await client.list(
+          driveId,
+          inputsPrefix,
+          PAGE_LIMIT,
+          pageCursor,
+          undefined,
+          signal,
+        );
         for (const entry of page.items) {
           // The prefix is advisory: only ever use paths proven under inputs/.
           if (!entry.path.startsWith(inputsPrefix)) throw new JobFailure('invalid_input_name');
@@ -599,7 +752,7 @@ export async function runJobs(
       stage = 'request';
       const request = (
         await client.get(driveId, submittedPath, {
-          versionId: requestMeta.id,
+          versionId,
           maxPlaintextBytes: JOB_LIMITS.requestBytes,
           ...(signal ? { signal } : {}),
         })
@@ -647,98 +800,67 @@ export async function runJobs(
         )
           throw new JobFailure('invalid_output');
       }
-      for (const output of produced)
-        await client.put(driveId, `${dir}/outputs/${output.name}`, output.bytes, {
+      for (const output of produced) {
+        const wrote = await client.put(driveId, `${dir}/outputs/${output.name}`, output.bytes, {
           mode: 'create',
           ...(signal ? { signal } : {}),
         });
+        committed.push({ name: output.name, versionId: wrote.id });
+      }
 
       stage = 'finalize';
-      await client.put(
-        driveId,
-        statusPath,
-        utf8.encode(
-          `${JSON.stringify({
-            version: 1,
-            job: id,
-            state: 'done',
-            claimedBy: claim.agentId,
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            outputs: produced.map((output) => output.name),
-          })}\n`,
-        ),
-        { ifVersionId: claim.id, ...(signal ? { signal } : {}) },
-      );
+      await persistTerminal('done');
     } catch (error) {
       // A stopped worker leaves the claim held as running for manual recovery.
       if (signal?.aborted) return;
-      await fail(id, statusPath, claim, startedAt, reasonFor(stage, error));
+      // A dead executable is fatal for the worker, not a job failure.
+      if (isWorkerUnavailable(error)) throw error;
+      await persistTerminal('failed', reasonFor(stage, error));
     }
   };
 
   const drain = async () => {
-    // Requeue ids whose backoff elapsed before taking new work.
+    // Requeue ids whose backoff elapsed before taking new work. The backoff
+    // entry stays so a failed retry keeps the grown delay.
     const now = Date.now();
     for (const [id, cool] of backoff)
-      if (cool.at <= now) {
-        backoff.delete(id);
-        enqueue(id);
-      }
+      if (cool.at <= now && !isSettled(id)) pending.set(id, { versionId: cool.versionId });
     for (;;) {
       if (signal?.aborted) return;
-      const id = pending.keys().next().value as string | undefined;
-      if (id === undefined) return;
+      const next = pending.entries().next().value as [string, { versionId: string }] | undefined;
+      if (next === undefined) return;
+      const [id, submission] = next;
       pending.delete(id);
       if (isSettled(id)) continue;
+      // Readiness is re-checked before every claim; a dead executable is fatal.
+      await handler.assertReady?.();
       try {
-        await runOne(id);
+        await runOne(id, submission.versionId);
       } catch (error) {
         // Acquisition errors are remembered for the once-mode report; a single
         // bad job — buggy or not — never kills the worker or starves the next.
-        if (isPermanentAuthorizationFailure(error)) throw error;
+        if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
         recordError(error);
       }
     }
   };
 
   /**
-   * One pass over /jobs/. Entries for a job id sort contiguously, so only the
-   * current id's flags live in memory; completed pages drain promptly.
+   * One pass over the durable submission feed. Each page is re-qualified and
+   * drained before the next is fetched, so memory stays bounded.
    */
   const scan = async () => {
     const cursors = new Set<string>();
-    let currentId: string | null = null;
-    let hasSubmitted = false;
-    let hasStatus = false;
-    const finalize = () => {
-      if (currentId !== null && hasSubmitted && !hasStatus) enqueue(currentId);
-      currentId = null;
-      hasSubmitted = false;
-      hasStatus = false;
-    };
     let pageCursor: string | undefined;
     do {
       if (signal?.aborted) return;
-      const page = await client.list(driveId, JOBS_PREFIX, PAGE_LIMIT, pageCursor);
-      for (const item of page.items) {
-        const parts = jobPathParts(item.path);
-        if (!parts) continue;
-        const [id, rest] = parts;
-        if (id !== currentId) {
-          finalize();
-          currentId = id;
-        }
-        if (rest === 'status.json') hasStatus = true;
-        else if (rest === 'submitted.md') hasSubmitted = true;
-      }
+      const page = await client.pendingJobSubmissions(driveId, PAGE_LIMIT, pageCursor, signal);
+      for (const event of page.items) observe(event);
       const next = page.nextCursor;
       guardPageCursor(cursors, pageCursor, next);
       pageCursor = next ?? undefined;
       await drain();
     } while (pageCursor);
-    finalize();
-    await drain();
   };
 
   const follow = async (page: RecentPage, firstCursor: string | undefined) => {
@@ -748,6 +870,7 @@ export async function runJobs(
       if (signal?.aborted) return;
       for (const event of page.items) observe(event);
       if (page.latestCursor) cursor = page.latestCursor;
+      await drain();
       if (!page.nextCursor) return;
       guardPageCursor(cursors, previous, page.nextCursor);
       previous = page.nextCursor;
@@ -756,12 +879,14 @@ export async function runJobs(
   };
 
   if (options.once) {
+    await handler.assertReady?.();
     await scan();
     // Report the first discovery or acquisition failure instead of a false pass.
     if (firstError !== undefined && !signal?.aborted) throw firstError;
     return;
   }
   if (signal?.aborted) return;
+  await handler.assertReady?.();
 
   let pollMs = basePollMs;
   // The startup scan runs as the loop's first reconcile: a transient outage at
@@ -794,7 +919,7 @@ export async function runJobs(
       pollMs = idle ? Math.min(pollMs * 2, pollMaxMs) : basePollMs;
     } catch (error) {
       if (signal?.aborted) return;
-      if (isPermanentAuthorizationFailure(error)) throw error;
+      if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
       // Timeout or transport outage: pace, then reconcile from a fresh head
       // captured before the recovery scan plus the authoritative cursor.
       await nap(retryMs);
@@ -803,7 +928,7 @@ export async function runJobs(
         await reconcile();
       } catch (error) {
         if (signal?.aborted) return;
-        if (isPermanentAuthorizationFailure(error)) throw error;
+        if (isWorkerUnavailable(error) || isPermanentAuthorizationFailure(error)) throw error;
         // Still down; the outer loop keeps the paced cadence.
       }
     }

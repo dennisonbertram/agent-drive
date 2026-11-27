@@ -67,13 +67,21 @@ const outage = () => new AgentDriveApiError('internal_error', 500, 'synthetic ou
 /**
  * In-memory drive with the server's observable semantics: create-only and CAS puts,
  * guarded idempotent rename, version-pinned reads, trash, path-sorted paginated list,
- * page limits capped at the real MAX_PAGE_SIZE, and a commit-ordered recent-event
- * feed whose latestCursor is the LAST RETURNED ROW, not the tail.
+ * page limits capped at the real MAX_PAGE_SIZE, a commit-ordered recent-event
+ * feed whose latestCursor is the LAST RETURNED ROW, not the tail, and a
+ * jobSubmissions view modelling the server-side filter: only `move` events from
+ * /jobs/<id>/request.md to the same /jobs/<id>/submitted.md with a nonnull
+ * versionId, whose file is still alive at the submitted path, and whose id has
+ * no worker receipt (live or trashed).
  */
 class FakeDrive {
   readonly calls: string[] = [];
   /** Cursor argument of every 'recent' call, in order. */
   readonly recentArgs: (string | undefined)[] = [];
+  /** Call signatures that arrived carrying an abort signal. */
+  readonly signalSeen = new Set<string>();
+  /** When true, pendingJobSubmissions behaves like a pre-flag server: every event. */
+  unfilteredSubmissions = false;
   private readonly live = new Map<string, StoredFile>();
   private readonly trashed = new Map<string, StoredFile>();
   private readonly history = new Map<string, StoredFile>();
@@ -103,6 +111,8 @@ class FakeDrive {
         nextCursor: string | null;
       })
     | undefined;
+  /** Transforms a pendingJobSubmissions page — for stalled-cursor tests. */
+  jobsTransform: ((page: RecentPage) => RecentPage) | undefined;
 
   private stamp() {
     this.clock += 1;
@@ -153,6 +163,7 @@ class FakeDrive {
     } = {},
   ) {
     this.fail(`put:${path}`);
+    if (options.signal) this.signalSeen.add(`put:${path}`);
     const guard = options.ifVersionId;
     const live = this.live.get(path);
     const trashed = this.trashed.get(path);
@@ -193,6 +204,7 @@ class FakeDrive {
     options: { versionId?: string; maxPlaintextBytes?: number; signal?: AbortSignal } = {},
   ) {
     this.fail(`get:${path}`);
+    if (options.signal) this.signalSeen.add(`get:${path}`);
     const file = options.versionId ? this.history.get(options.versionId) : this.live.get(path);
     if (!file || file.path !== path) throw notFound();
     if (
@@ -209,13 +221,22 @@ class FakeDrive {
     options: { versionId?: string; signal?: AbortSignal } = {},
   ) {
     this.fail(`meta:${path}`);
+    if (options.signal) this.signalSeen.add(`meta:${path}`);
     const file = options.versionId ? this.history.get(options.versionId) : this.live.get(path);
     if (!file || file.path !== path) throw notFound();
     return versionObject(file);
   }
 
-  async list(_driveId: string, prefix?: string, limit = 100, cursor?: string) {
+  async list(
+    _driveId: string,
+    prefix?: string,
+    limit = 100,
+    cursor?: string,
+    _filters?: { tag?: string; agentId?: string; machine?: string; user?: string },
+    signal?: AbortSignal,
+  ) {
     this.fail(`list:${prefix ?? ''}`);
+    if (signal) this.signalSeen.add(`list:${prefix ?? ''}`);
     if (limit > REAL_PAGE_LIMIT)
       throw new AgentDriveApiError('validation_error', 400, 'limit must be between 1 and 100.');
     const ordered = [...this.live.values()]
@@ -308,18 +329,25 @@ class FakeDrive {
   }
 
   /** Tail cursor of the event feed: the parallel client change's recentHead. */
-  async recentHead(_driveId: string, _signal?: AbortSignal): Promise<string | null> {
+  async recentHead(_driveId: string, signal?: AbortSignal): Promise<string | null> {
     this.fail('recentHead');
+    if (signal) this.signalSeen.add('recentHead');
     void _driveId;
-    void _signal;
     return this.events.length > 0 ? String(this.events.length) : null;
   }
 
-  async recent(_driveId: string, since?: string, limit = 50, cursor?: string): Promise<RecentPage> {
+  async recent(
+    _driveId: string,
+    since?: string,
+    limit = 50,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<RecentPage> {
     this.recentArgs.push(cursor);
     this.recentPolls += 1;
     await this.pollHook?.(this.recentPolls);
     this.fail('recent');
+    if (signal) this.signalSeen.add('recent');
     if (limit > REAL_PAGE_LIMIT)
       throw new AgentDriveApiError('validation_error', 400, 'limit must be between 1 and 100.');
     let start = 0;
@@ -334,6 +362,66 @@ class FakeDrive {
       // Real semantics: the cursor of the LAST RETURNED ROW, not the tail.
       latestCursor: items.length > 0 ? String(start + items.length) : (cursor ?? null),
     };
+  }
+
+  /**
+   * The server's /recent?jobSubmissions=1 view: qualifying move events only —
+   * a `move` from /jobs/<valid-id>/request.md to the same id's submitted.md
+   * carrying a versionId, the file still alive at the submitted path, and no
+   * worker receipt (live or trashed) for the id. `unfilteredSubmissions`
+   * models a pre-flag server that ignores the query and returns everything;
+   * the worker must still qualify each event itself.
+   */
+  async pendingJobSubmissions(
+    _driveId: string,
+    limit = 50,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<RecentPage> {
+    this.fail('jobSubmissions');
+    if (signal) this.signalSeen.add('jobSubmissions');
+    if (limit > REAL_PAGE_LIMIT)
+      throw new AgentDriveApiError('validation_error', 400, 'limit must be between 1 and 100.');
+    const qualifies = (event: RecentEvent) => {
+      if (this.unfilteredSubmissions) return true;
+      if (event.operation !== 'move' || event.versionId === null) return false;
+      const match = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/submitted\.md$/.exec(event.path);
+      if (!match || event.previousPath !== `/jobs/${match[1]}/request.md`) return false;
+      if (!this.live.has(event.path)) return false;
+      const receipt = `/jobs/.agent-drive/claims/${match[1]}.json`;
+      return !this.live.has(receipt) && !this.trashed.has(receipt);
+    };
+    // Keyset cursor over the raw event stream: `limit` counts qualifying items,
+    // and nextCursor is the last scanned position — so a receipt landing during
+    // a mid-scan drain can never shift or skip later pages.
+    const start = cursor ? Number(cursor) : -1;
+    const items: RecentEvent[] = [];
+    let scanned = start;
+    for (let index = start + 1; index < this.events.length && items.length < limit; index += 1) {
+      scanned = index;
+      if (qualifies(this.events[index]!)) items.push(this.events[index]!);
+    }
+    const page: RecentPage = {
+      items,
+      nextCursor: this.events.some((event, index) => index > scanned && qualifies(event))
+        ? String(scanned)
+        : null,
+      latestCursor: null,
+    };
+    return this.jobsTransform ? this.jobsTransform(page) : page;
+  }
+
+  /** Test helper: append an arbitrary event to the feed (e.g. a malformed move). */
+  emit(event: Pick<RecentEvent, 'operation' | 'path' | 'previousPath' | 'versionId'>) {
+    this.events.push({
+      id: randomUUID(),
+      agentId: 'agent-test',
+      agentName: null,
+      machineId: null,
+      userId: null,
+      createdAt: this.stamp(),
+      ...event,
+    });
   }
 
   has(path: string) {
@@ -361,6 +449,13 @@ class FakeDrive {
       : null;
   }
 
+  receipt(id: string): Record<string, unknown> | null {
+    const file = this.live.get(`/jobs/.agent-drive/claims/${id}.json`);
+    return file
+      ? (JSON.parse(new TextDecoder().decode(file.bytes)) as Record<string, unknown>)
+      : null;
+  }
+
   eventCount() {
     return this.events.length;
   }
@@ -371,6 +466,11 @@ const asClient = (drive: FakeDrive) =>
     Parameters<typeof submitJob>[0] &
     Parameters<typeof runJobs>[0];
 
+/**
+ * Seeds a real submission: request.md plus an actual request.md -> submitted.md
+ * move (the only operation that produces a qualifying submission event).
+ * `viaSubmit` routes the move through submitJob's guarded rename instead.
+ */
 async function seedSubmission(
   drive: FakeDrive,
   id: string,
@@ -383,10 +483,10 @@ async function seedSubmission(
   const client = asClient(drive);
   for (const input of options.inputs ?? [])
     await drive.put(DRIVE, `/jobs/${id}/inputs/${input.name}`, input.bytes);
+  await drive.put(DRIVE, `/jobs/${id}/request.md`, options.request ?? textBytes('do work'));
   if (options.viaSubmit === false) {
-    await drive.put(DRIVE, `/jobs/${id}/submitted.md`, options.request ?? textBytes('do work'));
+    drive.move(`/jobs/${id}/request.md`, `/jobs/${id}/submitted.md`);
   } else {
-    await drive.put(DRIVE, `/jobs/${id}/request.md`, options.request ?? textBytes('do work'));
     await submitJob(client, DRIVE, id);
   }
 }
@@ -563,6 +663,42 @@ describe('submitJob', () => {
     // Exactly one guarded rename was attempted — no automatic resubmission.
     expect(drive.calls.filter((call) => call.startsWith('rename:'))).toHaveLength(1);
     expect(drive.has('/jobs/job-8/submitted.md')).toBe(false);
+  });
+
+  it('conflicts without renaming the draft when the id is held but no submission is visible', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-held-sub');
+    // A worker claimed the job, then the submission and status were moved aside.
+    await drive.put(
+      DRIVE,
+      '/jobs/.agent-drive/claims/job-held-sub.json',
+      textBytes('{"version":1}'),
+    );
+    drive.move('/jobs/job-held-sub/submitted.md', '/jobs/job-held-sub/submitted.moved.md');
+    // The submitter wrote a fresh draft under the same id.
+    await drive.put(DRIVE, '/jobs/job-held-sub/request.md', textBytes('new draft'));
+
+    await expect(submitJob(client, DRIVE, 'job-held-sub')).rejects.toMatchObject({
+      status: 409,
+    });
+    // No rename ran and the draft is untouched.
+    expect(drive.calls.filter((call) => call.startsWith('rename:'))).toHaveLength(1);
+    expect(drive.text('/jobs/job-held-sub/request.md')).toBe('new draft');
+    expect(drive.has('/jobs/job-held-sub/submitted.md')).toBe(false);
+  });
+
+  it('conflicts when only a visible status remains of a held job', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await drive.put(DRIVE, '/jobs/job-status-only/status.json', textBytes('{"state":"running"}'));
+    await drive.put(DRIVE, '/jobs/job-status-only/request.md', textBytes('draft'));
+
+    await expect(submitJob(client, DRIVE, 'job-status-only')).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(drive.calls.filter((call) => call.startsWith('rename:'))).toHaveLength(0);
+    expect(drive.has('/jobs/job-status-only/submitted.md')).toBe(false);
   });
 });
 
@@ -762,18 +898,18 @@ describe('runJobs once', () => {
   it('reports a discovery outage in once mode instead of a false pass', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
-    drive.failures.set('list:/jobs/', 1);
+    drive.failures.set('jobSubmissions', 1);
 
     await expect(runJobs(client, DRIVE, async () => [], { once: true })).rejects.toThrow(
       AgentDriveApiError,
     );
   });
 
-  it('reports a repeated listing cursor as a discovery error instead of looping', async () => {
+  it('reports a repeated submission cursor as a discovery error instead of looping', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
-    await drive.put(DRIVE, '/jobs/a/submitted.md', textBytes('x'));
-    drive.listTransform = (_prefix, page) => ({ items: page.items, nextCursor: 'STUCK' });
+    await seedSubmission(drive, 'job-a');
+    drive.jobsTransform = (page) => ({ ...page, nextCursor: 'STUCK' });
 
     await expect(runJobs(client, DRIVE, async () => [], { once: true })).rejects.toThrow(
       AgentDriveApiError,
@@ -804,15 +940,50 @@ describe('runJobs once', () => {
     expect(drive.has('/jobs/job-e/status.json')).toBe(false);
   });
 
-  it('ignores drafts, foreign paths and invalid ids during discovery', async () => {
+  it('ignores drafts, foreign paths, non-move events and invalid ids during discovery', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
+    // Model a pre-flag server that returns every event: qualification is ours.
+    drive.unfilteredSubmissions = true;
     await drive.put(DRIVE, '/jobs/draft-only/request.md', textBytes('draft'));
     await drive.put(DRIVE, '/elsewhere/submitted.md', textBytes('x'));
-    await drive.put(DRIVE, '/jobs/bad id/submitted.md', textBytes('x'));
-    await drive.put(DRIVE, '/jobs/-bad/submitted.md', textBytes('x'));
-    await drive.put(DRIVE, '/jobs/nested/deep/submitted.md', textBytes('x'));
-    await drive.put(DRIVE, '/jobs/good/submitted.md', textBytes('run me'));
+    // A file appearing at submitted.md without a move is not a submission.
+    await drive.put(DRIVE, '/jobs/direct/submitted.md', textBytes('x'));
+    // A move from a different source is not a submission.
+    await drive.put(DRIVE, '/jobs/wrongsrc/notes.md', textBytes('x'));
+    drive.move('/jobs/wrongsrc/notes.md', '/jobs/wrongsrc/submitted.md');
+    // Malformed events: invalid ids, nested paths, missing versionId, copy/restore.
+    drive.emit({
+      operation: 'move',
+      path: '/jobs/bad id/submitted.md',
+      previousPath: '/jobs/bad id/request.md',
+      versionId: 'v',
+    });
+    drive.emit({
+      operation: 'move',
+      path: '/jobs/-bad/submitted.md',
+      previousPath: '/jobs/-bad/request.md',
+      versionId: 'v',
+    });
+    drive.emit({
+      operation: 'move',
+      path: '/jobs/nested/deep/submitted.md',
+      previousPath: '/jobs/nested/deep/request.md',
+      versionId: 'v',
+    });
+    drive.emit({
+      operation: 'move',
+      path: '/jobs/nover/submitted.md',
+      previousPath: '/jobs/nover/request.md',
+      versionId: null,
+    });
+    drive.emit({
+      operation: 'copy',
+      path: '/jobs/copied/submitted.md',
+      previousPath: '/jobs/copied/request.md',
+      versionId: 'v',
+    });
+    await seedSubmission(drive, 'good', { request: textBytes('run me'), viaSubmit: false });
 
     const seen: string[] = [];
     await runJobs(
@@ -827,17 +998,22 @@ describe('runJobs once', () => {
     expect(seen).toEqual(['good']);
   });
 
-  it('discovers pending submissions across all list pages at the real page limit', async () => {
+  it('discovers pending submissions across all submission pages at the real page limit', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
-    // 210 drafts push the single submission past the first two list pages.
-    for (let index = 0; index < 210; index += 1)
+    // Drafts never qualify; 110 real submissions span two event pages.
+    for (let index = 0; index < 30; index += 1)
       await drive.put(
         DRIVE,
         `/jobs/pad-${String(index).padStart(3, '0')}/request.md`,
         textBytes('x'),
       );
-    await seedSubmission(drive, 'zz-real', { request: textBytes('found') });
+    const ids: string[] = [];
+    for (let index = 0; index < 110; index += 1) {
+      const id = `job-${String(index).padStart(3, '0')}`;
+      ids.push(id);
+      await seedSubmission(drive, id, { viaSubmit: false });
+    }
 
     const seen: string[] = [];
     await runJobs(
@@ -849,26 +1025,23 @@ describe('runJobs once', () => {
       },
       { once: true },
     );
-    expect(seen).toEqual(['zz-real']);
-    expect(drive.calls.filter((call) => call === 'list:/jobs/').length).toBeGreaterThanOrEqual(3);
+    expect(seen).toEqual(ids);
+    expect(drive.calls.filter((call) => call === 'jobSubmissions').length).toBeGreaterThanOrEqual(
+      2,
+    );
   });
 
   it('stops scanning at a page boundary when the signal aborts mid-scan', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
-    // 250 drafts force three list pages at the real page limit.
-    for (let index = 0; index < 250; index += 1)
-      await drive.put(
-        DRIVE,
-        `/jobs/pad-${String(index).padStart(3, '0')}/request.md`,
-        textBytes('x'),
-      );
+    // 210 submissions force three event pages at the real page limit.
+    for (let index = 0; index < 210; index += 1)
+      await seedSubmission(drive, `pad-${String(index).padStart(3, '0')}`, { viaSubmit: false });
     const controller = new AbortController();
-    let lists = 0;
     drive.before = (call) => {
-      if (call === 'list:/jobs/') {
-        lists += 1;
-        if (lists === 2) controller.abort();
+      if (call === 'jobSubmissions' && drive.calls.length > 0) {
+        const pages = drive.calls.filter((c) => c === 'jobSubmissions').length;
+        if (pages === 2) controller.abort();
       }
     };
 
@@ -876,8 +1049,8 @@ describe('runJobs once', () => {
       once: true,
       signal: controller.signal,
     });
-    // The abort lands on page two; page three must never be listed.
-    expect(lists).toBe(2);
+    // The abort lands on page two; page three must never be fetched.
+    expect(drive.calls.filter((call) => call === 'jobSubmissions')).toHaveLength(2);
   });
 
   it('drains only the submissions visible in one pass', async () => {
@@ -887,7 +1060,9 @@ describe('runJobs once', () => {
     drive.before = (call) => {
       if (call.startsWith('get:') && !drive.has('/jobs/job-late/submitted.md')) {
         // A submission that lands mid-run is left for the next pass.
-        void drive.put(DRIVE, '/jobs/job-late/submitted.md', textBytes('late'));
+        void drive
+          .put(DRIVE, '/jobs/job-late/request.md', textBytes('late'))
+          .then(() => drive.move('/jobs/job-late/request.md', '/jobs/job-late/submitted.md'));
       }
     };
 
@@ -904,10 +1079,10 @@ describe('runJobs once', () => {
     expect(seen).toEqual(['job-g']);
   });
 
-  it('pins the submitted request version at pickup even if it changes mid-run', async () => {
+  it('runs the version recorded by the submit event even if it changes mid-run', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);
-    await drive.put(DRIVE, '/jobs/job-h/submitted.md', textBytes('v1-request'));
+    await seedSubmission(drive, 'job-h', { request: textBytes('v1-request'), viaSubmit: false });
     const pinned = drive.file('/jobs/job-h/submitted.md')!.versionId;
     drive.before = (call) => {
       // Between pinning and download, someone overwrites the request.
@@ -930,6 +1105,56 @@ describe('runJobs once', () => {
     expect(requestText).toBe('v1-request');
     expect(drive.text('/jobs/job-h/submitted.md')).toBe('v2-request');
     expect(pinned).toBeTruthy();
+  });
+
+  it('runs the version recorded by the submit event even if the file changed before pickup', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-pin', {
+      request: textBytes('v1-request'),
+      viaSubmit: false,
+    });
+    const pinned = drive.file('/jobs/job-pin/submitted.md')!.versionId;
+    // A plain overwrite after the submit move is NOT a new submission.
+    await drive.put(DRIVE, '/jobs/job-pin/submitted.md', textBytes('v2-request'), {
+      mode: 'overwrite',
+    });
+
+    let requestText = '';
+    await runJobs(
+      client,
+      DRIVE,
+      async (job) => {
+        requestText = new TextDecoder().decode(job.request);
+        return [];
+      },
+      { once: true },
+    );
+    expect(requestText).toBe('v1-request');
+    const receipt = drive.receipt('job-pin');
+    expect(receipt?.state).toBe('done');
+    expect(receipt?.requestVersionId).toBe(pinned);
+  });
+
+  it('never substitutes a different version when the submitted version is gone', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-gone', { viaSubmit: false });
+    // A later (fabricated) move event carries a version that never landed.
+    drive.emit({
+      operation: 'move',
+      path: '/jobs/job-gone/submitted.md',
+      previousPath: '/jobs/job-gone/request.md',
+      versionId: randomUUID(),
+    });
+
+    let invoked = 0;
+    await runJobs(client, DRIVE, async () => ((invoked += 1), []), { once: true });
+    // The newest qualifying event pins a version that cannot be fetched: the job
+    // is dropped, never claimed, and no substitute version runs.
+    expect(invoked).toBe(0);
+    expect(drive.has('/jobs/.agent-drive/claims/job-gone.json')).toBe(false);
+    expect(drive.has('/jobs/job-gone/status.json')).toBe(false);
   });
 
   it('pins attachment versions at pickup', async () => {
@@ -1022,7 +1247,7 @@ describe('runJobs input bounds', () => {
   it('rejects hostile input names and nested paths', async () => {
     for (const name of ['../status.json', 'a/b', '..', 'deep/evil.txt']) {
       const { invoked, status } = await runSeeded('hostile', async (fake) => {
-        await fake.put(DRIVE, '/jobs/hostile/submitted.md', textBytes('x'));
+        await seedSubmission(fake, 'hostile', { viaSubmit: false });
         await fake.put(DRIVE, `/jobs/hostile/inputs/${name}`, textBytes('x'));
       });
       expect(invoked).toBe(0);
@@ -1033,7 +1258,7 @@ describe('runJobs input bounds', () => {
   it('rejects control characters and trailing newlines in input names', async () => {
     for (const name of ['tab\tname', 'line\nbreak', 'trailing\n', 'nul\x00char']) {
       const { invoked, status } = await runSeeded('control', async (fake) => {
-        await fake.put(DRIVE, '/jobs/control/submitted.md', textBytes('x'));
+        await seedSubmission(fake, 'control', { viaSubmit: false });
         await fake.put(DRIVE, `/jobs/control/inputs/${name}`, textBytes('x'));
       });
       expect(invoked).toBe(0);
@@ -1044,7 +1269,7 @@ describe('runJobs input bounds', () => {
   it('rejects input names over 255 UTF-8 bytes and folded duplicates', async () => {
     const overlong = 'é'.repeat(130); // 260 bytes, well under 255 characters
     const { invoked, status } = await runSeeded('longname', async (fake) => {
-      await fake.put(DRIVE, '/jobs/longname/submitted.md', textBytes('x'));
+      await seedSubmission(fake, 'longname', { viaSubmit: false });
       await fake.put(DRIVE, `/jobs/longname/inputs/${overlong}`, textBytes('x'));
     });
     expect(invoked).toBe(0);
@@ -1052,7 +1277,7 @@ describe('runJobs input bounds', () => {
 
     // Composed vs decomposed é normalize to the same folded name.
     const dup = await runSeeded('folded', async (fake) => {
-      await fake.put(DRIVE, '/jobs/folded/submitted.md', textBytes('x'));
+      await seedSubmission(fake, 'folded', { viaSubmit: false });
       await fake.put(DRIVE, '/jobs/folded/inputs/café.txt', textBytes('1')); // composed U+00E9
       await fake.put(DRIVE, '/jobs/folded/inputs/cafe\u0301.txt', textBytes('2')); // decomposed e+U+0301
     });
@@ -1230,10 +1455,15 @@ describe('runJobs failure and finalization', () => {
       }
     };
 
-    await runJobs(client, DRIVE, okHandler, { once: true });
+    // The ambiguous terminal write is reported, not silently swallowed.
+    await expect(runJobs(client, DRIVE, okHandler, { once: true })).rejects.toThrow(
+      /job-contested/,
+    );
     // The worker's CAS lost; it must not blast the contested status with an overwrite.
     expect(drive.text('/jobs/job-contested/status.json')).toBe('{"state":"other"}');
+    // Committed outputs are kept and the authoritative receipt still records done.
     expect(drive.has('/jobs/job-contested/outputs/result.txt')).toBe(true);
+    expect(drive.receipt('job-contested')?.state).toBe('done');
   });
 
   it('leaves a job held as running when the worker is aborted mid-handler', async () => {
@@ -1262,7 +1492,7 @@ describe('runJobs failure and finalization', () => {
 describe('runJobs daemon follow', () => {
   it.each([
     ['recentHead', 401],
-    ['list:/jobs/', 403],
+    ['jobSubmissions', 403],
   ])('surfaces permanent authorization failure from %s promptly', async (call, status) => {
     const drive = new FakeDrive();
     const client = asClient(drive);
@@ -1301,10 +1531,12 @@ describe('runJobs daemon follow', () => {
     let scanned = false;
     let polls = 0;
     drive.before = (call) => {
-      // The submission lands between the head probe and the first list page.
-      if (call.startsWith('list:/jobs') && !scanned) {
+      // The submission lands between the head probe and the first submissions page.
+      if (call === 'jobSubmissions' && !scanned) {
         scanned = true;
-        void drive.put(DRIVE, '/jobs/joined/submitted.md', textBytes('hi'));
+        void drive
+          .put(DRIVE, '/jobs/joined/request.md', textBytes('hi'))
+          .then(() => drive.move('/jobs/joined/request.md', '/jobs/joined/submitted.md'));
       }
       if (call === 'recent') {
         polls += 1;
@@ -1321,7 +1553,7 @@ describe('runJobs daemon follow', () => {
     });
     expect(invoked).toBe(1);
     expect(drive.calls[0]).toBe('recentHead');
-    expect(drive.calls.indexOf('recentHead')).toBeLessThan(drive.calls.indexOf('list:/jobs/'));
+    expect(drive.calls.indexOf('recentHead')).toBeLessThan(drive.calls.indexOf('jobSubmissions'));
     expect(drive.status('joined')?.state).toBe('done');
   });
 
@@ -1453,7 +1685,7 @@ describe('runJobs daemon follow', () => {
       // follows that head can ever discover it.
       if (call === 'recentHead') {
         heads += 1;
-        if (heads === 2) void drive.put(DRIVE, '/jobs/reconciled/submitted.md', textBytes('x'));
+        if (heads === 2) void seedSubmission(drive, 'reconciled', { viaSubmit: false });
       }
       if (call === 'recent' && drive.has('/jobs/reconciled/status.json')) controller.abort();
       if (call === 'recent' && drive.calls.filter((c) => c === 'recent').length > 20)
@@ -1514,7 +1746,7 @@ describe('runJobs daemon follow', () => {
     // The submission is already queued before the worker starts; nothing new lands.
     await seedSubmission(drive, 'job-boot');
     const controller = new AbortController();
-    drive.failures.set('list:/jobs/', 1); // the startup scan's first page 500s
+    drive.failures.set('jobSubmissions', 1); // the startup scan's first page 500s
     drive.pollHook = () => {
       if (drive.status('job-boot') || drive.eventCount() > 50) controller.abort();
     };
@@ -1537,12 +1769,12 @@ describe('runJobs daemon follow', () => {
     const client = asClient(drive);
     const controller = new AbortController();
     drive.failures.set('recent', 1); // the first poll 500s -> recovery reconcile
-    let lists = 0;
+    let scans = 0;
     drive.before = (call) => {
-      if (call === 'list:/jobs/') {
-        lists += 1;
-        // The recovery scan (second list) fails AFTER the fresh head was captured.
-        if (lists === 2) throw outage();
+      if (call === 'jobSubmissions') {
+        scans += 1;
+        // The recovery scan (second page fetch) fails AFTER the fresh head was captured.
+        if (scans === 2) throw outage();
       }
     };
     drive.pollHook = async (call) => {
@@ -1565,6 +1797,372 @@ describe('runJobs daemon follow', () => {
     // job-slip's submit event; the retry must follow from the older cursor.
     expect(invoked).toBe(1);
     expect(drive.status('job-slip')?.state).toBe('done');
+  });
+});
+
+describe('worker receipt as the authoritative record', () => {
+  it('stores the approved request version and committed output versions on the receipt', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-rec', { request: textBytes('go') });
+    const submittedVersion = drive.file('/jobs/job-rec/submitted.md')!.versionId;
+
+    await runJobs(client, DRIVE, okHandler, { once: true });
+
+    const receipt = drive.receipt('job-rec');
+    expect(receipt?.state).toBe('done');
+    expect(receipt?.requestVersionId).toBe(submittedVersion);
+    const outVersion = drive.file('/jobs/job-rec/outputs/result.txt')!.versionId;
+    expect(receipt?.outputs).toEqual([{ name: 'result.txt', versionId: outVersion }]);
+    // The visible status keeps its historical name-only shape.
+    expect(drive.status('job-rec')?.outputs).toEqual(['result.txt']);
+  });
+
+  it('records the failure reason and partially committed outputs on the receipt', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-partial');
+    // A squatting output makes the SECOND output commit fail after the first lands.
+    await drive.put(DRIVE, '/jobs/job-partial/outputs/b.txt', textBytes('squatter'));
+
+    await runJobs(
+      client,
+      DRIVE,
+      async () => [
+        { name: 'a.txt', bytes: textBytes('1') },
+        { name: 'b.txt', bytes: textBytes('2') },
+      ],
+      { once: true },
+    );
+
+    const receipt = drive.receipt('job-partial');
+    expect(receipt?.state).toBe('failed');
+    expect(receipt?.reason).toBe('output_commit_failed');
+    expect(receipt?.outputs).toEqual([
+      { name: 'a.txt', versionId: drive.file('/jobs/job-partial/outputs/a.txt')!.versionId },
+    ]);
+    expect(drive.status('job-partial')?.state).toBe('failed');
+    expect(drive.status('job-partial')?.reason).toBe('output_commit_failed');
+  });
+});
+
+describe('terminal persistence reporting', () => {
+  it('surfaces a failed-state persistence outage instead of silently holding', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-unpersisted');
+    let statusPuts = 0;
+    let receiptPuts = 0;
+    drive.before = (call) => {
+      if (call === 'put:/jobs/job-unpersisted/status.json') {
+        statusPuts += 1;
+        if (statusPuts === 2) throw outage(); // the 'failed' CAS fails
+      }
+      if (call === 'put:/jobs/.agent-drive/claims/job-unpersisted.json') {
+        receiptPuts += 1;
+        if (receiptPuts === 2) throw outage(); // the receipt 'failed' CAS fails
+      }
+    };
+
+    await expect(
+      runJobs(
+        client,
+        DRIVE,
+        async () => {
+          throw new Error('boom');
+        },
+        { once: true },
+      ),
+    ).rejects.toThrow(/job-unpersisted/);
+    // Both writes failed: the running claim and receipt stay held, not clobbered.
+    expect(drive.status('job-unpersisted')?.state).toBe('running');
+    expect(drive.receipt('job-unpersisted')?.state).toBe('running');
+  });
+
+  it('still records the failure on the receipt when the visible status write fails', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-visfail');
+    let statusPuts = 0;
+    drive.before = (call) => {
+      if (call === 'put:/jobs/job-visfail/status.json') {
+        statusPuts += 1;
+        if (statusPuts === 2) throw outage(); // only the 'failed' CAS fails
+      }
+    };
+
+    await expect(
+      runJobs(
+        client,
+        DRIVE,
+        async () => {
+          throw new Error('boom');
+        },
+        { once: true },
+      ),
+    ).rejects.toThrow(/job-visfail/);
+    // The authoritative receipt carries the failure even though the visible
+    // status could not be updated.
+    const receipt = drive.receipt('job-visfail');
+    expect(receipt?.state).toBe('failed');
+    expect(receipt?.reason).toBe('handler_error');
+    expect(drive.status('job-visfail')?.state).toBe('running');
+  });
+});
+
+describe('worker availability', () => {
+  const unavailable = () => {
+    const error = new Error('worker executable unavailable');
+    error.name = 'WorkerUnavailableError';
+    return error;
+  };
+
+  it('does not claim any job when assertReady reports the worker unavailable', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-avail');
+    const handler = Object.assign(async () => [] as JobFile[], {
+      assertReady: () => {
+        throw unavailable();
+      },
+    });
+
+    await expect(runJobs(client, DRIVE, handler, { once: true })).rejects.toMatchObject({
+      name: 'WorkerUnavailableError',
+    });
+    // Nothing was claimed.
+    expect(drive.has('/jobs/.agent-drive/claims/job-avail.json')).toBe(false);
+    expect(drive.has('/jobs/job-avail/status.json')).toBe(false);
+  });
+
+  it('stops claiming further jobs once the worker becomes unavailable mid-drain', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-w1');
+    await seedSubmission(drive, 'job-w2');
+    let checks = 0;
+    const handler = Object.assign(async () => [] as JobFile[], {
+      assertReady: () => {
+        checks += 1;
+        // startup check + job-w1 pass; the check before job-w2's claim fails
+        if (checks === 3) throw unavailable();
+      },
+    });
+
+    await expect(runJobs(client, DRIVE, handler, { once: true })).rejects.toMatchObject({
+      name: 'WorkerUnavailableError',
+    });
+    expect(drive.status('job-w1')?.state).toBe('done');
+    expect(drive.has('/jobs/.agent-drive/claims/job-w2.json')).toBe(false);
+    expect(drive.has('/jobs/job-w2/status.json')).toBe(false);
+  });
+
+  it('surfaces a fatal error when the executable disappears after the claim', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-dead');
+    const handler = async (): Promise<JobFile[]> => {
+      throw unavailable();
+    };
+
+    await expect(runJobs(client, DRIVE, handler, { once: true })).rejects.toMatchObject({
+      name: 'WorkerUnavailableError',
+    });
+    // The claim stays held as running; no 'failed' is persisted for a dead worker.
+    expect(drive.status('job-dead')?.state).toBe('running');
+    expect(drive.receipt('job-dead')?.state).toBe('running');
+  });
+
+  it('stops a watching worker when the executable dies mid-job', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-mid-dead');
+    const handler = async (): Promise<JobFile[]> => {
+      throw unavailable();
+    };
+
+    await expect(
+      runJobs(client, DRIVE, handler, {
+        once: false,
+        signal: new AbortController().signal,
+        sleep: async () => {},
+      }),
+    ).rejects.toMatchObject({ name: 'WorkerUnavailableError' });
+    // The held claim is preserved; no terminal failure is fabricated.
+    expect(drive.status('job-mid-dead')?.state).toBe('running');
+    expect(drive.receipt('job-mid-dead')?.state).toBe('running');
+  });
+
+  it('halts a watching worker before scanning when assertReady fails', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    const handler = Object.assign(async () => [] as JobFile[], {
+      assertReady: () => {
+        throw unavailable();
+      },
+    });
+
+    await expect(
+      runJobs(client, DRIVE, handler, {
+        once: false,
+        signal: new AbortController().signal,
+        sleep: async () => {},
+      }),
+    ).rejects.toMatchObject({ name: 'WorkerUnavailableError' });
+    // The worker stopped before any scan or claim.
+    expect(drive.calls).not.toContain('jobSubmissions');
+  });
+});
+
+describe('signal and pacing', () => {
+  it('passes the shutdown signal to submission paging, metadata and input listing', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-sig', {
+      inputs: [{ name: 'in.txt', bytes: textBytes('x') }],
+    });
+    const controller = new AbortController();
+
+    await runJobs(client, DRIVE, async () => [], { once: true, signal: controller.signal });
+
+    expect(drive.signalSeen.has('jobSubmissions')).toBe(true);
+    expect(drive.signalSeen.has('meta:/jobs/job-sig/submitted.md')).toBe(true);
+    expect(drive.signalSeen.has('list:/jobs/job-sig/inputs/')).toBe(true);
+    expect(drive.signalSeen.has('get:/jobs/job-sig/submitted.md')).toBe(true);
+  });
+
+  it('drains each submissions page before fetching the next', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    const ids: string[] = [];
+    for (let index = 0; index < 110; index += 1) {
+      const id = `job-${String(index).padStart(3, '0')}`;
+      ids.push(id);
+      await seedSubmission(drive, id, { viaSubmit: false });
+    }
+
+    await runJobs(client, DRIVE, async () => [], { once: true });
+
+    const pageCalls = drive.calls
+      .map((call, index) => (call === 'jobSubmissions' ? index : -1))
+      .filter((index) => index >= 0);
+    expect(pageCalls).toHaveLength(2);
+    // Jobs from the first page are claimed before the second page is fetched.
+    const firstClaim = drive.calls.indexOf('put:/jobs/.agent-drive/claims/job-000.json');
+    const lastPageOneClaim = drive.calls.indexOf('put:/jobs/.agent-drive/claims/job-099.json');
+    expect(firstClaim).toBeGreaterThan(pageCalls[0]!);
+    expect(lastPageOneClaim).toBeGreaterThan(pageCalls[0]!);
+    expect(lastPageOneClaim).toBeLessThan(pageCalls[1]!);
+  });
+
+  it('drains each live-feed page before fetching the next', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    const controller = new AbortController();
+    drive.pollHook = async (call) => {
+      // 60 submissions land during the first poll: 120 feed events (> one page).
+      if (call === 1)
+        for (let index = 0; index < 60; index += 1)
+          await seedSubmission(drive, `feed-${String(index).padStart(3, '0')}`, {
+            viaSubmit: false,
+          });
+      if (call >= 6 || drive.status('feed-059')) controller.abort();
+    };
+
+    await runJobs(client, DRIVE, async () => [], {
+      once: false,
+      signal: controller.signal,
+      pollMs: 1,
+      pollMaxMs: 2,
+      sleep: async () => {},
+    });
+
+    const recentCalls = drive.calls
+      .map((call, index) => (call === 'recent' ? index : -1))
+      .filter((index) => index >= 0);
+    expect(recentCalls.length).toBeGreaterThanOrEqual(2);
+    // A claim landed before the second page of the feed was fetched.
+    const firstClaim = drive.calls.indexOf('put:/jobs/.agent-drive/claims/feed-000.json');
+    const lastPageOneClaim = drive.calls.indexOf('put:/jobs/.agent-drive/claims/feed-049.json');
+    expect(firstClaim).toBeGreaterThan(recentCalls[0]!);
+    expect(lastPageOneClaim).toBeGreaterThan(recentCalls[0]!);
+    expect(lastPageOneClaim).toBeLessThan(recentCalls[1]!);
+    expect(drive.status('feed-059')?.state).toBe('done');
+  });
+
+  it('keeps the grown backoff delay across retries instead of resetting it', async () => {
+    vi.useFakeTimers();
+    try {
+      const drive = new FakeDrive();
+      const client = asClient(drive);
+      await seedSubmission(drive, 'job-backoff', { viaSubmit: false });
+      const controller = new AbortController();
+      // Every claim attempt 500s: recoverable, so the id keeps backing off.
+      drive.inject.set('put:/jobs/.agent-drive/claims/job-backoff.json', () => outage());
+      const attempts: number[] = [];
+      drive.before = (call) => {
+        if (call === 'put:/jobs/.agent-drive/claims/job-backoff.json') attempts.push(Date.now());
+      };
+      drive.pollHook = () => {
+        vi.setSystemTime(Date.now() + 1); // one tick per poll
+        if (attempts.length >= 4) controller.abort();
+      };
+
+      await runJobs(client, DRIVE, async () => [], {
+        once: false,
+        signal: controller.signal,
+        pollMs: 1,
+        pollMaxMs: 2,
+        retryMs: 2,
+        rescanMs: 0,
+        sleep: async () => {},
+      });
+
+      expect(attempts).toHaveLength(4);
+      const gaps = attempts.slice(1).map((at, index) => at - attempts[index]!);
+      // Delays double per failure (2, 4, 8): a reset would retry every ~2 ticks.
+      expect(gaps[1]).toBeGreaterThan(gaps[0]!);
+      expect(gaps[2]).toBeGreaterThan(gaps[1]!);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a failed claim against the pinned submission version', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-retry', { request: textBytes('v1'), viaSubmit: false });
+    // The file changed after the move; the first claim attempt 500s once.
+    await drive.put(DRIVE, '/jobs/job-retry/submitted.md', textBytes('v2'), {
+      mode: 'overwrite',
+    });
+    drive.failures.set('put:/jobs/.agent-drive/claims/job-retry.json', 1);
+    const controller = new AbortController();
+    drive.pollHook = (call) => {
+      if (drive.status('job-retry') || call > 200) controller.abort();
+    };
+
+    let requestText = '';
+    await runJobs(
+      client,
+      DRIVE,
+      async (job) => {
+        requestText = new TextDecoder().decode(job.request);
+        return [];
+      },
+      {
+        once: false,
+        signal: controller.signal,
+        pollMs: 1,
+        pollMaxMs: 2,
+        retryMs: 1,
+        rescanMs: 0,
+        sleep: async () => {},
+      },
+    );
+
+    expect(requestText).toBe('v1');
+    expect(drive.status('job-retry')?.state).toBe('done');
   });
 });
 
