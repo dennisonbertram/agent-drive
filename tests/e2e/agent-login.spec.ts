@@ -1401,7 +1401,7 @@ test.describe('agent device login', () => {
     await expect(page).toHaveURL(/\/sign-in/);
   });
 
-  test('ux round 02: approval receipt confirms approval without claiming setup is finished', async ({
+  test('approval receipt is shown once even when approval is submitted twice quickly', async ({
     page,
     context,
   }) => {
@@ -1419,8 +1419,14 @@ test.describe('agent device login', () => {
     expect(started.status()).toBe(200);
     const request = (await started.json()) as { user_code: string };
     let tokenRequests = 0;
+    let approvalPosts = 0;
     page.on('request', (browserRequest) => {
       if (browserRequest.url().includes('/api/oauth/token')) tokenRequests += 1;
+      if (
+        browserRequest.method() === 'POST' &&
+        /\/api\/console\/device\/[^/]+\/approve(?:\?|$)/.test(browserRequest.url())
+      )
+        approvalPosts += 1;
     });
     await page.goto(`/connect?code=${request.user_code}`);
     await expect(page.getByRole('heading', { name: `Connect ${clientName}?` })).toBeVisible();
@@ -1431,7 +1437,10 @@ test.describe('agent device login', () => {
     await page
       .locator('#connect-verify')
       .fill(`${hex.slice(0, 4)} ${hex.slice(4, 8)} ${hex.slice(8, 12)} ${hex.slice(12, 16)}`);
-    await page.getByRole('button', { name: 'Approve agent' }).click();
+    await page.getByRole('button', { name: 'Approve agent' }).evaluate((button) => {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
 
     const receipt = page.getByRole('status');
     await expect(receipt.locator('.connect-tag')).toContainText('Approval saved');
@@ -1446,6 +1455,7 @@ test.describe('agent device login', () => {
       '/console',
     );
     expect(tokenRequests).toBe(0);
+    expect(approvalPosts).toBe(1);
     const authorization = await database.query<{
       status: string;
       consumed_at: Date | null;

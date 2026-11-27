@@ -354,6 +354,9 @@ export default function Connect({
 
   async function approve() {
     if (!request || busyRef.current) return;
+    const requested = request;
+    const startedAt = generation.current;
+    const live = () => startedAt === generation.current;
     setFormError('');
     setFieldError(null);
     // Recipient binding, checked before any key is sealed or posted: the typed code must be
@@ -369,12 +372,24 @@ export default function Connect({
       });
       return;
     }
-    let deviceVerification: string;
+    // Claim the submit before the first async digest. Otherwise a double click or an offer
+    // refresh during WebCrypto can let two handlers approve a stale request.
+    busyRef.current = true;
+    setPhase('approving');
+    let deviceVerification = '';
     try {
-      if (!request.public_key) throw new Error('This request has no agent key. Start again.');
-      deviceVerification = await verificationCode(request.public_key);
+      if (!requested.public_key) throw new Error('This request has no agent key. Start again.');
+      deviceVerification = await verificationCode(requested.public_key);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'The request could not be checked.');
+      if (live()) {
+        setPhase('review');
+        setFormError(error instanceof Error ? error.message : 'The request could not be checked.');
+      }
+      busyRef.current = false;
+      return;
+    }
+    if (!live()) {
+      busyRef.current = false;
       return;
     }
     if (typed !== deviceVerification) {
@@ -383,24 +398,22 @@ export default function Connect({
         message:
           'This code does not match the one your agent printed. Check the terminal again and type it exactly.',
       });
+      setPhase('review');
+      busyRef.current = false;
       return;
     }
-    const startedAt = ++generation.current;
-    const live = () => startedAt === generation.current;
-    setPhase('approving');
-    busyRef.current = true;
     try {
       // The revision binds this approval to the offer (or lack of one) the page showed.
-      const offerRevision = request.offerRevision ?? 0;
+      const offerRevision = requested.offerRevision ?? 0;
       let body: unknown = delegate
         ? { delegate: true, offerRevision, deviceVerification }
         : { offerRevision, deviceVerification };
       let uncheckedKey = false;
-      let scopes: string[] = request.offer?.scopes ?? request.scopes ?? DEFAULT_SCOPES;
-      let driveLabel = request.offer
-        ? `the drive ${request.offer.drive.name}`
-        : (request.drives ?? []).length > 0
-          ? (request.drives ?? []).map((d) => d.name).join(', ')
+      let scopes: string[] = requested.offer?.scopes ?? requested.scopes ?? DEFAULT_SCOPES;
+      let driveLabel = requested.offer
+        ? `the drive ${requested.offer.drive.name}`
+        : (requested.drives ?? []).length > 0
+          ? (requested.drives ?? []).map((d) => d.name).join(', ')
           : 'its new drive';
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
@@ -419,7 +432,7 @@ export default function Connect({
               ? parseRecoveryFile(text, target)
               : text.trim();
           decodeDriveKey(key);
-          if (!request.public_key) throw new Error('This request has no agent key. Start again.');
+          if (!requested.public_key) throw new Error('This request has no agent key. Start again.');
           // A well-formed key can still belong to another drive: it must open this one before
           // sealing. Metadata GETs only — the key itself is never sent.
           let check: DriveKeyCheck;
@@ -436,7 +449,7 @@ export default function Connect({
           if (check === 'mismatch') throw new KeyError(WRONG_DRIVE);
           // 'unverifiable' means the drive has no file or trace inbox to check against.
           uncheckedKey = check === 'unverifiable';
-          sealed = await sealDriveKey(request.public_key, target, key);
+          sealed = await sealDriveKey(requested.public_key, target, key);
         } catch (error) {
           if (
             error instanceof KeyError ||
@@ -464,12 +477,12 @@ export default function Connect({
         };
       }
       if (!live()) return;
-      await api(`device/${encodeURIComponent(request.user_code)}/approve`, 'POST', body);
+      await api(`device/${encodeURIComponent(requested.user_code)}/approve`, 'POST', body);
       if (!live()) return;
       clearKey();
       setPhase('done');
       setDone({
-        name: request.client_name,
+        name: requested.client_name,
         access: describeScopes(scopes),
         drive: driveLabel,
         uncheckedKey,
@@ -486,7 +499,7 @@ export default function Connect({
         // The request changed since this page loaded (for example an offer arrived): show it again.
         clearKey();
         busyRef.current = false;
-        await load(request.user_code);
+        await load(requested.user_code);
         if (generation.current === startedAt + 1)
           setNotice('The request changed; review it again.');
       } else if (

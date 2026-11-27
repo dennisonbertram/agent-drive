@@ -124,13 +124,18 @@ Run `agent-drive login` on the new agent's machine. If the human has the drive's
 credentials bundle, they open Details on the approval page and choose "Use one of my drives instead"; their
 browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
 
-If the new agent has a shell and a human is present, let it run `agent-drive login`, then (if your
-key has `delegate`) run `agent-drive grant <its code> --verify <its verification code> --write-path /inbox/<its name>`
-(`--read-only` for read only). The verification code is the `a1b2 c3d4 e5f6 7890` line the new
-agent printed; the human relays it and `grant` checks it against the login's public key before
-sealing, so a tampered request never receives the drive key. You seal the drive key to that
-login; the human clicks Approve once on the page, which shows the offer. Nothing secret is
-printed or sent in the clear.
+If the new agent has a shell and a human is present, first upgrade the agent that holds the
+drive to a CLI version that requires `--verify`. Let the new agent run `agent-drive login`, then
+(if your key has `delegate`) run:
+
+```sh
+agent-drive grant <its code> --verify "<its verification code>" --write-path /inbox/<its name>
+```
+
+Use `--read-only` for read only. The verification code is the `a1b2 c3d4 e5f6 7890` line the
+new agent printed; keep the quotes because the code contains spaces. The human relays it and
+`grant` checks it against the login's public key before sealing. The human clicks Approve once
+on the page, which shows the offer. Nothing secret is printed or sent in the clear.
 
 Which handoff when: `grant` (you hold `delegate`, new agent has a shell, human present); the
 human opens Details on `/connect` and chooses "Use one of my drives instead" (the human holds the recovery file or

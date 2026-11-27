@@ -54,7 +54,15 @@ describe('normalizeVerificationCode', () => {
   });
 
   it('rejects input that is not a 16-hex-digit code', () => {
-    for (const bad of ['', 'a1b2', 'a1b2 c3d4 e5f6', 'a1b2 c3d4 e5f6 78901', 'g1b2 c3d4 e5f6 7890'])
+    for (const bad of [
+      '',
+      'a1b2',
+      'a1b2 c3d4 e5f6',
+      'a1b2 c3d4 e5f6 78901',
+      'g1b2 c3d4 e5f6 7890',
+      'a1b2 c3d4 e5f6 7890!',
+      'a1b2 c3d4 e5f6 7890zz',
+    ])
       expect(normalizeVerificationCode(bad)).toBeUndefined();
   });
 });

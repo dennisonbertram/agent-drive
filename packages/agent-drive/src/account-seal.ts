@@ -512,8 +512,10 @@ export async function sealDrivesToAccount(opts: {
     } else if (pinned && pinned !== fingerprint) {
       throw new AccountKeyPinMismatch(pinned, fingerprint);
     }
-    const independentlyVerified =
-      expected === fingerprint || validConfigPin === fingerprint;
+    // Config pins predate the verification marker and may have been copied from an old TOFU
+    // install. Keep them as mismatch guards, but require a fresh fingerprint before upgrading
+    // one to a verified pin.
+    const independentlyVerified = expected === fingerprint;
     const previouslyVerified = state.verifiedPins[origin] === fingerprint;
     if (!independentlyVerified && !previouslyVerified) {
       // Pins written by earlier versions were TOFU pins from this API, not independent
@@ -746,9 +748,10 @@ export async function autoSealHeldKeys(opts: {
     const verified = new Set([...listed, ...(opts.driveIds ?? [])]);
     // A fingerprint the human preset in the environment counts as independently sourced;
     // the first seal verifies and pins it. Without one, first use fails closed.
-    const expectedFingerprint = expectedAccountFingerprint(
-      process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT,
-    );
+    const rawFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
+    const expectedFingerprint = expectedAccountFingerprint(rawFingerprint);
+    if (rawFingerprint !== undefined && !expectedFingerprint)
+      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
     const result = await sealDrivesToAccount({
       client: opts.client,
       config: opts.config,

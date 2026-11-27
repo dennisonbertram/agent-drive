@@ -145,7 +145,7 @@ The caller can offer only what it holds: the drive must be in its drive list, ea
 
 Response 200: `{ "status": "offered", "revision": 1 }`. A repeat offer for the same request replaces the first and raises `revision`. Granting does not approve anything. When the person approves, the console must send the `offerRevision` it showed. A newer offer makes the approval fail with 409 `The request changed; reload the page.` At token time the server checks that the offering key is still valid and still holds what it offered. If not, the token call returns `access_denied`.
 
-The CLI command for this is `agent-drive grant CODE --verify <code>`: the person relays the verification code the new agent printed, and `grant` checks it against the request's `public_key` before sealing, so a substituted `public_key` never receives the drive key. See [CLI reference](cli.md).
+The CLI command for this is `agent-drive grant CODE --verify "<code>"`: quote the value because the printed code has spaces between its four groups. The person relays the verification code the new agent printed, and `grant` checks it against the request's `public_key` before sealing, so a substituted `public_key` never receives the drive key. See [CLI reference](cli.md).
 
 ### Issue a key directly: POST /api/v1/keys with agentName
 

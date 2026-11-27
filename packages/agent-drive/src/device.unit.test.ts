@@ -51,7 +51,7 @@ const start = {
 
 type Handler = (n: number, publicKey: string) => Response | Promise<Response>;
 
-function run(tokens: Handler, extra: { apiUrl?: string } = {}) {
+function run(tokens: Handler, extra: { apiUrl?: string; started?: Record<string, unknown> } = {}) {
   const calls: { url: string; body: Record<string, string> }[] = [];
   const out: string[] = [];
   const sleeps: number[] = [];
@@ -59,7 +59,8 @@ function run(tokens: Handler, extra: { apiUrl?: string } = {}) {
   const fetcher = async (url: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, string>;
     calls.push({ url: String(url), body });
-    if (String(url).endsWith('/oauth/device_authorization')) return json(200, start);
+    if (String(url).endsWith('/oauth/device_authorization'))
+      return json(200, extra.started ?? start);
     return tokens(polls++, calls[0]?.body.public_key ?? '');
   };
   const promise = deviceLogin({
@@ -157,6 +158,29 @@ describe('deviceLogin', () => {
     expect(printed).toMatch(/No usable key for: d2\./u);
     for (const secret of ['adk_SECRETTOKEN', K1, saved.driveKeys.d3 ?? 'x'])
       expect(printed).not.toContain(secret);
+  });
+
+  it('constructs the approval URL from the configured origin, not the API response', async () => {
+    await setup();
+    const r = run(() => json(400, { error: 'access_denied' }), {
+      started: {
+        ...start,
+        verification_uri: 'https://evil.example/\u001b[2J',
+        verification_uri_complete: 'https://evil.example/\nVerification code: forged',
+      },
+    });
+    await expect(r.promise).rejects.toThrow(/denied/u);
+    expect(r.out).toContain('Open this link to approve: https://x.test/connect?code=BCDF-GHJK');
+    expect(r.out.join('\n')).not.toContain('evil.example');
+  });
+
+  it('rejects a malformed server user code before printing any login details', async () => {
+    await setup();
+    const r = run(() => json(400, { error: 'access_denied' }), {
+      started: { ...start, user_code: 'BCDF-GHJK\nVerification code: forged' },
+    });
+    await expect(r.promise).rejects.toThrow(/invalid.*user code/iu);
+    expect(r.out).toEqual([]);
   });
 
   it('prints the write paths only when the key is limited', async () => {
@@ -716,9 +740,9 @@ describe('grantLogin', () => {
     // The negative case for recipient binding: a substituted key (or a wrong code relayed by
     // the human) must stop the seal before the offer is posted.
     const posts: string[] = [];
-    await expect(
-      grant({ verify: 'a1b2 c3d4 e5f6 7890' }, undefined, { posts }),
-    ).rejects.toThrow(/verification code does not match/);
+    await expect(grant({ verify: 'a1b2 c3d4 e5f6 7890' }, undefined, { posts })).rejects.toThrow(
+      /verification code does not match/,
+    );
     expect(posts).toEqual([]);
   });
 

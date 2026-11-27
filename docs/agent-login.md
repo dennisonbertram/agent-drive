@@ -533,7 +533,7 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   human still approves once on `/connect`; `grant` never approves. A prompt-injected agent that
   runs `grant <attacker code>` cannot hand over a key unseen: the human sees "Offered by <agent>:
   drive <name>, <scopes>, writes under <paths>" and can deny or ignore it.
-- CLI: `agent-drive grant CODE --verify CODE2 [--drive ID] [--read-only] [--scope S]... [--write-path P]...`
+- CLI: `agent-drive grant CODE --verify "CODE2" [--drive ID] [--read-only] [--scope S]... [--write-path P]...`
   (docs/cli.md). `--verify` is required: it carries the verification code the new agent printed
   (§15), and `grant` recomputes it against the request's `public_key` and refuses on mismatch
   **before** sealing — a substituted key must never receive the sealed drive key. It reads the
@@ -601,14 +601,19 @@ a commitment to the real key through a channel the service cannot write to — t
   the offer, so an approve-time check alone cannot stop a substituted key from receiving it.
 - **Compatibility.** This is a deliberate break: CLI versions that predate the code cannot be
   approved (the typed-code gate has no bypass, because one would reopen the phishing hole), and
-  `grant` invocations must add `--verify`. The sealed-blob wire format, the public OAuth
-  endpoints and the schema are unchanged, and already-approved clients can still unseal keys.
+  `grant` invocations must add `--verify`. Upgrade both the requesting agent and the machine
+  holding the drive before a grant: an older granting CLI can still post a sealed offer before
+  approval, without checking that it is sealed to the key the human verified. The sealed-blob
+  wire format, the public OAuth endpoints and the schema are unchanged, and already-approved
+  clients can still unseal keys.
 
 The account-key first-use analogue is in `docs/keys-and-recovery.md` (§"account sealing") and
-`docs/threat-model.md`: first-time sealing requires `--fingerprint`, an
-`AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT` environment value, or an existing `accountKeyPins` config
-entry — an explicit fingerprint the human copied from the console — and fails closed otherwise.
-Pins written by older CLI versions were trust-on-first-use pins from the API; after upgrading,
-they remain preserved but cannot authorize sealing until the owner verifies the Settings
-fingerprint once. If it matches the existing pin, `--fingerprint` marks that origin's pin as
-verified; if the account key changed, the owner must use `--repin --fingerprint`.
+`docs/threat-model.md`: first-time sealing requires `--fingerprint` or an
+`AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT` value and fails closed otherwise. Existing
+`accountKeyPins` config entries are preserved as mismatch guards but no longer authorize
+sealing; after upgrading, the owner verifies the Settings fingerprint once with `--fingerprint`.
+That first verification depends on trusting the console session displaying the fingerprint. A
+malicious deploy controlling the console can show a false fingerprint, so use a separately
+recorded value if protecting against a malicious console deploy. If the verified value matches
+an old pin, the origin is marked verified; if the account key changed, the owner must use
+`--repin --fingerprint`.

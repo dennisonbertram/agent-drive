@@ -706,18 +706,18 @@ async function run(command: string, raw: string[]) {
     }
     // First use and repin need the fingerprint the human read in the console, supplied by
     // --fingerprint or AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT — never trusted to the API alone.
-    if (
-      args.values.fingerprint !== undefined &&
-      !expectedAccountFingerprint(args.values.fingerprint)
-    )
+    const flagFingerprint = expectedAccountFingerprint(args.values.fingerprint);
+    if (args.values.fingerprint !== undefined && !flagFingerprint)
       throw new Error(
         '--fingerprint must look like "a1b2 c3d4 e5f6 7890", exactly as the console shows it.',
       );
-    const expectedFingerprint =
-      expectedAccountFingerprint(args.values.fingerprint) ??
-      expectedAccountFingerprint(process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT);
-    if (args.values.repin === true && !expectedFingerprint)
+    const rawEnvironmentFingerprint = process.env.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT;
+    const environmentFingerprint = expectedAccountFingerprint(rawEnvironmentFingerprint);
+    if (rawEnvironmentFingerprint !== undefined && !environmentFingerprint)
+      throw new Error('AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".');
+    if (args.values.repin === true && !flagFingerprint)
       throw new Error(`--repin requires --fingerprint. ${PIN_REQUIRED_HINT}`);
+    const expectedFingerprint = flagFingerprint ?? environmentFingerprint;
     const result = await sealDrivesToAccount({
       client,
       config: connection.config,

@@ -72,13 +72,13 @@ Choose the handoff that fits.
 ### Grant from an agent that holds the drive
 
 1. On the new agent's machine, run `agent-drive login --name "<new agent name>"`. It prints a code and a verification code.
-2. On the agent that holds the drive, run:
+2. Update the agent that holds the drive to a CLI version that requires `--verify`, then run:
 
 ```sh
-agent-drive grant <code> --verify <verification code> --write-path <folder>
+agent-drive grant <code> --verify "<verification code>" --write-path <folder>
 ```
 
-The verification code is the one the new agent printed under its login code (`a1b2 c3d4 e5f6 7890`), relayed by the person. `grant` checks it against the request's public key before sealing; a mismatch means do not grant. Add `--read-only` for read only. Add `--drive <drive id>` if the machine holds more than one drive key. `--scope` (repeatable) sets the scopes explicitly.
+The verification code is the one the new agent printed under its login code (`a1b2 c3d4 e5f6 7890`), relayed by the person. Keep the quotes because the code contains spaces. An older granting CLI can still send a sealed offer before approval, so upgrade that machine before using `grant`. The current `grant` checks the code against the request's public key before sealing; a mismatch means do not grant. Add `--read-only` for read only. Add `--drive <drive id>` if the machine holds more than one drive key. `--scope` (repeatable) sets the scopes explicitly.
 
 The command seals the drive key to the new login and prints the approval URL. A person still clicks Approve on that page, which shows "Offered by" with the agent name, the drive and the permissions, and asks for the same verification code. Nothing secret is printed or sent in the clear.
 

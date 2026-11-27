@@ -35,7 +35,10 @@ export async function verificationCode(publicKey: string): Promise<string> {
  * canonical "xxxx xxxx xxxx xxxx" form, or undefined when the input is not a code at all.
  */
 export function normalizeVerificationCode(value: string): string | undefined {
-  const compact = value.toLowerCase().replace(/[^0-9a-f]/gu, '');
+  // Allow the separators users may type or copy, but never discard arbitrary characters. If we
+  // silently strip other input, a malformed or tampered value can still validate as a real code.
+  if (!/^[0-9a-f\s.-]*$/iu.test(value)) return undefined;
+  const compact = value.toLowerCase().replace(/[\s.-]/gu, '');
   if (!/^[0-9a-f]{16}$/u.test(compact)) return undefined;
   return compact.match(/.{4}/gu)!.join(' ');
 }

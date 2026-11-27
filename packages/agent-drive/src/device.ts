@@ -76,7 +76,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
   // Same transport policy as the API client: HTTPS, or exact loopback HTTP.
-  validateUrl(options.apiUrl, true);
+  const apiUrl = validateUrl(options.apiUrl, true);
   const base = options.apiUrl.replace(/\/+$/u, '');
   const post = async (path: string, body: Record<string, unknown>, bearer?: string) => {
     let response: Response;
@@ -127,12 +127,17 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   const grant = started.data as {
     device_code: string;
     user_code: string;
-    verification_uri: string;
-    verification_uri_complete?: string;
     expires_in: number;
     interval?: number;
   };
-  const link = grant.verification_uri_complete ?? grant.verification_uri;
+  // The API response is untrusted terminal input. Accept only the server's fixed user-code
+  // alphabet, then build the URL from the API origin the caller configured; never print or open
+  // a server-supplied URL that could contain terminal controls or send the human elsewhere.
+  if (!/^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/u.test(grant.user_code))
+    throw new Error('Agent Drive returned an invalid user code. Run `agent-drive login` again.');
+  const approvalUrl = new URL('/connect', apiUrl.origin);
+  approvalUrl.searchParams.set('code', grant.user_code);
+  const link = approvalUrl.toString();
   // The verification code is a commitment to this device's public key. It travels only through
   // the human — from this terminal to the approval page or to `agent-drive grant --verify` —
   // so a service that hands either side a different public key cannot get a key sealed to it.
