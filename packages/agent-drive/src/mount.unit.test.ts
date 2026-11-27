@@ -639,6 +639,171 @@ describe('mount bridge', () => {
     }
   });
 
+  it('serializes pinned reads during a flush and drains them before closing the shared reader', async () => {
+    const SECOND_VERSION = '44444444-4444-4444-8444-444444444444';
+    const firstPayload = Buffer.from('first');
+    const secondPayload = Buffer.from('second');
+    const thirdPayload = Buffer.from('third');
+    let finishFlush!: (version: { id: string; path: string }) => void;
+    let startFlush!: () => void;
+    const flushStarted = new Promise<void>((resolve) => (startFlush = resolve));
+    const flushResult = new Promise<{ id: string; path: string }>((resolve) => {
+      finishFlush = resolve;
+    });
+    let finishFirstRead!: () => void;
+    let rejectFirstRead: ((error: Error) => void) | undefined;
+    let markFirstReadStarted!: () => void;
+    const firstReadStarted = new Promise<void>((resolve) => (markFirstReadStarted = resolve));
+    let finishThirdRead!: () => void;
+    let markThirdReadStarted!: () => void;
+    const thirdReadStarted = new Promise<void>((resolve) => (markThirdReadStarted = resolve));
+    let thirdCloseResolved = false;
+    const firstReader = {
+      version: mountedVersion(VERSION, firstPayload.byteLength),
+      plaintextBytes: firstPayload.byteLength,
+      read: vi.fn(
+        () =>
+          new Promise<Uint8Array>((resolve, reject) => {
+            rejectFirstRead = reject;
+            finishFirstRead = () => {
+              rejectFirstRead = undefined;
+              resolve(firstPayload);
+            };
+            markFirstReadStarted();
+          }),
+      ),
+      close: vi.fn(async () => {
+        const reject = rejectFirstRead;
+        rejectFirstRead = undefined;
+        reject?.(Object.assign(new Error('reader closed during active read'), { code: 'EIO' }));
+      }),
+    };
+    const secondReader = {
+      version: mountedVersion(SECOND_VERSION, secondPayload.byteLength),
+      plaintextBytes: secondPayload.byteLength,
+      read: vi.fn(async () => secondPayload),
+      close: vi.fn(async () => {}),
+    };
+    const thirdReader = {
+      version: mountedVersion(SECOND_VERSION, thirdPayload.byteLength),
+      plaintextBytes: thirdPayload.byteLength,
+      read: vi.fn(
+        () =>
+          new Promise<Uint8Array>((resolve) => {
+            finishThirdRead = () => resolve(thirdPayload);
+            markThirdReadStarted();
+          }),
+      ),
+      close: vi.fn(async () => {}),
+    };
+    const writeback = {
+      openWrite: vi.fn(async () => ({
+        handleId: 'flush-handle',
+        recoveryPath: '/private/stage',
+        size: 0,
+      })),
+      flush: vi.fn(async () => {
+        startFlush();
+        return await flushResult;
+      }),
+      recover: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    };
+    const client = {
+      browse: vi.fn(),
+      openRangeReader: vi.fn(async (_drive: string, path: string) => {
+        if (path === '/docs/first') return firstReader;
+        if (path === '/docs/second') return secondReader;
+        return thirdReader;
+      }),
+    };
+    const bridge = await createMountBridge(client, DRIVE, {
+      capabilities: {
+        readOnly: false,
+        write: true,
+        delete: false,
+        writePaths: ['/docs'],
+        maxReadBytes: 1024,
+        maxWriteBytes: 1024,
+        ops: ['openWrite', 'flush', 'read'],
+      },
+      writeback: writeback as never,
+    });
+
+    try {
+      await bridge.request({
+        id: 'open',
+        op: 'openWrite',
+        path: '/docs/save',
+        baseVersionId: null,
+      });
+      const flush = bridge.request({ id: 'flush', op: 'flush', handleId: 'flush-handle' });
+      await flushStarted;
+      const first = bridge.request({
+        id: 'read-first',
+        op: 'read',
+        path: '/docs/first',
+        versionId: VERSION,
+        offset: 0,
+        size: firstPayload.byteLength,
+      });
+      await firstReadStarted;
+      const second = bridge.request({
+        id: 'read-second',
+        op: 'read',
+        path: '/docs/second',
+        versionId: SECOND_VERSION,
+        offset: 0,
+        size: secondPayload.byteLength,
+      });
+
+      expect(firstReader.close).not.toHaveBeenCalled();
+      expect(client.openRangeReader).toHaveBeenCalledTimes(1);
+      finishFirstRead();
+      await expect(first).resolves.toEqual({
+        id: 'read-first',
+        ok: true,
+        data: firstPayload.toString('base64'),
+      });
+      await expect(second).resolves.toEqual({
+        id: 'read-second',
+        ok: true,
+        data: secondPayload.toString('base64'),
+      });
+      expect(client.openRangeReader).toHaveBeenCalledTimes(2);
+
+      const third = bridge.request({
+        id: 'read-third',
+        op: 'read',
+        path: '/docs/third',
+        versionId: SECOND_VERSION,
+        offset: 0,
+        size: thirdPayload.byteLength,
+      });
+      await thirdReadStarted;
+      const closing = bridge.close().then(() => {
+        thirdCloseResolved = true;
+      });
+      finishFlush({ id: VERSION, path: '/docs/save' });
+      await expect(flush).resolves.toMatchObject({ ok: true });
+      await Promise.resolve();
+      expect(thirdCloseResolved).toBe(false);
+      expect(thirdReader.close).not.toHaveBeenCalled();
+      finishThirdRead();
+      await expect(third).resolves.toMatchObject({
+        ok: true,
+        data: thirdPayload.toString('base64'),
+      });
+      await closing;
+      expect(thirdReader.close).toHaveBeenCalledTimes(1);
+    } finally {
+      finishFlush({ id: VERSION, path: '/docs/save' });
+      rejectFirstRead?.(new Error('test cleanup'));
+      finishThirdRead?.();
+      await bridge.close();
+    }
+  });
+
   it('overlays only direct staged files and keeps remote directories on a name collision', async () => {
     const client = {
       browse: vi.fn().mockResolvedValue({
