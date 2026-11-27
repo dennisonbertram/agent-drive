@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Request } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
+import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   setUpWebhook,
   type Source,
@@ -22,7 +23,9 @@ export type TracesKey = { key: string; source: Source };
 export function TracesDialog({
   driveId,
   request,
+  strictRequest,
   verify,
+  verifyInbox,
   getKey,
   resumeWith,
   onReady,
@@ -31,7 +34,10 @@ export function TracesDialog({
   driveId: string;
   origin: string;
   request: Request;
+  /** Enrollment and token issuance are strict routes: this wraps the Clerk reverification. */
+  strictRequest: Request;
   verify: (driveId: string, key: string) => Promise<Verdict>;
+  verifyInbox: (driveId: string, key: string, record: TraceInboxRecord) => Promise<boolean>;
   /** The key this tab already has, or undefined after opening the unlock dialog for it. */
   getKey: () => Promise<TracesKey | undefined>;
   /** A key the unlock dialog just loaded for this action. */
@@ -89,10 +95,12 @@ export function TracesDialog({
       if (!found) return; // The unlock dialog took over; it comes back with resumeWith.
       const token = await setUpWebhook({
         request,
+        strictRequest,
         driveId,
         key: found.key,
         source: found.source,
         verify,
+        verifyInbox,
       });
       if (!alive.current) return;
       setCreated(token);

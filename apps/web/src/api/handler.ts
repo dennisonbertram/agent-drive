@@ -58,6 +58,7 @@ import {
 } from './directories';
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { renameFile } from './mount-rename';
+import { inboxRecordDigest } from './trace-webhook';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -2505,6 +2506,7 @@ async function traceEndpoint(
   operation: 'trace-inbox' | 'webhook-token',
   url: URL,
   console: boolean,
+  reverified: boolean,
 ) {
   const method = request.method;
   if (operation === 'trace-inbox' && method === 'GET') {
@@ -2516,6 +2518,10 @@ async function traceEndpoint(
     return response(traceInboxOutput(result.rows[0]));
   }
   if (!console) throw new ApiError('not_found', 'Endpoint not found.');
+  // Enrolling the inbox and issuing a token are strict routes: only a session that recently
+  // passed Clerk strict reverification may change what future traces are sealed to or hand out
+  // a new bearer. The GETs and the token DELETE keep ordinary session auth.
+  if (method === 'POST' && !reverified) return reverificationErrorResponse('strict');
   await ensureDrive(auth, driveId);
   if (operation === 'trace-inbox') {
     const body = await jsonBody(request);
@@ -2546,13 +2552,40 @@ async function traceEndpoint(
     return response({ token: row ? { id: row.id, createdAt: row.created_at } : null });
   }
   if (method === 'POST') {
+    // Requiring the full snapshot prevents an older client from silently binding a token to an
+    // inbox row that changed after the browser proved it. Older token rows remain usable.
+    const verifiedRecordRequired =
+      'A full verified trace inbox record is required. Reload the console or update the client before creating a token.';
+    if (request.body === null) throw new ApiError('validation_error', verifiedRecordRequired);
+    const body = await jsonBody(request);
+    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey']);
+    if (
+      typeof body.keyId !== 'string' ||
+      typeof body.publicKey !== 'string' ||
+      typeof body.wrappedPrivateKey !== 'string'
+    )
+      throw new ApiError('validation_error', verifiedRecordRequired);
+    const expectedKeyId = uuid(typeof body.keyId === 'string' ? body.keyId : undefined, 'keyId');
+    const expectedPublicKey = ecPointField(body.publicKey, 'publicKey');
+    const expectedWrappedPrivateKey = wrappedPrivateKeyField(body.wrappedPrivateKey);
     const token = `adw_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
     const created = await withTransaction(async (client) => {
       await lockVaultDrive(client, auth.accountId, driveId);
-      const inbox = await client.query('SELECT 1 FROM drive_trace_inboxes WHERE drive_id = $1', [
-        driveId,
-      ]);
-      if (!inbox.rowCount) throw new ApiError('conflict', 'Create the trace inbox first.');
+      const inbox = await client.query(
+        'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1',
+        [driveId],
+      );
+      const record = inbox.rows[0] as Row | undefined;
+      if (!record) throw new ApiError('conflict', 'Create the trace inbox first.');
+      if (
+        expectedKeyId !== record.key_id ||
+        expectedPublicKey !== record.public_key ||
+        expectedWrappedPrivateKey !== record.wrapped_private_key
+      )
+        throw new ApiError(
+          'conflict',
+          'The trace inbox changed. Reload the page and verify it again before creating a token.',
+        );
       const agent = await client.query(
         `INSERT INTO agents (account_id, name) VALUES ($1, 'openrouter')
          ON CONFLICT (account_id, name) DO UPDATE SET name = EXCLUDED.name
@@ -2564,9 +2597,17 @@ async function traceEndpoint(
         [driveId],
       );
       const inserted = await client.query(
-        `INSERT INTO drive_webhook_tokens (drive_id, account_id, agent_id, token_hash)
-         VALUES ($1, $2, $3, $4) RETURNING id, created_at`,
-        [driveId, auth.accountId, agent.rows[0].id, hashToken(token)],
+        `INSERT INTO drive_webhook_tokens
+           (drive_id, account_id, agent_id, token_hash, inbox_key_id, inbox_record_hash)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
+        [
+          driveId,
+          auth.accountId,
+          agent.rows[0].id,
+          hashToken(token),
+          record.key_id,
+          inboxRecordDigest(record.key_id, record.public_key, record.wrapped_private_key),
+        ],
       );
       return inserted.rows[0] as Row;
     });
@@ -3406,6 +3447,7 @@ async function handleRequest(request: Request, mode: RequestMode) {
         relative[2],
         url,
         mode.kind === 'console',
+        mode.kind === 'console' && mode.reverified,
       );
     } else if (relative[0] === 'drives' && relative.length === 3) {
       uuid(relative[1], 'drive id');

@@ -97,6 +97,30 @@ export async function unwrapInboxPrivateKey(inbox: TraceInbox, driveKey: string)
   );
 }
 
+/**
+ * Unwraps the record's private key under `driveKey` and proves it matches `publicKey` by
+ * deriving the same ECDH secret in both directions. Returns the key for immediate use.
+ * Throws when the wrap, the point, or the pair does not match — a record that unwraps to a
+ * different private key would make every trace sealed to it unreadable, so it is a mismatch,
+ * never an accepted inbox.
+ */
+export async function verifyInboxKeypair(inbox: TraceInbox, driveKey: string) {
+  const privateKey = await unwrapInboxPrivateKey(inbox, driveKey);
+  const point = await importPublicPoint(inbox.publicKey);
+  const subtle = crypto.subtle;
+  const ephemeral = await subtle.generateKey(EC, true, ['deriveBits']);
+  const [a, b] = await Promise.all([
+    subtle.deriveBits({ name: 'ECDH', public: ephemeral.publicKey }, privateKey, 256),
+    subtle.deriveBits({ name: 'ECDH', public: point }, ephemeral.privateKey, 256),
+  ]);
+  const ua = new Uint8Array(a);
+  const ub = new Uint8Array(b);
+  let diff = ua.length ^ ub.length;
+  for (let i = 0; i < ua.length && i < ub.length; i += 1) diff |= ua[i]! ^ ub[i]!;
+  if (diff !== 0) throw new Error('The trace inbox key pair does not match.');
+  return privateKey;
+}
+
 async function sealKey(bits: ArrayBuffer, context: Uint8Array, usage: KeyUsage) {
   const subtle = crypto.subtle;
   const hkdf = await subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);

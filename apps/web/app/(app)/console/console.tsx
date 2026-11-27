@@ -541,6 +541,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const strictRequest = useWrap(vaultRequest);
   const strictRef = useRef(strictRequest);
   strictRef.current = strictRequest;
+  // `Request` is generic; vaultRequest is not. strictRef keeps the call pointed at the current
+  // reverification wrapper.
+  const strictApi = useCallback(
+    <T,>(path: string, method?: string, body?: unknown) =>
+      strictRef.current(path, method, body) as Promise<T>,
+    [],
+  );
   const lockedRef = useRef<(reason: LockReason) => void>(() => {});
   const [, bumpVault] = useReducer((count: number) => count + 1, 0);
   const inboxCache = useRef<InboxCache>(new Map());
@@ -4354,7 +4361,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               driveId={selected}
               origin={origin}
               request={api}
+              strictRequest={strictApi}
               verify={(id, key) => vault.verifyKey(id, key)}
+              verifyInbox={(id, key, record) => vault.verifyInboxKey(id, key, record)}
               getKey={webhookKey}
               onBusy={setTracesBusy}
               resumeWith={tracesResume}

@@ -59,27 +59,62 @@ async function auditWebhook(client: PoolClient, accountId: string, agentId: stri
   );
 }
 
+/** sha256 of the exact stored inbox record fields; binds a webhook token to one immutable record. */
+export function inboxRecordDigest(keyId: string, publicKey: string, wrappedPrivateKey: string) {
+  return createHash('sha256').update(`${keyId}:${publicKey}:${wrappedPrivateKey}`).digest('hex');
+}
+
 async function authenticate(driveId: string, headers: Headers) {
   const header = headers.get('authorization');
   if (!header?.startsWith('Bearer ') || header.length <= 7)
     throw new ApiError('unauthorized', 'A bearer token is required.');
   const hash = createHash('sha256').update(header.slice(7)).digest('hex');
   const result = await getPool().query(
-    `SELECT t.token_hash, t.agent_id, t.account_id, t.drive_id
+    `SELECT t.token_hash, t.agent_id, t.account_id, t.drive_id,
+            t.inbox_key_id, t.inbox_record_hash,
+            i.key_id AS bound_key_id, i.public_key AS bound_public_key,
+            i.wrapped_private_key AS bound_wrapped_key
        FROM drive_webhook_tokens t
        JOIN drives d ON d.id = t.drive_id
        JOIN accounts a ON a.id = d.account_id
+       LEFT JOIN drive_trace_inboxes i ON i.drive_id = t.drive_id
       WHERE t.drive_id = $1 AND t.token_hash = $2 AND t.revoked_at IS NULL
         AND d.deleting_at IS NULL AND a.deleting_at IS NULL`,
     [driveId, hash],
   );
   const row = result.rows[0] as
-    | { token_hash: string; agent_id: string; account_id: string; drive_id: string }
+    | {
+        token_hash: string;
+        agent_id: string;
+        account_id: string;
+        drive_id: string;
+        inbox_key_id: string | null;
+        inbox_record_hash: string | null;
+        bound_key_id: string | null;
+        bound_public_key: string | null;
+        bound_wrapped_key: string | null;
+      }
     | undefined;
   const stored = row ? Buffer.from(row.token_hash, 'hex') : null;
   const given = Buffer.from(hash, 'hex');
   if (!row || !stored || stored.length !== given.length || !timingSafeEqual(stored, given))
     throw new ApiError('unauthorized', 'The webhook token is not valid.');
+  // A bound token is valid only while the exact inbox record it was issued for is still the
+  // drive's record. Tokens issued before the binding existed (NULL) keep drive-scoped behavior.
+  if (row.inbox_key_id !== null) {
+    const intact =
+      row.bound_key_id !== null &&
+      row.bound_public_key !== null &&
+      row.bound_wrapped_key !== null &&
+      row.bound_key_id === row.inbox_key_id &&
+      inboxRecordDigest(row.bound_key_id, row.bound_public_key, row.bound_wrapped_key) ===
+        row.inbox_record_hash;
+    if (!intact)
+      throw new ApiError(
+        'conflict',
+        'The trace inbox changed. Create a new webhook token in the console.',
+      );
+  }
   return row;
 }
 

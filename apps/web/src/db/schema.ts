@@ -199,6 +199,11 @@ export const driveWebhookTokens = pgTable(
       .notNull()
       .references(() => agents.id, { onDelete: 'restrict' }),
     tokenHash: text('token_hash').notNull(),
+    // The exact trace-inbox record this token was issued against (key_id and a digest of
+    // key_id:public_key:wrapped_private_key). NULL on tokens issued before the binding existed;
+    // those keep their drive-scoped behavior.
+    inboxKeyId: uuid('inbox_key_id'),
+    inboxRecordHash: text('inbox_record_hash'),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'date' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
   },

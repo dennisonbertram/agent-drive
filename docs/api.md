@@ -406,9 +406,9 @@ Response: `{ "version": { ... } }`. 404 if the path or version does not exist.
 }
 ```
 
-A client needs the inbox record to open files that the OpenRouter webhook sealed to it. Creating the inbox and the webhook token happens in the console. See [Capture traces](trace-capture.md).
+A client needs the inbox record to open files that the OpenRouter webhook sealed to it. Creating the inbox and the webhook token happens in the console, and both are strict routes there: `POST /drives/:id/trace-inbox` and `POST /drives/:id/webhook-token` return the Clerk strict reverification challenge unless the session was recently reverified. `POST /drives/:id/webhook-token` requires the verified `{ "keyId": "<uuid>", "publicKey": "<base64url>", "wrappedPrivateKey": "<base64url>" }` inbox snapshot; requests without the full snapshot fail validation. It returns 409 if any field no longer matches the stored record, then binds the issued token to that exact record. Older token records remain valid with their original drive-scoped behavior. See [Capture traces](trace-capture.md).
 
-`POST /api/webhooks/openrouter/:driveId` is not an agent route and does not use an API key. It takes the drive's webhook token as `Authorization: Bearer adw_...`, over HTTPS only. The body is OpenTelemetry (OTLP) JSON, at most 4 MiB. The token is checked first: a missing, wrong, revoked or other-drive token returns 401.
+`POST /api/webhooks/openrouter/:driveId` is not an agent route and does not use an API key. It takes the drive's webhook token as `Authorization: Bearer adw_...`, over HTTPS only. The body is OpenTelemetry (OTLP) JSON, at most 4 MiB. The token is checked first: a missing, wrong, revoked or other-drive token returns 401. A token bound to an inbox record also returns 409 `conflict` when the stored record no longer matches the record it was issued against; pre-binding tokens are not bound and keep working.
 
 | Case                                | Response                                                            |
 | ----------------------------------- | ------------------------------------------------------------------- |

@@ -76,7 +76,7 @@ On Files, the Traces button opens the `/traces` folder in the Recent view. Captu
 - Local agents: shows the install command and the `agent-drive capture --drive <drive id> -- claude` command. See [Capture traces](trace-capture.md).
 - OpenRouter webhook: Add webhook shows a webhook URL and a headers JSON once. Copy both into an OpenRouter Webhook destination, and leave Privacy Mode off for it, or traces will contain no prompts or replies. Replace makes a new token. Revoke webhook stops it.
 
-Setting up the webhook needs the drive key loaded, so the console may ask you to unlock the drive first.
+Setting up the webhook needs the drive key loaded, so the console may ask you to unlock the drive first. Creating the inbox and issuing a token also require a fresh sign-in: you may be asked to confirm your identity before the console continues.
 
 ## Agents and API keys
 

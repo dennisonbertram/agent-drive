@@ -115,9 +115,9 @@ OpenRouter can send each trace to your drive. The service receives it over TLS, 
 ### Set up in the console
 
 1. Open the drive in the console and choose the traces action (the "Capture traces" dialog).
-2. Under "OpenRouter webhook", choose "Add webhook". The console needs the drive key in the tab. If the drive has none loaded, it asks for the recovery file. It checks that the key belongs to this drive before it continues. For a drive with no files, a pasted key cannot be checked, so load the recovery file or a credentials bundle instead.
-3. The console creates the drive's trace inbox if the drive has none. It makes the inbox key pair in the browser and stores the private key wrapped under your drive key.
-4. The console creates a webhook token. It starts with `adw_` and is shown once. Copy the webhook URL and the headers JSON now:
+2. Under "OpenRouter webhook", choose "Add webhook". The console needs the drive key in the tab. If the drive has none loaded, it asks for the recovery file. It checks that the key belongs to this drive before it continues: the stored inbox's wrapped private key must unwrap under your drive key, and the unwrapped private key must match the inbox's public key. For a drive with no files, a pasted key cannot be checked, so load the recovery file or a credentials bundle instead.
+3. The console creates the drive's trace inbox if the drive has none. It makes the inbox key pair in the browser and stores the private key wrapped under your drive key. Creating the inbox and issuing the token are strict routes: the service asks for a fresh sign-in (Clerk strict reverification) before it accepts either one.
+4. The console creates a webhook token. It starts with `adw_` and is shown once. Before issuing one, the console proves the drive key opens the exact inbox record and sends that full snapshot to the service. If the stored record changed in between, the console fetches and verifies the new record before retrying. Each new token is then bound to that exact record — its key id and a hash of the full record — so a later change makes the token stop working instead of sealing traces to a record you did not verify. Tokens issued before this binding existed keep working. Copy the webhook URL and the headers JSON now:
 
 ```text
 Webhook URL: https://<origin>/api/webhooks/openrouter/<drive id>
@@ -142,6 +142,7 @@ A drive has one active webhook token. "Replace" creates a new token and revokes 
 | Stored                                       | 201 `{ "ok": true, "stored": 1, "path": "..." }`     |
 | Same body delivered again                    | 200 `{ "ok": true, "stored": 0, "duplicate": true }` |
 | The drive has no trace inbox                 | 409 `conflict`                                       |
+| The token's bound inbox record was changed   | 409 `conflict`                                       |
 | Drive quota exceeded                         | 413 `quota_exceeded`                                 |
 | Plan budget exceeded                         | 402                                                  |
 
@@ -162,6 +163,8 @@ A working token returns `{"ok":true}`.
 ### Encryption of webhook traces
 
 The service holds the OpenRouter payload in plaintext, in memory, for the length of the request. It seals the payload with a random file key and wraps that key to the drive's trace inbox public key. It does not hold the drive key, it logs nothing from the body or the token, and it cannot read the stored file afterwards. Formats: [Encryption format](crypto.md).
+
+The trust boundary is the console code the service delivers, not the service's honesty. The keypair check runs in your browser on the record the API returned; a compromised service serves the code that checks it, so it can always decline to check. What it cannot do quietly: enroll the inbox or mint a token without a recently reverified session, or change the stored inbox record without invalidating every token issued after binding existed. A party that controls the database directly can still write a NULL-bound token and swap the record — the binding raises the cost of a quiet swap, it does not prove one did not happen. See [Threat model](threat-model.md).
 
 ### Read webhook traces
 

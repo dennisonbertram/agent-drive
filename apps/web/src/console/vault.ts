@@ -5,7 +5,7 @@
 import { envelopeVersion, unwrapFileKey } from '../../../../packages/agent-drive/src/crypto.ts';
 import { inboxFor } from './share-link';
 import {
-  unwrapInboxPrivateKey,
+  verifyInboxKeypair,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
@@ -632,10 +632,20 @@ export class Vault {
     const record = await this.deps.inbox(driveId);
     if (!record) return 'unverifiable';
     try {
-      await unwrapInboxPrivateKey(inboxFor(driveId, record), key);
+      await verifyInboxKeypair(inboxFor(driveId, record), key);
       return 'inbox';
     } catch {
       return 'mismatch';
+    }
+  }
+
+  /** Proves the supplied key opens this exact inbox snapshot. */
+  async verifyInboxKey(driveId: string, key: string, record: TraceInboxRecord): Promise<boolean> {
+    try {
+      await verifyInboxKeypair(inboxFor(driveId, record), key);
+      return true;
+    } catch {
+      return false;
     }
   }
 
