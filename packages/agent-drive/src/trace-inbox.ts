@@ -7,6 +7,7 @@ const enc = new TextEncoder();
 const EC = { name: 'ECDH', namedCurve: 'P-256' } as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const SEAL_SALT = 'agent-drive-trace-inbox-v1';
+const CHALLENGE_SALT = 'agent-drive-trace-inbox-possession-challenge-v1';
 
 export type TraceInboxRecord = { keyId: string; publicKey: string; wrappedPrivateKey: string };
 /** A stored record plus the drive the reader asked for (never taken from the server). */
@@ -21,6 +22,10 @@ const wrapAad = (i: TraceInbox) =>
 /** HKDF info and AES-GCM AAD: binds the drive, key id, serialized epk and recipient public key. */
 const label = (keyId: string, driveId: string, epk: Uint8Array, publicKey: string) =>
   enc.encode(`${keyId}:${driveId}:${encodeBase64Url(epk)}:${publicKey}`);
+const challengeLabel = (keyId: string, driveId: string, epk: Uint8Array, publicKey: string) =>
+  enc.encode(
+    `agent-drive:trace-inbox-possession-challenge:v1:${keyId}:${driveId}:${encodeBase64Url(epk)}:${publicKey}`,
+  );
 
 async function importPublicPoint(value: unknown): Promise<CryptoKey> {
   if (typeof value !== 'string' || value.length !== 87) throw new Error('point');
@@ -121,14 +126,14 @@ export async function verifyInboxKeypair(inbox: TraceInbox, driveKey: string) {
   return privateKey;
 }
 
-async function sealKey(bits: ArrayBuffer, context: Uint8Array, usage: KeyUsage) {
+async function sealKey(bits: ArrayBuffer, context: Uint8Array, usage: KeyUsage, salt = SEAL_SALT) {
   const subtle = crypto.subtle;
   const hkdf = await subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
   return subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: enc.encode(SEAL_SALT),
+      salt: enc.encode(salt),
       info: context as Uint8Array<ArrayBuffer>,
     },
     hkdf,
@@ -168,6 +173,66 @@ export async function sealFileKeyToInbox(
   out.set(iv, 66);
   out.set(ct, 78);
   return encodeBase64Url(out);
+}
+
+/** Seals a possession challenge with a distinct envelope version, KDF salt, and AAD domain. */
+export async function sealTraceInboxChallenge(
+  challenge: string,
+  inbox: Pick<TraceInbox, 'driveId' | 'keyId' | 'publicKey'>,
+  random: SealRandom = {},
+): Promise<string> {
+  const challengeBytes = decodeBase64Url(challenge);
+  if (challengeBytes.length !== 32) throw new Error('Invalid trace inbox challenge.');
+  if (!isUuid(inbox.driveId) || !isUuid(inbox.keyId))
+    throw new Error('Invalid trace inbox record.');
+  const subtle = crypto.subtle;
+  const point = await importPublicPoint(inbox.publicKey);
+  const ephemeral = random.ephemeral ?? (await subtle.generateKey(EC, true, ['deriveBits']));
+  const bits = await subtle.deriveBits({ name: 'ECDH', public: point }, ephemeral.privateKey, 256);
+  const rawEpk = new Uint8Array(await subtle.exportKey('raw', ephemeral.publicKey));
+  const context = challengeLabel(inbox.keyId, inbox.driveId, rawEpk, inbox.publicKey);
+  const aes = await sealKey(bits, context, 'encrypt', CHALLENGE_SALT);
+  const iv = random.iv ?? crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(
+    await subtle.encrypt(
+      { name: 'AES-GCM', iv: iv as Uint8Array<ArrayBuffer>, additionalData: context },
+      aes,
+      enc.encode(challenge),
+    ),
+  );
+  const out = new Uint8Array(1 + 65 + 12 + ciphertext.length);
+  out[0] = 3;
+  out.set(rawEpk, 1);
+  out.set(iv, 66);
+  out.set(ciphertext, 78);
+  return encodeBase64Url(out);
+}
+
+async function unsealTraceInboxChallenge(
+  envelope: string,
+  privateKey: CryptoKey,
+  keyId: string,
+  driveId: string,
+  publicKey: string,
+): Promise<string> {
+  if (!isUuid(driveId) || !isUuid(keyId)) throw new Error('Invalid trace inbox record.');
+  await importPublicPoint(publicKey);
+  if (envelope.length !== 183) throw new Error('Invalid inbox challenge.');
+  const bytes = decodeBase64Url(envelope);
+  if (bytes.length !== 137 || bytes[0] !== 3) throw new Error('Invalid inbox challenge.');
+  const rawEpk = bytes.slice(1, 66);
+  if (rawEpk[0] !== 4) throw new Error('Invalid inbox challenge.');
+  const epk = await crypto.subtle.importKey('raw', rawEpk, EC, false, []);
+  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: epk }, privateKey, 256);
+  const context = challengeLabel(keyId, driveId, rawEpk, publicKey);
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: bytes.slice(66, 78), additionalData: context },
+    await sealKey(bits, context, 'decrypt', CHALLENGE_SALT),
+    bytes.slice(78),
+  );
+  const challenge = new TextDecoder('utf-8', { fatal: true }).decode(plain);
+  if (decodeBase64Url(challenge).length !== 32) throw new Error('Invalid inbox challenge.');
+  return challenge;
 }
 
 /** Opens an envelope v2. `driveId` is the drive the reader requested. Returns the file key. */
@@ -211,5 +276,5 @@ export async function answerTraceInboxChallenge(input: {
   const { driveId, driveKey, record, envelope } = input;
   const inbox: TraceInbox = { driveId, ...record };
   const privateKey = await verifyInboxKeypair(inbox, driveKey);
-  return unsealFileKeyFromInbox(envelope, privateKey, record.keyId, driveId, record.publicKey);
+  return unsealTraceInboxChallenge(envelope, privateKey, record.keyId, driveId, record.publicKey);
 }

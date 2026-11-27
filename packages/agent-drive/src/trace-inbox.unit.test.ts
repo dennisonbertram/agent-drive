@@ -4,6 +4,7 @@ import {
   answerTraceInboxChallenge,
   createTraceInbox,
   sealFileKeyToInbox,
+  sealTraceInboxChallenge,
   unsealFileKeyFromInbox,
   unwrapInboxPrivateKey,
   verifyInboxKeypair,
@@ -73,10 +74,14 @@ describe('trace inbox round trip and failures', () => {
     const rec = await createTraceInbox(v.driveId, driveKey);
     const recipient = { driveId: v.driveId, ...rec };
     const proof = generateDriveKey(); // 32 random bytes encoded as the existing key primitive expects.
-    const envelope = await sealFileKeyToInbox(proof, recipient);
+    const envelope = await sealTraceInboxChallenge(proof, recipient);
     await expect(
       answerTraceInboxChallenge({ driveId: v.driveId, driveKey, record: rec, envelope }),
     ).resolves.toBe(proof);
+    const privateKey = await unwrapInboxPrivateKey(recipient, driveKey);
+    await expect(
+      unsealFileKeyFromInbox(envelope, privateKey, rec.keyId, v.driveId, rec.publicKey),
+    ).rejects.toThrow('Invalid wrapped key.');
     await expect(
       answerTraceInboxChallenge({
         driveId: v.driveId,
@@ -93,6 +98,23 @@ describe('trace inbox round trip and failures', () => {
         envelope,
       }),
     ).rejects.toThrow();
+  });
+
+  it('rejects a stored file-key envelope as challenge proof before returning any plaintext', async () => {
+    const driveKey = generateDriveKey();
+    const rec = await createTraceInbox(v.driveId, driveKey);
+    const fileKeyEnvelope = await sealFileKeyToInbox(v.fileKey, {
+      driveId: v.driveId,
+      ...rec,
+    });
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey,
+        record: rec,
+        envelope: fileKeyEnvelope,
+      }),
+    ).rejects.toThrow('Invalid inbox challenge.');
   });
 
   it('rejects tampering with epk, iv and ct, and a wrong driveId or keyId', async () => {

@@ -7,7 +7,7 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handleApiRequest, handleConsoleApiRequest } from './handler';
 import { inboxRecordDigest } from './trace-webhook';
-import { generateDriveKey } from '../../../../packages/agent-drive/src/crypto.js';
+import { decodeBase64Url, generateDriveKey } from '../../../../packages/agent-drive/src/crypto.js';
 import {
   answerTraceInboxChallenge,
   createTraceInbox,
@@ -184,6 +184,7 @@ describe('trace inbox', () => {
       envelope: expect.any(String),
     });
     expect(body).not.toHaveProperty('proof');
+    expect(decodeBase64Url(body.envelope as string)[0]).toBe(3);
     const stored = await pool.query(
       'SELECT actor_user_id, drive_id, action, inbox_record_hash, challenge_hash, expires_at FROM drive_trace_inbox_challenges WHERE id = $1',
       [body.challengeId],
@@ -330,6 +331,47 @@ describe('trace inbox', () => {
       ...issued.proof,
     });
     expect(response.status).toBe(409);
+  });
+
+  it('checks challenge expiry after waiting for the drive lock', async () => {
+    const f = await fixture();
+    const inbox = await inboxBody(f);
+    const issued = await challenge(f, 'enroll', inbox);
+    const holder = await pool.connect();
+    try {
+      await holder.query('BEGIN');
+      await holder.query('SELECT id FROM drives WHERE id = $1 FOR UPDATE', [f.driveId]);
+      const holderPid = (await holder.query('SELECT pg_backend_pid() AS pid')).rows[0]
+        .pid as number;
+      const request = consoleCall(f.userId, `drives/${f.driveId}/trace-inbox`, 'POST', {
+        ...inbox,
+        ...issued.proof,
+      });
+      let blocked = false;
+      for (let i = 0; i < 100; i += 1) {
+        const waiting = await pool.query(
+          'SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))',
+          [holderPid],
+        );
+        if (waiting.rowCount) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(blocked).toBe(true);
+      await pool.query(
+        `UPDATE drive_trace_inbox_challenges
+            SET expires_at = clock_timestamp() - interval '1 second'
+          WHERE id = $1`,
+        [issued.proof!.challengeId],
+      );
+      await holder.query('COMMIT');
+      expect((await request).status).toBe(409);
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
   });
 
   it('validates the body', async () => {

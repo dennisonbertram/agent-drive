@@ -23,6 +23,7 @@ function fake(
   opts: {
     inbox?: boolean;
     inboxConflictOnce?: boolean;
+    challengeConflictOnce?: boolean;
     tokenConflictOnce?: boolean;
     inboxProof?: boolean;
     inboxProofs?: boolean[];
@@ -35,16 +36,26 @@ function fake(
   let inbox = opts.inbox ?? false;
   let tokenConflict = opts.tokenConflictOnce ?? false;
   let inboxConflict = opts.inboxConflictOnce ?? false;
+  let challengeConflict = opts.challengeConflictOnce ?? false;
   const respond = async (path: string, method = 'GET', body?: unknown): Promise<never> => {
     const name = path.split('/').at(-1);
     if (method === 'POST' && name === 'challenge') {
       challenges.push(body);
+      if (challengeConflict) {
+        challengeConflict = false;
+        inbox = true;
+        throw Object.assign(new Error('A trace inbox already exists for this drive.'), {
+          status: 409,
+        });
+      }
       return { challengeId: 'challenge-id', envelope: 'encrypted-challenge' } as never;
     }
     if (method === 'POST') posted.push(body);
     if (name === 'trace-inbox' && method === 'GET')
       return {
-        inbox: inbox ? { keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' } : null,
+        inbox: inbox
+          ? { keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w', createdAt: 'server-only' }
+          : null,
       } as never;
     if (name === 'trace-inbox') {
       inbox = true;
@@ -168,6 +179,38 @@ describe('setUpWebhook', () => {
       'strict POST webhook-token',
     ]);
     // The token is bound to the exact record the verifier checked.
+    expect(f.posted.at(-1)).toEqual({
+      keyId: 'k',
+      publicKey: 'p',
+      wrappedPrivateKey: 'w',
+      challengeId: 'challenge-id',
+      proof: 'proof',
+    });
+    expect(f.challenges[0]).toEqual({
+      action: 'issue-token',
+      inbox: { keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' },
+    });
+  });
+  it('recovers when another tab enrolls before the challenge request', async () => {
+    const f = fake({ challengeConflictOnce: true });
+    await run(f, 'bundle', async () => 'file');
+    expect(f.calls).toEqual([
+      'GET trace-inbox',
+      'strict POST challenge',
+      'GET trace-inbox',
+      'strict POST challenge',
+      'strict POST webhook-token',
+    ]);
+    expect(f.challenges).toEqual([
+      {
+        action: 'enroll',
+        inbox: expect.objectContaining({ keyId: expect.any(String) }),
+      },
+      {
+        action: 'issue-token',
+        inbox: { keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' },
+      },
+    ]);
     expect(f.posted.at(-1)).toEqual({
       keyId: 'k',
       publicKey: 'p',

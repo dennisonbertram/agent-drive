@@ -59,7 +59,7 @@ import {
 import { maybeCleanupExpiredUploads } from './upload-cleanup';
 import { renameFile } from './mount-rename';
 import { inboxRecordDigest } from './trace-webhook';
-import { sealFileKeyToInbox } from '../../../../packages/agent-drive/src/trace-inbox.ts';
+import { sealTraceInboxChallenge } from '../../../../packages/agent-drive/src/trace-inbox.ts';
 import { bearerDeviceEndpoint, consoleDeviceEndpoint } from './device';
 import {
   authorizeDownload,
@@ -1285,7 +1285,7 @@ async function traceInboxChallengeEndpoint(
   const record = parseTraceInboxRecord(recordBody);
   const recordHash = inboxRecordDigest(record.keyId, record.publicKey, record.wrappedPrivateKey);
   const challenge = randomBytes(32).toString('base64url');
-  const envelope = await sealFileKeyToInbox(challenge, { driveId, ...record });
+  const envelope = await sealTraceInboxChallenge(challenge, { driveId, ...record });
   const challengeId = randomUUID();
   await withTransaction(async (client) => {
     await lockVaultDrive(client, auth.accountId, driveId);
@@ -1348,7 +1348,7 @@ async function consumeTraceInboxChallenge(
   const consumed = await client.query(
     `DELETE FROM drive_trace_inbox_challenges
       WHERE id = $1 AND actor_user_id = $2 AND drive_id = $3 AND action = $4
-        AND inbox_record_hash = $5 AND challenge_hash = $6 AND expires_at > now()
+        AND inbox_record_hash = $5 AND challenge_hash = $6 AND expires_at > clock_timestamp()
       RETURNING id`,
     [
       input.challengeId,
