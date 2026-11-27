@@ -170,6 +170,31 @@ const itemKey = (item: FileEntry) =>
   item.kind === 'folder' ? `folder:${item.path}` : `file:${item.id}`;
 const LAST_DRIVE = 'agent-drive:last-drive';
 const DEFAULT_SORT_DIR = { name: 'asc', modified: 'desc', size: 'desc' } as const;
+// A job lives in /jobs/<id> (one ASCII identifier, up to 64 chars): the user drafts
+// request.md, Submit renames it to submitted.md — the marker the runner waits for — and
+// the runner writes status.json once it picks the job up.
+const JOB_FOLDER = /^\/jobs\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const JOB_REQUEST = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/request\.md$/;
+
+// What a row inside an open /jobs/<id> folder shows: Submit on the draft, or the one
+// queue/pickup indicator on submitted.md — or on the draft when it is the only marker.
+// status.json stays a normal openable file: it is encrypted, so "picked" is as far as the
+// listing can honestly go.
+function jobRowState(
+  file: FileEntry,
+  folder: string,
+  submitted: boolean,
+  picked: boolean,
+): 'submit' | 'queued' | 'picked' | null {
+  const cut = file.path.lastIndexOf('/');
+  if ((file.path.slice(0, cut) || ROOT) !== folder) return null;
+  const name = file.path.slice(cut + 1);
+  if (name === 'submitted.md') return picked ? 'picked' : 'queued';
+  if (name !== 'request.md') return null;
+  // A draft coexisting with a queued or claimed job never submits again.
+  if (submitted) return null;
+  return picked ? 'picked' : 'submit';
+}
 
 function rememberedDrive() {
   try {
@@ -635,6 +660,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [saved, setSaved] = useState(false);
   const [downloadingId, setDownloadingId] = useState('');
   const downloadAborters = useRef(new Map<string, AbortController>());
+  // The "driveId:path" pair a job Submit is running for; the click pinned both and the version.
+  const [jobSubmitting, setJobSubmitting] = useState('');
+  const jobSubmittingNow = useRef('');
   const [memoryDownloadFile, setMemoryDownloadFile] = useState<FileEntry | null>(null);
   const [pickerRetry, setPickerRetry] = useState<FileEntry | null>(null);
   // The row whose Download or Preview asked for the key; it continues once the key loads.
@@ -763,6 +791,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       : rowsFromListing(fileItems, folder).filter((row) => row.name.toLowerCase().includes(query));
     rows = sortRows(matches, sort.key, sort.dir);
   }
+  // Only inside one canonical /jobs/<id> folder in ordinary browse — never root, Recent,
+  // Shares, Trash, or a nested folder — inspect that folder's own loaded rows for the
+  // queue/pickup markers. A marker the server has not sent yet — another page, a
+  // filtered-out sibling — cannot veto a submit; it just lets the server answer a conflict.
+  const inJobFolder = tab === 'Files' && view === 'browse' && JOB_FOLDER.test(folder);
+  let jobSubmitted = false;
+  let jobPicked = false;
+  if (inJobFolder)
+    for (const file of loadedFiles) {
+      const cut = file.path.lastIndexOf('/');
+      if ((file.path.slice(0, cut) || ROOT) !== folder) continue;
+      const name = file.path.slice(cut + 1);
+      if (name === 'submitted.md') jobSubmitted = true;
+      else if (name === 'status.json') jobPicked = true;
+      if (jobSubmitted && jobPicked) break;
+    }
   const drive = drives.find((item) => item.id === selected);
   // Storage by folder: drives pending deletion still count in the account total but are
   // not offered here — the folders endpoint already refuses them. The select defaults to
@@ -1813,10 +1857,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   }, [toasts]);
   const selectedNow = useRef(selected);
   const tabNow = useRef(tab);
+  const folderNow = useRef(folder);
   useEffect(() => {
     selectedNow.current = selected;
     tabNow.current = tab;
-  }, [selected, tab]);
+    folderNow.current = folder;
+  }, [selected, tab, folder]);
   function unhide(driveId: string, path: string, exactKey?: string) {
     setHiddenRows((current) => {
       const next = new Map(
@@ -1861,6 +1907,56 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setModal(null);
     await refresh();
     restoredToast(driveId, path);
+  }
+
+  // Submit renames the draft to submitted.md — the queue marker the runner waits for. The
+  // click pinned the drive, path and observed version; the server still has the final say
+  // through the if-version checks, so a stale row or an existing submitted.md answers a
+  // conflict. Browsing alone never submits; only this explicit click does.
+  async function submitJob(file: FileEntry) {
+    const job = JOB_REQUEST.exec(file.path);
+    const driveId = selected;
+    const versionId = file.version_id;
+    // No version means the row cannot prove what it is submitting; wait for a fresh list.
+    // A second click while one is in flight, or a stale drive, never submits.
+    if (!job || !driveId || !versionId || jobSubmittingNow.current) return;
+    const jobId = job[1]!;
+    const destinationPath = `/jobs/${jobId}/submitted.md`;
+    const marker = `${driveId}:${file.path}`;
+    jobSubmittingNow.current = marker;
+    setJobSubmitting(marker);
+    // The reply is only news while the click's drive and folder are still open — after
+    // navigation the fresh listing carries the result and a stale toast would just confuse.
+    const stillHere = () =>
+      selectedNow.current === driveId && folderNow.current === folder && tabNow.current === 'Files';
+    try {
+      await api(`drives/${driveId}/rename`, 'POST', {
+        path: file.path,
+        destinationPath,
+        ifSourceVersionId: versionId,
+        ifDestinationVersionId: null,
+        operationId: crypto.randomUUID(),
+      });
+      if (stillHere()) showToast(`Job ${jobId} queued — the runner can pick it up now.`);
+    } catch (reason) {
+      if (stillHere()) {
+        const status = (reason as { status?: number }).status;
+        showToast(
+          status === 409
+            ? `Could not queue job ${jobId}: request.md changed or the job is already queued. The list was refreshed.`
+            : `Could not confirm the submit for job ${jobId}. ${
+                reason instanceof Error ? reason.message : 'Try again.'
+              } The list was refreshed — a submitted.md row means it queued.`,
+          { tone: 'error' },
+        );
+      }
+    } finally {
+      if (jobSubmittingNow.current === marker) jobSubmittingNow.current = '';
+      setJobSubmitting((current) => (current === marker ? '' : current));
+      // Whatever the reply, a fresh listing tells the truth — including an ambiguous reply
+      // whose rename had actually committed.
+      if (driveId === selectedNow.current) setFileRefresh((value) => value + 1);
+    }
   }
 
   // Trash is instant: the row leaves at once, the request runs behind the toast, Undo restores.
@@ -3024,6 +3120,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   '',
                               );
                               const meta = `${size(Number(file.ciphertext_size ?? 0))} · ${shortDate(file.created_at)} · ${author}`;
+                              const jobState = inJobFolder
+                                ? jobRowState(file, folder, jobSubmitted, jobPicked)
+                                : null;
                               return (
                                 <tr key={row.key} role="row" data-kind="file">
                                   <td className="file-cell" role="cell">
@@ -3064,6 +3163,42 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                   </td>
                                   <td className="row-actions-cell" role="cell">
                                     <div className="row-actions">
+                                      {jobState === 'submit' && (
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            busy || Boolean(jobSubmitting) || !file.version_id
+                                          }
+                                          aria-busy={
+                                            jobSubmitting === `${selected}:${file.path}` ||
+                                            undefined
+                                          }
+                                          title={
+                                            file.version_id
+                                              ? 'Queue this request for the job runner — it becomes submitted.md'
+                                              : 'Reload the file list before submitting — this row has no version to pin.'
+                                          }
+                                          onClick={() => void submitJob(file)}
+                                        >
+                                          Submit job
+                                        </button>
+                                      )}
+                                      {jobState === 'queued' && (
+                                        <span
+                                          className="muted"
+                                          title="submitted.md is queued for the runner."
+                                        >
+                                          Queued
+                                        </span>
+                                      )}
+                                      {jobState === 'picked' && (
+                                        <span
+                                          className="muted"
+                                          title="status.json exists — the runner has picked this job up."
+                                        >
+                                          Picked up
+                                        </span>
+                                      )}
                                       <button
                                         className="row-primary"
                                         disabled={busy && downloadingId !== file.id}
