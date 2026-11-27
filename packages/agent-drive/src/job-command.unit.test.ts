@@ -1,0 +1,505 @@
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, dirname, join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { type JobRequest, makeJobHandler } from './job-command.js';
+
+const NODE = process.execPath;
+const enc = new TextEncoder();
+const dirs: string[] = [];
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+});
+
+async function testDir() {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-drive-jobtest-'));
+  dirs.push(dir);
+  return dir;
+}
+
+const job = (over: Partial<JobRequest> = {}): JobRequest => ({
+  id: 'job-unit-test',
+  request: enc.encode('# synthetic request\n\nDo a safe thing.\n'),
+  inputs: [],
+  ...over,
+});
+
+const freshSignal = () => new AbortController().signal;
+const run = (script: string, args: string[] = []) => [NODE, '-e', script, ...args];
+
+/** Polls until `path` holds JSON, then returns it. */
+async function marker(path: string): Promise<{ pid: number; childPid?: number; cwd: string }> {
+  let parsed: { pid: number; childPid?: number; cwd: string } | undefined;
+  await vi.waitFor(
+    async () => {
+      parsed = JSON.parse(await readFile(path, 'utf8'));
+    },
+    { timeout: 10_000, interval: 50 },
+  );
+  return parsed!;
+}
+
+async function expectDead(pid: number) {
+  await vi.waitFor(
+    () => {
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+      expect(alive).toBe(false);
+    },
+    { timeout: 10_000, interval: 50 },
+  );
+}
+
+describe('makeJobHandler', () => {
+  it('requires a worker command', () => {
+    expect(() => makeJobHandler([])).toThrow(/worker command/u);
+    expect(() => makeJobHandler([''])).toThrow(/worker command/u);
+  });
+
+  it('writes stdout to outputs/result.md and returns it', async () => {
+    const handler = makeJobHandler(run(`process.stdout.write('worker said hello')`));
+    await expect(handler(job(), freshSignal())).resolves.toEqual([
+      { name: 'result.md', bytes: Buffer.from('worker said hello') },
+    ]);
+  });
+
+  it('materializes request.md in a private cwd and pipes the same bytes to stdin', async () => {
+    const script = `
+      const fs = require('fs');
+      const fromDisk = fs.readFileSync('request.md');
+      const fromStdin = fs.readFileSync(0);
+      fs.writeFileSync('outputs/disk.bin', fromDisk);
+      fs.writeFileSync('outputs/stdin.bin', fromStdin);
+      fs.writeFileSync('outputs/cwd.txt', process.cwd());
+    `;
+    const request = new Uint8Array([0xff, 0x00, 0x41, 0x80, 0x0a]); // not valid UTF-8
+    const outputs = await makeJobHandler(run(script))(job({ request }), freshSignal());
+    const byName = new Map(outputs.map((o) => [o.name, o.bytes]));
+    expect(byName.get('disk.bin')).toEqual(Buffer.from(request));
+    expect(byName.get('stdin.bin')).toEqual(Buffer.from(request));
+    const cwd = byName.get('cwd.txt')!.toString();
+    expect(cwd).toMatch(/agent-drive-job-/u);
+    // The private workspace is cleaned up once the job settles.
+    await expect(stat(cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('stages flat inputs under inputs/ for the worker', async () => {
+    const script = `
+      const fs = require('fs');
+      const names = fs.readdirSync('inputs').sort();
+      fs.writeFileSync('outputs/manifest.txt', names.join(','));
+      for (const name of names) fs.writeFileSync('outputs/' + name + '.copy', fs.readFileSync('inputs/' + name));
+    `;
+    const inputs = [
+      { name: 'b.bin', bytes: new Uint8Array([2, 3]) },
+      { name: 'a.txt', bytes: enc.encode('alpha') },
+    ];
+    const outputs = await makeJobHandler(run(script))(job({ inputs }), freshSignal());
+    const byName = new Map(outputs.map((o) => [o.name, o.bytes]));
+    expect(byName.get('manifest.txt')).toEqual(Buffer.from('a.txt,b.bin'));
+    expect(byName.get('a.txt.copy')).toEqual(Buffer.from('alpha'));
+    expect(byName.get('b.bin.copy')).toEqual(Buffer.from([2, 3]));
+  });
+
+  it('returns worker-written outputs sorted by name, including a worker result.md when stdout is empty', async () => {
+    const script = `
+      const fs = require('fs');
+      fs.writeFileSync('outputs/zeta.md', 'z');
+      fs.writeFileSync('outputs/alpha.md', 'a');
+      fs.writeFileSync('outputs/result.md', 'written by worker');
+    `;
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    expect(outputs.map((o) => o.name)).toEqual(['alpha.md', 'result.md', 'zeta.md']);
+    expect(outputs[1]!.bytes).toEqual(Buffer.from('written by worker'));
+  });
+
+  it('returns an empty list when the worker produces nothing', async () => {
+    const outputs = await makeJobHandler(run(`process.exit(0)`))(job(), freshSignal());
+    expect(outputs).toEqual([]);
+  });
+
+  it('runs the worker with a minimal environment and an isolated HOME/TMPDIR', async () => {
+    vi.stubEnv('AGENT_DRIVE_API_KEY', 'unit-test-secret');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-unit-test');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'ant-unit-test');
+    vi.stubEnv('JOB_COMMAND_LEAK_PROBE', 'should-not-cross');
+    const script = `require('fs').writeFileSync('outputs/env.json', JSON.stringify(process.env))`;
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    const env = JSON.parse(outputs[0]!.bytes.toString());
+    expect(env.AGENT_DRIVE_API_KEY).toBeUndefined();
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.JOB_COMMAND_LEAK_PROBE).toBeUndefined();
+    expect(env.PATH).toBe('/usr/local/bin:/usr/bin:/bin');
+    expect(env.PATH).not.toContain(process.env.PATH ?? '__never__');
+    expect(env.HOME).toMatch(/agent-drive-job-[^/]+\/home$/u);
+    expect(dirname(env.TMPDIR)).toBe(dirname(env.HOME));
+    expect(env.TMPDIR).toMatch(/\/tmp$/u);
+    expect(Object.keys(env).length).toBeLessThanOrEqual(10);
+  });
+
+  it('passes arguments literally without a shell', async () => {
+    const tricky = 'a;b $(id) `id` >x |y * ~ $HOME && echo pwned';
+    const script = `require('fs').writeFileSync('outputs/argv.json', JSON.stringify(process.argv.slice(1)))`;
+    const outputs = await makeJobHandler(run(script, [tricky]))(job(), freshSignal());
+    expect(JSON.parse(outputs[0]!.bytes.toString())).toEqual([tricky]);
+  });
+
+  it('rejects when the worker exits nonzero', async () => {
+    const handler = makeJobHandler(run(`process.exit(3)`));
+    await expect(handler(job(), freshSignal())).rejects.toThrow(/code 3/u);
+  });
+
+  it('rejects when the executable cannot be spawned', async () => {
+    const handler = makeJobHandler(['/definitely/not/a/real/binary-xyz']);
+    await expect(handler(job(), freshSignal())).rejects.toThrow(
+      /definitely\/not\/a\/real\/binary-xyz/u,
+    );
+  });
+
+  it('resolves a path-like command against the owner cwd, not the job dir', async () => {
+    const handler = makeJobHandler(['./no-such-worker-xyz']);
+    await expect(handler(job(), freshSignal())).rejects.toThrow(
+      new RegExp(`${process.cwd()}/no-such-worker-xyz`, 'u'),
+    );
+  });
+
+  it('resolves a bare command name on the owner PATH', async () => {
+    const outputs = await makeJobHandler(['echo', '-n', 'bare-name-ok'])(job(), freshSignal());
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('bare-name-ok') }]);
+  });
+
+  it('runs an owner-installed bare command not on the child PATH', async () => {
+    const dir = await testDir();
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    // Shebang with a full interpreter path: dependable inside the minimal child env.
+    await writeFile(
+      join(bin, 'owner-worker'),
+      `#!${NODE}\nprocess.stdout.write('installed worker ran')\n`,
+      { mode: 0o755 },
+    );
+    // Resolution happens once, at handler build, against the launch PATH.
+    vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH}`);
+    const handler = makeJobHandler(['owner-worker']);
+    vi.unstubAllEnvs();
+    await expect(handler(job(), freshSignal())).resolves.toEqual([
+      { name: 'result.md', bytes: Buffer.from('installed worker ran') },
+    ]);
+  });
+
+  it('aborts: kills the whole process group, rejects, and cleans the workspace', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `
+      const fs = require('fs');
+      const child = require('child_process').spawn(
+        process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      fs.writeFileSync(process.argv[1], JSON.stringify({ pid: process.pid, childPid: child.pid, cwd: process.cwd() }));
+      setInterval(() => {}, 1000);
+    `;
+    const controller = new AbortController();
+    const pending = makeJobHandler(run(script, [markerPath]))(job(), controller.signal);
+    const { pid, childPid, cwd } = await marker(markerPath);
+    controller.abort();
+    await expect(pending).rejects.toThrow(/abort/u);
+    await expectDead(pid);
+    await expectDead(childPid!); // grandchildren die with the process group
+    await expect(stat(cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('times the worker out, kills it, and rejects', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `
+      require('fs').writeFileSync(process.argv[1], JSON.stringify({ pid: process.pid, cwd: process.cwd() }));
+      setInterval(() => {}, 1000);
+    `;
+    const handler = makeJobHandler(run(script, [markerPath]), { timeoutMs: 300 });
+    const pending = handler(job(), freshSignal());
+    const { pid, cwd } = await marker(markerPath);
+    await expect(pending).rejects.toThrow(/timeout|timed out|limit/u);
+    await expectDead(pid);
+    await expect(stat(cwd)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects an already-aborted job without spawning the worker', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `require('fs').writeFileSync(process.argv[1], '{}')`;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      makeJobHandler(run(script, [markerPath]))(job(), controller.signal),
+    ).rejects.toThrow(/abort/u);
+    await expect(stat(markerPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('swallows EPIPE when the worker exits without reading a large stdin', async () => {
+    const request = new Uint8Array(1024 * 1024).fill(0x61);
+    const outputs = await makeJobHandler(run(`process.exit(0)`))(job({ request }), freshSignal());
+    expect(outputs).toEqual([]);
+  });
+});
+
+describe('orphaned subprocesses', () => {
+  it('delivers output written by an out-of-group orphan after the leader exits', async () => {
+    // The group is swept at 'exit'; a detached orphan survives and its write arrives
+    // inside the drain bound, so 'close' fires when the pipe EOFs — not at leader exit.
+    const script = `
+      const orphan = require('child_process').spawn(process.execPath, [
+        '-e', 'setTimeout(() => process.stdout.write(" +from-orphan"), 400)',
+      ], { detached: true, stdio: ['ignore', 'inherit', 'ignore'] });
+      orphan.unref(); // leader exits now; the orphan writes to the inherited pipe later
+      process.stdout.write('from-worker');
+    `;
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]!.name).toBe('result.md');
+    expect(outputs[0]!.bytes.toString()).toContain('from-worker');
+    expect(outputs[0]!.bytes.toString()).toContain('from-orphan');
+  });
+
+  it('kills a group orphan that holds no pipes at leader exit', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `
+      const fs = require('fs');
+      const orphan = require('child_process').spawn(
+        process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+      orphan.unref(); // so this worker can exit while the orphan keeps running
+      fs.writeFileSync(process.argv[1], JSON.stringify({ orphanPid: orphan.pid }));
+    `;
+    const outputs = await makeJobHandler(run(script, [markerPath]))(job(), freshSignal());
+    expect(outputs).toEqual([]);
+    const { orphanPid } = JSON.parse(await readFile(markerPath, 'utf8')) as {
+      orphanPid: number;
+    };
+    // The single group sweep at 'exit' kills it — it cannot touch outputs afterwards.
+    await expectDead(orphanPid);
+  });
+
+  it('sweeps a group orphan holding the stdout pipe at leader exit and settles normally', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `
+      const fs = require('fs');
+      const orphan = require('child_process').spawn(
+        process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });
+      orphan.unref(); // leader exits; the orphan would hold the pipe for a minute
+      fs.writeFileSync(process.argv[1], JSON.stringify({ orphanPid: orphan.pid }));
+      process.stdout.write('worker-done');
+    `;
+    const started = Date.now();
+    const outputs = await makeJobHandler(run(script, [markerPath]))(job(), freshSignal());
+    // 'close' arrives as soon as the swept orphan's pipe end dies — well under a timeout.
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('worker-done') }]);
+    const { orphanPid } = JSON.parse(await readFile(markerPath, 'utf8')) as {
+      orphanPid: number;
+    };
+    await expectDead(orphanPid);
+  });
+
+  it('drops a silent pipe held by an out-of-group orphan after the drain bound', async () => {
+    const script = `
+      const orphan = require('child_process').spawn(process.execPath, [
+        '-e', 'setTimeout(() => {}, 15000)',
+      ], { detached: true, stdio: ['ignore', 'inherit', 'ignore'] });
+      orphan.unref(); // leader exits; the orphan keeps the pipe, out of group reach
+    `;
+    const started = Date.now();
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    const elapsed = Date.now() - started;
+    expect(outputs).toEqual([]);
+    expect(elapsed).toBeGreaterThan(1_500); // normal output was given time to drain
+    expect(elapsed).toBeLessThan(10_000); // but not the orphan's 15 s lifetime
+  });
+
+  it('settles a timeout on an escaped pipe holder without ever signalling it', async () => {
+    const dir = await testDir();
+    const markerPath = join(dir, 'marker.json');
+    const script = `
+      const fs = require('fs');
+      const orphan = require('child_process').spawn(
+        process.execPath, ['-e', 'setTimeout(() => {}, 15000)'],
+        { detached: true, stdio: ['ignore', 'inherit', 'ignore'] });
+      orphan.unref(); // leader exits; detached orphan keeps the pipe, out of group reach
+      fs.writeFileSync(process.argv[1], JSON.stringify({ orphanPid: orphan.pid }));
+    `;
+    const handler = makeJobHandler(run(script, [markerPath]), { timeoutMs: 400 });
+    const started = Date.now();
+    await expect(handler(job(), freshSignal())).rejects.toThrow(/limit|killed/u);
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const { orphanPid } = JSON.parse(await readFile(markerPath, 'utf8')) as {
+      orphanPid: number;
+    };
+    // Documented limit: outside the job's group it is never signalled — after 'exit'
+    // nothing kills by numeric ID, so it simply runs out its own timer.
+    expect(() => process.kill(orphanPid, 0)).not.toThrow();
+  });
+});
+
+describe('output collection', () => {
+  it('refuses to overwrite a worker-written result.md with stdout', async () => {
+    const script = `
+      require('fs').writeFileSync('outputs/result.md', 'from worker');
+      process.stdout.write('from stdout');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(/result\.md/u);
+  });
+
+  it('rejects a symlinked output even to a harmless target', async () => {
+    const script = `
+      const fs = require('fs');
+      fs.writeFileSync('outputs/real.txt', 'x');
+      fs.symlinkSync('/etc/hosts', 'outputs/evil');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /not a regular file|symlink/u,
+    );
+  });
+
+  it('rejects a hardlinked output', async () => {
+    const script = `
+      const fs = require('fs');
+      fs.writeFileSync('outputs/real.txt', 'x');
+      fs.linkSync('request.md', 'outputs/hard');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(/link/u);
+  });
+
+  it('rejects a subdirectory inside outputs', async () => {
+    const script = `require('fs').mkdirSync('outputs/nested')`;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /not a regular file|directory/u,
+    );
+  });
+
+  it('rejects a FIFO without ever blocking on it', async () => {
+    const script = `
+      require('child_process').execFileSync('mkfifo', ['outputs/pipe']);
+      require('fs').writeFileSync('outputs/real.txt', 'x');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /not a regular file/u,
+    );
+  });
+
+  it('rejects when the worker replaces the outputs directory with a symlink', async () => {
+    const script = `
+      const fs = require('fs');
+      fs.rmdirSync('outputs');
+      fs.symlinkSync('/tmp', 'outputs');
+      process.stdout.write('hi');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /outputs directory|outputs/u,
+    );
+  });
+
+  it('rejects a seventeenth output file', async () => {
+    const script = `
+      const fs = require('fs');
+      for (let i = 0; i < 17; i++) fs.writeFileSync('outputs/f' + i + '.txt', 'x');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(/16|too many/u);
+  });
+
+  it('accepts a file at exactly 8 MiB and rejects one byte more', async () => {
+    const exact = `require('fs').writeFileSync('outputs/big.bin', Buffer.alloc(8 * 1024 * 1024, 1))`;
+    const outputs = await makeJobHandler(run(exact))(job(), freshSignal());
+    expect(outputs[0]!.bytes.byteLength).toBe(8 * 1024 * 1024);
+
+    const over = `require('fs').writeFileSync('outputs/big.bin', Buffer.alloc(8 * 1024 * 1024 + 1, 1))`;
+    await expect(makeJobHandler(run(over))(job(), freshSignal())).rejects.toThrow(
+      /8 ?MiB|file limit|exceeds/u,
+    );
+  });
+
+  it('counts stdout toward the 16-file output limit', async () => {
+    const script = `
+      const fs = require('fs');
+      for (let i = 0; i < 16; i++) fs.writeFileSync('outputs/f' + i + '.txt', 'x');
+      process.stdout.write('one too many');
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(/16|too many/u);
+  });
+
+  it('rejects when outputs exceed 32 MiB in total', async () => {
+    const script = `
+      const fs = require('fs');
+      for (let i = 0; i < 5; i++) fs.writeFileSync('outputs/f' + i + '.bin', Buffer.alloc(7 * 1024 * 1024, i));
+    `;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /32 ?MiB|total/u,
+    );
+  });
+
+  it('rejects stdout over 8 MiB instead of buffering it unboundedly', async () => {
+    const script = `process.stdout.write(Buffer.alloc(9 * 1024 * 1024, 2))`;
+    await expect(makeJobHandler(run(script))(job(), freshSignal())).rejects.toThrow(
+      /8 ?MiB|standard output|stdout/u,
+    );
+  });
+
+  it('returns raw binary stdout untouched, including invalid UTF-8', async () => {
+    const payload = [0x00, 0xff, 0xfe, 0x80, 0x41, 0x0a];
+    const script = `process.stdout.write(Buffer.from(${JSON.stringify(payload)}))`;
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from(payload) }]);
+  });
+
+  it('discards a flooding stderr without deadlocking or leaking it', async () => {
+    const script = `
+      for (let i = 0; i < 200; i++) process.stderr.write('x'.repeat(65536));
+      process.stdout.write('clean result');
+    `;
+    const outputs = await makeJobHandler(run(script))(job(), freshSignal());
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('clean result') }]);
+  });
+});
+
+describe('input validation', () => {
+  it.each(['../escape', 'a/b', 'a\\b', '', '.', '..', 'has\0nul', 'x'.repeat(300)])(
+    'rejects the unsafe input name %j',
+    async (name) => {
+      const inputs = [{ name, bytes: new Uint8Array([1]) }];
+      await expect(makeJobHandler(run(''))(job({ inputs }), freshSignal())).rejects.toThrow(
+        /input name/u,
+      );
+    },
+  );
+
+  it('rejects duplicate input names', async () => {
+    const inputs = [
+      { name: 'same.txt', bytes: new Uint8Array([1]) },
+      { name: 'same.txt', bytes: new Uint8Array([2]) },
+    ];
+    await expect(makeJobHandler(run(''))(job({ inputs }), freshSignal())).rejects.toThrow(
+      /duplicate/u,
+    );
+  });
+
+  it('never silently merges input names that collide on a case-insensitive filesystem', async () => {
+    const dir = await testDir();
+    await writeFile(join(dir, 'Probe.TXT'), 'x');
+    const insensitive = await stat(join(dir, 'probe.txt')).then(
+      () => true,
+      () => false,
+    );
+    const inputs = [
+      { name: 'Case.md', bytes: enc.encode('first') },
+      { name: 'case.md', bytes: enc.encode('second') },
+    ];
+    const pending = makeJobHandler(run(''))(job({ inputs }), freshSignal());
+    if (insensitive) await expect(pending).rejects.toThrow(/collid|exists|EEXIST/iu);
+    else await expect(pending).resolves.toEqual([]);
+  });
+});
