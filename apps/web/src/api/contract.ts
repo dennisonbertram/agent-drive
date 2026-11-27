@@ -8,6 +8,7 @@ export const API_CONTRACT = [
   'POST /api/v1/device/:code/grant',
   'POST /api/v1/drives/:id/put',
   'POST /api/v1/drives/:id/commit',
+  'POST /api/v1/drives/:id/commit-job-claim',
   'POST /api/v1/drives/:id/mkdir',
   'POST /api/v1/drives/:id/rmdir',
   'GET /api/v1/drives/:id/get',
