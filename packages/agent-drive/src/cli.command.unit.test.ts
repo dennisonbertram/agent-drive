@@ -1148,8 +1148,10 @@ describe('capture command', () => {
     const r = await capture(['--drive', A, '--', ...dumpEnv(file, 3)]);
     expect(r.code).toBe(3);
     const env = JSON.parse(await readFile(file, 'utf8')) as Record<string, string>;
-    expect(env.ANTHROPIC_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/anthropic$/u);
-    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/openai$/u);
+    expect(env.ANTHROPIC_BASE_URL).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/anthropic$/u,
+    );
+    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/openai\/v1$/u);
     expect(process.env.ANTHROPIC_BASE_URL).toBe('');
     expect(process.env.OPENAI_BASE_URL).toBe('');
     expect(disabled(r.err)).toEqual([]);
@@ -1206,23 +1208,40 @@ describe('capture command', () => {
     ]);
   });
 
-  it('prepends the six provider flags for codex', async () => {
+  it('passes Codex the token through a header environment variable, not argv', async () => {
     const bin = await mkdtemp(join(tmpdir(), 'agent-drive-bin-'));
     dirs.push(bin);
     const argsFile = join(bin, 'args.json');
     await writeFile(
       join(bin, 'codex'),
-      `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2)));\n`,
+      `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify({ argv: process.argv.slice(2), env: { ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL, OPENAI_BASE_URL: process.env.OPENAI_BASE_URL, AGENT_DRIVE_CAPTURE_TOKEN: process.env.AGENT_DRIVE_CAPTURE_TOKEN } }));\n`,
       { mode: 0o755 },
     );
     const r = await capture(['--drive', A, '--', join(bin, 'codex'), 'exec', 'hello']);
     expect(r.code).toBe(0);
-    const argv = JSON.parse(await readFile(argsFile, 'utf8')) as string[];
-    expect(argv.filter((a) => a === '-c').length).toBe(6);
+    const result = JSON.parse(await readFile(argsFile, 'utf8')) as {
+      argv: string[];
+      env: Record<string, string>;
+    };
+    const { argv, env } = result;
+    expect(argv.filter((a) => a === '-c').length).toBe(7);
     expect(argv.slice(-2)).toEqual(['exec', 'hello']);
     expect(argv).toContain('model_provider="agent_drive_capture"');
     expect(argv.some((a) => /base_url="http:\/\/127\.0\.0\.1:\d+\/openai\/v1"/u.test(a))).toBe(
       true,
+    );
+    const secret = env.AGENT_DRIVE_CAPTURE_TOKEN;
+    expect(secret).toMatch(/^[A-Za-z0-9_-]{24}$/u);
+    expect(env.OPENAI_BASE_URL).toMatch(
+      new RegExp(`^http://127\\.0\\.0\\.1:\\d+/${secret}/openai/v1$`, 'u'),
+    );
+    expect(env.ANTHROPIC_BASE_URL).toMatch(
+      new RegExp(`^http://127\\.0\\.0\\.1:\\d+/${secret}/anthropic$`, 'u'),
+    );
+    expect(JSON.stringify(argv)).not.toContain(secret);
+    expect(r.err).not.toContain(secret);
+    expect(argv).toContain(
+      'model_providers.agent_drive_capture.env_http_headers={"x-agent-drive-capture-token"="AGENT_DRIVE_CAPTURE_TOKEN"}',
     );
   });
 
