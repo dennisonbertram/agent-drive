@@ -1,4 +1,14 @@
-import { chmod, mkdtemp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -361,14 +371,105 @@ describe('worker availability', () => {
     expect(() => handler.assertReady()).toThrow(WorkerUnavailableError);
   });
 
-  it('throws WorkerUnavailableError when spawn reports ENOENT past the pin', async () => {
+  it('rejects a script whose shebang interpreter is missing before any job runs', async () => {
     const dir = await testDir();
-    // Stat-able and executable, but the interpreter is absent: execve fails
-    // ENOENT inside the child, so only the spawn error path can report it.
     const path = join(dir, 'bad-interp');
     await writeFile(path, '#!/definitely/missing/interp-xyz\n', { mode: 0o755 });
+    expect(() => makeJobHandler([path])).toThrow(WorkerUnavailableError);
+    expect(() => makeJobHandler([path])).toThrow(/interp-xyz/u);
+  });
+
+  it('fails assertReady when a script interpreter disappears after startup', async () => {
+    const dir = await testDir();
+    // A symlink to a real runtime: present and executable at build, gone later.
+    const interp = join(dir, 'gone-interp');
+    await symlink(NODE, interp);
+    const path = join(dir, 'interp-worker');
+    await writeFile(path, `#!${interp}\n`, { mode: 0o755 });
+    const handler = makeJobHandler([path]);
+    await rm(interp);
+    expect(() => handler.assertReady()).toThrow(WorkerUnavailableError);
+    await expect(handler(job(), freshSignal())).rejects.toThrow(WorkerUnavailableError);
+  });
+
+  it('surfaces an interpreter that cannot exec as WorkerUnavailableError at job time', async () => {
+    const dir = await testDir();
+    // Stat-able and executable, but execve fails ENOEXEC inside the child, so
+    // only the spawn error path can report it.
+    const interp = join(dir, 'nonexec-interp');
+    await writeFile(interp, 'plain data, not a program\n', { mode: 0o755 });
+    const path = join(dir, 'enoexec-worker');
+    await writeFile(path, `#!${interp}\n`, { mode: 0o755 });
     const handler = makeJobHandler([path]);
     await expect(handler(job(), freshSignal())).rejects.toBeInstanceOf(WorkerUnavailableError);
+  });
+});
+
+describe('launcher interpreters', () => {
+  it('runs a #!/usr/bin/env node launcher on the Node Agent Drive runs on', async () => {
+    const dir = await testDir();
+    // Stands in for an owner npm-installed executable: env resolves `node`, but
+    // the child's minimal PATH has no node on it — the launch must bind the
+    // Node that runs Agent Drive instead of env's lookup.
+    const launcher = join(dir, 'node-worker');
+    await writeFile(
+      launcher,
+      '#!/usr/bin/env node\n' +
+        'require("fs").writeFileSync("outputs/argv.json", JSON.stringify(process.argv.slice(2)))\n' +
+        "process.stdout.write('env node worker ran')\n",
+      { mode: 0o755 },
+    );
+    const outputs = await makeJobHandler([launcher, '--flag', 'lit eral'])(job(), freshSignal());
+    const byName = new Map(outputs.map((o) => [o.name, o.bytes]));
+    expect(byName.get('argv.json')).toEqual(Buffer.from('["--flag","lit eral"]'));
+    expect(byName.get('result.md')).toEqual(Buffer.from('env node worker ran'));
+  });
+
+  it('runs an owner-installed bare command with an env shebang not on the child PATH', async () => {
+    const dir = await testDir();
+    const bin = join(dir, 'bin');
+    await mkdir(bin);
+    await writeFile(
+      join(bin, 'env-worker'),
+      "#!/usr/bin/env node\nprocess.stdout.write('env-installed worker ran')\n",
+      { mode: 0o755 },
+    );
+    vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH}`);
+    const handler = makeJobHandler(['env-worker']);
+    vi.unstubAllEnvs();
+    await expect(handler(job(), freshSignal())).resolves.toEqual([
+      { name: 'result.md', bytes: Buffer.from('env-installed worker ran') },
+    ]);
+  });
+
+  it('runs a #!/usr/bin/env launcher for another interpreter on the scoped PATH', async () => {
+    const dir = await testDir();
+    const launcher = join(dir, 'sh-worker');
+    await writeFile(launcher, '#!/usr/bin/env sh\necho env-sh-ran\n', { mode: 0o755 });
+    const outputs = await makeJobHandler([launcher])(job(), freshSignal());
+    expect(outputs).toEqual([{ name: 'result.md', bytes: Buffer.from('env-sh-ran\n') }]);
+  });
+
+  it('rejects an env-shebang interpreter absent from the scoped PATH before any job', async () => {
+    const dir = await testDir();
+    const launcher = join(dir, 'missing-interp');
+    await writeFile(launcher, '#!/usr/bin/env no-such-interp-xyz\n', { mode: 0o755 });
+    expect(() => makeJobHandler([launcher])).toThrow(WorkerUnavailableError);
+    expect(() => makeJobHandler([launcher])).toThrow(/no-such-interp-xyz/u);
+  });
+
+  it('rejects a launcher needing env argument parsing before any job', async () => {
+    const dir = await testDir();
+    const launcher = join(dir, 'fancy-env');
+    await writeFile(launcher, '#!/usr/bin/env -S node --title=worker\n', { mode: 0o755 });
+    expect(() => makeJobHandler([launcher])).toThrow(/unsupported|wrap/u);
+  });
+
+  it('rejects a launcher with a non-absolute shebang interpreter before any job', async () => {
+    const dir = await testDir();
+    const launcher = join(dir, 'relative-interp');
+    await writeFile(launcher, '#!node\n', { mode: 0o755 });
+    expect(() => makeJobHandler([launcher])).toThrow(/unsupported|absolute/u);
   });
 });
 
