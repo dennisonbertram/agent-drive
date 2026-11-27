@@ -174,7 +174,12 @@ describe('live workspace embedded helper', () => {
     const root = await mkdtemp(join(tmpdir(), 'agent-drive-live-disconnect-'));
     roots.push(root);
     const helper = await startHelper(root);
-    const opened = await helper.send({ id: 1, op: 'openWrite', path: '/.env', baseVersionId: null });
+    const opened = await helper.send({
+      id: 1,
+      op: 'openWrite',
+      path: '/.env',
+      baseVersionId: null,
+    });
     await helper.send({
       id: 2,
       op: 'write',
@@ -183,7 +188,9 @@ describe('live workspace embedded helper', () => {
       data: Buffer.from('API_KEY=synthetic-disconnect\n').toString('base64'),
     });
     await helper.stop();
-    expect((await readdir(root)).filter((name) => name.startsWith('.agent-drive-live-staging-v1-'))).toEqual([]);
+    expect(
+      (await readdir(root)).filter((name) => name.startsWith('.agent-drive-live-staging-v1-')),
+    ).toEqual([]);
     expect((await readdir(root)).filter((name) => name.startsWith('commit-'))).toEqual([]);
   });
 
