@@ -1,4 +1,5 @@
 import {
+  access,
   chmod,
   lstat,
   mkdir,
@@ -63,7 +64,7 @@ JSON.parse(line);
 await new Promise((resolve) => setTimeout(resolve, 30));
 if (process.stdin.readableEnded) process.exit(41);
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -76,6 +77,44 @@ process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '
     await handle.close();
     expect(await handle.waitForExit()).toMatchObject({ code: 0 });
   }, 20_000);
+
+  it.each([
+    { kind: 'missing', protocolVersion: 'undefined' },
+    { kind: 'mismatched', protocolVersion: '1' },
+  ])(
+    'rejects a $kind helper protocol and stops the child before mount success',
+    async ({ protocolVersion }) => {
+      const directory = await fixture();
+      const actualPath = join(directory, 'finder-root');
+      const requestedMountpoint = join(directory, 'requested-mount');
+      const stopped = join(directory, 'helper-stopped');
+      const helper = await writeHelper(
+        directory,
+        `
+import { writeFileSync } from 'node:fs';
+const hold = setInterval(() => {}, 1000);
+process.on('SIGTERM', () => {
+  clearInterval(hold);
+  writeFileSync(${JSON.stringify(stopped)}, 'stopped');
+  process.exit(0);
+});
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: ${protocolVersion} }) + '\\n');
+`,
+      );
+      vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
+
+      await expect(
+        startMacMount({
+          driveId: 'synthetic-drive',
+          requestedMountpoint,
+          dispatch: async () => ({}),
+        }),
+      ).rejects.toThrow(/update or reinstall Agent Drive\.app/);
+      await expect(readFile(stopped, 'utf8')).resolves.toBe('stopped');
+      await expect(lstat(requestedMountpoint)).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+    20_000,
+  );
 
   it('validates and dispatches the producer-completion write protocol over authenticated loopback RPC', async () => {
     const directory = await fixture();
@@ -100,7 +139,7 @@ if (invalid.status !== 400) process.exit(42);
 const complete = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ id: 'complete-copy', op: 'completeWrite', handleId: 'copy-handle' }) });
 if (complete.status !== 200 || (await complete.json()).id !== 'complete-copy') process.exit(43);
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -211,7 +250,7 @@ if (maxRead.status !== 200 || (await maxRead.json()).data.length !== 1398104) pr
 const maxReadStaged = await fetch(endpoint + '/rpc', { method: 'POST', headers, body: JSON.stringify({ id: 'max-read-staged', op: 'readStaged', handleId: 'h', offset: 0, size: 1048576 }) });
 if (maxReadStaged.status !== 200 || (await maxReadStaged.json()).data.length !== 1398104) process.exit(37);
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -277,7 +316,7 @@ await new Promise((resolve) => process.stdin.once('data', (chunk) => {
   resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
 }));
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -315,7 +354,7 @@ await new Promise((resolve) => process.stdin.once('data', (chunk) => {
   resolve(JSON.parse(input.slice(0, input.indexOf('\\n'))));
 }));
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -337,10 +376,12 @@ process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '
     const actualPath = join(directory, 'finder-root');
     await mkdir(actualPath);
     const requestedMountpoint = join(directory, 'requested-mount');
+    const dispatchStarted = join(directory, 'dispatch-started');
     const helper = await writeHelper(
       directory,
       `
 import { request as helperRequest } from 'node:http';
+import { access } from 'node:fs/promises';
 let input = '';
 const startup = await new Promise((resolve, reject) => {
   const onData = (chunk) => {
@@ -355,12 +396,14 @@ const startup = await new Promise((resolve, reject) => {
   process.stdin.on('error', reject);
 });
 ${waitForSignal}
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
-setTimeout(() => {
-  const request = helperRequest({ host: '127.0.0.1', port: startup.port, method: 'POST', path: '/rpc', headers: { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' } });
-  request.end(JSON.stringify({ id: 'cancel-me', op: 'stat', path: '/note.txt' }));
-  setTimeout(() => request.destroy(), 30);
-}, 50);
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
+const request = helperRequest({ host: '127.0.0.1', port: startup.port, method: 'POST', path: '/rpc', headers: { authorization: 'Bearer ' + startup.token, 'content-type': 'application/json' } });
+request.end(JSON.stringify({ id: 'cancel-me', op: 'stat', path: '/note.txt' }));
+while (true) {
+  try { await access(${JSON.stringify(dispatchStarted)}); break; }
+  catch { await new Promise((resolve) => setTimeout(resolve, 10)); }
+}
+request.destroy();
 `,
     );
     vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', helper);
@@ -381,6 +424,7 @@ setTimeout(() => {
             },
             { once: true },
           );
+          void writeFile(dispatchStarted, 'started');
         }),
     });
 
@@ -405,7 +449,7 @@ const line = await new Promise((resolve) => input.once('line', resolve));
 input.close();
 const startup = JSON.parse(line);
 await writeFile(${JSON.stringify(startupPath)}, JSON.stringify(startup));
-process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)} }) + '\\n');
+process.stdout.write(JSON.stringify({ path: ${JSON.stringify(actualPath)}, protocolVersion: 2 }) + '\\n');
 while (true) {
   try { await access(${JSON.stringify(goPath)}); break; } catch { await new Promise((resolve) => setTimeout(resolve, 10)); }
 }

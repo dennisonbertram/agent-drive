@@ -19,6 +19,7 @@ const MAX_FLUSH_OPERATIONS = 64;
 const FLUSH_OPERATION_TTL_MS = 20 * 60_000;
 const HELPER_START_TIMEOUT_MS = 15_000;
 const HELPER_STOP_TIMEOUT_MS = 5_000;
+const HELPER_PROTOCOL_VERSION = 2;
 
 export type MacMountExit = { code: number | null; signal: NodeJS.Signals | null };
 
@@ -393,6 +394,16 @@ async function receiveHelperPath(child: ChildProcess): Promise<string> {
           result.path.includes('\0')
         ) {
           return finish(new Error('Finder helper returned an invalid mount path'));
+        }
+        if (result.protocolVersion !== HELPER_PROTOCOL_VERSION) {
+          const received = Number.isSafeInteger(result.protocolVersion)
+            ? String(result.protocolVersion)
+            : 'missing or invalid';
+          return finish(
+            new Error(
+              `Finder helper protocol is incompatible (received ${received}, expected ${HELPER_PROTOCOL_VERSION}); update or reinstall Agent Drive.app.`,
+            ),
+          );
         }
         finish(undefined, resolve(result.path));
       } catch {

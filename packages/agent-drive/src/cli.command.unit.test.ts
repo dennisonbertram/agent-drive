@@ -633,6 +633,36 @@ describe('mount command validation', () => {
       expect(readKey.paths.filter((path) => path === 'whoami')).toHaveLength(1);
       const options =
         process.platform === 'darwin' ? bridgeOptions : invocations.map((call) => call[3]);
+      const readOnlyOps = ['capabilities', 'stat', 'list', 'read'];
+      const writableOps = [
+        ...readOnlyOps,
+        ...(process.platform === 'darwin'
+          ? [
+              'openWrite',
+              'write',
+              'truncate',
+              'readStaged',
+              'finalizeWrite',
+              'flushStatus',
+              'closeWrite',
+              'mkdir',
+              'rename',
+            ]
+          : [
+              'openWrite',
+              'write',
+              'truncate',
+              'readStaged',
+              'flush',
+              'finalizeWrite',
+              'flushStatus',
+              'release',
+              'closeWrite',
+              'completeWrite',
+              'mkdir',
+              'rename',
+            ]),
+      ];
       expect(options).toEqual([
         expect.objectContaining({
           ...(process.platform === 'darwin' ? {} : { readWrite: true }),
@@ -640,15 +670,16 @@ describe('mount command validation', () => {
             readOnly: false,
             write: true,
             writePaths: ['/docs'],
+            ops: writableOps,
           }),
         }),
         expect.objectContaining({
           ...(process.platform === 'darwin' ? {} : { readWrite: false }),
-          capabilities: expect.objectContaining({ readOnly: true, write: false }),
+          capabilities: expect.objectContaining({ readOnly: true, write: false, ops: readOnlyOps }),
         }),
         expect.objectContaining({
           ...(process.platform === 'darwin' ? {} : { readWrite: false }),
-          capabilities: expect.objectContaining({ readOnly: true, write: false }),
+          capabilities: expect.objectContaining({ readOnly: true, write: false, ops: readOnlyOps }),
         }),
       ]);
     } finally {

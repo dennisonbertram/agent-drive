@@ -32,7 +32,9 @@ enum AgentDriveFinder {
                 registration = registered
                 let root = try await userVisibleURL(manager: registered.manager)
                 guard root.path.utf8.count <= 4_096 else { throw BootstrapError.invalidMountPath }
-                let output = try JSONEncoder().encode(ConnectOutput(path: root.path))
+                let output = try JSONEncoder().encode(
+                    ConnectOutput(path: root.path, protocolVersion: 2)
+                )
                 await waitForTermination {
                     FileHandle.standardOutput.write(output)
                     FileHandle.standardOutput.write(Data([0x0a]))
@@ -243,6 +245,7 @@ private struct DomainRegistration {
 
 private struct ConnectOutput: Encodable {
     let path: String
+    let protocolVersion: Int
 }
 
 private enum BootstrapError: Error {
