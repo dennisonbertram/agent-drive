@@ -9,6 +9,11 @@ public enum BridgeClientError: Error, Equatable {
     case malformedResponse
     case remote(String)
     case remoteFailure(RPCFailure)
+
+    public var confirmsNotSubmitted: Bool {
+        guard case .remoteFailure(let failure) = self else { return false }
+        return failure.mutationOutcome == "notSubmitted"
+    }
 }
 
 public struct RPCFailure: Equatable, Error {
@@ -190,7 +195,7 @@ public struct MountCapabilities: Decodable, Equatable {
 
     public func allowsWrite(_ path: String) -> Bool {
         guard !readOnly, write, maxWriteBytes > 0,
-              ["openWrite", "write", "truncate", "flush", "flushStatus", "release"].allSatisfy(ops.contains),
+              ["openWrite", "write", "truncate", "flush", "flushStatus", "closeWrite"].allSatisfy(ops.contains),
               ItemPath.isCanonical(path)
         else { return false }
         return writePaths.isEmpty || writePaths.contains(where: { contains($0, path: path) })
@@ -360,22 +365,41 @@ public struct DriveBridge {
     public func flush(handleId: String) async throws -> FlushResult {
         guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
         let deadline = Date().addingTimeInterval(12 * 60)
+        let admissionDeadline = Date().addingTimeInterval(60)
         let requestedOperationId = UUID().uuidString.lowercased()
         var payload: Data
-        do {
-            payload = try await request(
-                op: "flush", handleId: handleId, operationId: requestedOperationId
-            )
-        } catch {
-            guard let bridgeError = error as? BridgeClientError,
-                  bridgeError == .unavailable || bridgeError == .malformedResponse
-            else { throw uncertainFlush(error, operationId: requestedOperationId) }
+        var admissionDelay: UInt64 = 50_000_000
+        var retriedUncertainStart = false
+        while true {
             do {
                 payload = try await request(
                     op: "flush", handleId: handleId, operationId: requestedOperationId
                 )
+                break
             } catch {
-                throw uncertainFlush(error, operationId: requestedOperationId)
+                if case BridgeClientError.remoteFailure(let failure) = error,
+                   failure.errno == "EBUSY", failure.mutationOutcome == "notSubmitted" {
+                    let confirmedNotSubmitted = BridgeClientError.remoteFailure(RPCFailure(
+                        errno: failure.errno,
+                        recoveryPath: failure.recoveryPath,
+                        currentVersionId: failure.currentVersionId,
+                        mutationOutcome: "notSubmitted",
+                        operationId: requestedOperationId
+                    ))
+                    guard Date() < admissionDeadline else { throw confirmedNotSubmitted }
+                    do {
+                        try await Task.sleep(nanoseconds: admissionDelay)
+                    } catch {
+                        throw confirmedNotSubmitted
+                    }
+                    admissionDelay = min(admissionDelay * 2, 2_000_000_000)
+                    continue
+                }
+                guard !retriedUncertainStart,
+                      let bridgeError = error as? BridgeClientError,
+                      bridgeError == .unavailable || bridgeError == .malformedResponse
+                else { throw uncertainFlush(error, operationId: requestedOperationId) }
+                retriedUncertainStart = true
             }
         }
         var response: FlushResponse
@@ -469,6 +493,18 @@ public struct DriveBridge {
     public func release(handleId: String) async throws {
         guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
         _ = try await request(op: "release", handleId: handleId)
+    }
+
+    public func closeWrite(handleId: String) async throws {
+        guard validHandle(handleId) else { throw BridgeClientError.invalidRead }
+        do {
+            _ = try await request(op: "closeWrite", handleId: handleId)
+        } catch {
+            guard let bridgeError = error as? BridgeClientError,
+                  bridgeError == .unavailable || bridgeError == .malformedResponse
+            else { throw error }
+            _ = try await request(op: "closeWrite", handleId: handleId)
+        }
     }
 
     public func mkdir(path: String) async throws {

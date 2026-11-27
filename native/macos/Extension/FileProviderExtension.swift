@@ -534,6 +534,7 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
             truncateOnOpen: true,
             incomplete: contents != nil
         )
+        var flushStarted = false
         do {
             var source: Int32 = -1
             var size: Int64 = 0
@@ -574,35 +575,37 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
             if contents != nil {
                 try await client.completeWrite(handleId: handle.handleId)
             }
+            flushStarted = true
             let result = try await client.flush(handleId: handle.handleId)
-            try? await client.release(handleId: handle.handleId)
             return (result, size)
         } catch {
+            let bridgeError = error as? BridgeClientError
+            let closeUnsubmittedStage = !flushStarted || (bridgeError?.confirmsNotSubmitted ?? false)
+            if closeUnsubmittedStage {
+                try? await client.closeWrite(handleId: handle.handleId)
+            }
+
+            if case BridgeClientError.remoteFailure(let failure) = error {
+                throw BridgeClientError.remoteFailure(RPCFailure(
+                    errno: failure.errno,
+                    recoveryPath: failure.recoveryPath ?? handle.recoveryPath,
+                    currentVersionId: failure.currentVersionId,
+                    mutationOutcome: failure.mutationOutcome,
+                    operationId: failure.operationId
+                ))
+            }
+
             let errno: String
             if error is CancellationError {
                 errno = "ECANCELED"
             } else if let bridgeError = error as? BridgeClientError {
                 switch bridgeError {
-                case .remoteFailure(let failure):
-                    if failure.outcomeIsUnknown {
-                        throw BridgeClientError.remoteFailure(RPCFailure(
-                            errno: failure.errno,
-                            recoveryPath: handle.recoveryPath,
-                            currentVersionId: failure.currentVersionId,
-                            mutationOutcome: "unknown",
-                            operationId: failure.operationId
-                        ))
-                    }
-                    if failure.recoveryPath != nil {
-                        try? await client.release(handleId: handle.handleId)
-                        throw error
-                    }
-                    errno = failure.errno
+                case .remoteFailure:
+                    errno = "EIO"
                 case .remote(let value): errno = value
                 default: errno = "EIO"
                 }
             } else { errno = "EIO" }
-            try? await client.release(handleId: handle.handleId)
             throw BridgeClientError.remoteFailure(RPCFailure(
                 errno: errno,
                 recoveryPath: handle.recoveryPath,

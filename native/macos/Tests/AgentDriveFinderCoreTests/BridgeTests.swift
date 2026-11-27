@@ -115,7 +115,7 @@ final class BridgeTests: XCTestCase {
                     "writePaths": ["/work"],
                     "maxReadBytes": 1_048_576,
                     "maxWriteBytes": 1_048_576,
-                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "flush", "flushStatus", "release", "completeWrite", "mkdir", "unlink", "rmdir", "rename"],
+                    "ops": ["list", "stat", "read", "openWrite", "write", "truncate", "flush", "flushStatus", "closeWrite", "completeWrite", "mkdir", "unlink", "rmdir", "rename"],
                 ],
             ])
         }
@@ -311,6 +311,97 @@ final class BridgeTests: XCTestCase {
         )
         let result = try await client.flush(handleId: "interop-stage")
         XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
+    }
+
+    func testFlushRetriesCapacityRejectionWithTheSameOperationId() async throws {
+        let operationIds = LockedList<String>()
+        let attempts = LockedList<Int>()
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            XCTAssertEqual(sent["op"] as? String, "flush")
+            let operationId = try XCTUnwrap(sent["operationId"] as? String)
+            operationIds.append(operationId)
+            let attempt = attempts.values.count + 1
+            attempts.append(attempt)
+            if attempt == 1 {
+                return try MockURLProtocol.response(json: [
+                    "id": id,
+                    "ok": false,
+                    "errno": "EBUSY",
+                    "mutationOutcome": "notSubmitted",
+                ])
+            }
+            return try MockURLProtocol.response(json: [
+                "id": id,
+                "ok": true,
+                "version": ["id": "22222222-2222-4222-8222-222222222222", "path": "/work/retry.txt"],
+            ])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+
+        let result = try await client.flush(handleId: "busy-stage")
+
+        XCTAssertEqual(result.version, "22222222-2222-4222-8222-222222222222")
+        XCTAssertEqual(operationIds.values.count, 2)
+        XCTAssertEqual(operationIds.values[0], operationIds.values[1])
+    }
+
+    func testCloseWriteRequestsNoFlushCleanupForTheStagedHandle() async throws {
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            XCTAssertEqual(sent["op"] as? String, "closeWrite")
+            XCTAssertEqual(sent["handleId"] as? String, "stage-to-preserve")
+            XCTAssertNil(sent["operationId"])
+            return try MockURLProtocol.response(json: ["id": id, "ok": true, "recoveryPath": "/tmp/recovery.txt"])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+
+        try await client.closeWrite(handleId: "stage-to-preserve")
+    }
+
+    func testCloseWriteRetriesAnUncertainResponseForTheSameHandle() async throws {
+        let attempts = LockedList<Int>()
+        MockURLProtocol.handler = { request in
+            let sent = try JSONSerialization.jsonObject(with: XCTUnwrap(MockURLProtocol.bodyData(request))) as! [String: Any]
+            let id = try XCTUnwrap(sent["id"] as? String)
+            XCTAssertEqual(sent["op"] as? String, "closeWrite")
+            XCTAssertEqual(sent["handleId"] as? String, "stage-to-preserve")
+            attempts.append(attempts.values.count + 1)
+            if attempts.values.count == 1 { throw URLError(.timedOut) }
+            return try MockURLProtocol.response(json: ["id": id, "ok": true])
+        }
+        let client = DriveBridge(
+            connection: try MountConnection(driveId: "d1ed8a9e-82e0-4f68-900e-50737a5a6b40", port: 43210, token: "cap"),
+            session: MockURLProtocol.makeSession()
+        )
+
+        try await client.closeWrite(handleId: "stage-to-preserve")
+
+        XCTAssertEqual(attempts.values, [1, 2])
+    }
+
+    func testWriteCleanupOnlyTreatsExplicitNotSubmittedAsSafeToClose() {
+        let notSubmitted = BridgeClientError.remoteFailure(RPCFailure(
+            errno: "EBUSY",
+            mutationOutcome: "notSubmitted"
+        ))
+        let unknown = BridgeClientError.remoteFailure(RPCFailure(
+            errno: "ETIMEDOUT",
+            mutationOutcome: "unknown"
+        ))
+        let terminal = BridgeClientError.remoteFailure(RPCFailure(errno: "ESTALE"))
+
+        XCTAssertTrue(notSubmitted.confirmsNotSubmitted)
+        XCTAssertFalse(unknown.confirmsNotSubmitted)
+        XCTAssertFalse(terminal.confirmsNotSubmitted)
     }
 
     func testFlushPollsTheSameBoundedOperationUntilItReturnsTheCommittedVersion() async throws {
