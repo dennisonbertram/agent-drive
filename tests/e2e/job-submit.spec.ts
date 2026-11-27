@@ -307,7 +307,7 @@ test('job-submit: unknown receipt and approval answers never read as queued, cla
 
   await expect(browser.getByText('submitted.md', { exact: true })).toBeVisible();
   await expect(browser.getByText('Submitted', { exact: true })).toHaveCount(0);
-  await expect(browser.getByText('Not submitted', { exact: true })).toHaveCount(0);
+  await expect(browser.getByText('Unsent', { exact: true })).toHaveCount(0);
   await expect(browser.getByText('Picked up', { exact: true })).toHaveCount(0);
   expectJobLookups(gets);
 });
@@ -330,7 +330,7 @@ test('job-submit: an unmarked approval answer is unknown, not a submission or a 
 
   await expect(browser.getByText('submitted.md', { exact: true })).toBeVisible();
   await expect(browser.getByText('Submitted', { exact: true })).toHaveCount(0);
-  await expect(browser.getByText('Not submitted', { exact: true })).toHaveCount(0);
+  await expect(browser.getByText('Unsent', { exact: true })).toHaveCount(0);
   await expect(browser.getByText('Picked up', { exact: true })).toHaveCount(0);
   expectJobLookups(gets);
 });
@@ -341,19 +341,35 @@ test('job-submit: a submitted.md that only appeared is not a submission', async 
 }) => {
   // The marker file exists but nothing ever renamed request.md onto it — a direct
   // upload, copy or restore. No receipt and no approved move: the row must not
-  // read Submitted; the confirmed absence reads Not submitted instead.
+  // read Submitted; the confirmed absence reads Unsent instead.
   const { gets } = await stubConsole(browser, {
     items: () => [SUBMITTED],
     onGet: async () => NOT_FOUND,
   });
+  await browser.setViewportSize({ width: 1280, height: 800 });
   await signIn(context, 'e2e_job_submit_direct_write');
   await browser.goto(`/console?drive=${DRIVE}&path=${encodeURIComponent('/jobs/job-123')}`);
 
   await expect(browser.getByText('submitted.md', { exact: true })).toBeVisible();
-  await expect(browser.getByText('Not submitted', { exact: true })).toHaveCount(1);
+  const unsent = browser.getByText('Unsent', { exact: true });
+  await expect(unsent).toHaveCount(1);
   await expect(browser.getByText('Submitted', { exact: true })).toHaveCount(0);
   await expect(browser.getByText('Picked up', { exact: true })).toHaveCount(0);
   await expect(browser.getByRole('button', { name: 'Submit job' })).toHaveCount(0);
+  const badgeBounds = await unsent.boundingBox();
+  const cellBounds = await unsent
+    .locator('xpath=ancestor::td[contains(@class, "row-actions-cell")]')
+    .boundingBox();
+  expect(badgeBounds).not.toBeNull();
+  expect(cellBounds).not.toBeNull();
+  expect(badgeBounds!.x).toBeGreaterThanOrEqual(cellBounds!.x);
+  expect(badgeBounds!.y).toBeGreaterThanOrEqual(cellBounds!.y);
+  expect(badgeBounds!.x + badgeBounds!.width).toBeLessThanOrEqual(
+    cellBounds!.x + cellBounds!.width,
+  );
+  expect(badgeBounds!.y + badgeBounds!.height).toBeLessThanOrEqual(
+    cellBounds!.y + cellBounds!.height,
+  );
   // The page asked once — never per row — whether the canonical marker is a real
   // submission: a single metadata-only jobApproval read of submitted.md itself.
   const approvals = gets.filter((call) => call.jobApproval === '1');

@@ -3368,7 +3368,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                                           className="muted"
                                           title="This marker was not created by submitting request.md. Submit a draft request.md to create a runnable job."
                                         >
-                                          Not submitted
+                                          Unsent
                                         </span>
                                       )}
                                       {jobState === 'picked' && (
