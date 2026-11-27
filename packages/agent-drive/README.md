@@ -35,9 +35,10 @@ file also requires `delete`. Directory rename is not supported.
 On Linux x64 and arm64, use a package build that includes the matching native helper and ensure the
 host has FUSE support, access to `/dev/fuse`, and a usable `fusermount3` or compatible `fusermount`
 helper where needed. The foreground command unmounts on Ctrl+C; wait for it to exit. On macOS, the
-CLI launches the signed Finder helper from `/Applications/Agent Drive.app` on the same Mac. The app
-and its File Provider extension must be installed and enabled if macOS asks. The CLI does not
-provide a public Mac app download.
+CLI launches the signed Finder helper from `/Applications/Agent Drive.app` on the same Mac. If
+Finder shows an "Agent Drive is not enabled" banner, open the drive's `Agent Drive` entry under
+Locations in the Finder sidebar and click Enable, then rerun the mount if it had failed. The CLI
+does not provide a public Mac app download.
 
 Reads fetch authenticated ranges from a pinned file version, so existing ADRV v1 files do not need
 to be re-uploaded. Writes are staged as plaintext in the private local journal before remote commit.
