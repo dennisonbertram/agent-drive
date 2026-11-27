@@ -189,6 +189,36 @@ export const driveTraceInboxes = pgTable(
   ],
 );
 
+// Short-lived, actor-bound challenges prove possession of the inbox private key before enrollment
+// or token rotation. Rows are consumed atomically by deleting the exact challenge in the write tx.
+export const driveTraceInboxChallenges = pgTable(
+  'drive_trace_inbox_challenges',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    driveId: uuid('drive_id')
+      .notNull()
+      .references(() => drives.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id').notNull(),
+    action: text('action').notNull(),
+    inboxRecordHash: text('inbox_record_hash').notNull(),
+    challengeHash: text('challenge_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('drive_trace_inbox_challenges_actor_action_unique').on(
+      table.driveId,
+      table.actorUserId,
+      table.action,
+    ),
+    index('drive_trace_inbox_challenges_expiry_idx').on(table.expiresAt),
+    check(
+      'drive_trace_inbox_challenges_action_check',
+      sql`${table.action} IN ('enroll', 'issue-token')`,
+    ),
+  ],
+);
+
 export const driveWebhookTokens = pgTable(
   'drive_webhook_tokens',
   {

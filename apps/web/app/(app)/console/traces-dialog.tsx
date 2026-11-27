@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Request } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
-import type { TraceInboxRecord } from '../../../../../packages/agent-drive/src/trace-inbox.ts';
 import {
   setUpWebhook,
   type Source,
@@ -13,7 +12,7 @@ import {
 import { CopyButton } from '../copy-button';
 import { RevokeControl } from './share-dialog';
 
-type Active = { id: string; createdAt: string };
+type Active = { id: string; createdAt: string; status: 'active' | 'stale' };
 export type TracesKey = { key: string; source: Source };
 
 /**
@@ -25,7 +24,6 @@ export function TracesDialog({
   request,
   strictRequest,
   verify,
-  verifyInbox,
   getKey,
   resumeWith,
   onReady,
@@ -37,7 +35,6 @@ export function TracesDialog({
   /** Enrollment and token issuance are strict routes: this wraps the Clerk reverification. */
   strictRequest: Request;
   verify: (driveId: string, key: string) => Promise<Verdict>;
-  verifyInbox: (driveId: string, key: string, record: TraceInboxRecord) => Promise<boolean>;
   /** The key this tab already has, or undefined after opening the unlock dialog for it. */
   getKey: () => Promise<TracesKey | undefined>;
   /** A key the unlock dialog just loaded for this action. */
@@ -100,11 +97,10 @@ export function TracesDialog({
         key: found.key,
         source: found.source,
         verify,
-        verifyInbox,
       });
       if (!alive.current) return;
       setCreated(token);
-      setActive({ id: token.id, createdAt: token.createdAt });
+      setActive({ id: token.id, createdAt: token.createdAt, status: 'active' });
       onReady(found.key, found.source);
     } catch (reason) {
       if (alive.current)
@@ -173,8 +169,8 @@ export function TracesDialog({
           {active ? (
             <div className="trace-token" data-testid="webhook-token-row">
               <span className="share-when">Created {versionWhen(active.createdAt)}</span>
-              <span className="share-state" data-status="active">
-                Active
+              <span className="share-state" data-status={active.status}>
+                {active.status === 'stale' ? 'Needs replacement' : 'Active'}
               </span>
               <button
                 type="button"
@@ -189,6 +185,12 @@ export function TracesDialog({
                 confirmLabel="Revoke webhook"
                 onRevoke={revoke}
               />
+              {active.status === 'stale' && (
+                <p className="share-help" role="status">
+                  The inbox changed after this token was created. Replace the token to resume trace
+                  delivery.
+                </p>
+              )}
             </div>
           ) : (
             <div>

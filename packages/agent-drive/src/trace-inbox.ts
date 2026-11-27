@@ -200,3 +200,16 @@ export async function unsealFileKeyFromInbox(
   decodeDriveKey(fileKey);
   return fileKey;
 }
+
+/** Opens a server-issued, inbox-bound possession challenge with the locally unwrapped key. */
+export async function answerTraceInboxChallenge(input: {
+  driveId: string;
+  driveKey: string;
+  record: TraceInboxRecord;
+  envelope: string;
+}): Promise<string> {
+  const { driveId, driveKey, record, envelope } = input;
+  const inbox: TraceInbox = { driveId, ...record };
+  const privateKey = await verifyInboxKeypair(inbox, driveKey);
+  return unsealFileKeyFromInbox(envelope, privateKey, record.keyId, driveId, record.publicKey);
+}

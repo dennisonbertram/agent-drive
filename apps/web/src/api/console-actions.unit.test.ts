@@ -72,6 +72,7 @@ describe('console actions', () => {
   });
   it('allows exactly the trace inbox and webhook token routes', () => {
     const inbox = ['drives', ID, 'trace-inbox'];
+    const challenge = ['drives', ID, 'trace-inbox', 'challenge'];
     const token = ['drives', ID, 'webhook-token'];
     for (const m of ['GET', 'POST']) expect(consoleRouteAllowed(m, inbox)).toBe(true);
     for (const m of ['PUT', 'PATCH', 'DELETE']) expect(consoleRouteAllowed(m, inbox)).toBe(false);
@@ -80,6 +81,10 @@ describe('console actions', () => {
     expect(actionFor('GET', inbox, true)).toBe('drive.trace_inbox.read');
     expect(actionFor('GET', inbox)).toBe('drive.trace_inbox.read');
     expect(actionFor('POST', inbox)).toBe('console.drive.trace_inbox.create');
+    expect(consoleRouteAllowed('POST', challenge)).toBe(true);
+    expect(actionFor('POST', challenge)).toBe('console.drive.trace_inbox.challenge');
+    expect(consoleRouteAllowed('GET', challenge)).toBe(false);
+    expect(consoleRouteAllowed('POST', ['drives', ID, 'trace-inbox', 'other'])).toBe(false);
     expect(actionFor('GET', token)).toBe('console.drive.webhook_token.read');
     expect(actionFor('POST', token)).toBe('console.drive.webhook_token.create');
     expect(actionFor('DELETE', token)).toBe('console.drive.webhook_token.revoke');

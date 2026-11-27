@@ -25,16 +25,22 @@ function fake(
     inboxConflictOnce?: boolean;
     tokenConflictOnce?: boolean;
     inboxProof?: boolean;
+    inboxProofs?: boolean[];
   } = {},
 ) {
   const calls: string[] = [];
   const posted: unknown[] = [];
-  const proofs: unknown[] = [];
+  const challenges: unknown[] = [];
+  let proofResults = [...(opts.inboxProofs ?? [opts.inboxProof ?? true])];
   let inbox = opts.inbox ?? false;
   let tokenConflict = opts.tokenConflictOnce ?? false;
   let inboxConflict = opts.inboxConflictOnce ?? false;
   const respond = async (path: string, method = 'GET', body?: unknown): Promise<never> => {
     const name = path.split('/').at(-1);
+    if (method === 'POST' && name === 'challenge') {
+      challenges.push(body);
+      return { challengeId: 'challenge-id', envelope: 'encrypted-challenge' } as never;
+    }
     if (method === 'POST') posted.push(body);
     if (name === 'trace-inbox' && method === 'GET')
       return {
@@ -63,17 +69,19 @@ function fake(
     calls.push(`strict ${method} ${path.split('/').at(-1)}`);
     return respond(path, method, body);
   };
-  const verifyInbox = async (_driveId: string, _key: string, record: unknown) => {
-    proofs.push(record);
-    return opts.inboxProof ?? true;
+  const answerChallenge = async () => {
+    if (!proofResults.length) return 'proof';
+    const valid = proofResults.shift();
+    if (!valid) throw new Error(MISMATCH);
+    return 'proof';
   };
   return {
     request: request as never,
     strictRequest: strictRequest as never,
-    verifyInbox,
+    answerChallenge,
     calls,
     posted,
-    proofs,
+    challenges,
   };
 }
 const run = (f: ReturnType<typeof fake>, source: Source, verify: () => Promise<Verdict>) =>
@@ -84,7 +92,7 @@ const run = (f: ReturnType<typeof fake>, source: Source, verify: () => Promise<V
     key,
     source,
     verify,
-    verifyInbox: f.verifyInbox,
+    answerChallenge: f.answerChallenge,
   });
 
 describe('setUpWebhook', () => {
@@ -105,7 +113,9 @@ describe('setUpWebhook', () => {
       expect(await run(f, source, async () => 'unverifiable')).toEqual(made);
       expect(f.calls).toEqual([
         'GET trace-inbox',
+        'strict POST challenge',
         'strict POST trace-inbox',
+        'strict POST challenge',
         'strict POST webhook-token',
       ]);
       // The token POST names all fields of the record the key was proven against.
@@ -113,13 +123,19 @@ describe('setUpWebhook', () => {
         keyId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
         publicKey: expect.any(String),
         wrappedPrivateKey: expect.any(String),
+        challengeId: 'challenge-id',
+        proof: 'proof',
       });
+      expect(f.challenges.map((v) => (v as { action: string }).action)).toEqual([
+        'enroll',
+        'issue-token',
+      ]);
     },
   );
-  it('proves the locally created inbox snapshot before posting it', async () => {
+  it('requires the local key to open the encrypted enrollment challenge', async () => {
     const f = fake({ inboxProof: false });
     await expect(run(f, 'trusted', async () => 'unverifiable')).rejects.toThrow(MISMATCH);
-    expect(f.calls).toEqual(['GET trace-inbox']);
+    expect(f.calls).toEqual(['GET trace-inbox', 'strict POST challenge']);
     expect(f.posted).toEqual([]);
   });
   it('refuses an unchecked vault slot key on an empty drive', async () => {
@@ -127,11 +143,16 @@ describe('setUpWebhook', () => {
     await expect(run(f, 'vault', async () => 'unverifiable')).rejects.toThrow(EMPTY_DRIVE);
     expect(f.calls).toEqual(['GET trace-inbox']);
   });
-  it('rejects an inbox that the key cannot open even when a file proves the drive key', async () => {
+  it('rejects an inbox challenge the key cannot open even when a file proves the drive key', async () => {
     const f = fake({ inbox: true, inboxProof: false });
     await expect(run(f, 'pasted', async () => 'file')).rejects.toThrow(MISMATCH);
-    expect(f.proofs).toHaveLength(1);
+    expect(f.calls).toContain('strict POST challenge');
     expect(f.calls).not.toContain('strict POST webhook-token');
+  });
+  it('keeps the drive-file check when an inbox already exists', async () => {
+    const f = fake({ inbox: true });
+    await expect(run(f, 'vault', async () => 'mismatch')).rejects.toThrow(MISMATCH);
+    expect(f.calls).toEqual(['GET trace-inbox']);
   });
   it('accepts a pasted key only when it opens the exact existing inbox', async () => {
     const f = fake({ inbox: true });
@@ -140,16 +161,29 @@ describe('setUpWebhook', () => {
       driveProofCalls += 1;
       return 'file';
     });
-    expect(driveProofCalls).toBe(0);
-    expect(f.calls).toEqual(['GET trace-inbox', 'strict POST webhook-token']);
-    expect(f.proofs).toEqual([{ keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' }]);
+    expect(driveProofCalls).toBe(1);
+    expect(f.calls).toEqual([
+      'GET trace-inbox',
+      'strict POST challenge',
+      'strict POST webhook-token',
+    ]);
     // The token is bound to the exact record the verifier checked.
-    expect(f.posted.at(-1)).toEqual({ keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' });
+    expect(f.posted.at(-1)).toEqual({
+      keyId: 'k',
+      publicKey: 'p',
+      wrappedPrivateKey: 'w',
+      challengeId: 'challenge-id',
+      proof: 'proof',
+    });
   });
-  it('re-verifies after a 409 on the inbox and stops on mismatch', async () => {
-    const f = fake({ inboxConflictOnce: true, inboxProof: false });
+  it('re-verifies a 409 inbox winner and stops when its challenge cannot be opened', async () => {
+    const f = fake({ inboxConflictOnce: true, inboxProofs: [true, false] });
     await expect(run(f, 'bundle', async () => 'unverifiable')).rejects.toThrow(MISMATCH);
-    expect(f.proofs).toHaveLength(1);
+    expect(f.posted).toHaveLength(1); // local enrollment was attempted before the 409
+    expect(f.challenges.map((v) => (v as { action: string }).action)).toEqual([
+      'enroll',
+      'issue-token',
+    ]);
     expect(f.calls).not.toContain('strict POST webhook-token');
   });
   it('continues after a 409 on the inbox when the key opens the winning inbox', async () => {
@@ -163,9 +197,12 @@ describe('setUpWebhook', () => {
     await run(f, 'bundle', async () => 'inbox');
     expect(f.calls).toEqual([
       'GET trace-inbox',
+      'strict POST challenge',
       'strict POST webhook-token',
       'GET trace-inbox',
+      'strict POST challenge',
       'strict POST trace-inbox',
+      'strict POST challenge',
       'strict POST webhook-token',
     ]);
   });
@@ -173,9 +210,14 @@ describe('setUpWebhook', () => {
     const f = fake({ inboxConflictOnce: true });
     await run(f, 'bundle', async () => 'unverifiable');
     // The winning record came from a re-read and proof, not the lost create.
-    expect(f.proofs).toHaveLength(2);
-    expect(f.proofs.at(-1)).toEqual({ keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' });
-    expect(f.posted.at(-1)).toEqual({ keyId: 'k', publicKey: 'p', wrappedPrivateKey: 'w' });
+    expect(f.challenges).toHaveLength(2);
+    expect(f.posted.at(-1)).toEqual({
+      keyId: 'k',
+      publicKey: 'p',
+      wrappedPrivateKey: 'w',
+      challengeId: 'challenge-id',
+      proof: 'proof',
+    });
   });
 });
 

@@ -4363,7 +4363,6 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               request={api}
               strictRequest={strictApi}
               verify={(id, key) => vault.verifyKey(id, key)}
-              verifyInbox={(id, key, record) => vault.verifyInboxKey(id, key, record)}
               getKey={webhookKey}
               onBusy={setTracesBusy}
               resumeWith={tracesResume}

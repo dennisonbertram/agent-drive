@@ -503,6 +503,67 @@ describe('openrouter webhook ingest', () => {
     expect(await counts(f)).toEqual(before);
   });
 
+  it('rechecks a bound inbox inside the storage transaction after webhook authentication', async () => {
+    const f = await fixture();
+    const bound = `adw_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
+    await pool.query(
+      'UPDATE drive_webhook_tokens SET revoked_at = now() WHERE drive_id = $1 AND revoked_at IS NULL',
+      [f.driveId],
+    );
+    await pool.query(
+      `INSERT INTO drive_webhook_tokens
+         (drive_id, account_id, agent_id, token_hash, inbox_key_id, inbox_record_hash)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [
+        f.driveId,
+        f.accountId,
+        f.agentId,
+        sha(bound),
+        f.record.keyId,
+        inboxRecordDigest(f.record.keyId, f.record.publicKey, f.record.wrappedPrivateKey),
+      ],
+    );
+    const headers = new Headers({ authorization: `Bearer ${bound}` });
+    const url = new URL(`https://agent-drive.test/api/webhooks/openrouter/${f.driveId}`);
+    const auth = await authorizeOpenRouterWebhook({ url, headers, driveId: f.driveId });
+    const changed = await createTraceInbox(f.driveId, f.driveKey);
+    await pool.query(
+      'UPDATE drive_trace_inboxes SET key_id = $1, public_key = $2, wrapped_private_key = $3 WHERE drive_id = $4',
+      [changed.keyId, changed.publicKey, changed.wrappedPrivateKey, f.driveId],
+    );
+    const response = await ingestOpenRouterTrace({
+      url,
+      headers,
+      auth,
+      driveId: f.driveId,
+      bytes: new TextEncoder().encode(JSON.stringify(withTime())),
+    }).catch(responseForError);
+    expect(response.status).toBe(409);
+    expect(await counts(f)).toMatchObject({ objects: 0, versions: 0, audit: 0 });
+  });
+
+  it('rejects a partially cleared token binding before storing a trace', async () => {
+    const f = await fixture();
+    const fingerprint = inboxRecordDigest(
+      f.record.keyId,
+      f.record.publicKey,
+      f.record.wrappedPrivateKey,
+    );
+    for (const partial of [
+      { inbox_key_id: null, inbox_record_hash: fingerprint },
+      { inbox_key_id: f.record.keyId, inbox_record_hash: null },
+    ]) {
+      await pool.query(
+        'UPDATE drive_webhook_tokens SET inbox_key_id = $1, inbox_record_hash = $2 WHERE token_hash = $3',
+        [partial.inbox_key_id, partial.inbox_record_hash, sha(f.token)],
+      );
+      const before = await counts(f);
+      const response = await post(f, withTime());
+      expect(response.status).toBe(409);
+      expect(await counts(f)).toEqual(before);
+    }
+  });
+
   it('keeps a pre-binding token (NULL columns) working even after the record changes', async () => {
     const f = await fixture();
     // f.token was inserted without binding columns: legacy drive-scoped behavior must survive.

@@ -101,8 +101,10 @@ async function authenticate(driveId: string, headers: Headers) {
     throw new ApiError('unauthorized', 'The webhook token is not valid.');
   // A bound token is valid only while the exact inbox record it was issued for is still the
   // drive's record. Tokens issued before the binding existed (NULL) keep drive-scoped behavior.
-  if (row.inbox_key_id !== null) {
+  if (row.inbox_key_id !== null || row.inbox_record_hash !== null) {
     const intact =
+      row.inbox_key_id !== null &&
+      row.inbox_record_hash !== null &&
       row.bound_key_id !== null &&
       row.bound_public_key !== null &&
       row.bound_wrapped_key !== null &&
@@ -193,10 +195,28 @@ export async function ingestOpenRouterTrace(input: {
         throw error;
       }
       const inbox = await client.query(
-        'SELECT key_id, public_key FROM drive_trace_inboxes WHERE drive_id = $1',
+        'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1 FOR SHARE',
         [driveId],
       );
       if (!inbox.rowCount) throw new ApiError('conflict', 'The drive has no trace inbox.');
+      const record = inbox.rows[0] as {
+        key_id: string;
+        public_key: string;
+        wrapped_private_key: string;
+      };
+      if (token.inbox_key_id !== null || token.inbox_record_hash !== null) {
+        if (
+          token.inbox_key_id === null ||
+          token.inbox_record_hash === null ||
+          token.inbox_key_id !== record.key_id ||
+          token.inbox_record_hash !==
+            inboxRecordDigest(record.key_id, record.public_key, record.wrapped_private_key)
+        )
+          throw new ApiError(
+            'conflict',
+            'The trace inbox changed. Create a new webhook token in the console.',
+          );
+      }
       await enforceOperationBudget(client, token.account_id);
       await enforceWriteBudget(client, token.account_id, { bytes: BigInt(ciphertextSize) });
       await checkDriveQuota(client, driveId, ciphertextSize);
@@ -209,7 +229,7 @@ export async function ingestOpenRouterTrace(input: {
         wrappedKey = await sealFileKeyToInbox(encodeBase64Url(fileKey), {
           driveId,
           keyId: inbox.rows[0].key_id,
-          publicKey: inbox.rows[0].public_key,
+          publicKey: record.public_key,
         });
       } finally {
         fileKey.fill(0);

@@ -218,6 +218,13 @@
       "when": 1795792929089,
       "tag": "0030_webhook_token_inbox_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795809322722,
+      "tag": "0031_trace_inbox_proof_challenges",
+      "breakpoints": true
     }
   ]
 }

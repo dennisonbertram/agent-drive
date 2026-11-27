@@ -1,4 +1,5 @@
 import {
+  answerTraceInboxChallenge,
   createTraceInbox,
   type TraceInboxRecord,
 } from '../../../../packages/agent-drive/src/trace-inbox.ts';
@@ -37,9 +38,11 @@ export async function setUpWebhook(args: {
   key: string;
   source: Source;
   verify: (driveId: string, key: string) => Promise<Verdict>;
-  verifyInbox: (driveId: string, key: string, record: TraceInboxRecord) => Promise<boolean>;
+  /** Test seam; production opens the challenge using the exact locally unwrapped inbox key. */
+  answerChallenge?: typeof answerTraceInboxChallenge;
 }): Promise<WebhookToken> {
-  const { request, strictRequest, driveId, key, source, verify, verifyInbox } = args;
+  const { request, strictRequest, driveId, key, source, verify } = args;
+  const answerChallenge = args.answerChallenge ?? answerTraceInboxChallenge;
 
   const readInbox = async () => {
     const { inbox } = await request<{ inbox: TraceInboxRecord | null }>(
@@ -48,8 +51,24 @@ export async function setUpWebhook(args: {
     return inbox;
   };
 
-  async function proveInbox(record: TraceInboxRecord) {
-    if (!(await verifyInbox(driveId, key, record))) throw new Error(MISMATCH);
+  async function requestProof(action: 'enroll' | 'issue-token', record: TraceInboxRecord) {
+    const challenge = await strictRequest<{ challengeId: string; envelope: string }>(
+      `drives/${driveId}/trace-inbox/challenge`,
+      'POST',
+      { action, inbox: record },
+    );
+    let proof: string;
+    try {
+      proof = await answerChallenge({
+        driveId,
+        driveKey: key,
+        record,
+        envelope: challenge.envelope,
+      });
+    } catch {
+      throw new Error(MISMATCH);
+    }
+    return { challengeId: challenge.challengeId, proof };
   }
 
   // Returns the exact record the drive has on the server after this call.
@@ -58,7 +77,9 @@ export async function setUpWebhook(args: {
     if (inbox) {
       // Prove this exact record even when a file also proves the drive key. Otherwise a changed
       // inbox could receive traces the drive key cannot open.
-      await proveInbox(inbox);
+      const verdict = await verify(driveId, key);
+      if (verdict === 'mismatch') throw new Error(MISMATCH);
+      if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
       return inbox;
     }
 
@@ -69,23 +90,28 @@ export async function setUpWebhook(args: {
     if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
 
     const created = await createTraceInbox(driveId, key);
-    await proveInbox(created);
+    const proof = await requestProof('enroll', created);
     try {
-      await strictRequest(`drives/${driveId}/trace-inbox`, 'POST', created);
+      await strictRequest(`drives/${driveId}/trace-inbox`, 'POST', { ...created, ...proof });
       return created;
     } catch (reason) {
       if (!conflict(reason)) throw reason;
       // Another tab created it first: the key must open that inbox.
       const winner = await readInbox();
       if (!winner) throw reason;
-      await proveInbox(winner);
+      const verdict = await verify(driveId, key);
+      if (verdict === 'mismatch') throw new Error(MISMATCH);
+      if (verdict === 'unverifiable' && !isDriveBoundSource(source)) throw new Error(EMPTY_DRIVE);
+      // A fresh issue-token challenge below proves possession of the winner's exact private key.
       return winner;
     }
   }
 
   let record = await ensureInbox();
   try {
+    const proof = await requestProof('issue-token', record);
     return await strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
+      ...proof,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,
@@ -93,7 +119,9 @@ export async function setUpWebhook(args: {
   } catch (reason) {
     if (!conflict(reason)) throw reason;
     record = await ensureInbox();
+    const proof = await requestProof('issue-token', record);
     return strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
+      ...proof,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,

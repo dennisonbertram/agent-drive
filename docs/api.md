@@ -105,39 +105,40 @@ List routes return `{ "items": [...], "nextCursor": string | null }`.
 
 All paths are relative to `/api/v1`. `:id` is a drive ID (a UUID). File paths are canonical absolute POSIX paths: they start with `/`, are at most 1,024 characters, and contain no `//`, `.`, `..`, backslash or trailing `/`.
 
-| Method | Route                          | Scope                                            |
-| ------ | ------------------------------ | ------------------------------------------------ |
-| GET    | `/whoami`                      | any valid key                                    |
-| GET    | `/agents`                      | `manage`                                         |
-| POST   | `/agents`                      | `manage`                                         |
-| GET    | `/drives`                      | `manage`, or `read`                              |
-| POST   | `/drives`                      | `manage`                                         |
-| GET    | `/keys`                        | `manage`                                         |
-| POST   | `/keys`                        | `manage`, or `delegate`                          |
-| DELETE | `/keys/:id`                    | `manage`                                         |
-| POST   | `/drives/:id/put`              | `write`                                          |
-| POST   | `/drives/:id/commit`           | `write`                                          |
-| POST   | `/drives/:id/commit-job-claim` | `read` and `write`                               |
-| POST   | `/drives/:id/mkdir`            | `write`                                          |
-| POST   | `/drives/:id/rmdir`            | `delete`                                         |
-| GET    | `/drives/:id/get`              | `read`                                           |
-| GET    | `/drives/:id/list`             | `read`                                           |
-| GET    | `/drives/:id/versions`         | `read`                                           |
-| GET    | `/drives/:id/search`           | `read`                                           |
-| GET    | `/drives/:id/recent`           | `read`                                           |
-| POST   | `/drives/:id/move`             | `write`                                          |
-| POST   | `/drives/:id/rename`           | `write` (also `delete` to replace a destination) |
-| POST   | `/drives/:id/copy`             | `read` and `write`                               |
-| POST   | `/drives/:id/delete`           | `delete`                                         |
-| POST   | `/drives/:id/unlink`           | `delete`                                         |
-| POST   | `/drives/:id/restore`          | `read` and `write`                               |
-| POST   | `/drives/:id/key-backup`       | `write`                                          |
-| GET    | `/drives/:id/trace-inbox`      | `read`                                           |
-| POST   | `/drives/:id/shares`           | `share` and `read`                               |
-| GET    | `/drives/:id/shares`           | `share`                                          |
-| DELETE | `/drives/:id/shares/:shareId`  | `share`                                          |
-| GET    | `/device/:code`                | `delegate`                                       |
-| POST   | `/device/:code/grant`          | `delegate`                                       |
+| Method | Route                               | Scope                                            |
+| ------ | ----------------------------------- | ------------------------------------------------ |
+| GET    | `/whoami`                           | any valid key                                    |
+| GET    | `/agents`                           | `manage`                                         |
+| POST   | `/agents`                           | `manage`                                         |
+| GET    | `/drives`                           | `manage`, or `read`                              |
+| POST   | `/drives`                           | `manage`                                         |
+| GET    | `/keys`                             | `manage`                                         |
+| POST   | `/keys`                             | `manage`, or `delegate`                          |
+| DELETE | `/keys/:id`                         | `manage`                                         |
+| POST   | `/drives/:id/put`                   | `write`                                          |
+| POST   | `/drives/:id/commit`                | `write`                                          |
+| POST   | `/drives/:id/commit-job-claim`      | `read` and `write`                               |
+| POST   | `/drives/:id/mkdir`                 | `write`                                          |
+| POST   | `/drives/:id/rmdir`                 | `delete`                                         |
+| GET    | `/drives/:id/get`                   | `read`                                           |
+| GET    | `/drives/:id/list`                  | `read`                                           |
+| GET    | `/drives/:id/versions`              | `read`                                           |
+| GET    | `/drives/:id/search`                | `read`                                           |
+| GET    | `/drives/:id/recent`                | `read`                                           |
+| POST   | `/drives/:id/move`                  | `write`                                          |
+| POST   | `/drives/:id/rename`                | `write` (also `delete` to replace a destination) |
+| POST   | `/drives/:id/copy`                  | `read` and `write`                               |
+| POST   | `/drives/:id/delete`                | `delete`                                         |
+| POST   | `/drives/:id/unlink`                | `delete`                                         |
+| POST   | `/drives/:id/restore`               | `read` and `write`                               |
+| POST   | `/drives/:id/key-backup`            | `write`                                          |
+| GET    | `/drives/:id/trace-inbox`           | `read`                                           |
+| POST   | `/drives/:id/trace-inbox/challenge` | Console only (strict reverification)             |
+| POST   | `/drives/:id/shares`                | `share` and `read`                               |
+| GET    | `/drives/:id/shares`                | `share`                                          |
+| DELETE | `/drives/:id/shares/:shareId`       | `share`                                          |
+| GET    | `/device/:code`                     | `delegate`                                       |
+| POST   | `/device/:code/grant`               | `delegate`                                       |
 
 The two `/device` routes are described in [HTTP API: device login and delegation](api-device-login.md). One public route sits outside `/api/v1`: `GET /api/shares/:id` (see Shares).
 
@@ -406,7 +407,7 @@ Response: `{ "version": { ... } }`. 404 if the path or version does not exist.
 }
 ```
 
-A client needs the inbox record to open files that the OpenRouter webhook sealed to it. Creating the inbox and the webhook token happens in the console, and both are strict routes there: `POST /drives/:id/trace-inbox` and `POST /drives/:id/webhook-token` return the Clerk strict reverification challenge unless the session was recently reverified. `POST /drives/:id/webhook-token` requires the verified `{ "keyId": "<uuid>", "publicKey": "<base64url>", "wrappedPrivateKey": "<base64url>" }` inbox snapshot; requests without the full snapshot fail validation. It returns 409 if any field no longer matches the stored record, then binds the issued token to that exact record. Older token records remain valid with their original drive-scoped behavior. See [Capture traces](trace-capture.md).
+A client needs the inbox record to open files that the OpenRouter webhook sealed to it. Creating the inbox and the webhook token happens in the console, and both mutations require Clerk strict reverification. Before either mutation, the console requests a short-lived challenge encrypted to the exact inbox public key, then opens it locally with the drive key and inbox private key. `POST /drives/:id/trace-inbox` and `POST /drives/:id/webhook-token` require the resulting one-time proof and the full `{ "keyId": "<uuid>", "publicKey": "<base64url>", "wrappedPrivateKey": "<base64url>" }` inbox snapshot. A mismatch, expired challenge, or replay returns 409 before the inbox is inserted or a token is rotated. The server verifies inbox-key possession; the console separately verifies that the wrapped private key belongs to the drive key. Token records stay bound to the exact inbox record, and older token records remain valid with their original drive-scoped behavior. See [Capture traces](trace-capture.md).
 
 `POST /api/webhooks/openrouter/:driveId` is not an agent route and does not use an API key. It takes the drive's webhook token as `Authorization: Bearer adw_...`, over HTTPS only. The body is OpenTelemetry (OTLP) JSON, at most 4 MiB. The token is checked first: a missing, wrong, revoked or other-drive token returns 401. A token bound to an inbox record also returns 409 `conflict` when the stored record no longer matches the record it was issued against; pre-binding tokens are not bound and keep working.
 

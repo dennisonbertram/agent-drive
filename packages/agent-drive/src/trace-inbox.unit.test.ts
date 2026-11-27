@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeDriveKey, encodeBase64Url, generateDriveKey } from './crypto.js';
 import {
+  answerTraceInboxChallenge,
   createTraceInbox,
   sealFileKeyToInbox,
   unsealFileKeyFromInbox,
@@ -65,6 +66,33 @@ describe('trace inbox round trip and failures', () => {
     expect(await unsealFileKeyFromInbox(env, key, rec.keyId, v.driveId, rec.publicKey)).toBe(
       v.fileKey,
     );
+  });
+
+  it('opens a challenge only with the exact record private key and drive key', async () => {
+    const driveKey = generateDriveKey();
+    const rec = await createTraceInbox(v.driveId, driveKey);
+    const recipient = { driveId: v.driveId, ...rec };
+    const proof = generateDriveKey(); // 32 random bytes encoded as the existing key primitive expects.
+    const envelope = await sealFileKeyToInbox(proof, recipient);
+    await expect(
+      answerTraceInboxChallenge({ driveId: v.driveId, driveKey, record: rec, envelope }),
+    ).resolves.toBe(proof);
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey: generateDriveKey(),
+        record: rec,
+        envelope,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      answerTraceInboxChallenge({
+        driveId: v.driveId,
+        driveKey,
+        record: { ...rec, publicKey: v.publicKey },
+        envelope,
+      }),
+    ).rejects.toThrow();
   });
 
   it('rejects tampering with epk, iv and ct, and a wrong driveId or keyId', async () => {
