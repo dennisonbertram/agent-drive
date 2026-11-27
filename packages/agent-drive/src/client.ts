@@ -191,6 +191,8 @@ export type ConflictState = 'exists' | 'changed' | 'trashed' | 'absent';
 const conflictStates: unknown[] = ['exists', 'changed', 'trashed', 'absent'];
 // Same pattern as uuid() in apps/web/src/api/validation.ts; keep in sync.
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+// Same pattern as JOB_ID in packages/agent-drive/src/jobs.ts; keep in sync.
+const jobIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 function fileEntry(item: FileEntryWire): FileEntry {
   return {
@@ -905,6 +907,38 @@ export class AgentDriveClient {
       `drives/${encode(driveId)}/get?${query.toString()}`,
       options.signal ? { signal: options.signal } : {},
     );
+  }
+
+  /**
+   * The request version the file at /jobs/<id>/submitted.md was last submitted at: the version
+   * pinned by that live file's newest qualifying /jobs/<id>/request.md -> submitted.md move.
+   * Any earlier queued submission event for the same file resolves to this same version at
+   * pickup, so a stale candidate can never run a superseded approval, and a file that merely
+   * appeared at submitted.md (a put, copy or restore) is never an approval — the answer is 404.
+   * Metadata only; the response must carry `jobApproval: true` because older servers answer the
+   * same GET with ordinary unmarked metadata for whatever version they select. Unmarked
+   * metadata is rejected as an unsupported worker API, never used as a fallback.
+   */
+  async getJobApproval(driveId: string, jobId: string, signal?: AbortSignal): Promise<Version> {
+    if (!jobIdPattern.test(jobId)) {
+      throw new TypeError(
+        'A job id is 1-64 ASCII characters: alphanumeric, then alphanumeric, "_" or "-".',
+      );
+    }
+    const path = `/jobs/${jobId}/submitted.md`;
+    const query = new URLSearchParams({ path, metadataOnly: '1', jobApproval: '1' });
+    const result = await this.request<Version & { jobApproval?: unknown }>(
+      `drives/${encode(driveId)}/get?${query.toString()}`,
+      signal ? { signal } : {},
+    );
+    if (result.jobApproval !== true || result.path !== path || !isVersionMetadata(result)) {
+      throw new AgentDriveApiError(
+        'worker_api_unsupported',
+        502,
+        'The server does not support job approval lookups (worker API not supported).',
+      );
+    }
+    return versionCopy(result);
   }
 
   async put(driveId: string, path: string, plaintext: Uint8Array, options: PutOptions = {}) {

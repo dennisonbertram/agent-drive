@@ -1165,3 +1165,85 @@ describe('AgentDriveClient.list signal', () => {
     expect(calls[1]?.init?.signal).toBeUndefined();
   });
 });
+
+describe('AgentDriveClient.getJobApproval', () => {
+  const approved = {
+    id: '11111111-1111-4111-8111-111111111111',
+    path: '/jobs/job-1/submitted.md',
+    ciphertextSize: 64,
+    wrappedKey: 'wrapped',
+    agentId: 'a',
+    machineId: null,
+    userId: null,
+    tags: [],
+    description: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    jobApproval: true,
+  };
+  const make = (body: unknown = approved, status = 200) => {
+    const calls: { url: string; init: RequestInit | undefined }[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return Response.json(body, { status });
+    });
+    const client = new AgentDriveClient({
+      apiUrl: 'http://127.0.0.1:3000',
+      apiKey: 'k',
+      fetch: fetcher,
+    });
+    return { calls, client, fetcher };
+  };
+
+  it('requests the approval mode metadata get and returns the pinned version', async () => {
+    const { calls, client } = make();
+    const controller = new AbortController();
+    const version = await client.getJobApproval('drive-1', 'job-1', controller.signal);
+    expect(version.id).toBe(approved.id);
+    expect(version.path).toBe('/jobs/job-1/submitted.md');
+    expect(version).not.toHaveProperty('jobApproval');
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0]!.url);
+    expect(url.pathname).toBe('/api/v1/drives/drive-1/get');
+    expect(url.searchParams.get('path')).toBe('/jobs/job-1/submitted.md');
+    expect(url.searchParams.get('metadataOnly')).toBe('1');
+    expect(url.searchParams.get('jobApproval')).toBe('1');
+    expect(url.searchParams.has('versionId')).toBe(false);
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
+  it('rejects unmarked ordinary metadata as an unsupported worker API', async () => {
+    const { client } = make({ ...approved, jobApproval: undefined });
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      name: 'AgentDriveApiError',
+      code: 'worker_api_unsupported',
+      status: 502,
+      message: expect.stringContaining('not supported'),
+    });
+  });
+
+  it('rejects a marker on metadata for the wrong path', async () => {
+    const { client } = make({ ...approved, path: '/jobs/job-2/submitted.md' });
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      code: 'worker_api_unsupported',
+      status: 502,
+    });
+  });
+
+  it('rejects invalid job ids before any request', async () => {
+    const { client, fetcher } = make();
+    for (const id of ['', 'bad id', '/jobs/x', 'nested/deep', '-lead', `x`.repeat(65)])
+      await expect(client.getJobApproval('drive-1', id)).rejects.toBeInstanceOf(TypeError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it('propagates a 404 when no qualifying submission exists', async () => {
+    const { client } = make(
+      { error: { code: 'not_found', message: 'No approved job submission exists.' } },
+      404,
+    );
+    await expect(client.getJobApproval('drive-1', 'job-1')).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+    });
+  });
+});
