@@ -672,33 +672,11 @@ async function run(command: string, raw: string[]) {
     const writeEnabled = hasWriteScope && args.values['read-only'] !== true;
     const deleteEnabled = writeEnabled && mountIdentity.scopes.includes('delete');
     const sharedMountOps = ['capabilities', 'stat', 'list', 'read'];
+    const sharedWriteOps = ['openWrite', 'write', 'truncate', 'readStaged', 'mkdir', 'rename'];
     const platformWriteOps =
       process.platform === 'darwin'
-        ? [
-            'openWrite',
-            'write',
-            'truncate',
-            'readStaged',
-            'finalizeWrite',
-            'flushStatus',
-            'closeWrite',
-            'mkdir',
-            'rename',
-          ]
-        : [
-            'openWrite',
-            'write',
-            'truncate',
-            'readStaged',
-            'flush',
-            'finalizeWrite',
-            'flushStatus',
-            'release',
-            'closeWrite',
-            'completeWrite',
-            'mkdir',
-            'rename',
-          ];
+        ? ['finalizeWrite', 'flushStatus', 'closeWrite']
+        : ['flush', 'release'];
     const mountCapabilities = {
       readOnly: !writeEnabled,
       write: writeEnabled,
@@ -708,7 +686,7 @@ async function run(command: string, raw: string[]) {
       maxWriteBytes: MOUNT_MAX_WRITE_BYTES,
       ops: [
         ...sharedMountOps,
-        ...(writeEnabled ? platformWriteOps : []),
+        ...(writeEnabled ? [...sharedWriteOps, ...platformWriteOps] : []),
         ...(deleteEnabled ? ['unlink', 'rmdir'] : []),
       ],
     };

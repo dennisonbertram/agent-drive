@@ -634,34 +634,13 @@ describe('mount command validation', () => {
       const options =
         process.platform === 'darwin' ? bridgeOptions : invocations.map((call) => call[3]);
       const readOnlyOps = ['capabilities', 'stat', 'list', 'read'];
+      const sharedWriteOps = ['openWrite', 'write', 'truncate', 'readStaged', 'mkdir', 'rename'];
       const writableOps = [
         ...readOnlyOps,
+        ...sharedWriteOps,
         ...(process.platform === 'darwin'
-          ? [
-              'openWrite',
-              'write',
-              'truncate',
-              'readStaged',
-              'finalizeWrite',
-              'flushStatus',
-              'closeWrite',
-              'mkdir',
-              'rename',
-            ]
-          : [
-              'openWrite',
-              'write',
-              'truncate',
-              'readStaged',
-              'flush',
-              'finalizeWrite',
-              'flushStatus',
-              'release',
-              'closeWrite',
-              'completeWrite',
-              'mkdir',
-              'rename',
-            ]),
+          ? ['finalizeWrite', 'flushStatus', 'closeWrite']
+          : ['flush', 'release']),
       ];
       expect(options).toEqual([
         expect.objectContaining({
