@@ -1288,11 +1288,10 @@ Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
 memory, never written to disk; its drives count as backed up).
 `;
-// For commands that run a child process, only flags before `--` are ours.
-const ownArgs =
-  (name === 'capture' || name === 'jobs') && raw.includes('--')
-    ? raw.slice(0, raw.indexOf('--'))
-    : raw;
+// Arguments after the `--` terminator are positionals — for `capture` and `jobs
+// work`, the delegated command — never this CLI's own flags.
+const terminator = raw.indexOf('--');
+const ownArgs = terminator < 0 ? raw : raw.slice(0, terminator);
 let done: Promise<void>;
 if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);

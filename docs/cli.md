@@ -194,16 +194,38 @@ the current file before making another change.
 Mounted jobs let an agent prepare encrypted work on one dedicated drive and let an explicitly
 configured local command process submitted requests. The drive is the trust boundary: a key scoped
 to `/jobs` can edit or submit jobs throughout that tree. Use a dedicated drive and give it only to
-the agents and local worker that need it. Limit submitter keys to their own job directories; they
-need `read` and `write` scopes, with write paths covering that job. The worker key needs `read` and
-`write` scopes, with write paths under `/jobs` for its execution receipt, status, and results. The
-worker command runs as the operating-system user that
+the agents and local worker that need it.
+
+Give each submitter `read` and `write` scopes with write paths on exactly its draft, its submission,
+and its inputs — never `status.json`, `outputs/`, or the worker's `/jobs/.agent-drive/` receipts.
+Those files are worker-owned; a submitter that could write them could forge the status and results
+of a run. For example, one `--write-path` flag per path, with the job ID in each:
+
+```sh
+agent-drive key create --agent AGENT_ID --drive DRIVE_ID --label submitter \
+  --scope read --scope write \
+  --write-path /jobs/monthly-close/request.md \
+  --write-path /jobs/monthly-close/submitted.md \
+  --write-path /jobs/monthly-close/inputs
+```
+
+A write path matches itself and anything beneath it, so the `inputs` entry covers the flat input
+files and `jobs submit`'s guarded rename needs write access to both `request.md` and
+`submitted.md`. Creating `/jobs/<id>` as a directory through the mount needs a write path covering
+the directory itself, which this grant deliberately omits: have an owner key create the job
+directory first, or let the submitter write its files with `agent-drive put` and submit with
+`jobs submit`, neither of which needs an explicit directory. The worker key needs `read` and
+`write` scopes, with write paths under `/jobs` for its execution receipt, status, and results —
+including `/jobs/.agent-drive/claims/`. The worker command runs as the operating-system user that
 started it; a private working directory is not a sandbox. If request authors are untrusted, run the
 worker as a dedicated system user or in a container with only the files and local services it needs.
 
-Write paths limit where a key can change files, not where it can read. Any key with `read` access to
-this drive can read other job folders even when its writes are limited to one job directory. Use
-separate drives when request authors must not read one another's jobs.
+Write paths limit where a key can change files, not where it can read. A key with `read` scope sees
+file metadata and ciphertext anywhere on the drive; plaintext requires the drive key. Every agent
+that mounts or writes drafts holds the drive key, so treat any submitter as able to read other job
+folders even when its writes are limited. A key used only for `jobs submit` — which reads metadata
+and needs no local drive key — sees metadata and ciphertext but no plaintext. Use separate drives
+when request authors must not read one another's jobs.
 
 Initialize the drive once. This creates `/jobs/README.md` only if it is absent. Then mount it with a
 key that has `read` and `write` scopes and can write under `/jobs`:
@@ -214,8 +236,10 @@ agent-drive mount "$HOME/AgentDrive" --drive DRIVE_ID
 ```
 
 The mount command stays in the foreground, so use a second terminal for the remaining commands.
-Create a draft using a stable ID and flat input filenames. Each input is pinned to the version
-present when the worker picks up the submitted job.
+Create a draft using a stable ID and flat input filenames. Submission pins the request: the worker
+records the `submitted.md` version the qualifying rename committed and runs exactly that version,
+so editing the file afterwards does not change what runs. Inputs are pinned differently — each
+input is the version present when the worker picks up the job.
 
 ```sh
 mkdir -p "$HOME/AgentDrive/jobs/monthly-close/inputs"
@@ -240,6 +264,9 @@ On Linux, a plain POSIX `mv` through the mounted drive uses the source and desti
 observed at the rename syscall, but can replace an existing destination when the key also has
 `delete`. Use `jobs submit` or the dashboard Submit action when the destination must be absent; both
 enforce that condition even if the key has `delete`.
+
+Only a real rename of `request.md` to `submitted.md` submits a job. A `submitted.md` that appears any
+other way — `put`, `cp`, or `restore` — never starts a run.
 
 Run the explicitly configured local bookkeeper. This synthetic example compares the two invoice
 rows with the reported total and saves a CSV result; it makes no model or network calls:
@@ -267,7 +294,8 @@ The configured command runs in a private per-job working directory. It receives 
 stdin and can read `request.md` and `inputs/`; its stdout is saved as `outputs/result.md`, while the
 worker's `/jobs/<id>/status.json` records `running`, `done` or `failed`. A separate execution receipt
 under `/jobs/.agent-drive/claims/` prevents another run of the same ID even if someone moves the
-visible status file. The example writes its structured result to `outputs/comparison.csv`; the
+visible status file, and records the request version that ran and the committed output versions —
+the receipt is authoritative, while the visible status and outputs are the human-readable record. The example writes its structured result to `outputs/comparison.csv`; the
 `cat` commands above read the result and status through the mounted drive. The worker creates output
 files without replacing existing files; people can edit them later without changing the execution
 receipt. `--once` processes all currently queued jobs in one scan and then exits; without it, the
@@ -302,18 +330,23 @@ read them. Keep the local model and any reachable services limited to what the o
 submitted request to use. Ollama's [CLI documentation](https://docs.ollama.com/cli) describes the
 local `ollama run` command.
 
-An existing agent can connect by mounting the same dedicated drive with write access to its job
-directory, writing `request.md` and flat files under `inputs/`, and then asking the owner to submit
-the stable job ID. The agent should leave the draft unsubmitted until the owner has reviewed it.
-The owner can submit with the CLI above or the dashboard Submit action.
+An existing agent can connect with the submitter grant shown above, write `request.md` and flat
+files under `inputs/` — through the mount once an owner key has created the job directory, or
+directly with `agent-drive put` — and then ask the owner to submit the stable job ID. The agent
+should leave the draft unsubmitted until the owner has reviewed it. The owner can submit with the
+CLI above or the dashboard Submit action.
 
 Job IDs start with a letter or digit and contain at most 64 letters, digits, underscores, or
 hyphens. Inputs are limited to 16 flat files, 8 MiB per file and 32 MiB total; requests are limited
-to 64 KiB and each execution has a 15-minute limit. The worker creates the private execution
-receipt without replacing an existing one and creates output files without replacing existing
-files. If the process is killed after claiming a job, treat its outcome as unknown and reconcile it
-before taking action; `status.json` may still say `running`. Do not move or delete the receipt to
-retry; create and submit a new job ID for an intentional rerun.
+to 64 KiB and each execution has a 15-minute limit. Outputs are held to the input budget — 16 files,
+8 MiB each, 32 MiB total — but those caps are checked when the worker collects results after the
+command exits, so they do not bound the private workspace while the command runs. A job that
+overflows the workspace fails at collection; when request authors are untrusted, put the worker's
+temporary volume under a filesystem quota or a container disk limit. The worker creates the private
+execution receipt without replacing an existing one and creates output files without replacing
+existing files. If the process is killed after claiming a job, treat its outcome as unknown and
+reconcile it before taking action; `status.json` may still say `running`. Do not move or delete the
+receipt to retry; create and submit a new job ID for an intentional rerun.
 
 ## Output and exit codes
 

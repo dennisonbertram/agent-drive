@@ -52,22 +52,29 @@ path while mounted. An `EIO` unlink may have succeeded remotely; refresh before 
 
 Use a dedicated drive as the trust boundary for submitted work; keys scoped to `/jobs` can edit and
 submit jobs throughout it. Submitter keys need `read` and `write` scopes. Limit each submitter's
-`writePaths` to its own job directory, but note
-that write paths do not limit reads: any key with `read` access to the drive can read every job on
-it. Use separate drives when jobs must be private from other readers. `jobs init` creates the
+`writePaths` to exactly `/jobs/<id>/request.md`, `/jobs/<id>/submitted.md`, and `/jobs/<id>/inputs`;
+`status.json`, `outputs/`, and `/jobs/.agent-drive/` are worker-owned, and a submitter that could
+write them could forge the run. Note that write paths do not limit reads: a `read`-scoped key sees
+metadata and ciphertext drive-wide, and plaintext to anyone holding the drive key. Use separate
+drives when jobs must be private from other readers. `jobs init` creates the
 `/jobs` instructions once, `jobs submit ID` explicitly submits a draft, and `jobs work` runs one
 fixed local command for submitted jobs. Drafts stay inert until submitted. For a synthetic local
 example and the folder layout, see the
 [mounted jobs guide](https://agentdrive.xyz/docs/cli#mounted-jobs).
 
 The `jobs submit` CLI command uses metadata and a guarded rename. Its API key needs `read` and
-`write` scopes and write paths covering both rename paths, but no local drive decryption key. On Linux, plain
+`write` scopes and write paths covering both rename paths, but no local drive decryption key. Only a
+real rename submits — a `submitted.md` produced by `put`, `cp`, or `restore` never runs. On Linux, plain
 POSIX `mv` can replace an existing `submitted.md` when the key also has `delete`; use `jobs submit`
 or the dashboard Submit action when the destination must be absent.
 
-The worker key needs `read` and `write` scopes, with `writePaths` covering `/jobs`. It runs under
-the operating-system account that starts it, and its private working directory is not a sandbox.
-Use a dedicated system user or container when request authors are untrusted.
+The worker key needs `read` and `write` scopes, with `writePaths` covering `/jobs`. A mounted
+`mkdir` needs a write path covering the directory itself, so an owner key creates each `/jobs/<id>`
+first — or the submitter writes files with `agent-drive put`, which needs no explicit directory.
+The worker runs under the operating-system account that starts it, and its private working
+directory is not a sandbox; output caps are checked at collection and do not bound the workspace,
+so use a dedicated system user, a filesystem quota, or a container when request authors are
+untrusted.
 
 ```sh
 agent-drive jobs init --drive DRIVE_ID
@@ -105,5 +112,6 @@ not a security sandbox; run as a dedicated system user or container when request
 untrusted. See the [mounted jobs guide](https://agentdrive.xyz/docs/cli#mounted-jobs) for the local
 Ollama alternative, input and output limits, and recovery behavior. The worker creates output files
 without replacing existing files, though people may edit them later. A private receipt under
-`/jobs/.agent-drive/claims/` prevents a duplicate run even if the visible `status.json` moves; use a
-new ID for a deliberate rerun.
+`/jobs/.agent-drive/claims/` records the request version that ran and the committed output versions
+and prevents a duplicate run even if the visible `status.json` moves; use a new ID for a deliberate
+rerun.

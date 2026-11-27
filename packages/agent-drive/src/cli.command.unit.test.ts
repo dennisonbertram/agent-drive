@@ -1332,6 +1332,40 @@ describe('jobs CLI', () => {
     }
   });
 
+  it('treats --once after the -- terminator as a positional, not the jobs flag', async () => {
+    // A local file literally named --once must reach `put` as a filename.
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-once-'));
+    dirs.push(dir);
+    await writeFile(join(dir, '--once'), 'x');
+    const cwd = process.cwd();
+    process.chdir(dir);
+    try {
+      const r = await cli(['put', '--', '--once', '/x.md', '--drive', A], one, (path, init) => {
+        if (path.endsWith('/put'))
+          return {
+            intentId: 'i1',
+            uploadUrl: 'https://s3.test/x',
+            ciphertextSize: (JSON.parse(String(init?.body)) as { ciphertextSize: number })
+              .ciphertextSize,
+          };
+        if (path.endsWith('/commit')) return { version: { id: randomUUID(), path: '/x.md' } };
+        return {};
+      });
+      expect(r.err).toBe('');
+      expect(r.paths.some((p) => p.includes(`drives/${A}/commit`))).toBe(true);
+    } finally {
+      process.chdir(cwd);
+    }
+
+    // A drive path of the same name reaches `mv` as a positional too.
+    const move = await cli(['mv', '--', '--once', '/b.md', '--drive', A], one, (path) =>
+      path.endsWith('/move') ? { id: 'f1', path: '/b.md' } : {},
+    );
+    expect(move.err).toBe('');
+    const rename = move.calls.find((call) => call.path.endsWith('/move'));
+    expect(JSON.parse(rename?.body ?? '{}')).toMatchObject({ path: '--once' });
+  });
+
   it('dispatches init, submit, and one local worker with the parsed command and lifecycle options', async () => {
     const initJobs = vi.fn(async () => ({ path: '/jobs/README.md', created: true }));
     const submitJob = vi.fn(async () => ({ id: 'monthly-close', state: 'submitted' }));

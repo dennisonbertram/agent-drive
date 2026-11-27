@@ -13,10 +13,15 @@ names, tags, descriptions, and attribution stay visible to the service.
 
 Use a dedicated drive for this workflow because keys scoped to `/jobs` can edit or submit jobs
 throughout that tree. Submitter keys need `read` and `write` scopes. Limit each submitter's
-`writePaths` to its own job directory; the worker needs `read` and `write` scopes, with `writePaths`
-covering `/jobs` for its execution receipt, status, and results. Write paths do not limit
-reads: any key with `read` access to the drive can read every job on it. Use separate drives when
-jobs must be private from other readers.
+`writePaths` to exactly `/jobs/<id>/request.md`, `/jobs/<id>/submitted.md`, and `/jobs/<id>/inputs` —
+never `status.json`, `outputs/`, or `/jobs/.agent-drive/`, which are worker-owned and forgeable
+status or results if a submitter could write them. A mounted `mkdir` needs a write path covering
+the directory itself, so an owner key creates `/jobs/<id>` first or the submitter writes files
+directly with `agent-drive put`, which needs no explicit directory. The worker needs `read` and
+`write` scopes, with `writePaths` covering `/jobs` for its execution receipt, status, and results.
+Write paths do not limit reads: a `read`-scoped key sees metadata and ciphertext drive-wide, and
+plaintext to anyone holding the drive key. Use separate drives when jobs must be private from
+other readers.
 The agent may create a draft under `/jobs/<stable-id>/` with `request.md` and flat files under
 `inputs/`. Do not ask a worker to run while the request is still a draft. Leave it for the owner to
 review and submit with `agent-drive jobs submit <stable-id> --drive <drive-id>` or the dashboard
@@ -25,6 +30,8 @@ API key needs `read` and `write` scopes and write paths covering both rename pat
 drive decryption key. Both submission paths require `submitted.md` to be absent. On Linux, plain POSIX `mv` can
 replace an existing destination when the key also has `delete`, though the mount guards the versions
 it observed at the rename syscall. Use the CLI or dashboard when the destination must be absent.
+Only the rename submits — a `submitted.md` created by `put`, `cp`, or `restore` never runs.
+Submission pins the request to the renamed version; inputs are pinned at worker pickup.
 
 The owner runs a fixed, explicitly configured local worker with
 `agent-drive jobs work --drive <drive-id> --once -- COMMAND [ARGS...]`. The worker sends the request
@@ -32,9 +39,13 @@ on stdin, runs privately with `request.md` and `inputs/` available, and saves st
 `outputs/result.md`. Do not put secrets in the request or inputs, ask the CLI to select a model
 provider, or construct the worker command from untrusted job text. Inputs are bounded to 16 flat
 files, 8 MiB each and 32 MiB total; requests are limited to 64 KiB and executions to 15 minutes.
-If a worker is killed after a job is claimed, its `running` state needs reconciliation before anyone
-acts on it. A private receipt under `/jobs/.agent-drive/claims/` prevents a duplicate run even if
-`status.json` moves. Do not move or delete the receipt; a new ID is required for a deliberate rerun.
+Outputs are held to the same budget, checked when the worker collects results after the command
+exits — they do not bound the workspace during the run, so use a filesystem quota or container disk
+limit when request authors are untrusted. If a worker is killed after a job is claimed, its
+`running` state needs reconciliation before anyone
+acts on it. A private receipt under `/jobs/.agent-drive/claims/` records the request version that
+ran and the committed output versions and prevents a duplicate run even if `status.json` moves. Do
+not move or delete the receipt; a new ID is required for a deliberate rerun.
 
 The worker runs as the operating-system user that started it; its private working directory is not
 a sandbox. Run it as a dedicated system user or in a container when request authors are untrusted.
