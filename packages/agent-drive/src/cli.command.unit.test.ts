@@ -1218,7 +1218,9 @@ describe('capture command', () => {
     ).toBe(true);
     const secret = env.AGENT_DRIVE_CAPTURE_TOKEN;
     expect(secret).toMatch(/^[A-Za-z0-9_-]{24}$/u);
-    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/openai$/u);
+    expect(env.OPENAI_BASE_URL).toMatch(
+      new RegExp(`^http://127\\.0\\.0\\.1:\\d+/${secret}/openai$`, 'u'),
+    );
     expect(env.ANTHROPIC_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/anthropic$/u);
     expect(JSON.stringify(argv)).not.toContain(secret);
     expect(r.err).not.toContain(secret);

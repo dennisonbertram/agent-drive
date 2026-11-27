@@ -629,8 +629,9 @@ export async function runCapture(input: {
     ...process.env,
     ANTHROPIC_BASE_URL:
       base === 'codex' ? `${origin}/anthropic` : `${origin}/${proxy.secret}/anthropic`,
-    OPENAI_BASE_URL:
-      base === 'codex' ? `${origin}/openai` : `${origin}/${proxy.secret}/openai`,
+    // Codex itself uses its per-provider base URL and custom header below. Its
+    // descendants inherit OPENAI_BASE_URL, so keep that route path-authenticated.
+    OPENAI_BASE_URL: `${origin}/${proxy.secret}/openai`,
     ...(base === 'codex' ? { [CODEX_CAPTURE_TOKEN_ENV]: proxy.secret } : {}),
   };
   const args =
