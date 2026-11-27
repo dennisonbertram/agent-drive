@@ -156,6 +156,24 @@ All take `--drive ID` unless noted. With one drive key saved for the current API
 - `whoami`, `check`, `credentials ...`, `account seal`, `skill install`
 - `skill install` writes into your own skills folder (`~/.claude/skills` or `~/.codex/skills`). In a sandbox, CI or on a shared machine, use `skill install --target DIR` or skip it.
 
+### Live Instabox workspaces
+
+Connect to the intended sandbox and absolute folder path using values from the current workspace:
+
+```sh
+agent-drive connect "$WORKSPACE_NAME" "$HOME/AgentWorkspaces/$WORKSPACE_NAME" \
+  --sandbox "$SANDBOX_ID" --root "$WORKSPACE_ROOT" --persist
+cp -n "$LOCAL_ENV_FILE" "$HOME/AgentWorkspaces/$WORKSPACE_NAME/.env"
+```
+
+`connect` starts the mount in the foreground by default. `--persist` starts it through a per-user
+login service. New connections wake the selected sandbox on first filesystem access; use
+`--no-wake-on-access` to opt out, or `agent-drive mounts wake "$WORKSPACE_NAME" off` to change a
+saved setting. Listing names and checking mount status do not wake a sandbox. The mount exposes
+existing files in place, including hidden `.env` files; do not print or copy secret contents into
+logs or chat. Live mounts currently create new files only; replacing existing files returns a
+read-only error.
+
 The mount runs in the foreground. Press Ctrl+C once and wait for it to exit cleanly; Linux can be
 unmounted with `fusermount3 -u MOUNTPOINT` if needed. Reads are authenticated ranges pinned to a
 file version, so existing ADRV v1 files remain readable. Saves are version-checked; `fsync` waits

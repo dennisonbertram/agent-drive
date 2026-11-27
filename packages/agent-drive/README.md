@@ -46,6 +46,31 @@ on macOS the error includes the recovery path, and Linux keeps the staged file v
 path while mounted. An `EIO` unlink may have succeeded remotely; refresh before retrying. See the
 [CLI mount guide](https://agentdrive.xyz/docs/cli#mount-a-drive) for details.
 
+## Mount an existing Instabox workspace
+
+Connect the exact sandbox and folder. Add `--persist` to save the local name and start a login
+service:
+
+```sh
+agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
+  --sandbox SANDBOX_ID --root /workspace/project --persist
+cp -n "$LOCAL_ENV_FILE" "$HOME/AgentWorkspaces/coordinator/.env"
+```
+
+Omit `--persist` to run the mount in the foreground. Reconnect to the saved mount with:
+
+```sh
+agent-drive mount --name coordinator
+agent-drive mounts service install coordinator
+```
+
+This mode uses the local Instabox CLI and does not use Agent Drive cloud credentials. New
+connections wake on first filesystem access unless `--no-wake-on-access` is set. The mounted folder
+includes existing dotfiles such as `.env`; registration does not copy or print file contents. See
+the [live workspace mount guide](../../docs/cli.md#live-workspace-mounts).
+Live mounts currently support creating new files; saving changes over an existing file returns a
+read-only error.
+
 ## Local jobs
 
 Use a dedicated drive as the trust boundary for submitted work; keys scoped to `/jobs` can edit and

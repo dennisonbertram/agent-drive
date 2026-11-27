@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
 import { decodeDriveKey, generateDriveKey } from './crypto.js';
 import {
@@ -27,6 +28,7 @@ import {
 import { installSkill, packagedSkillPath } from './skill.js';
 import {
   configPath,
+  DEFAULT_API_URL,
   driveKeyEnvironmentName,
   keysForOrigin,
   machineName,
@@ -112,6 +114,11 @@ function parse(raw: string[]) {
       'agent-only': { type: 'boolean' },
       repin: { type: 'boolean' },
       once: { type: 'boolean' },
+      sandbox: { type: 'string' },
+      root: { type: 'string' },
+      'wake-on-access': { type: 'boolean' },
+      'no-wake-on-access': { type: 'boolean' },
+      persist: { type: 'boolean' },
     },
     allowPositionals: true,
     strict: true,
@@ -276,6 +283,113 @@ function validateJobOptions(args: ReturnType<typeof parse>, allowed: readonly st
   if ((args.values.drive?.length ?? 0) > 1) throw new Error('Pass only one --drive ID.');
 }
 
+function validateMountsOptions(args: ReturnType<typeof parse>, allowed: readonly string[]) {
+  const unknown = Object.keys(args.values).filter((name) => !allowed.includes(name));
+  if (unknown.length)
+    throw new Error(
+      `Unsupported mounts option${unknown.length === 1 ? '' : 's'}: ${unknown.map((name) => `--${name}`).join(', ')}.`,
+    );
+  if ((args.values.drive?.length ?? 0) > 1) throw new Error('Pass only one --drive ID.');
+}
+
+function validateConnectOptions(args: ReturnType<typeof parse>) {
+  const allowed = new Set([
+    'sandbox',
+    'root',
+    'read-only',
+    'wake-on-access',
+    'no-wake-on-access',
+    'persist',
+  ]);
+  const unknown = Object.keys(args.values).filter((name) => !allowed.has(name));
+  if (unknown.length)
+    throw new Error(
+      `Unsupported connect option${unknown.length === 1 ? '' : 's'}: ${unknown.map((name) => `--${name}`).join(', ')}.`,
+    );
+}
+
+type LiveWorkspaceProviderHandle = {
+  dispatch(request: unknown, signal?: AbortSignal): Promise<unknown>;
+  close(): Promise<void>;
+};
+
+type LiveWorkspaceMountHandle = {
+  waitForExit(): Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+  close(): Promise<void>;
+};
+
+async function runLiveWorkspaceMount(
+  entry: import('./mount-registry.js').LiveWorkspaceRegistryEntry,
+  readOnly: boolean,
+) {
+  const controller = new AbortController();
+  let interruptedBy: 'SIGINT' | 'SIGTERM' | undefined;
+  let closeMount: (() => Promise<void>) | undefined;
+  const onSignal = (signal: 'SIGINT' | 'SIGTERM') => {
+    if (interruptedBy) {
+      process.exit(signal === 'SIGINT' ? 130 : 143);
+      return;
+    }
+    interruptedBy = signal;
+    controller.abort(signal);
+    void closeMount?.();
+  };
+  const onSigint = () => onSignal('SIGINT');
+  const onSigterm = () => onSignal('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  let provider: LiveWorkspaceProviderHandle | undefined;
+  let mount: LiveWorkspaceMountHandle | undefined;
+  try {
+    const { createLiveWorkspaceProvider } = await import('./live-workspace.js');
+    const { startWorkspaceMount } = await import('./workspace-mount.js');
+    const waker = entry.wakeOnAccess
+      ? (await import('./workspace-wake.js')).createInstaboxWorkspaceWaker({
+          registeredMachineIds: [entry.sandboxId],
+        })
+      : undefined;
+    const beforeIO = entry.wakeOnAccess
+      ? async (machineId: string, signal?: AbortSignal) => {
+          await waker!.wake(machineId, signal);
+        }
+      : undefined;
+    provider = await createLiveWorkspaceProvider({
+      sandboxId: entry.sandboxId,
+      root: entry.root,
+      readOnly,
+      ...(beforeIO ? { beforeIO } : {}),
+    });
+    if (!controller.signal.aborted) {
+      mount = await startWorkspaceMount({
+        workspaceId: JSON.stringify([entry.sandboxId, entry.root]),
+        mountPoint: entry.mountpoint,
+        readOnly,
+        signal: controller.signal,
+        dispatch: (request, signal) => provider!.dispatch(request, signal),
+      });
+      closeMount = () => mount!.close();
+      if (controller.signal.aborted) await closeMount();
+      const exit = await mount.waitForExit();
+      if (!interruptedBy && (exit.code !== 0 || exit.signal !== null))
+        throw new Error(
+          `Workspace mount helper exited (${exit.signal ?? exit.code ?? 'unknown'}).`,
+        );
+    }
+  } finally {
+    try {
+      await closeMount?.();
+    } finally {
+      try {
+        await provider?.close();
+      } finally {
+        process.off('SIGINT', onSigint);
+        process.off('SIGTERM', onSigterm);
+        if (interruptedBy) process.exitCode = interruptedBy === 'SIGINT' ? 130 : 143;
+      }
+    }
+  }
+}
+
 export function parseShareExpiry(value: string, now?: number): string;
 export function parseShareExpiry(value: undefined, now?: number): undefined;
 export function parseShareExpiry(value: string | undefined, now = Date.now()) {
@@ -397,8 +511,26 @@ async function run(command: string, raw: string[]) {
   if (args.values.once) throw new Error('--once is only supported by `jobs work`.');
   if (args.values['token-stdin'] && command !== 'login')
     throw new Error('--token-stdin is only supported by `login`.');
-  if (args.values['read-only'] && command !== 'mount' && command !== 'grant')
-    throw new Error('--read-only is only supported by `mount` and `grant`.');
+  if (
+    args.values['read-only'] &&
+    command !== 'mount' &&
+    command !== 'grant' &&
+    command !== 'mounts' &&
+    command !== 'connect'
+  )
+    throw new Error(
+      '--read-only is only supported by `mount`, `grant`, `mounts add` and `connect`.',
+    );
+  if (args.values.sandbox !== undefined && command !== 'mounts' && command !== 'connect')
+    throw new Error('--sandbox is only supported by `mounts add` and `connect`.');
+  if (args.values.root !== undefined && command !== 'connect')
+    throw new Error('--root is only supported by `connect`.');
+  if (args.values['wake-on-access'] && command !== 'connect')
+    throw new Error('--wake-on-access is only supported by `connect`.');
+  if (args.values.persist && command !== 'connect')
+    throw new Error('--persist is only supported by `connect`.');
+  if (args.values['no-wake-on-access'] && command !== 'connect')
+    throw new Error('--no-wake-on-access is only supported by `connect`.');
   if (command === 'put') {
     if (args.values.overwrite && args.values['if-version'] !== undefined)
       throw new Error('--overwrite and --if-version are mutually exclusive.');
@@ -407,8 +539,43 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'get' && args.values.version !== undefined && !args.values.version.trim())
     throw new Error('--version must not be empty.');
-  if (command === 'mount' && (args.positionals.length !== 1 || !args.positionals[0]?.trim()))
-    throw new Error('Usage: mount MOUNTPOINT [--drive ID] [--read-only]');
+  // `mount --name NAME` mounts a registry entry: its recorded drive, API context,
+  // mountpoint and read-only flag apply; conflicting flags are errors, never overrides.
+  let registryMount: import('./mount-registry.js').MountRegistryEntry | undefined;
+  if (command === 'mount' && args.values.name !== undefined) {
+    const name = args.values.name.trim();
+    if (!name || args.positionals.length !== 0)
+      throw new Error('Usage: mount --name NAME | mount MOUNTPOINT [--drive ID] [--read-only]');
+    const { findMountEntry } = await import('./mount-registry.js');
+    registryMount = await findMountEntry(name);
+    if (registryMount.kind === 'live-workspace') {
+      if (
+        args.values.drive !== undefined ||
+        args.values.api !== undefined ||
+        args.values['key-file']
+      )
+        throw new Error(
+          `Live workspace '${name}' does not use Agent Drive credentials or --drive/--api flags.`,
+        );
+    } else {
+      if (
+        args.values.drive !== undefined &&
+        (args.values.drive.length !== 1 || args.values.drive[0] !== registryMount.driveId)
+      )
+        throw new Error(`--drive does not match the drive registered for '${name}'.`);
+      if (args.values.api !== undefined && args.values.api !== registryMount.apiUrl)
+        throw new Error(`--api does not match the API recorded for '${name}'.`);
+      args.values.drive = [registryMount.driveId];
+      args.values.api = registryMount.apiUrl;
+    }
+    args.values['read-only'] = (args.values['read-only'] ?? false) || registryMount.readOnly;
+  }
+  if (
+    command === 'mount' &&
+    registryMount === undefined &&
+    (args.positionals.length !== 1 || !args.positionals[0]?.trim())
+  )
+    throw new Error('Usage: mount MOUNTPOINT [--drive ID] [--read-only] | mount --name NAME');
   let stdinSize: number | undefined;
   if (args.values.size !== undefined) {
     if (command !== 'put' || args.positionals[0] !== '-')
@@ -609,6 +776,130 @@ async function run(command: string, raw: string[]) {
       'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
+  if (command === 'connect') {
+    validateConnectOptions(args);
+    const [name, mountpoint] = args.positionals;
+    const sandboxId = args.values.sandbox;
+    const root = args.values.root;
+    if (args.positionals.length !== 2 || !name || !mountpoint || !sandboxId || !root)
+      throw new Error(
+        'Usage: connect NAME MOUNTPOINT --sandbox ID --root /WORKSPACE/PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]',
+      );
+    if (args.values['wake-on-access'] && args.values['no-wake-on-access'])
+      throw new Error('Use only one of --wake-on-access or --no-wake-on-access.');
+    const { registerLiveWorkspace } = await import('./mount-registry.js');
+    const entry = await registerLiveWorkspace({
+      name,
+      mountpoint,
+      sandboxId,
+      root,
+      ...(args.values['read-only'] !== undefined ? { readOnly: args.values['read-only'] } : {}),
+      wakeOnAccess: args.values['no-wake-on-access'] !== true,
+    });
+    output(entry);
+    if (args.values.persist) {
+      const service = await import('./workspace-service.js');
+      const options = {
+        name,
+        cliPath: fileURLToPath(import.meta.url),
+        configPath: configPath(),
+      };
+      await service.installWorkspaceService(options);
+      const current = await service.getWorkspaceServiceRuntimeStatus(options);
+      if (current.state === 'installed' && !current.active)
+        await service.activateWorkspaceService(options);
+      output(await service.getWorkspaceServiceRuntimeStatus(options));
+      return;
+    }
+    await runLiveWorkspaceMount(entry, entry.readOnly);
+    return;
+  }
+  if (command === 'mounts') {
+    const mode = args.positionals[0];
+    const usage =
+      'Usage: mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID] | mounts list | mounts status [NAME] | mounts wake NAME on|off | mounts service install|status|remove NAME';
+    const registry = await import('./mount-registry.js');
+    if (mode === 'service') {
+      validateMountsOptions(args, []);
+      const [action, name] = args.positionals.slice(1);
+      if (args.positionals.length !== 3 || !name) throw new Error(usage);
+      await registry.findMountEntry(name);
+      const service = await import('./workspace-service.js');
+      const options = {
+        name,
+        cliPath: fileURLToPath(import.meta.url),
+        configPath: configPath(),
+      };
+      if (action === 'install') {
+        await service.installWorkspaceService(options);
+        const current = await service.getWorkspaceServiceRuntimeStatus(options);
+        if (current.state === 'installed' && !current.active)
+          await service.activateWorkspaceService(options);
+        output(await service.getWorkspaceServiceRuntimeStatus(options));
+        return;
+      }
+      if (action === 'status') {
+        output(await service.getWorkspaceServiceRuntimeStatus(options));
+        return;
+      }
+      if (action === 'remove') {
+        const current = await service.getWorkspaceServiceRuntimeStatus(options);
+        if (current.active) await service.deactivateWorkspaceService(options);
+        output(await service.removeWorkspaceService(options));
+        return;
+      }
+      throw new Error(usage);
+    }
+    if (mode === 'add') {
+      validateMountsOptions(args, ['drive', 'api', 'read-only', 'sandbox']);
+      const [name, mountpoint] = [args.positionals[1], args.positionals[2]];
+      if (args.positionals.length !== 3 || !name || !mountpoint) throw new Error(usage);
+      const config = await readConfig();
+      const apiUrl =
+        args.values.api || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
+      const driveId = resolveDriveId(args.values.drive?.[0], config, apiUrl);
+      output(
+        await registry.registerMount({
+          name,
+          mountpoint,
+          driveId,
+          apiUrl,
+          ...(args.values['read-only'] !== undefined ? { readOnly: args.values['read-only'] } : {}),
+          ...(args.values.sandbox !== undefined ? { sandboxId: args.values.sandbox } : {}),
+        }),
+      );
+      return;
+    }
+    if (mode === 'list') {
+      validateMountsOptions(args, []);
+      if (args.positionals.length !== 1) throw new Error(usage);
+      output(await registry.readMountRegistry());
+      return;
+    }
+    if (mode === 'status') {
+      validateMountsOptions(args, []);
+      if (args.positionals.length > 2) throw new Error(usage);
+      output(await registry.mountStatus(args.positionals[1]));
+      return;
+    }
+    if (mode === 'wake') {
+      validateMountsOptions(args, []);
+      const [name, policy] = args.positionals.slice(1);
+      if (args.positionals.length !== 3 || !name || (policy !== 'on' && policy !== 'off'))
+        throw new Error('Usage: mounts wake NAME on|off');
+      const { setLiveWorkspaceWakePolicy } = await import('./mount-registry.js');
+      output(await setLiveWorkspaceWakePolicy(name, policy === 'on'));
+      return;
+    }
+    throw new Error(usage);
+  }
+  if (command === 'mount' && registryMount?.kind === 'live-workspace') {
+    await runLiveWorkspaceMount(
+      registryMount,
+      (args.values['read-only'] ?? false) || registryMount.readOnly,
+    );
+    return;
+  }
   if (command === 'grant') {
     const code = args.positionals[0];
     if (!code) throw new Error('grant requires the CODE shown by `agent-drive login`.');
@@ -710,7 +1001,7 @@ async function run(command: string, raw: string[]) {
   });
   if (command === 'mount') {
     const driveId = requiredDrive(args);
-    const mountPoint = args.positionals[0]!;
+    const mountPoint = registryMount?.mountpoint ?? args.positionals[0]!;
     const mountIdentity = await client.whoami();
     if (
       !Array.isArray(mountIdentity.scopes) ||
@@ -1246,7 +1537,17 @@ Commands:
                                         --size starts the 10-minute upload intent before stdin; input, upload and commit must fit.
                                         Without it, stdin is spooled first; upload and commit then have 10 minutes.
   get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
+  connect NAME MOUNTPOINT --sandbox ID --root PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]
+                                        Save and start a live workspace mount without Agent Drive credentials
+  mounts wake NAME on|off               Change saved wake-on-first-access policy locally
   mount MOUNTPOINT --drive ID [--read-only]  Mount a drive; write scope enables edits
+  mount --name NAME                    Mount a saved drive or live workspace
+  mounts list | status [NAME]           List saved mounts or inspect a mountpoint
+  mounts service install|status|remove NAME  Manage login startup for a saved mount
+  mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID]
+                                        Register a named local mount connection (offline; stored in mounts.json)
+  mounts list                             List registered mounts without starting any
+  mounts status [NAME]                    Show each entry's mountpoint filesystem state
   jobs init [--drive ID]                    Create the /jobs guide in a drive
   jobs submit ID [--drive ID]               Explicitly submit one drafted job
   jobs work [--drive ID] [--once] -- COMMAND [ARGS...]

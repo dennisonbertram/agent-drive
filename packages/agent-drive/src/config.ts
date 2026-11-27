@@ -124,7 +124,7 @@ export async function readConfig(): Promise<AgentDriveConfig> {
   };
 }
 
-function originOf(url: string) {
+export function originOf(url: string) {
   try {
     return new URL(url).origin;
   } catch {
