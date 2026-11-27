@@ -1,4 +1,16 @@
-import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import {
+  access,
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+} from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, posix, resolve } from 'node:path';
 import {
@@ -103,6 +115,43 @@ function validMountpoint(value: unknown) {
   if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0'))
     throw new Error('Invalid mountpoint; use an absolute path.');
   return resolve(value);
+}
+
+/** Validate Finder alias prerequisites before `connect` reserves its registry name. */
+export async function validateLiveWorkspaceMountpoint(
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string> {
+  const mountpoint = validMountpoint(value);
+  if (platform !== 'darwin') return mountpoint;
+
+  const parent = dirname(mountpoint);
+  let resolvedParent: string;
+  let parentInfo;
+  try {
+    resolvedParent = await realpath(parent);
+    parentInfo = await lstat(resolvedParent);
+  } catch (error) {
+    if (isCode(error, 'ENOENT'))
+      throw new Error(`Finder mountpoint parent does not exist: ${parent}`);
+    throw error;
+  }
+  if (!parentInfo.isDirectory())
+    throw new Error(`Finder mountpoint parent is not a directory: ${parent}`);
+  try {
+    await access(resolvedParent, constants.W_OK | constants.X_OK);
+  } catch {
+    throw new Error(`Finder mountpoint parent is not writable: ${parent}`);
+  }
+
+  try {
+    await lstat(mountpoint);
+    throw new Error(`Finder mountpoint already exists: ${mountpoint}`);
+  } catch (error) {
+    if (isCode(error, 'ENOENT')) return mountpoint;
+    throw error;
+  }
+  return mountpoint;
 }
 
 function validDriveId(value: unknown) {
@@ -315,9 +364,7 @@ async function requireSavedAuthorization(entry: DriveMountRegistryEntry) {
     );
 }
 
-export async function registerMount(
-  input: RegisterMountInput,
-): Promise<DriveMountRegistryEntry> {
+export async function registerMount(input: RegisterMountInput): Promise<DriveMountRegistryEntry> {
   const entry: DriveMountRegistryEntry = {
     kind: 'drive',
     name: validName(input.name),
@@ -360,8 +407,40 @@ export async function registerMount(
   );
 }
 
+/** Remove only the exact live-workspace registration created by this connect attempt. */
+export async function unregisterLiveWorkspaceIfUnchanged(
+  entry: LiveWorkspaceRegistryEntry,
+): Promise<boolean> {
+  const path = mountRegistryPath();
+  assertRegistryPathSafe(path);
+  return await withSqliteFileLock(
+    `${path}.lock.sqlite`,
+    async () => {
+      const mounts = await readRegistryFile(path);
+      const index = mounts.findIndex(
+        (current) =>
+          current.kind === 'live-workspace' &&
+          current.name === entry.name &&
+          current.registeredAt === entry.registeredAt &&
+          current.mountpoint === entry.mountpoint &&
+          current.sandboxId === entry.sandboxId &&
+          current.root === entry.root &&
+          current.readOnly === entry.readOnly &&
+          current.wakeOnAccess === entry.wakeOnAccess,
+      );
+      if (index < 0) return false;
+      const next = [...mounts];
+      next.splice(index, 1);
+      await writeRegistryFile(path, next);
+      return true;
+    },
+    { owner: 'mount-registry' },
+  );
+}
+
 export async function registerLiveWorkspace(
   input: RegisterLiveWorkspaceInput,
+  options: { preventFinderAliases?: boolean } = {},
 ): Promise<LiveWorkspaceRegistryEntry> {
   const entry: LiveWorkspaceRegistryEntry = {
     kind: 'live-workspace',
@@ -397,6 +476,15 @@ export async function registerLiveWorkspace(
       for (const existing of mounts) {
         if (existing.name === entry.name)
           throw new Error(`A mount named '${entry.name}' is already registered.`);
+        if (
+          options.preventFinderAliases === true &&
+          existing.kind === 'live-workspace' &&
+          existing.sandboxId === entry.sandboxId &&
+          existing.root === entry.root
+        )
+          throw new Error(
+            `This workspace is already registered as '${existing.name}' at ${existing.mountpoint}. Use that Finder mount instead of adding an alias.`,
+          );
         if (existing.mountpoint === entry.mountpoint)
           throw new Error(
             `The mountpoint ${entry.mountpoint} is already registered as '${existing.name}'.`,

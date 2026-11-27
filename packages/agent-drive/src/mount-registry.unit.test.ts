@@ -13,6 +13,8 @@ import {
   setLiveWorkspaceWakePolicy,
   readMountRegistry,
   registerMount,
+  validateLiveWorkspaceMountpoint,
+  unregisterLiveWorkspaceIfUnchanged,
 } from './mount-registry.js';
 
 const API = 'https://x.test/api';
@@ -85,12 +87,14 @@ describe('mount registry storage', () => {
     const credentials = JSON.stringify({ apiUrl: API, apiKey: 'credential-secret' });
     await writeFile(registryPath, credentials, { mode: 0o600 });
 
-    await expect(registerLiveWorkspace({
-      name: 'coordinator',
-      mountpoint: join(dir, 'coordinator'),
-      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
-      root: '/workspace/project',
-    })).rejects.toThrow(/malformed|refusing to overwrite/i);
+    await expect(
+      registerLiveWorkspace({
+        name: 'coordinator',
+        mountpoint: join(dir, 'coordinator'),
+        sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+        root: '/workspace/project',
+      }),
+    ).rejects.toThrow(/malformed|refusing to overwrite/i);
     expect(await readFile(registryPath, 'utf8')).toBe(credentials);
   });
 
@@ -158,6 +162,100 @@ describe('mount registry storage', () => {
     expect(text).not.toContain('apiKey');
   });
 
+  it('rejects a second live workspace alias while allowing a different workspace', async () => {
+    const dir = await isolatedConfig();
+    const first = {
+      name: 'coordinator',
+      mountpoint: join(dir, 'coordinator'),
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      root: '/workspace/project',
+    };
+    const registered = await registerLiveWorkspace(first, { preventFinderAliases: true });
+
+    await expect(
+      registerLiveWorkspace(
+        {
+          ...first,
+          name: 'coordinator-alias',
+          mountpoint: join(dir, 'coordinator-alias'),
+        },
+        { preventFinderAliases: true },
+      ),
+    ).rejects.toThrow(/already registered as 'coordinator'.*use that Finder mount/i);
+    expect(await readMountRegistry()).toEqual([registered]);
+
+    await expect(
+      registerLiveWorkspace({
+        ...first,
+        name: 'linux-alias',
+        mountpoint: join(dir, 'linux-alias'),
+      }),
+    ).resolves.toMatchObject({ name: 'linux-alias' });
+
+    await expect(
+      registerLiveWorkspace(
+        {
+          ...first,
+          name: 'other-workspace',
+          mountpoint: join(dir, 'other-workspace'),
+          sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V9B',
+        },
+        { preventFinderAliases: true },
+      ),
+    ).resolves.toMatchObject({ name: 'other-workspace' });
+  });
+
+  it('preflights Finder mountpoint parent and leaf before connect registration', async () => {
+    const dir = await isolatedConfig();
+    const missingParent = join(dir, 'missing', 'mount');
+    await expect(validateLiveWorkspaceMountpoint(missingParent, 'darwin')).rejects.toThrow(
+      /parent does not exist/i,
+    );
+
+    const file = join(dir, 'occupied-file');
+    await writeFile(file, 'synthetic');
+    await expect(validateLiveWorkspaceMountpoint(file, 'darwin')).rejects.toThrow(
+      /mountpoint already exists/i,
+    );
+
+    const occupiedDirectory = join(dir, 'occupied-directory');
+    await mkdir(occupiedDirectory);
+    await expect(validateLiveWorkspaceMountpoint(occupiedDirectory, 'darwin')).rejects.toThrow(
+      /mountpoint already exists/i,
+    );
+
+    const mountpoint = join(dir, 'mount');
+    await expect(validateLiveWorkspaceMountpoint(mountpoint, 'darwin')).resolves.toBe(mountpoint);
+    await expect(
+      registerLiveWorkspace({
+        name: 'recoverable',
+        mountpoint,
+        sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+        root: '/workspace/project',
+      }),
+    ).resolves.toMatchObject({ name: 'recoverable' });
+  });
+
+  it('does not roll back a live workspace entry changed since startup began', async () => {
+    const dir = await isolatedConfig();
+    const entry = await registerLiveWorkspace({
+      name: 'recoverable',
+      mountpoint: join(dir, 'mount'),
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      root: '/workspace/project',
+    });
+    const registry = await readMountRegistry();
+    await writeFile(
+      mountRegistryPath(),
+      JSON.stringify({ version: 1, mounts: [{ ...registry[0], readOnly: true }] }),
+    );
+
+    await expect(unregisterLiveWorkspaceIfUnchanged(entry)).resolves.toBe(false);
+    await expect(readMountRegistry()).resolves.toMatchObject([
+      { name: 'recoverable', readOnly: true },
+    ]);
+  });
+
   it('changes wake policy under the registry lock without contacting Instabox', async () => {
     const dir = await isolatedConfig();
     await registerLiveWorkspace({
@@ -170,9 +268,7 @@ describe('mount registry storage', () => {
       kind: 'live-workspace',
       wakeOnAccess: false,
     });
-    expect(await readMountRegistry()).toMatchObject([
-      { name: 'coordinator', wakeOnAccess: false },
-    ]);
+    expect(await readMountRegistry()).toMatchObject([{ name: 'coordinator', wakeOnAccess: false }]);
     await expect(setLiveWorkspaceWakePolicy('missing', true)).rejects.toThrow(
       /no mount registered/i,
     );
@@ -193,7 +289,9 @@ describe('mount registry storage', () => {
         ],
       }),
     );
-    await expect(setLiveWorkspaceWakePolicy('drive', true)).rejects.toThrow(/not a live workspace/i);
+    await expect(setLiveWorkspaceWakePolicy('drive', true)).rejects.toThrow(
+      /not a live workspace/i,
+    );
   });
 
   it('reads older registry entries without a kind as drive mounts', async () => {
@@ -289,7 +387,7 @@ describe('mount registry validation', () => {
     expect(await readMountRegistry()).toEqual([]);
   });
 
-  it.each(['relative/path', '/workspace/../outside', '/workspace//project', '/workspace\\project']) (
+  it.each(['relative/path', '/workspace/../outside', '/workspace//project', '/workspace\\project'])(
     'rejects an unsafe live workspace root %s',
     async (root) => {
       const dir = await isolatedConfig();

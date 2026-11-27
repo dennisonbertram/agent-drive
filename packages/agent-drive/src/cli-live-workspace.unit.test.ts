@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ afterEach(async () => {
   vi.doUnmock('./live-workspace.js');
   vi.doUnmock('./workspace-mount.js');
   vi.doUnmock('./workspace-wake.js');
+  vi.doUnmock('./workspace-service.js');
   vi.resetModules();
   process.exitCode = undefined;
   await Promise.all(
@@ -59,7 +60,7 @@ async function runCli(args: string[], registry?: unknown) {
   };
 }
 
-function mockLiveMountRuntime() {
+function mockLiveMountRuntime(runtimeOptions: { mountError?: Error } = {}) {
   const providerOptions: Record<string, unknown>[] = [];
   const mountOptions: Record<string, unknown>[] = [];
   const wakes: string[] = [];
@@ -97,6 +98,7 @@ function mockLiveMountRuntime() {
   vi.doMock('./workspace-mount.js', () => ({
     workspaceMountDomainId: () => 'test-domain-id',
     startWorkspaceMount: vi.fn(async (options: Record<string, unknown>) => {
+      if (runtimeOptions.mountError) throw runtimeOptions.mountError;
       mountOptions.push(options);
       const dispatch = options.dispatch as (request: {
         id: string;
@@ -150,6 +152,125 @@ describe('live workspace CLI registration', () => {
       workspaceId: JSON.stringify(['m_coordinator42', '/workspace/project']),
     });
     expect(runtime.wakes).toEqual(['m_coordinator42']);
+  });
+
+  it('releases the just-created registration when foreground mount startup fails', async () => {
+    mockLiveMountRuntime({ mountError: new Error('synthetic mount startup failure') });
+    const result = await runCli([
+      'connect',
+      'recoverable',
+      '/tmp/agent-drive-recoverable',
+      '--sandbox',
+      'm_recoverable42',
+      '--root',
+      '/workspace/project',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('synthetic mount startup failure');
+    expect(JSON.parse(await readFile(result.registryPath, 'utf8')).mounts).toEqual([]);
+  });
+
+  it('forgets an offline live workspace without changing remote state', async () => {
+    vi.doMock('./workspace-service.js', () => ({
+      getWorkspaceServiceRuntimeStatus: vi.fn(async () => ({
+        state: 'missing',
+        path: '/private/synthetic-service',
+        active: false,
+      })),
+    }));
+    const mountDir = await mkdtemp(join(tmpdir(), 'agent-drive-forget-free-'));
+    directories.push(mountDir);
+    const existing = {
+      version: 1,
+      mounts: [
+        {
+          kind: 'live-workspace',
+          name: 'coordinator',
+          mountpoint: join(mountDir, 'mount'),
+          sandboxId: 'm_coordinator42',
+          root: '/workspace/project',
+          readOnly: false,
+          wakeOnAccess: true,
+          registeredAt: '2026-11-27T12:00:00.000Z',
+        },
+      ],
+    };
+
+    const result = await runCli(['mounts', 'forget', 'coordinator'], existing);
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.fetchMock).not.toHaveBeenCalled();
+    expect(JSON.parse(result.stdout)).toEqual({ forgotten: 'coordinator' });
+    expect(JSON.parse(await readFile(result.registryPath, 'utf8')).mounts).toEqual([]);
+  });
+
+  it('refuses to forget a live workspace with an installed login service', async () => {
+    vi.doMock('./workspace-service.js', () => ({
+      getWorkspaceServiceRuntimeStatus: vi.fn(async () => ({
+        state: 'installed',
+        path: '/private/synthetic-service',
+        active: false,
+      })),
+    }));
+    const existing = {
+      version: 1,
+      mounts: [
+        {
+          kind: 'live-workspace',
+          name: 'coordinator',
+          mountpoint: '/tmp/agent-drive-forget-service-coordinator',
+          sandboxId: 'm_coordinator42',
+          root: '/workspace/project',
+          readOnly: false,
+          wakeOnAccess: true,
+          registeredAt: '2026-11-27T12:00:00.000Z',
+        },
+      ],
+    };
+
+    const result = await runCli(['mounts', 'forget', 'coordinator'], existing);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/login service is installed/i);
+    expect(JSON.parse(await readFile(result.registryPath, 'utf8')).mounts).toHaveLength(1);
+  });
+
+  it('refuses to forget a live workspace while a mountpoint alias is present', async () => {
+    vi.doMock('./workspace-service.js', () => ({
+      getWorkspaceServiceRuntimeStatus: vi.fn(async () => ({
+        state: 'missing',
+        path: '/private/synthetic-service',
+        active: false,
+      })),
+    }));
+    const directory = await mkdtemp(join(tmpdir(), 'agent-drive-forget-mounted-'));
+    directories.push(directory);
+    const target = join(directory, 'actual');
+    const alias = join(directory, 'alias');
+    await mkdir(target);
+    await symlink(target, alias);
+    const existing = {
+      version: 1,
+      mounts: [
+        {
+          kind: 'live-workspace',
+          name: 'coordinator',
+          mountpoint: alias,
+          sandboxId: 'm_coordinator42',
+          root: '/workspace/project',
+          readOnly: false,
+          wakeOnAccess: true,
+          registeredAt: '2026-11-27T12:00:00.000Z',
+        },
+      ],
+    };
+
+    const result = await runCli(['mounts', 'forget', 'coordinator'], existing);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/Finder mountpoint is present|cannot safely verify/i);
+    expect(JSON.parse(await readFile(result.registryPath, 'utf8')).mounts).toHaveLength(1);
   });
 
   it('rejects a duplicate local name instead of replacing its binding', async () => {
@@ -288,8 +409,15 @@ describe('live workspace CLI registration', () => {
       ],
     };
     const restart = vi.fn(async () => ({ restarted: true, active: true }));
-    const status = vi.fn(async () => ({ state: 'installed', path: '/private/service', active: true }));
-    const waitReady = vi.fn(async () => ({ ready: true, mountpoint: '/tmp/agent-drive-coordinator' }));
+    const status = vi.fn(async () => ({
+      state: 'installed',
+      path: '/private/service',
+      active: true,
+    }));
+    const waitReady = vi.fn(async () => ({
+      ready: true,
+      mountpoint: '/tmp/agent-drive-coordinator',
+    }));
     vi.doMock('./workspace-service.js', () => ({
       resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
       getWorkspaceServiceRuntimeStatus: status,
@@ -348,7 +476,11 @@ describe('live workspace CLI registration', () => {
 
   it('installs and starts a persistent mount when connect is given --persist', async () => {
     const runtime = mockLiveMountRuntime();
-    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service', updated: false }));
+    const install = vi.fn(async () => ({
+      state: 'installed',
+      path: '/private/service',
+      updated: false,
+    }));
     const activate = vi.fn(async () => {});
     const getStatus = vi
       .fn()
@@ -361,7 +493,10 @@ describe('live workspace CLI registration', () => {
       activateWorkspaceService: activate,
       getWorkspaceServiceRuntimeStatus: getStatus,
     }));
-    const waitReady = vi.fn(async () => ({ ready: true, mountpoint: '/tmp/agent-drive-coordinator' }));
+    const waitReady = vi.fn(async () => ({
+      ready: true,
+      mountpoint: '/tmp/agent-drive-coordinator',
+    }));
     vi.doMock('./workspace-service-readiness.js', () => ({
       waitForWorkspaceMountReadiness: waitReady,
     }));
@@ -531,7 +666,11 @@ describe('live workspace CLI registration', () => {
         },
       ],
     };
-    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service', updated: false }));
+    const install = vi.fn(async () => ({
+      state: 'installed',
+      path: '/private/service',
+      updated: false,
+    }));
     const activate = vi.fn(async () => {});
     const getStatus = vi
       .fn()

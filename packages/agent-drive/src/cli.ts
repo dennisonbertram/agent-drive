@@ -2,6 +2,7 @@
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js';
 import { decodeDriveKey, generateDriveKey } from './crypto.js';
@@ -610,10 +611,7 @@ async function run(command: string, raw: string[]) {
       const environmentApiKey = process.env.AGENT_DRIVE_API_KEY;
       if (environmentApiKey) {
         const environmentApiUrl = process.env.AGENT_DRIVE_API_URL;
-        if (
-          !environmentApiUrl ||
-          originOf(environmentApiUrl) !== originOf(registryMount.apiUrl)
-        )
+        if (!environmentApiUrl || originOf(environmentApiUrl) !== originOf(registryMount.apiUrl))
           throw new Error(
             `The environment API key has no matching origin for the API registered as '${name}'. Unset AGENT_DRIVE_API_KEY or set AGENT_DRIVE_API_URL to the registered origin.`,
           );
@@ -840,15 +838,23 @@ async function run(command: string, raw: string[]) {
       );
     if (args.values['wake-on-access'] && args.values['no-wake-on-access'])
       throw new Error('Use only one of --wake-on-access or --no-wake-on-access.');
-    const { registerLiveWorkspace } = await import('./mount-registry.js');
-    const entry = await registerLiveWorkspace({
-      name,
-      mountpoint,
-      sandboxId,
-      root,
-      ...(args.values['read-only'] !== undefined ? { readOnly: args.values['read-only'] } : {}),
-      wakeOnAccess: args.values['no-wake-on-access'] !== true,
-    });
+    const {
+      registerLiveWorkspace,
+      unregisterLiveWorkspaceIfUnchanged,
+      validateLiveWorkspaceMountpoint,
+    } = await import('./mount-registry.js');
+    await validateLiveWorkspaceMountpoint(mountpoint);
+    const entry = await registerLiveWorkspace(
+      {
+        name,
+        mountpoint,
+        sandboxId,
+        root,
+        ...(args.values['read-only'] !== undefined ? { readOnly: args.values['read-only'] } : {}),
+        wakeOnAccess: args.values['no-wake-on-access'] !== true,
+      },
+      { preventFinderAliases: process.platform === 'darwin' },
+    );
     if (args.values.persist) {
       const runtime = await installAndWaitForWorkspaceService(name, entry);
       output(entry);
@@ -856,13 +862,18 @@ async function run(command: string, raw: string[]) {
       return;
     }
     output(entry);
-    await runLiveWorkspaceMount(entry, entry.readOnly);
+    try {
+      await runLiveWorkspaceMount(entry, entry.readOnly);
+    } catch (error) {
+      await unregisterLiveWorkspaceIfUnchanged(entry);
+      throw error;
+    }
     return;
   }
   if (command === 'mounts') {
     const mode = args.positionals[0];
     const usage =
-      'Usage: mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID] | mounts list | mounts status [NAME] | mounts wake NAME on|off | mounts service install|status|remove NAME';
+      'Usage: mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID] | mounts list | mounts status [NAME] | mounts forget NAME | mounts wake NAME on|off | mounts service install|status|remove NAME';
     const registry = await import('./mount-registry.js');
     if (mode === 'service') {
       validateMountsOptions(args, []);
@@ -889,9 +900,7 @@ async function run(command: string, raw: string[]) {
         current = await service.getWorkspaceServiceRuntimeStatus(options);
         if (current.state !== 'installed' || !current.active)
           throw new Error(`Workspace service '${name}' did not become active.`);
-        const { waitForWorkspaceMountReadiness } = await import(
-          './workspace-service-readiness.js'
-        );
+        const { waitForWorkspaceMountReadiness } = await import('./workspace-service-readiness.js');
         await waitForWorkspaceMountReadiness({
           mountpoint: entry.mountpoint,
           expectedDomainId:
@@ -946,6 +955,58 @@ async function run(command: string, raw: string[]) {
       output(await registry.mountStatus(args.positionals[1]));
       return;
     }
+    if (mode === 'forget') {
+      validateMountsOptions(args, []);
+      const name = args.positionals[1];
+      if (args.positionals.length !== 2 || !name) throw new Error('Usage: mounts forget NAME');
+      const entry = await registry.findMountEntry(name);
+      if (entry.kind !== 'live-workspace')
+        throw new Error(`Mount '${name}' is not a live workspace.`);
+      const service = await import('./workspace-service.js');
+      const serviceStatus = await service.getWorkspaceServiceRuntimeStatus({
+        name,
+        cliPath: fileURLToPath(import.meta.url),
+        configPath: configPath(),
+      });
+      if (serviceStatus.state !== 'missing')
+        throw new Error(
+          `Cannot forget '${name}' while its login service is ${serviceStatus.state}. Remove or repair it with \`agent-drive mounts service remove ${name}\` first.`,
+        );
+      const filesystem = await registry.describeMountpoint(entry.mountpoint);
+      if (process.platform === 'darwin' && filesystem.state !== 'free')
+        throw new Error(
+          `Cannot forget '${name}' while its Finder mountpoint is present. Stop the mount and try again.`,
+        );
+      if (process.platform === 'linux') {
+        if (filesystem.state === 'symlink' || filesystem.state === 'other')
+          throw new Error(`Cannot safely verify the mountpoint for '${name}'.`);
+        if (filesystem.state === 'directory') {
+          const mountInfo = await readFile('/proc/self/mountinfo', 'utf8').catch(() => {
+            throw new Error(`Cannot safely verify whether '${name}' is mounted.`);
+          });
+          const escapedPath = resolve(entry.mountpoint)
+            .replace(/\\/g, '\\134')
+            .replace(/ /g, '\\040')
+            .replace(/\t/g, '\\011')
+            .replace(/\n/g, '\\012');
+          const isMounted = mountInfo.split('\n').some((line) => {
+            const fields = line.split(' ');
+            return (
+              fields[4]?.replace(/\\([0-7]{3})/g, (_match, octal: string) =>
+                String.fromCharCode(Number.parseInt(octal, 8)),
+              ) === escapedPath
+            );
+          });
+          if (isMounted) throw new Error(`Cannot forget '${name}' while its mountpoint is active.`);
+        }
+      } else if (process.platform !== 'darwin' && filesystem.state !== 'free') {
+        throw new Error(`Cannot safely verify the mountpoint for '${name}'.`);
+      }
+      if (!(await registry.unregisterLiveWorkspaceIfUnchanged(entry)))
+        throw new Error(`Mount '${name}' changed during the forget operation. Retry the command.`);
+      output({ forgotten: name });
+      return;
+    }
     if (mode === 'wake') {
       validateMountsOptions(args, []);
       const [name, policy] = args.positionals.slice(1);
@@ -981,9 +1042,9 @@ async function run(command: string, raw: string[]) {
           );
           await waitForWorkspaceMountReadiness({
             mountpoint: previousLive.mountpoint,
-            expectedDomainId: (
-              await import('./workspace-mount.js')
-            ).workspaceMountDomainId(JSON.stringify([previousLive.sandboxId, previousLive.root])),
+            expectedDomainId: (await import('./workspace-mount.js')).workspaceMountDomainId(
+              JSON.stringify([previousLive.sandboxId, previousLive.root]),
+            ),
           });
         } catch (error) {
           await setLiveWorkspaceWakePolicy(name, previousLive.wakeOnAccess);
@@ -1641,6 +1702,7 @@ Commands:
   get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
   connect NAME MOUNTPOINT --sandbox ID --root PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]
                                         Save and start a live workspace mount without Agent Drive credentials
+  mounts forget NAME                    Forget an offline live workspace registration
   mounts wake NAME on|off               Change saved wake-on-first-access policy locally
   mount MOUNTPOINT --drive ID [--read-only]  Mount a drive; write scope enables edits
   mount --name NAME                    Mount a saved drive or live workspace

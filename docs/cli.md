@@ -68,12 +68,13 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `key revoke`          | Revoke an API key.                                           | [Connect an agent](connect-an-agent.md)                      |
 | `put`                 | Upload and encrypt a file.                                   | [Files, versions and sync](files-and-sync.md)                |
 | `get`                 | Download and decrypt a file.                                 | [Files, versions and sync](files-and-sync.md)                |
-| `connect`             | Save and start a live sandbox folder mount.                   | [Live workspace mounts](#live-workspace-mounts)               |
+| `connect`             | Save and start a live sandbox folder mount.                  | [Live workspace mounts](#live-workspace-mounts)              |
 | `mount`               | Mount a drive or a saved live workspace.                     | [Mounts](#mount-a-drive)                                     |
-| `mounts list`         | List saved local mount definitions.                          | [Live workspace mounts](#live-workspace-mounts)               |
-| `mounts status`       | Inspect a saved mountpoint.                                  | [Live workspace mounts](#live-workspace-mounts)               |
-| `mounts wake`         | Change a saved live workspace's wake policy.                 | [Live workspace mounts](#live-workspace-mounts)               |
-| `mounts service`      | Install, check or remove login startup for a named mount.    | [Live workspace mounts](#live-workspace-mounts)               |
+| `mounts list`         | List saved local mount definitions.                          | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts status`       | Inspect a saved mountpoint.                                  | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts forget`       | Forget an offline live workspace registration.               | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts wake`         | Change a saved live workspace's wake policy.                 | [Live workspace mounts](#live-workspace-mounts)              |
+| `mounts service`      | Install, check or remove login startup for a named mount.    | [Live workspace mounts](#live-workspace-mounts)              |
 | `jobs init`           | Create the jobs guide in a drive.                            | [Mounted jobs](#mounted-jobs)                                |
 | `jobs submit`         | Submit one draft for local processing.                       | [Mounted jobs](#mounted-jobs)                                |
 | `jobs work`           | Run one configured local worker.                             | [Mounted jobs](#mounted-jobs)                                |
@@ -181,6 +182,8 @@ cannot complete safely, the command reports the error and leaves pending local w
 A foreground mount uses the setting it loaded at startup; stop it cleanly and run
 `agent-drive mount --name NAME` again to apply a later change.
 Different names may point at the same sandbox folder, but each name needs a distinct local mountpoint.
+On macOS, Finder supports one registered mount per sandbox folder. Use the existing name and
+mountpoint instead of registering a second Finder alias for the same sandbox folder.
 
 Live mounts currently support creating new files. Saving changes over an existing file is not
 supported yet and fails safely with a read-only error. Existing files are available to read; use a
@@ -195,6 +198,11 @@ agent-drive mounts service install coordinator
 agent-drive mounts service status coordinator
 agent-drive mounts service remove coordinator
 ```
+
+After stopping the foreground mount and removing any login service, use
+`agent-drive mounts forget NAME` to forget its local definition. It does not change the sandbox or
+files in it. The command refuses to forget a mount while its service or mountpoint may still be
+active.
 
 `--persist` installs and activates the named login service. You can also install it after connecting
 with `mounts service install`. New live connections wake on first filesystem access unless
