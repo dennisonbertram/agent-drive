@@ -192,6 +192,8 @@ describe('authentication', () => {
       expect(reply.status, path).toBe(401);
       expect(JSON.parse(reply.body.toString())).toEqual({ error: 'unauthorized' });
     }
+    const queryOnSecretRoot = await sendRaw(s.proxy.port, `/${s.proxy.secret}?x=1`);
+    expect(queryOnSecretRoot.status).toBe(404);
     expect(up.seen.length).toBe(0);
     expect(s.proxy.dropped.get('unauthorized')).toBe(attempts.length);
     expect(s.logs.join('\n')).not.toContain(s.proxy.secret);

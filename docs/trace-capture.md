@@ -32,7 +32,7 @@ What happens:
 1. The CLI starts a proxy on `127.0.0.1` on a random port and generates a fresh secret for the run.
 2. It starts COMMAND with `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/<secret>/anthropic` and `OPENAI_BASE_URL=http://127.0.0.1:<port>/<secret>/openai` in the environment of that child process only. Codex also receives the secret in a `-c` provider URL argument. Your shell, shell profile, Claude settings and `~/.codex/config.toml` are not changed.
 3. The proxy answers only requests whose first path segment is that run's secret. Anything else gets a 401 and is never forwarded or recorded, which keeps other local processes from relaying through the proxy. It does not protect against software that can read the child process's environment, command-line arguments, or memory.
-4. The proxy removes the secret segment, then forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives. The secret never reaches the API and is never written to logs or traces.
+4. The proxy removes the secret segment, then forwards each request unchanged to `api.anthropic.com` or `api.openai.com` and streams the response back as it arrives. The proxy's own access logs and trace paths omit the secret. System-level process debugging may record child arguments or environment values.
 5. For each exchange it builds a redacted copy, encrypts it with the drive key, and queues it for upload.
 6. When COMMAND exits, the CLI exits with the same exit code.
 
@@ -49,11 +49,13 @@ For a command named `codex`, the CLI adds these arguments before yours, because 
 -c model_provider="agent_drive_capture"
 ```
 
-Each request is also logged to standard error:
+Authenticated requests are logged to standard error:
 
 ```text
 capture: <METHOD> <path> <status> <ms>ms <captured | not captured: reason>
 ```
+
+Unauthenticated requests use the fixed line `capture: unauthorized 401`; the proxy does not log their method or path.
 
 ## What is and is not captured
 

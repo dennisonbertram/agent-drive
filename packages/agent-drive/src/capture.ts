@@ -336,7 +336,7 @@ export async function startProxy(options: ProxyOptions) {
     const method = req.method ?? 'GET';
     // The first path segment is the run secret: checked before any routing,
     // recording or forwarding, and never carried upstream or into logs/traces.
-    const gate = /^\/([0-9A-Za-z_-]+)(\/.*)?$/u.exec(req.url ?? '');
+    const gate = /^\/([0-9A-Za-z_-]+)(\/.*|\?.*)?$/u.exec(req.url ?? '');
     if (!gate || !authorized(gate[1] ?? '')) {
       drop('unauthorized');
       res.writeHead(401, { 'content-type': 'application/json' });

@@ -1134,8 +1134,10 @@ describe('capture command', () => {
     const r = await capture(['--drive', A, '--', ...dumpEnv(file, 3)]);
     expect(r.code).toBe(3);
     const env = JSON.parse(await readFile(file, 'utf8')) as Record<string, string>;
-    expect(env.ANTHROPIC_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/anthropic$/u);
-    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/openai$/u);
+    expect(env.ANTHROPIC_BASE_URL).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/anthropic$/u,
+    );
+    expect(env.OPENAI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/openai$/u);
     expect(process.env.ANTHROPIC_BASE_URL).toBe('');
     expect(process.env.OPENAI_BASE_URL).toBe('');
     expect(disabled(r.err)).toEqual([]);
@@ -1207,9 +1209,9 @@ describe('capture command', () => {
     expect(argv.filter((a) => a === '-c').length).toBe(6);
     expect(argv.slice(-2)).toEqual(['exec', 'hello']);
     expect(argv).toContain('model_provider="agent_drive_capture"');
-    expect(argv.some((a) => /base_url="http:\/\/127\.0\.0\.1:\d+\/openai\/v1"/u.test(a))).toBe(
-      true,
-    );
+    expect(
+      argv.some((a) => /base_url="http:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/openai\/v1"/u.test(a)),
+    ).toBe(true);
   });
 
   it('rejects a missing -- and an invalid --agent without running anything', async () => {
