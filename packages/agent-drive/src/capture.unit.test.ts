@@ -179,6 +179,25 @@ describe('routing', () => {
     );
     expect((await spooled(s.dir)).length + s.uploads.length).toBe(2);
   });
+
+  it('routes an OpenAI SDK Responses request built from its authenticated base URL', async () => {
+    const up = await fakeUpstream((_q, res) => jsonReply(res, { ok: true }));
+    const s = await setup(up.upstreams);
+    // The official OpenAI Node SDK uses OPENAI_BASE_URL as its base and appends
+    // `/responses` for `client.responses.create(...)`.
+    const baseUrl = `http://127.0.0.1:${s.proxy.port}/${s.proxy.secret}/openai/v1`;
+    const requestUrl = new URL(`${baseUrl}/responses`);
+    const reply = await sendRaw(s.proxy.port, `${requestUrl.pathname}${requestUrl.search}`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer SYNTHETIC-OPENAI-KEY' },
+      body: '{"model":"test","input":"hello"}',
+    });
+    expect(reply.status).toBe(200);
+    expect(up.seen.map((request) => request.url)).toEqual(['/v1/responses']);
+    expect(up.seen[0]!.headers.authorization).toBe('Bearer SYNTHETIC-OPENAI-KEY');
+    expect(up.seen[0]!.headers[CODEX_CAPTURE_TOKEN_HEADER]).toBeUndefined();
+    await s.proxy.close({ taskMs: 1000, totalMs: 500 });
+  });
 });
 
 describe('authentication', () => {
