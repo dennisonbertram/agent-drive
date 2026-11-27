@@ -1054,6 +1054,47 @@ describe('AgentDriveClient job-approval guarded claim writes', () => {
       });
   });
 
+  it('classifies only the exact missing-route 404 on a guarded commit as an unsupported worker API', async () => {
+    const routeMissing = { error: { code: 'not_found', message: 'Endpoint not found.' } };
+    const intentMissing = { error: { code: 'not_found', message: 'Upload intent not found.' } };
+    const responses = [routeMissing, intentMissing, routeMissing];
+    const paths: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      paths.push(new URL(String(input)).pathname);
+      return Response.json(responses[paths.length - 1], { status: 404 });
+    });
+    const client = makeClient(fetcher);
+
+    // An older server has no commit-job-claim route: its generic route miss is
+    // a fatal capability gap, not a claim failure — never retried or replayed
+    // through the unguarded endpoint.
+    await expect(
+      client.replayCommit('d', 'claim-intent', { ifJobApprovalVersionId: approvalId }),
+    ).rejects.toMatchObject({
+      code: 'worker_api_unsupported',
+      status: 502,
+      message: expect.stringContaining('not supported'),
+    });
+    // A real 404 from the guarded endpoint — a missing intent or drive — keeps
+    // its own code and message.
+    await expect(
+      client.replayCommit('d', 'claim-intent', { ifJobApprovalVersionId: approvalId }),
+    ).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+      message: 'Upload intent not found.',
+    });
+    // The identical route-miss reply on the plain endpoint is just a 404.
+    await expect(client.replayCommit('d', 'plain-intent')).rejects.toMatchObject({
+      code: 'not_found',
+      status: 404,
+      message: 'Endpoint not found.',
+    });
+
+    expect(paths.filter((path) => path.endsWith('/commit-job-claim'))).toHaveLength(2);
+    expect(paths.filter((path) => path.endsWith('/commit'))).toHaveLength(1);
+  });
+
   it('keeps ordinary puts and replays on the generic commit endpoint', async () => {
     const calls: { pathname: string; body?: unknown }[] = [];
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

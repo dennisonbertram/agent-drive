@@ -1861,6 +1861,39 @@ describe('runJobs daemon follow', () => {
     ).rejects.toBe(error);
   });
 
+  it('stops the watch on an unsupported guarded claim commit instead of restaging', async () => {
+    const drive = new FakeDrive();
+    const client = asClient(drive);
+    await seedSubmission(drive, 'job-old-commit');
+    const claimPath = '/jobs/.agent-drive/claims/job-old-commit.json';
+    // The signal the real client produces when an older server has no
+    // commit-job-claim route: one guarded attempt, then a fatal stop.
+    const error = new AgentDriveApiError('worker_api_unsupported', 502, 'upgrade required');
+    drive.inject.set(`put:${claimPath}`, () => error);
+    const naps: number[] = [];
+    let invoked = 0;
+
+    await expect(
+      runJobs(client, DRIVE, async () => ((invoked += 1), []), {
+        once: false,
+        signal: new AbortController().signal,
+        pollMs: 1,
+        pollMaxMs: 2,
+        retryMs: 1,
+        sleep: async (ms) => {
+          naps.push(ms);
+        },
+      }),
+    ).rejects.toBe(error);
+
+    // No retry sleep, no second receipt attempt, no claim or handler run.
+    expect(naps).toEqual([]);
+    expect(drive.calls.filter((call) => call === `put:${claimPath}`)).toHaveLength(1);
+    expect(invoked).toBe(0);
+    expect(drive.has(claimPath)).toBe(false);
+    expect(drive.has('/jobs/job-old-commit/status.json')).toBe(false);
+  });
+
   it('probes the head cursor before the startup scan so no join is lost', async () => {
     const drive = new FakeDrive();
     const client = asClient(drive);

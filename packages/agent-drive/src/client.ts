@@ -1078,18 +1078,41 @@ export class AgentDriveClient {
       throw new TypeError('A valid upload intent ID is required.');
     }
     const ifJobApprovalVersionId = options.ifJobApprovalVersionId;
-    const committed = await this.request<{ version: Version }>(
-      `drives/${encode(driveId)}/${ifJobApprovalVersionId === undefined ? 'commit' : 'commit-job-claim'}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(
-          ifJobApprovalVersionId === undefined
-            ? { intentId }
-            : { intentId, ifJobApprovalVersionId },
-        ),
-        ...(options.signal ? { signal: options.signal } : {}),
-      },
-    );
+    let committed: { version: Version };
+    try {
+      committed = await this.request<{ version: Version }>(
+        `drives/${encode(driveId)}/${ifJobApprovalVersionId === undefined ? 'commit' : 'commit-job-claim'}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(
+            ifJobApprovalVersionId === undefined
+              ? { intentId }
+              : { intentId, ifJobApprovalVersionId },
+          ),
+          ...(options.signal ? { signal: options.signal } : {}),
+        },
+      );
+    } catch (error) {
+      // A guarded commit only exists on servers with the dedicated route; an
+      // older server answers its exact route-miss 404, which is a fatal
+      // capability gap rather than a claim outcome — never a reason to retry
+      // or fall back to the unguarded commit. Every other failure (a missing
+      // intent or drive, an approval change) keeps its own code and message.
+      if (
+        ifJobApprovalVersionId !== undefined &&
+        error instanceof AgentDriveApiError &&
+        error.status === 404 &&
+        error.code === 'not_found' &&
+        error.message === 'Endpoint not found.'
+      ) {
+        throw new AgentDriveApiError(
+          'worker_api_unsupported',
+          502,
+          'Guarded job claims are not supported on this server. Upgrade the Agent Drive server to run this worker.',
+        );
+      }
+      throw error;
+    }
     return committed.version;
   }
 
