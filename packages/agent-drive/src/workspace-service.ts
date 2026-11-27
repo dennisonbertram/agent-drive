@@ -1,6 +1,18 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { lstat, link, mkdir, open, readFile, unlink } from 'node:fs/promises';
+import {
+  access,
+  lstat,
+  link,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  unlink,
+} from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -13,6 +25,7 @@ export type WorkspaceServiceOptions = {
   cliPath: string;
   nodePath?: string;
   configPath?: string;
+  instaboxPath?: string;
 };
 export type WorkspaceServicePaths = { directory: string; path: string };
 export type WorkspaceServiceStatus = {
@@ -79,10 +92,13 @@ function systemdArg(value: string): string {
     .replaceAll('"', '\\"')}"`;
 }
 
-function servicePath(nodePath: string): string {
+function servicePath(nodePath: string, instaboxPath?: string): string {
+  const directories = [dirname(nodePath), ...(instaboxPath ? [dirname(instaboxPath)] : [])];
+  if (directories.some((directory) => directory.includes(':')))
+    throw new Error('Node and Instabox directories cannot contain a colon in the service PATH.');
   return [
     ...new Set([
-      dirname(nodePath),
+      ...directories,
       '/opt/homebrew/bin',
       '/usr/local/bin',
       '/usr/bin',
@@ -91,6 +107,100 @@ function servicePath(nodePath: string): string {
       '/sbin',
     ]),
   ].join(':');
+}
+
+export async function resolveInstaboxExecutable(
+  options: {
+    searchPath?: string;
+    home?: string;
+  } = {},
+): Promise<string> {
+  const home = options.home ?? homedir();
+  validatePath(home, 'Home directory');
+  const directories = [
+    ...(options.searchPath ?? process.env.PATH ?? '').split(':').filter(Boolean),
+    join(home, '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+  ];
+  const visited = new Set<string>();
+  for (const directory of directories) {
+    if (!directory.startsWith('/') || directory.includes('\0') || /[\r\n]/.test(directory))
+      continue;
+    const normalized = resolve(directory);
+    if (visited.has(normalized)) continue;
+    visited.add(normalized);
+    const candidate = join(normalized, 'instabox');
+    try {
+      const info = await stat(candidate);
+      if (!info.isFile()) continue;
+      await access(candidate, constants.X_OK);
+      const executable = await realpath(candidate);
+      validatePath(executable, 'Instabox path');
+      return executable;
+    } catch {
+      // Keep searching the bounded list of absolute executable locations.
+    }
+  }
+  throw new Error('Could not find an executable Instabox CLI in PATH or ~/.local/bin.');
+}
+
+function ownerMarker(platform: WorkspaceServicePlatform, name: string): string {
+  return platform === 'darwin'
+    ? `<!-- agent-drive-workspace-service:v1:${name} -->`
+    : `# agent-drive-workspace-service:v1:${name}`;
+}
+
+function isLegacyOwnedDefinition(
+  value: string,
+  platform: WorkspaceServicePlatform,
+  name: string,
+): boolean {
+  if (platform === 'linux') {
+    const lines = value.replace(/\n+$/u, '').split('\n');
+    return (
+      lines.length === 13 &&
+      lines[0] === '# Managed by Agent Drive. Do not edit while the named mount is installed.' &&
+      lines[1] === '[Unit]' &&
+      lines[2] === `Description=Agent Drive persistent mount ${name}` &&
+      lines[3] === '' &&
+      lines[4] === '[Service]' &&
+      /^Environment="PATH=(?:\\.|[^"\\])*"$/u.test(lines[5] ?? '') &&
+      /^Environment="AGENT_DRIVE_CONFIG=\/(?:\\.|[^"\\])*"$/u.test(lines[6] ?? '') &&
+      lines[7] === 'Type=simple' &&
+      new RegExp(
+        `^ExecStart="/(?:\\\\.|[^"\\\\])*" "/(?:\\\\.|[^"\\\\])*" "mount" "--name" "${name}"$`,
+        'u',
+      ).test(lines[8] ?? '') &&
+      lines[9] === 'Restart=on-failure' &&
+      lines[10] === '' &&
+      lines[11] === '[Install]' &&
+      lines[12] === 'WantedBy=default.target'
+    );
+  }
+  return (
+    value.includes(`<key>Label</key><string>com.agentdrive.mount.${name}</string>`) &&
+    value.includes('<key>EnvironmentVariables</key>') &&
+    /<key>PATH<\/key><string>\/(?:\\.|[^<])*<\/string>/u.test(value) &&
+    /<key>AGENT_DRIVE_CONFIG<\/key><string>\/(?:\\.|[^<])*<\/string>/u.test(value) &&
+    new RegExp(
+      `<key>ProgramArguments</key>\\s*<array>\\s*<string>/(?:\\\\.|[^<])*<\\/string>\\s*<string>/(?:\\\\.|[^<])*<\\/string>\\s*<string>mount<\\/string>\\s*<string>--name<\\/string>\\s*<string>${name}<\\/string>\\s*<\\/array>`,
+      'u',
+    ).test(value)
+  );
+}
+
+function isOwnedDefinition(
+  value: string,
+  platform: WorkspaceServicePlatform,
+  name: string,
+): boolean {
+  return (
+    value.split(/\r?\n/u).some((line) => line.trim() === ownerMarker(platform, name)) ||
+    isLegacyOwnedDefinition(value, platform, name)
+  );
 }
 
 export function workspaceServicePaths(
@@ -115,7 +225,7 @@ export function workspaceServicePaths(
 export function renderWorkspaceService(
   options: Pick<
     WorkspaceServiceOptions,
-    'platform' | 'name' | 'cliPath' | 'nodePath' | 'configPath'
+    'platform' | 'home' | 'name' | 'cliPath' | 'nodePath' | 'configPath' | 'instaboxPath'
   >,
 ): string {
   validateName(options.name);
@@ -123,9 +233,11 @@ export function renderWorkspaceService(
   const platform = platformOf(options.platform);
   const nodePath = options.nodePath ?? process.execPath;
   validatePath(nodePath, 'Node path');
-  const path = servicePath(nodePath);
+  if (options.instaboxPath) validatePath(options.instaboxPath, 'Instabox path');
+  const instaboxPath = options.instaboxPath ? resolve(options.instaboxPath) : undefined;
+  const path = servicePath(nodePath, instaboxPath);
   const configFilePath = resolve(
-    options.configPath ?? join(homedir(), '.config', 'agent-drive', 'config.json'),
+    options.configPath ?? join(options.home ?? homedir(), '.config', 'agent-drive', 'config.json'),
   );
   validatePath(configFilePath, 'Agent Drive config path');
   if (platform === 'darwin') {
@@ -138,11 +250,15 @@ export function renderWorkspaceService(
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
       '<plist version="1.0">',
       '<dict>',
+      `  ${ownerMarker(platform, options.name)}`,
       `  <key>Label</key><string>${xml(label)}</string>`,
       '  <key>EnvironmentVariables</key>',
       '  <dict>',
       `    <key>PATH</key><string>${xml(path)}</string>`,
       `    <key>AGENT_DRIVE_CONFIG</key><string>${xml(configFilePath)}</string>`,
+      ...(instaboxPath
+        ? [`    <key>AGENT_DRIVE_INSTABOX_CLI</key><string>${xml(instaboxPath)}</string>`]
+        : []),
       '  </dict>',
       '  <key>ProgramArguments</key>',
       '  <array>',
@@ -158,13 +274,16 @@ export function renderWorkspaceService(
     ].join('\n');
   }
   return [
-    '# Managed by Agent Drive. Do not edit while the named mount is installed.',
+    ownerMarker(platform, options.name),
     '[Unit]',
     `Description=Agent Drive persistent mount ${options.name}`,
     '',
     '[Service]',
     `Environment=${systemdArg(`PATH=${path}`)}`,
     `Environment=${systemdArg(`AGENT_DRIVE_CONFIG=${configFilePath}`)}`,
+    ...(instaboxPath
+      ? [`Environment=${systemdArg(`AGENT_DRIVE_INSTABOX_CLI=${instaboxPath}`)}`]
+      : []),
     'Type=simple',
     `ExecStart=${[nodePath, options.cliPath, 'mount', '--name', options.name].map(systemdArg).join(' ')}`,
     'Restart=on-failure',
@@ -183,6 +302,7 @@ export async function getWorkspaceServiceStatus(
   options: WorkspaceServiceOptions,
 ): Promise<WorkspaceServiceStatus> {
   const { path } = workspaceServicePaths(options);
+  const platform = platformOf(options.platform);
   let existing: string;
   try {
     const info = await lstat(path);
@@ -197,17 +317,46 @@ export async function getWorkspaceServiceStatus(
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'missing', path };
     throw error;
   }
-  return { state: existing === contents(options) ? 'installed' : 'conflict', path };
+  return {
+    state: isOwnedDefinition(existing, platform, options.name) ? 'installed' : 'conflict',
+    path,
+  };
 }
 
 export async function installWorkspaceService(
   options: WorkspaceServiceOptions,
-): Promise<{ state: 'installed'; path: string }> {
+): Promise<{ state: 'installed'; path: string; updated: boolean }> {
   const { directory, path } = workspaceServicePaths(options);
   const expected = contents(options);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const current = await getWorkspaceServiceStatus(options);
-  if (current.state === 'installed') return { state: 'installed', path };
+  if (current.state === 'installed') {
+    const existing = await readFile(path, 'utf8');
+    if (existing === expected) return { state: 'installed', path, updated: false };
+    const temporaryPath = join(directory, `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
+    const handle = await open(temporaryPath, 'wx', 0o600);
+    try {
+      try {
+        await handle.writeFile(expected, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      const currentInfo = await lstat(path);
+      const currentText = await readFile(path, 'utf8');
+      if (
+        !currentInfo.isFile() ||
+        (currentInfo.mode & 0o777) !== 0o600 ||
+        (typeof process.getuid === 'function' && currentInfo.uid !== process.getuid()) ||
+        !isOwnedDefinition(currentText, platformOf(options.platform), options.name)
+      )
+        throw new Error(`Refusing to update an unowned service definition at ${path}`);
+      await rename(temporaryPath, path);
+    } finally {
+      await unlink(temporaryPath).catch(() => {});
+    }
+    return { state: 'installed', path, updated: true };
+  }
   if (current.state === 'conflict') throw new Error(`Service definition collision at ${path}`);
 
   // Write a private temporary file, then hard-link it into place without replacing a collision.
@@ -227,11 +376,12 @@ export async function installWorkspaceService(
   } finally {
     await unlink(temporaryPath).catch(() => {});
   }
-  return { state: 'installed', path };
+  return { state: 'installed', path, updated: false };
 }
 
 export async function removeWorkspaceService(
   options: WorkspaceServiceOptions,
+  runner: WorkspaceServiceRunner = runCommand,
 ): Promise<{ state: 'removed' | 'missing'; path: string }> {
   const status = await getWorkspaceServiceStatus(options);
   if (status.state === 'missing') return { state: 'missing', path: status.path };
@@ -239,13 +389,21 @@ export async function removeWorkspaceService(
     throw new Error(
       `Refusing to remove a service definition without matching ownership at ${status.path}`,
     );
+  await deactivateWorkspaceService(options, runner);
   // Re-read just before unlink so edits made after the status check are preserved.
   const current = await readFile(status.path, 'utf8');
-  if (current !== contents(options))
+  if (!isOwnedDefinition(current, platformOf(options.platform), options.name))
     throw new Error(
       `Refusing to remove a service definition without matching ownership at ${status.path}`,
     );
   await unlink(status.path);
+  if (platformOf(options.platform) === 'linux') {
+    const result = await runner('/usr/bin/systemctl', ['--user', 'daemon-reload']);
+    if (result.code !== 0)
+      throw new Error(
+        `Could not reload the systemd user manager after removing ${status.path}: ${result.stderr || result.stdout}`,
+      );
+  }
   return { state: 'removed', path: status.path };
 }
 
@@ -296,6 +454,20 @@ export async function activateWorkspaceService(
   }
 }
 
+export async function restartWorkspaceService(
+  options: WorkspaceServiceOptions,
+  runner: WorkspaceServiceRunner = runCommand,
+): Promise<{ restarted: boolean; active: boolean }> {
+  await assertOwned(options);
+  const before = await getWorkspaceServiceRuntimeStatus(options, runner);
+  if (!before.active) return { restarted: false, active: false };
+  await deactivateWorkspaceService(options, runner);
+  await activateWorkspaceService(options, runner);
+  const after = await getWorkspaceServiceRuntimeStatus(options, runner);
+  if (!after.active) throw new Error('Workspace service did not become active after restart.');
+  return { restarted: true, active: true };
+}
+
 export async function deactivateWorkspaceService(
   options: WorkspaceServiceOptions,
   runner: WorkspaceServiceRunner = runCommand,
@@ -303,7 +475,7 @@ export async function deactivateWorkspaceService(
   const target = serviceTarget(options);
   const paths = await assertOwned(options);
   const runtime = await getWorkspaceServiceRuntimeStatus(options, runner);
-  if (!runtime.active) return;
+  if (target.platform === 'darwin' && !runtime.active) return;
   const command = target.platform === 'darwin' ? '/bin/launchctl' : '/usr/bin/systemctl';
   const args =
     target.platform === 'darwin'

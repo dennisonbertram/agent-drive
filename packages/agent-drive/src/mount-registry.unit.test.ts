@@ -68,6 +68,32 @@ describe('mount registry storage', () => {
     expect(mountRegistryPath().startsWith(dir)).toBe(true);
   });
 
+  it('refuses to treat the credential config as a registry or overwrite it', async () => {
+    const dir = await isolatedConfig();
+    const credentialsPath = join(dir, 'mounts.json');
+    const secretConfig = JSON.stringify({ apiUrl: API, apiKey: 'credential-secret' });
+    await writeFile(credentialsPath, secretConfig, { mode: 0o600 });
+    vi.stubEnv('AGENT_DRIVE_CONFIG', credentialsPath);
+
+    await expect(registerMount(input(dir))).rejects.toThrow(/collides with.*config/i);
+    expect(await readFile(credentialsPath, 'utf8')).toBe(secretConfig);
+  });
+
+  it('refuses an existing config-shaped JSON file at the registry path', async () => {
+    const dir = await isolatedConfig();
+    const registryPath = mountRegistryPath();
+    const credentials = JSON.stringify({ apiUrl: API, apiKey: 'credential-secret' });
+    await writeFile(registryPath, credentials, { mode: 0o600 });
+
+    await expect(registerLiveWorkspace({
+      name: 'coordinator',
+      mountpoint: join(dir, 'coordinator'),
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      root: '/workspace/project',
+    })).rejects.toThrow(/malformed|refusing to overwrite/i);
+    expect(await readFile(registryPath, 'utf8')).toBe(credentials);
+  });
+
   it('registers an entry with private file and directory permissions', async () => {
     const dir = await authorizedConfig();
     const nested = join(dir, 'new', 'agent-drive');
@@ -114,7 +140,7 @@ describe('mount registry storage', () => {
     const entry = await registerLiveWorkspace({
       name: 'coordinator',
       mountpoint: join(dir, 'coordinator'),
-      sandboxId: 'sbx_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
       root: '/workspace/project',
     });
 
@@ -122,7 +148,7 @@ describe('mount registry storage', () => {
       kind: 'live-workspace',
       name: 'coordinator',
       mountpoint: join(dir, 'coordinator'),
-      sandboxId: 'sbx_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
       root: '/workspace/project',
       readOnly: false,
     });
@@ -137,7 +163,7 @@ describe('mount registry storage', () => {
     await registerLiveWorkspace({
       name: 'coordinator',
       mountpoint: join(dir, 'coordinator'),
-      sandboxId: 'sbx_01HZY6Y5JQKCN1W9F2NR4T7V8A',
+      sandboxId: 'm_01HZY6Y5JQKCN1W9F2NR4T7V8A',
       root: '/workspace/project',
     });
     expect(await setLiveWorkspaceWakePolicy('coordinator', false)).toMatchObject({
@@ -250,6 +276,19 @@ describe('mount registry validation', () => {
     expect(entry.apiUrl).toBe('https://x.test');
   });
 
+  it('requires an exact Instabox machine ID for a live workspace', async () => {
+    const dir = await isolatedConfig();
+    await expect(
+      registerLiveWorkspace({
+        name: 'work',
+        mountpoint: join(dir, 'mount'),
+        sandboxId: 'coordinator',
+        root: '/workspace/project',
+      }),
+    ).rejects.toThrow(/exact m_.*ID/u);
+    expect(await readMountRegistry()).toEqual([]);
+  });
+
   it.each(['relative/path', '/workspace/../outside', '/workspace//project', '/workspace\\project']) (
     'rejects an unsafe live workspace root %s',
     async (root) => {
@@ -258,7 +297,7 @@ describe('mount registry validation', () => {
         registerLiveWorkspace({
           name: 'work',
           mountpoint: join(dir, 'mount'),
-          sandboxId: 'sbx_valid',
+          sandboxId: 'm_valid',
           root,
         }),
       ).rejects.toThrow(/workspace root/u);

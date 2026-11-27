@@ -15,6 +15,7 @@ import {
 
 export const MOUNT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const SANDBOX_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const LIVE_SANDBOX_ID_PATTERN = /^m_[A-Za-z0-9_-]{1,126}$/u;
 const REGISTRY_VERSION = 1;
 const MALFORMED = 'Agent Drive mount registry is malformed; refusing to overwrite it.';
 
@@ -83,6 +84,13 @@ function isCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
+function assertRegistryPathSafe(path: string) {
+  if (resolve(path) === resolve(configPath()))
+    throw new Error(
+      'Mount registry path collides with the Agent Drive config; refusing to overwrite credentials.',
+    );
+}
+
 function validName(value: unknown) {
   if (typeof value !== 'string' || !MOUNT_NAME_PATTERN.test(value))
     throw new Error(
@@ -121,6 +129,12 @@ function validApiUrl(value: unknown) {
 function validSandboxId(value: unknown) {
   if (typeof value !== 'string' || !SANDBOX_ID_PATTERN.test(value))
     throw new Error('Invalid sandbox ID.');
+  return value;
+}
+
+function validLiveSandboxId(value: unknown) {
+  if (typeof value !== 'string' || !LIVE_SANDBOX_ID_PATTERN.test(value))
+    throw new Error('Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias.');
   return value;
 }
 
@@ -168,7 +182,7 @@ function storedEntry(value: unknown): MountRegistryEntry {
       kind: 'live-workspace',
       ...common,
       sandboxId:
-        typeof value.sandboxId === 'string' && SANDBOX_ID_PATTERN.test(value.sandboxId)
+        typeof value.sandboxId === 'string' && LIVE_SANDBOX_ID_PATTERN.test(value.sandboxId)
           ? value.sandboxId
           : malformed(),
       root: (() => {
@@ -226,6 +240,7 @@ function storedEntry(value: unknown): MountRegistryEntry {
 }
 
 async function readRegistryFile(path: string): Promise<MountRegistryEntry[]> {
+  assertRegistryPathSafe(path);
   let serialized: string;
   try {
     serialized = await readFile(path, 'utf8');
@@ -240,8 +255,8 @@ async function readRegistryFile(path: string): Promise<MountRegistryEntry[]> {
     throw new Error(MALFORMED);
   }
   if (!isRecord(value)) throw new Error(MALFORMED);
-  if (value.mounts !== undefined && !Array.isArray(value.mounts)) throw new Error(MALFORMED);
-  return ((value.mounts ?? []) as unknown[]).map(storedEntry);
+  if (!Array.isArray(value.mounts)) throw new Error(MALFORMED);
+  return (value.mounts as unknown[]).map(storedEntry);
 }
 
 export async function readMountRegistry(): Promise<MountRegistryEntry[]> {
@@ -320,8 +335,9 @@ export async function registerMount(
     ...(input.sandboxId !== undefined ? { sandboxId: validSandboxId(input.sandboxId) } : {}),
     registeredAt: new Date().toISOString(),
   };
-  await requireSavedAuthorization(entry);
   const path = mountRegistryPath();
+  assertRegistryPathSafe(path);
+  await requireSavedAuthorization(entry);
   // The lock database opens inside withSqliteFileLock, so the parent directory
   // must exist before the lock is taken.
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -351,7 +367,7 @@ export async function registerLiveWorkspace(
     kind: 'live-workspace',
     name: validName(input.name),
     mountpoint: validMountpoint(input.mountpoint),
-    sandboxId: validSandboxId(input.sandboxId),
+    sandboxId: validLiveSandboxId(input.sandboxId),
     root: validWorkspaceRoot(input.root),
     readOnly:
       input.readOnly === undefined
@@ -372,6 +388,7 @@ export async function registerLiveWorkspace(
     registeredAt: new Date().toISOString(),
   };
   const path = mountRegistryPath();
+  assertRegistryPathSafe(path);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   return await withSqliteFileLock(
     `${path}.lock.sqlite`,
@@ -399,6 +416,7 @@ export async function setLiveWorkspaceWakePolicy(
   const valid = validName(name);
   if (typeof wakeOnAccess !== 'boolean') throw new Error('Invalid wake-on-access flag.');
   const path = mountRegistryPath();
+  assertRegistryPathSafe(path);
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   return withSqliteFileLock(
     `${path}.lock.sqlite`,

@@ -47,7 +47,7 @@ async function cli(
     ),
   });
   const paths: string[] = [];
-  const calls: { path: string; method: string }[] = [];
+  const calls: { path: string; method: string; authorization?: string }[] = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: URL | string, init?: RequestInit) => {
@@ -56,7 +56,12 @@ async function cli(
         ? parsed.pathname.replace('/api/v1/', '')
         : `storage${parsed.pathname}`;
       paths.push(path);
-      calls.push({ path, method: init?.method ?? 'GET' });
+      const headers = new Headers(init?.headers);
+      calls.push({
+        path,
+        method: init?.method ?? 'GET',
+        ...(headers.has('authorization') ? { authorization: headers.get('authorization')! } : {}),
+      });
       const response = respond(path, init, parsed.search);
       if (response instanceof Response) return response;
       const hasAccountKey =
@@ -313,27 +318,52 @@ describe('mount --name', () => {
     );
     const r = await cli(['mount', '--name', 'work'], one, whoami, {}, seeded.dir);
     expect(r.err).toBe('');
-    expect(createMountBridge).toHaveBeenCalledWith(
-      expect.anything(),
-      A,
-      expect.objectContaining({
-        capabilities: expect.objectContaining({ readOnly: true, write: false }),
-      }),
-    );
     if (process.platform === 'darwin') {
+      expect(createMountBridge).toHaveBeenCalledWith(
+        expect.anything(),
+        A,
+        expect.objectContaining({
+          capabilities: expect.objectContaining({ readOnly: true, write: false }),
+        }),
+      );
       expect(startMacMount).toHaveBeenCalledWith(
         expect.objectContaining({ driveId: A, requestedMountpoint: mp }),
       );
       expect(runLinuxMount).not.toHaveBeenCalled();
     } else {
+      expect(createMountBridge).not.toHaveBeenCalled();
       expect(runLinuxMount).toHaveBeenCalledWith(
         expect.anything(),
         A,
         mp,
-        expect.objectContaining({ readWrite: false }),
+        expect.objectContaining({
+          readWrite: false,
+          capabilities: expect.objectContaining({ readOnly: true, write: false }),
+        }),
       );
       expect(startMacMount).not.toHaveBeenCalled();
     }
+  });
+
+  it('does not send an environment bearer to a different registered API origin', async () => {
+    const mp = join(await mkdtemp(join(tmpdir(), 'agent-drive-mp-')), 'mount');
+    dirs.push(mp);
+    const seeded = await cli(['mounts', 'add', 'work', mp, '--drive', A], one);
+
+    const result = await cli(
+      ['mount', '--name', 'work'],
+      one,
+      undefined,
+      {
+        AGENT_DRIVE_API_URL: 'https://production.example/api',
+        AGENT_DRIVE_API_KEY: 'production-bearer',
+      },
+      seeded.dir,
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.err).toMatch(/environment.*API origin|API key.*origin/i);
+    expect(result.calls).toEqual([]);
   });
 
   it('rejects conflicting --drive and positional arguments instead of overriding the entry', async () => {
@@ -375,13 +405,27 @@ describe('mount --name', () => {
   it('keeps the plain positional mount flow unchanged', async () => {
     const mp = join(await mkdtemp(join(tmpdir(), 'agent-drive-mp-')), 'mount');
     dirs.push(mp);
-    const { createMountBridge, whoami } = mountFakes();
+    const { runLinuxMount, createMountBridge, whoami } = mountFakes();
     const r = await cli(['mount', mp, '--drive', A], one, whoami);
     expect(r.err).toBe('');
-    expect(createMountBridge).toHaveBeenCalledWith(
-      expect.anything(),
-      A,
-      expect.objectContaining({ capabilities: expect.objectContaining({ write: true }) }),
-    );
+    if (process.platform === 'darwin') {
+      expect(createMountBridge).toHaveBeenCalledWith(
+        expect.anything(),
+        A,
+        expect.objectContaining({ capabilities: expect.objectContaining({ write: true }) }),
+      );
+    } else {
+      expect(createMountBridge).not.toHaveBeenCalled();
+      expect(r.calls).toContainEqual({ path: 'whoami', method: 'GET' });
+      expect(runLinuxMount).toHaveBeenCalledWith(
+        expect.anything(),
+        A,
+        mp,
+        expect.objectContaining({
+          readWrite: true,
+          capabilities: expect.objectContaining({ write: true }),
+        }),
+      );
+    }
   });
 });

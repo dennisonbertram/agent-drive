@@ -35,7 +35,7 @@ file also requires `delete`. Directory rename is not supported.
 On Linux x64 and arm64, use a package build that includes the matching native helper and ensure the
 host has FUSE support, access to `/dev/fuse`, and a usable `fusermount3` or compatible `fusermount`
 helper where needed. The foreground command unmounts on Ctrl+C; wait for it to exit. On macOS, the
-CLI launches the signed Finder helper from `/Applications/Agent Drive.app` on the same Mac. Download [Agent Drive Finder 0.3.0](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.0/Agent-Drive-Finder-0.3.0.zip), open the ZIP to extract `Agent Drive.app`, drag it to `/Applications`, and open it once. Install the CLI separately, then run `agent-drive mount MOUNTPOINT`. Match the Finder location to the mountpoint path passed to the command. Finder's Locations row may read `Agent Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive ID. If mount startup fails and Finder shows an "Agent Drive is not enabled" banner, open the Agent Drive row in the sidebar, click Enable, and rerun the mount.
+CLI launches the signed Finder helper from `/Applications/Agent Drive.app` on the same Mac. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip), open the ZIP to extract `Agent Drive.app`, drag it to `/Applications`, and open it once. Install the CLI separately, then run `agent-drive mount MOUNTPOINT`. Match the Finder location to the mountpoint path passed to the command. Finder's Locations row may read `Agent Drive`; when multiple drives are registered, macOS may include the first 8 characters of the drive ID. If mount startup fails and Finder shows an "Agent Drive is not enabled" banner, open the Agent Drive row in the sidebar, click Enable, and rerun the mount.
 
 Reads fetch authenticated ranges from a pinned file version, so existing ADRV v1 files do not need
 to be re-uploaded. Writes are staged as plaintext in the private local journal before remote commit.
@@ -52,6 +52,7 @@ Connect the exact sandbox and folder. Add `--persist` to save the local name and
 service:
 
 ```sh
+mkdir -p "$HOME/AgentWorkspaces"
 agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
   --sandbox SANDBOX_ID --root /workspace/project --persist
 cp -n "$LOCAL_ENV_FILE" "$HOME/AgentWorkspaces/coordinator/.env"

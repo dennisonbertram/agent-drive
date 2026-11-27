@@ -63,6 +63,7 @@ function mockLiveMountRuntime() {
   const providerOptions: Record<string, unknown>[] = [];
   const mountOptions: Record<string, unknown>[] = [];
   const wakes: string[] = [];
+  const availabilityChecks: Array<{ machineId: string; wakeOnAccess: boolean }> = [];
   vi.doMock('./live-workspace.js', () => ({
     createLiveWorkspaceProvider: vi.fn(async (options: Record<string, unknown>) => {
       providerOptions.push(options);
@@ -85,14 +86,16 @@ function mockLiveMountRuntime() {
   }));
   vi.doMock('./workspace-wake.js', () => ({
     createInstaboxWorkspaceWaker: vi.fn((options: { registeredMachineIds: string[] }) => ({
-      wake: vi.fn(async (machineId: string) => {
+      ensureAvailable: vi.fn(async (machineId: string, request: { wakeOnAccess: boolean }) => {
         expect(options.registeredMachineIds).toEqual([machineId]);
-        wakes.push(machineId);
+        availabilityChecks.push({ machineId, wakeOnAccess: request.wakeOnAccess });
+        if (request.wakeOnAccess) wakes.push(machineId);
         return 'already-running';
       }),
     })),
   }));
   vi.doMock('./workspace-mount.js', () => ({
+    workspaceMountDomainId: () => 'test-domain-id',
     startWorkspaceMount: vi.fn(async (options: Record<string, unknown>) => {
       mountOptions.push(options);
       const dispatch = options.dispatch as (request: {
@@ -108,7 +111,7 @@ function mockLiveMountRuntime() {
       };
     }),
   }));
-  return { providerOptions, mountOptions, wakes };
+  return { providerOptions, mountOptions, wakes, availabilityChecks };
 }
 
 describe('live workspace CLI registration', () => {
@@ -119,7 +122,7 @@ describe('live workspace CLI registration', () => {
       'coordinator',
       '/tmp/agent-drive-coordinator',
       '--sandbox',
-      'instabox-coordinator-42',
+      'm_coordinator42',
       '--root',
       '/workspace/project',
     ]);
@@ -134,7 +137,7 @@ describe('live workspace CLI registration', () => {
       kind: 'live-workspace',
       name: 'coordinator',
       mountpoint: '/tmp/agent-drive-coordinator',
-      sandboxId: 'instabox-coordinator-42',
+      sandboxId: 'm_coordinator42',
       root: '/workspace/project',
       readOnly: false,
       wakeOnAccess: true,
@@ -144,9 +147,9 @@ describe('live workspace CLI registration', () => {
     expect(runtime.mountOptions[0]).toMatchObject({
       mountPoint: '/tmp/agent-drive-coordinator',
       readOnly: false,
-      workspaceId: JSON.stringify(['instabox-coordinator-42', '/workspace/project']),
+      workspaceId: JSON.stringify(['m_coordinator42', '/workspace/project']),
     });
-    expect(runtime.wakes).toEqual(['instabox-coordinator-42']);
+    expect(runtime.wakes).toEqual(['m_coordinator42']);
   });
 
   it('rejects a duplicate local name instead of replacing its binding', async () => {
@@ -157,7 +160,7 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'coordinator',
           mountpoint: '/tmp/old-coordinator',
-          sandboxId: 'instabox-old',
+          sandboxId: 'm_old',
           root: '/workspace/old',
           readOnly: false,
         },
@@ -169,7 +172,7 @@ describe('live workspace CLI registration', () => {
         'coordinator',
         '/tmp/new-coordinator',
         '--sandbox',
-        'instabox-new',
+        'm_new',
         '--root',
         '/workspace/new',
       ],
@@ -189,7 +192,7 @@ describe('live workspace CLI registration', () => {
       'coordinator',
       '/tmp/agent-drive-coordinator',
       '--sandbox',
-      'instabox-coordinator-42',
+      'm_coordinator42',
       '--root',
       '/workspace/project',
       '--no-wake-on-access',
@@ -200,6 +203,9 @@ describe('live workspace CLI registration', () => {
     };
     expect(registry.mounts[0]).toMatchObject({ wakeOnAccess: false });
     expect(runtime.wakes).toEqual([]);
+    expect(runtime.availabilityChecks).toEqual([
+      { machineId: 'm_coordinator42', wakeOnAccess: false },
+    ]);
     expect(result.fetchMock).not.toHaveBeenCalled();
   });
 
@@ -210,20 +216,20 @@ describe('live workspace CLI registration', () => {
       'coordinator',
       '/tmp/agent-drive-coordinator',
       '--sandbox',
-      'instabox-coordinator-42',
+      'm_coordinator42',
       '--root',
       '/workspace/project',
       '--wake-on-access',
     ]);
     expect(result.exitCode).toBeUndefined();
-    expect(runtime.wakes).toEqual(['instabox-coordinator-42']);
+    expect(runtime.wakes).toEqual(['m_coordinator42']);
 
     const contradiction = await runCli([
       'connect',
       'coordinator',
       '/tmp/agent-drive-coordinator',
       '--sandbox',
-      'instabox-coordinator-42',
+      'm_coordinator42',
       '--root',
       '/workspace/project',
       '--wake-on-access',
@@ -242,13 +248,21 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'coordinator',
           mountpoint: '/tmp/agent-drive-coordinator',
-          sandboxId: 'instabox-coordinator-42',
+          sandboxId: 'm_coordinator42',
           root: '/workspace/project',
           readOnly: false,
           wakeOnAccess: true,
         },
       ],
     };
+    vi.doMock('./workspace-service.js', () => ({
+      resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
+      getWorkspaceServiceRuntimeStatus: vi.fn(async () => ({
+        state: 'missing',
+        path: '/private/service',
+        active: false,
+      })),
+    }));
     const result = await runCli(['mounts', 'wake', 'coordinator', 'off'], registry);
     expect(result.exitCode).toBeUndefined();
     expect(result.fetchMock).not.toHaveBeenCalled();
@@ -258,18 +272,98 @@ describe('live workspace CLI registration', () => {
     });
   });
 
+  it('restarts only the active owned service when its wake policy changes', async () => {
+    const registry = {
+      version: 1,
+      mounts: [
+        {
+          kind: 'live-workspace',
+          name: 'coordinator',
+          mountpoint: '/tmp/agent-drive-coordinator',
+          sandboxId: 'm_coordinator42',
+          root: '/workspace/project',
+          readOnly: false,
+          wakeOnAccess: true,
+        },
+      ],
+    };
+    const restart = vi.fn(async () => ({ restarted: true, active: true }));
+    const status = vi.fn(async () => ({ state: 'installed', path: '/private/service', active: true }));
+    const waitReady = vi.fn(async () => ({ ready: true, mountpoint: '/tmp/agent-drive-coordinator' }));
+    vi.doMock('./workspace-service.js', () => ({
+      resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
+      getWorkspaceServiceRuntimeStatus: status,
+      restartWorkspaceService: restart,
+    }));
+    vi.doMock('./workspace-service-readiness.js', () => ({
+      waitForWorkspaceMountReadiness: waitReady,
+    }));
+
+    const result = await runCli(['mounts', 'wake', 'coordinator', 'off'], registry);
+
+    expect(result.exitCode).toBeUndefined();
+    expect(result.fetchMock).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledTimes(1);
+    expect(restart).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'coordinator', instaboxPath: '/opt/instabox/bin/instabox' }),
+    );
+    expect(waitReady).toHaveBeenCalledWith(
+      expect.objectContaining({ mountpoint: '/tmp/agent-drive-coordinator' }),
+    );
+    expect(JSON.parse(result.stdout)).toMatchObject({ wakeOnAccess: false });
+  });
+
+  it('does not change saved wake policy when service ownership cannot be verified', async () => {
+    const registry = {
+      version: 1,
+      mounts: [
+        {
+          kind: 'live-workspace',
+          name: 'coordinator',
+          mountpoint: '/tmp/agent-drive-coordinator',
+          sandboxId: 'm_coordinator42',
+          root: '/workspace/project',
+          readOnly: false,
+          wakeOnAccess: true,
+        },
+      ],
+    };
+    vi.doMock('./workspace-service.js', () => ({
+      resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
+      getWorkspaceServiceRuntimeStatus: vi.fn(async () => ({
+        state: 'conflict',
+        path: '/private/service',
+        active: false,
+      })),
+    }));
+
+    const result = await runCli(['mounts', 'wake', 'coordinator', 'off'], registry);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/not the exact owned definition/i);
+    expect(JSON.parse(await readFile(result.registryPath, 'utf8')).mounts[0]).toMatchObject({
+      wakeOnAccess: true,
+    });
+  });
+
   it('installs and starts a persistent mount when connect is given --persist', async () => {
     const runtime = mockLiveMountRuntime();
-    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service' }));
+    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service', updated: false }));
     const activate = vi.fn(async () => {});
     const getStatus = vi
       .fn()
       .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: false })
+      .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: false })
       .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: true });
     vi.doMock('./workspace-service.js', () => ({
+      resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
       installWorkspaceService: install,
       activateWorkspaceService: activate,
       getWorkspaceServiceRuntimeStatus: getStatus,
+    }));
+    const waitReady = vi.fn(async () => ({ ready: true, mountpoint: '/tmp/agent-drive-coordinator' }));
+    vi.doMock('./workspace-service-readiness.js', () => ({
+      waitForWorkspaceMountReadiness: waitReady,
     }));
 
     const result = await runCli([
@@ -277,7 +371,7 @@ describe('live workspace CLI registration', () => {
       'coordinator',
       '/tmp/agent-drive-coordinator',
       '--sandbox',
-      'instabox-coordinator-42',
+      'm_coordinator42',
       '--root',
       '/workspace/project',
       '--persist',
@@ -290,9 +384,13 @@ describe('live workspace CLI registration', () => {
         name: 'coordinator',
         cliPath: expect.stringMatching(/^\//u),
         configPath: result.configPath,
+        instaboxPath: '/opt/instabox/bin/instabox',
       }),
     );
     expect(activate).toHaveBeenCalledTimes(1);
+    expect(waitReady).toHaveBeenCalledWith(
+      expect.objectContaining({ mountpoint: '/tmp/agent-drive-coordinator' }),
+    );
     expect(JSON.parse(result.stdout.trim().split('\n').at(-1)!)).toMatchObject({
       state: 'installed',
       active: true,
@@ -308,7 +406,7 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'coordinator',
           mountpoint: '/tmp/agent-drive-coordinator',
-          sandboxId: 'instabox-coordinator-42',
+          sandboxId: 'm_coordinator42',
           root: '/workspace/project',
           readOnly: false,
         },
@@ -320,7 +418,7 @@ describe('live workspace CLI registration', () => {
 
     expect(result.exitCode).toBeUndefined();
     expect(result.fetchMock).not.toHaveBeenCalled();
-    expect(result.stdout).toContain('instabox-coordinator-42');
+    expect(result.stdout).toContain('m_coordinator42');
     expect(result.stdout).toContain('/workspace/project');
     expect(createWaker).not.toHaveBeenCalled();
   });
@@ -333,7 +431,7 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'coordinator',
           mountpoint: '/tmp/agent-drive-coordinator',
-          sandboxId: 'instabox-coordinator-42',
+          sandboxId: 'm_coordinator42',
           root: '/workspace/coordinator',
           readOnly: false,
           wakeOnAccess: true,
@@ -342,7 +440,7 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'subagent',
           mountpoint: '/tmp/agent-drive-subagent',
-          sandboxId: 'instabox-subagent-12',
+          sandboxId: 'm_subagent12',
           root: '/workspace/subagent',
           readOnly: true,
           wakeOnAccess: false,
@@ -361,7 +459,7 @@ describe('live workspace CLI registration', () => {
           dispatch: async (request: { id: string | number; op: string }) => {
             if (request.op !== 'capabilities')
               await (providerOptions[0]!.beforeIO as (sandboxId: string) => Promise<void>)(
-                'instabox-coordinator-42',
+                'm_coordinator42',
               );
             return {
               id: request.id,
@@ -375,9 +473,10 @@ describe('live workspace CLI registration', () => {
     }));
     vi.doMock('./workspace-wake.js', () => ({
       createInstaboxWorkspaceWaker: vi.fn((options: { registeredMachineIds: string[] }) => ({
-        wake: vi.fn(async (machineId: string) => {
-          expect(options.registeredMachineIds).toEqual(['instabox-coordinator-42']);
-          wakes.push(machineId);
+        ensureAvailable: vi.fn(async (machineId: string, request: { wakeOnAccess: boolean }) => {
+          expect(options.registeredMachineIds).toEqual(['m_coordinator42']);
+          if (machineId !== 'm_coordinator42') throw new Error('wrong sandbox');
+          if (request.wakeOnAccess) wakes.push(machineId);
           return 'already-running';
         }),
       })),
@@ -405,15 +504,15 @@ describe('live workspace CLI registration', () => {
     expect(result.fetchMock).not.toHaveBeenCalled();
     expect(providerOptions).toHaveLength(1);
     expect(providerOptions[0]).toMatchObject({
-      sandboxId: 'instabox-coordinator-42',
+      sandboxId: 'm_coordinator42',
       root: '/workspace/coordinator',
     });
     expect(mountOptions[0]).toMatchObject({
       mountPoint: '/tmp/agent-drive-coordinator',
       readOnly: false,
-      workspaceId: JSON.stringify(['instabox-coordinator-42', '/workspace/coordinator']),
+      workspaceId: JSON.stringify(['m_coordinator42', '/workspace/coordinator']),
     });
-    expect(wakes).toEqual(['instabox-coordinator-42']);
+    expect(wakes).toEqual(['m_coordinator42']);
     expect(closeProvider).toHaveBeenCalledTimes(1);
   });
 
@@ -425,23 +524,31 @@ describe('live workspace CLI registration', () => {
           kind: 'live-workspace',
           name: 'coordinator',
           mountpoint: '/tmp/agent-drive-coordinator',
-          sandboxId: 'instabox-coordinator-42',
+          sandboxId: 'm_coordinator42',
           root: '/workspace/project',
           readOnly: false,
           wakeOnAccess: false,
         },
       ],
     };
-    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service' }));
+    const install = vi.fn(async () => ({ state: 'installed', path: '/private/service', updated: false }));
     const activate = vi.fn(async () => {});
     const getStatus = vi
       .fn()
       .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: false })
+      .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: false })
       .mockResolvedValueOnce({ state: 'installed', path: '/private/service', active: true });
     vi.doMock('./workspace-service.js', () => ({
+      resolveInstaboxExecutable: () => '/opt/instabox/bin/instabox',
       installWorkspaceService: install,
       activateWorkspaceService: activate,
       getWorkspaceServiceRuntimeStatus: getStatus,
+    }));
+    vi.doMock('./workspace-service-readiness.js', () => ({
+      waitForWorkspaceMountReadiness: vi.fn(async () => ({
+        ready: true,
+        mountpoint: '/tmp/agent-drive-coordinator',
+      })),
     }));
 
     const result = await runCli(['mounts', 'service', 'install', 'coordinator'], registry);
@@ -449,7 +556,11 @@ describe('live workspace CLI registration', () => {
     expect(result.exitCode).toBeUndefined();
     expect(result.fetchMock).not.toHaveBeenCalled();
     expect(install).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'coordinator', cliPath: expect.stringMatching(/^\//u) }),
+      expect.objectContaining({
+        name: 'coordinator',
+        cliPath: expect.stringMatching(/^\//u),
+        instaboxPath: '/opt/instabox/bin/instabox',
+      }),
     );
     expect(activate).toHaveBeenCalledTimes(1);
     expect(JSON.parse(result.stdout)).toMatchObject({ state: 'installed', active: true });

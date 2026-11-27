@@ -32,6 +32,7 @@ import {
   driveKeyEnvironmentName,
   keysForOrigin,
   machineName,
+  originOf,
   readConfig,
   resolveLoginApiUrl,
   resolveDriveId,
@@ -343,21 +344,23 @@ async function runLiveWorkspaceMount(
   try {
     const { createLiveWorkspaceProvider } = await import('./live-workspace.js');
     const { startWorkspaceMount } = await import('./workspace-mount.js');
-    const waker = entry.wakeOnAccess
-      ? (await import('./workspace-wake.js')).createInstaboxWorkspaceWaker({
-          registeredMachineIds: [entry.sandboxId],
-        })
-      : undefined;
-    const beforeIO = entry.wakeOnAccess
-      ? async (machineId: string, signal?: AbortSignal) => {
-          await waker!.wake(machineId, signal);
-        }
-      : undefined;
+    const waker = (await import('./workspace-wake.js')).createInstaboxWorkspaceWaker({
+      registeredMachineIds: [entry.sandboxId],
+      ...(process.env.AGENT_DRIVE_INSTABOX_CLI
+        ? { cliPath: process.env.AGENT_DRIVE_INSTABOX_CLI }
+        : {}),
+    });
+    const beforeIO = async (machineId: string, signal?: AbortSignal) => {
+      await waker.ensureAvailable(machineId, {
+        wakeOnAccess: entry.wakeOnAccess,
+        ...(signal ? { signal } : {}),
+      });
+    };
     provider = await createLiveWorkspaceProvider({
       sandboxId: entry.sandboxId,
       root: entry.root,
       readOnly,
-      ...(beforeIO ? { beforeIO } : {}),
+      beforeIO,
     });
     if (!controller.signal.aborted) {
       mount = await startWorkspaceMount({
@@ -388,6 +391,46 @@ async function runLiveWorkspaceMount(
       }
     }
   }
+}
+
+async function installAndWaitForWorkspaceService(
+  name: string,
+  entry: import('./mount-registry.js').MountRegistryEntry,
+) {
+  const service = await import('./workspace-service.js');
+  const options = {
+    name,
+    cliPath: fileURLToPath(import.meta.url),
+    configPath: configPath(),
+    ...(entry.kind === 'live-workspace'
+      ? { instaboxPath: await service.resolveInstaboxExecutable() }
+      : {}),
+  };
+  const installed = await service.installWorkspaceService(options);
+  let runtime = await service.getWorkspaceServiceRuntimeStatus(options);
+  if (runtime.state !== 'installed')
+    throw new Error(`Workspace service '${name}' was not installed successfully.`);
+  if (installed.updated && runtime.active) await service.restartWorkspaceService(options);
+  runtime = await service.getWorkspaceServiceRuntimeStatus(options);
+  if (runtime.state === 'installed' && !runtime.active)
+    await service.activateWorkspaceService(options);
+  runtime = await service.getWorkspaceServiceRuntimeStatus(options);
+  if (runtime.state !== 'installed' || !runtime.active)
+    throw new Error(`Workspace service '${name}' did not become active.`);
+
+  const { waitForWorkspaceMountReadiness } = await import('./workspace-service-readiness.js');
+  const readinessOptions = {
+    mountpoint: entry.mountpoint,
+    ...(entry.kind === 'live-workspace'
+      ? {
+          expectedDomainId: (
+            await import('./workspace-mount.js')
+          ).workspaceMountDomainId(JSON.stringify([entry.sandboxId, entry.root])),
+        }
+      : {}),
+  };
+  await waitForWorkspaceMountReadiness(readinessOptions);
+  return runtime;
 }
 
 export function parseShareExpiry(value: string, now?: number): string;
@@ -565,6 +608,17 @@ async function run(command: string, raw: string[]) {
         throw new Error(`--drive does not match the drive registered for '${name}'.`);
       if (args.values.api !== undefined && args.values.api !== registryMount.apiUrl)
         throw new Error(`--api does not match the API recorded for '${name}'.`);
+      const environmentApiKey = process.env.AGENT_DRIVE_API_KEY;
+      if (environmentApiKey) {
+        const environmentApiUrl = process.env.AGENT_DRIVE_API_URL;
+        if (
+          !environmentApiUrl ||
+          originOf(environmentApiUrl) !== originOf(registryMount.apiUrl)
+        )
+          throw new Error(
+            `The environment API key has no matching origin for the API registered as '${name}'. Unset AGENT_DRIVE_API_KEY or set AGENT_DRIVE_API_URL to the registered origin.`,
+          );
+      }
       args.values.drive = [registryMount.driveId];
       args.values.api = registryMount.apiUrl;
     }
@@ -796,21 +850,13 @@ async function run(command: string, raw: string[]) {
       ...(args.values['read-only'] !== undefined ? { readOnly: args.values['read-only'] } : {}),
       wakeOnAccess: args.values['no-wake-on-access'] !== true,
     });
-    output(entry);
     if (args.values.persist) {
-      const service = await import('./workspace-service.js');
-      const options = {
-        name,
-        cliPath: fileURLToPath(import.meta.url),
-        configPath: configPath(),
-      };
-      await service.installWorkspaceService(options);
-      const current = await service.getWorkspaceServiceRuntimeStatus(options);
-      if (current.state === 'installed' && !current.active)
-        await service.activateWorkspaceService(options);
-      output(await service.getWorkspaceServiceRuntimeStatus(options));
+      const runtime = await installAndWaitForWorkspaceService(name, entry);
+      output(entry);
+      output(runtime);
       return;
     }
+    output(entry);
     await runLiveWorkspaceMount(entry, entry.readOnly);
     return;
   }
@@ -823,19 +869,41 @@ async function run(command: string, raw: string[]) {
       validateMountsOptions(args, []);
       const [action, name] = args.positionals.slice(1);
       if (args.positionals.length !== 3 || !name) throw new Error(usage);
-      await registry.findMountEntry(name);
+      const entry = await registry.findMountEntry(name);
       const service = await import('./workspace-service.js');
       const options = {
         name,
         cliPath: fileURLToPath(import.meta.url),
         configPath: configPath(),
+        ...(entry.kind === 'live-workspace'
+          ? { instaboxPath: await service.resolveInstaboxExecutable() }
+          : {}),
       };
       if (action === 'install') {
-        await service.installWorkspaceService(options);
-        const current = await service.getWorkspaceServiceRuntimeStatus(options);
+        const installed = await service.installWorkspaceService(options);
+        let current = await service.getWorkspaceServiceRuntimeStatus(options);
+        if (installed.updated && current.state === 'installed' && current.active)
+          await service.restartWorkspaceService(options);
+        current = await service.getWorkspaceServiceRuntimeStatus(options);
         if (current.state === 'installed' && !current.active)
           await service.activateWorkspaceService(options);
-        output(await service.getWorkspaceServiceRuntimeStatus(options));
+        current = await service.getWorkspaceServiceRuntimeStatus(options);
+        if (current.state !== 'installed' || !current.active)
+          throw new Error(`Workspace service '${name}' did not become active.`);
+        const { waitForWorkspaceMountReadiness } = await import(
+          './workspace-service-readiness.js'
+        );
+        await waitForWorkspaceMountReadiness({
+          mountpoint: entry.mountpoint,
+          ...(entry.kind === 'live-workspace'
+            ? {
+                expectedDomainId: (
+                  await import('./workspace-mount.js')
+                ).workspaceMountDomainId(JSON.stringify([entry.sandboxId, entry.root])),
+              }
+            : {}),
+        });
+        output(current);
         return;
       }
       if (action === 'status') {
@@ -843,8 +911,6 @@ async function run(command: string, raw: string[]) {
         return;
       }
       if (action === 'remove') {
-        const current = await service.getWorkspaceServiceRuntimeStatus(options);
-        if (current.active) await service.deactivateWorkspaceService(options);
         output(await service.removeWorkspaceService(options));
         return;
       }
@@ -888,7 +954,45 @@ async function run(command: string, raw: string[]) {
       if (args.positionals.length !== 3 || !name || (policy !== 'on' && policy !== 'off'))
         throw new Error('Usage: mounts wake NAME on|off');
       const { setLiveWorkspaceWakePolicy } = await import('./mount-registry.js');
-      output(await setLiveWorkspaceWakePolicy(name, policy === 'on'));
+      const previous = await registry.findMountEntry(name);
+      const requestedPolicy = policy === 'on';
+      const service = await import('./workspace-service.js');
+      const previousLive = previous.kind === 'live-workspace' ? previous : undefined;
+      const serviceOptions =
+        previousLive && previousLive.wakeOnAccess !== requestedPolicy
+          ? {
+              name,
+              cliPath: fileURLToPath(import.meta.url),
+              configPath: configPath(),
+              instaboxPath: await service.resolveInstaboxExecutable(),
+            }
+          : undefined;
+      const current = serviceOptions
+        ? await service.getWorkspaceServiceRuntimeStatus(serviceOptions)
+        : undefined;
+      if (current?.state === 'conflict')
+        throw new Error(
+          `Cannot change wake policy because the managed service '${name}' is not the exact owned definition.`,
+        );
+      const updated = await setLiveWorkspaceWakePolicy(name, requestedPolicy);
+      if (previousLive && serviceOptions && current?.state === 'installed' && current.active) {
+        try {
+          await service.restartWorkspaceService(serviceOptions);
+          const { waitForWorkspaceMountReadiness } = await import(
+            './workspace-service-readiness.js'
+          );
+          await waitForWorkspaceMountReadiness({
+            mountpoint: previousLive.mountpoint,
+            expectedDomainId: (
+              await import('./workspace-mount.js')
+            ).workspaceMountDomainId(JSON.stringify([previousLive.sandboxId, previousLive.root])),
+          });
+        } catch (error) {
+          await setLiveWorkspaceWakePolicy(name, previousLive.wakeOnAccess);
+          throw error;
+        }
+      }
+      output(updated);
       return;
     }
     throw new Error(usage);

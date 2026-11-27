@@ -137,6 +137,7 @@ not an atomic subtree operation.
 Register an exact Instabox sandbox ID and absolute folder path under a local name:
 
 ```sh
+mkdir -p "$HOME/AgentWorkspaces"
 agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" \
   --sandbox SANDBOX_ID --root /workspace/project
 ```
@@ -172,8 +173,13 @@ sandbox `.env` untouched and does not print its contents.
 
 The wake operation targets only the saved sandbox ID. It runs on first remote file I/O, not when you
 connect, list a name, or check local capabilities. Use `mounts wake NAME on|off` to change the
-saved setting later; that command edits local metadata only. Existing saved definitions with
+saved setting later; the command updates local metadata and may restart that exact managed service,
+but it does not call Instabox. Existing saved definitions with
 `wakeOnAccess: false` remain asleep until enabled. `--read-only` saves a read-only definition.
+Changing this setting restarts an active managed login service after a graceful stop. If the stop
+cannot complete safely, the command reports the error and leaves pending local writes recoverable.
+A foreground mount uses the setting it loaded at startup; stop it cleanly and run
+`agent-drive mount --name NAME` again to apply a later change.
 Different names may point at the same sandbox folder, but each name needs a distinct local mountpoint.
 
 Live mounts currently support creating new files. Saving changes over an existing file is not
