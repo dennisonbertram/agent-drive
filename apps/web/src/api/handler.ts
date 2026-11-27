@@ -106,6 +106,16 @@ const ABSENT_VERSION_MARKER = '00000000-0000-0000-0000-000000000000';
 // Postgres regex capturing the job id of /jobs/<id>/submitted.md; mirrors JOB_ID in
 // packages/agent-drive/src/jobs.ts (1-64 chars: alphanumeric, then alphanumeric, "_" or "-").
 const JOB_SUBMITTED_PATH_PATTERN = '^/jobs/([A-Za-z0-9][A-Za-z0-9_-]{0,63})/submitted\\.md$';
+// The JS equivalent, for exact path validation in the jobApproval metadata read.
+const JOB_SUBMITTED_PATH = /^\/jobs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/submitted\.md$/u;
+// jobApproval=1 is a metadata-only read; every other get option is an unsupported combination.
+const JOB_APPROVAL_EXCLUSIVE_OPTIONS = [
+  'versionId',
+  'authorizeRange',
+  'range',
+  'maxPlaintextBytes',
+  'authorizeIfWithinLimit',
+];
 
 const scopeNames = new Set(['read', 'write', 'delete', 'share', 'manage', 'delegate']);
 const DEFAULT_DRIVE_QUOTA_BYTES = BigInt(Number.MAX_SAFE_INTEGER);
@@ -2535,6 +2545,45 @@ async function fileEndpoint(
   if (operation === 'get' && request.method === 'GET') {
     need(auth, 'read', driveId);
     const path = canonicalPath(url.searchParams.get('path'));
+    const jobApproval = queryValue(url, 'jobApproval', 8);
+    if (jobApproval !== null) {
+      // Worker pickup mode: the version pinned by the live file's newest qualifying
+      // request.md -> submitted.md submission. Metadata only — it never signs a URL, so a
+      // re-approval on a later feed page supersedes every earlier queued candidate.
+      const jobId = JOB_SUBMITTED_PATH.exec(path)?.[1];
+      const metadataOnlyValues = url.searchParams.getAll('metadataOnly');
+      if (
+        jobApproval !== '1' ||
+        url.searchParams.getAll('jobApproval').length !== 1 ||
+        jobId === undefined ||
+        metadataOnlyValues.length !== 1 ||
+        metadataOnlyValues[0] !== '1' ||
+        JOB_APPROVAL_EXCLUSIVE_OPTIONS.some((name) => url.searchParams.has(name))
+      ) {
+        throw new ApiError(
+          'validation_error',
+          'jobApproval requires metadataOnly=1, the exact path /jobs/<id>/submitted.md, and no other options.',
+        );
+      }
+      const approved = await getPool().query(
+        `SELECT v.*, f.path
+           FROM files f
+           JOIN file_events e
+             ON e.drive_id = f.drive_id AND e.file_id = f.id AND e.path = f.path
+           JOIN versions v ON v.id = e.version_id
+          WHERE f.drive_id = $1 AND f.path = $2 AND f.deleted_at IS NULL
+            AND e.operation = 'move'
+            AND e.version_id IS NOT NULL
+            AND e.previous_path = $3
+          ORDER BY e.seq DESC
+          LIMIT 1`,
+        [driveId, path, `/jobs/${jobId}/request.md`],
+      );
+      const approvedRow = approved.rows[0] as Row | undefined;
+      if (!approvedRow)
+        throw new ApiError('not_found', 'No approved job submission exists for this file.');
+      return response({ ...rowVersion(approvedRow), jobApproval: true });
+    }
     const rangeOptInPresent =
       url.searchParams.has('authorizeRange') || url.searchParams.has('range');
     let downloadRange: string | undefined;
