@@ -83,7 +83,10 @@ local agent through its normal local configuration. Do not derive the command fr
   human can open their files in the console after setting a passphrase. Create an agent-only
   drive (`drive create --agent-only`) only when the user asks for a drive the console must not
   open. `agent-drive account seal` re-seals held keys on demand, including drives made before
-  the account key existed.
+  the account key existed. The first seal on a machine needs the account-key fingerprint the
+  human copies from the console (Settings): `agent-drive account seal --fingerprint "<print>"`.
+  Until then sealing reports `unverified` and nothing is sealed — that is the anti-substitution
+  check, not a failure to work around.
 
 ## Credentials backup
 
@@ -108,7 +111,8 @@ paste the bundle into a chat, a file in a drive, or a log.
 If the human wants to open files in the console or get a fresh recovery file, never paste the
 bundle or a drive key into the chat. Once they set a passphrase in the console, run `agent-drive
 account seal --drive <drive id>` — sealing also runs automatically, so this only adds a drive
-that was missed. The owner can then use their passphrase or enrolled passkey in Files
+that was missed. On a machine that has never verified the account key this also needs
+`--fingerprint "<print>"` from the console's Settings page. The owner can then use their passphrase or enrolled passkey in Files
 (`no account key` means the passphrase is not set up yet; `agent-only` means the
 drive is kept out by design). If they have no passphrase, run `agent-drive credentials export
 --to <path>` and tell them to choose that file under "Choose recovery file" — the console accepts
@@ -121,9 +125,12 @@ credentials bundle, they open Details on the approval page and choose "Use one o
 browser seals the key to the new agent. The new agent can be read-only or limited to one folder.
 
 If the new agent has a shell and a human is present, let it run `agent-drive login`, then (if your
-key has `delegate`) run `agent-drive grant <its code> --write-path /inbox/<its name>` (`--read-only`
-for read only). You seal the drive key to that login; the human clicks Approve once on the page,
-which shows the offer. Nothing secret is printed or sent in the clear.
+key has `delegate`) run `agent-drive grant <its code> --verify <its verification code> --write-path /inbox/<its name>`
+(`--read-only` for read only). The verification code is the `a1b2 c3d4 e5f6 7890` line the new
+agent printed; the human relays it and `grant` checks it against the login's public key before
+sealing, so a tampered request never receives the drive key. You seal the drive key to that
+login; the human clicks Approve once on the page, which shows the offer. Nothing secret is
+printed or sent in the clear.
 
 Which handoff when: `grant` (you hold `delegate`, new agent has a shell, human present); the
 human opens Details on `/connect` and chooses "Use one of my drives instead" (the human holds the recovery file or

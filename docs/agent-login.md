@@ -123,10 +123,13 @@ JSON with `Cache-Control: no-store`.
     "driveIds": ["existing drive ids the key may use"],
     "newDriveName": "optional: create a drive for the agent",
     "scopes": ["read", "write"],
+    "deviceVerification": "a1b2 c3d4 e5f6 7890 (required, see §15)",
     "sealedDriveKeys": { "<driveId>": { "epk": "…", "iv": "…", "ct": "…" } }
   }
   ```
 
+  - `deviceVerification` is required on every body shape: the human-typed fingerprint of the
+    request's `public_key` (§15). The server recomputes it and rejects a mismatch with 409.
   - At least one of `driveIds` or `newDriveName`. Every drive id must belong to the account.
   - `scopes`: non-empty subset of read, write, delete, share; `manage` is rejected.
   - Without `agentId`, the agent named `client_name` is reused if it exists, otherwise created.
@@ -149,6 +152,8 @@ JSON with `Cache-Control: no-store`.
 - Clerk-protected like `/console` (signed-out visitors go to `/sign-in` and come back).
 - `?code=XXXX-XXXX` prefills a code field; the page loads the request and shows: agent name,
   machine, requested time, and "Check that this code matches the one in your agent's terminal."
+  It also requires the human to type the verification code the agent printed (§15) — the page
+  never displays it — and verifies it against `public_key` before anything is sealed or posted.
 - Choices:
   - Drive: an existing drive, or "Create a new drive for this agent" (name defaults to the
     agent name). The new-drive option explains that the agent will hold that drive's key.
@@ -187,8 +192,8 @@ failed unseal is reported per drive and does not abort login.
   - Machine from `AGENT_DRIVE_MACHINE` or the hostname.
   - `--no-browser` skips opening a browser; a browser is also never opened when stdout is not a
     TTY or `CI` is set.
-  - It prints the URL, the code, and "Waiting for approval…", polls at `interval` (honouring
-    `slow_down`), and stops on denial or expiry with a clear message.
+  - It prints the URL, the code, the verification code (§15), and "Waiting for approval…", polls
+    at `interval` (honouring `slow_down`), and stops on denial or expiry with a clear message.
 - On success it saves `apiUrl`, `apiKey`, and drive keys to the private config. It unseals drive
   keys and generates and saves a key for `new_drive_id`. It prints a summary (agent, drives,
   scopes, config path) but never the API key or a drive key.
@@ -236,9 +241,10 @@ recovery-key choices. The agent owns those decisions.
   only. There are no drive, permission, or key fields.
 - The copy says: "This agent gets its own encrypted drive. Its key is created and kept on that
   machine; Agent Drive never sees it." When reconnecting, it says "Reconnects to: <drive names>".
-- `POST /api/console/device/{code}/approve` with an empty body (`{}`) applies the defaults
-  below. The optional explicit fields from §2 stay accepted for API compatibility, but the page
-  no longer sends them.
+- `POST /api/console/device/{code}/approve` with a body carrying only `delegate`,
+  `offerRevision` and `deviceVerification` applies the defaults below. The optional explicit
+  fields from §2 stay accepted for API compatibility, but the page no longer sends them.
+  `deviceVerification` (§15) is required on every shape.
 
 ### Defaults on approve
 
@@ -527,8 +533,11 @@ offerRevision: number }`. It applies the defaults (reconnect with preserved perm
   human still approves once on `/connect`; `grant` never approves. A prompt-injected agent that
   runs `grant <attacker code>` cannot hand over a key unseen: the human sees "Offered by <agent>:
   drive <name>, <scopes>, writes under <paths>" and can deny or ignore it.
-- CLI: `agent-drive grant CODE [--drive ID] [--read-only] [--scope S]... [--write-path P]...`
-  (docs/cli.md). It reads the request (`GET /v1/device/:code`), seals the local drive key with
+- CLI: `agent-drive grant CODE --verify CODE2 [--drive ID] [--read-only] [--scope S]... [--write-path P]...`
+  (docs/cli.md). `--verify` is required: it carries the verification code the new agent printed
+  (§15), and `grant` recomputes it against the request's `public_key` and refuses on mismatch
+  **before** sealing — a substituted key must never receive the sealed drive key. It reads the
+  request (`GET /v1/device/:code`), seals the local drive key with
   `sealDriveKey` (section 4), posts the offer (`POST /v1/device/:code/grant`), and prints the
   `/connect` URL. Default scopes are `read write` (user decision) and must be within the caller's
   own; default write paths are the caller's own. The offer must pass `assertDelegation` (§11), so
@@ -559,3 +568,47 @@ offer was withdrawn; run agent-drive login again.` No key is issued.
   holds recovery material; `credentials issue` (§13) for a sandbox with no browser.
 - Revoking the granting agent after exchange does not revoke the grantee; each key is revoked
   alone.
+
+## 15. Independently authenticated recipient binding (supersedes the §3/§14 trust note)
+
+Until this version the approval flow trusted the service to relay the requesting device's public
+key honestly: the page sealed to whatever `GET /device/:code` returned, and `grant` sealed to
+whatever `GET /v1/device/:code` returned. A compromised or malicious service could substitute its
+own public key and receive a sealed drive key. The verification code closes that gap by carrying
+a commitment to the real key through a channel the service cannot write to — the human.
+
+- **The code.** `verificationCode(public_key)`: the first 8 bytes of SHA-256 over the raw ECDH
+  P-256 public key, shown as four hex groups (`a1b2 c3d4 e5f6 7890`) — the same display
+  fingerprint the account key uses. Shared implementation:
+  `packages/agent-drive/src/verification.ts`, WebCrypto only, so the identical code runs in the
+  CLI, the API and the browser.
+- **`agent-drive login`** prints `Verification code: <code>` next to the link and user code. It
+  is not a secret: its value is that it appears on the requesting device's own output and nowhere
+  the service can write.
+- **`/connect`** requires the human to type the code. The page never displays it — displaying it
+  would let users copy what the page shows instead of reading the terminal, which is the whole
+  point of the independent channel. Before sealing or approving, the browser recomputes
+  `verificationCode(request.public_key)` and compares; a mismatch is a field error and nothing is
+  sent.
+- **Approve body.** Every approval shape — defaults, defaults+delegate, offer-bound and explicit
+  — gains a required `deviceVerification` field holding the typed code. The server recomputes it
+  from the request row's `public_key` inside the approval transaction and returns
+  `409 conflict` on mismatch, so an approval is bound to the key the human verified even if the
+  page's check was bypassed. A missing or malformed value is `400 validation_error`.
+- **`agent-drive grant`** requires `--verify <code>`: the human relays the new agent's printed
+  code, and the granter recomputes and compares against `request.public_key` **before** sealing.
+  The check has to precede sealing, not approval — the granter posts the sealed drive key with
+  the offer, so an approve-time check alone cannot stop a substituted key from receiving it.
+- **Compatibility.** This is a deliberate break: CLI versions that predate the code cannot be
+  approved (the typed-code gate has no bypass, because one would reopen the phishing hole), and
+  `grant` invocations must add `--verify`. The sealed-blob wire format, the public OAuth
+  endpoints and the schema are unchanged, and already-approved clients can still unseal keys.
+
+The account-key first-use analogue is in `docs/keys-and-recovery.md` (§"account sealing") and
+`docs/threat-model.md`: first-time sealing requires `--fingerprint`, an
+`AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT` environment value, or an existing `accountKeyPins` config
+entry — an explicit fingerprint the human copied from the console — and fails closed otherwise.
+Pins written by older CLI versions were trust-on-first-use pins from the API; after upgrading,
+they remain preserved but cannot authorize sealing until the owner verifies the Settings
+fingerprint once. If it matches the existing pin, `--fingerprint` marks that origin's pin as
+verified; if the account key changed, the owner must use `--repin --fingerprint`.

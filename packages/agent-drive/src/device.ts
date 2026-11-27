@@ -17,6 +17,7 @@ import {
   unsealDriveKey,
   type SealedDriveKey,
 } from './seal.js';
+import { normalizeVerificationCode, verificationCode } from './verification.js';
 
 type TokenResponse = {
   access_token: string;
@@ -132,8 +133,13 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     interval?: number;
   };
   const link = grant.verification_uri_complete ?? grant.verification_uri;
+  // The verification code is a commitment to this device's public key. It travels only through
+  // the human — from this terminal to the approval page or to `agent-drive grant --verify` —
+  // so a service that hands either side a different public key cannot get a key sealed to it.
+  const verify = await verificationCode(publicKey);
   options.log(`Open this link to approve: ${link}`);
   options.log(`Check that the code matches: ${grant.user_code}`);
+  options.log(`Verification code: ${verify}`);
   options.log('Waiting for approval...');
   if (options.openBrowser) openUrl(link);
 
@@ -247,9 +253,15 @@ function expired() {
 /**
  * An agent that holds a drive seals its drive key to a pending login and offers it. The human
  * still approves on /connect. Prints the request facts and the approval URL, never a key.
+ *
+ * `verify` is the verification code the requesting device's login printed, relayed by the
+ * human. It is checked against the public key the API returns for the request BEFORE the drive
+ * key is sealed: a service that answers this lookup with a substituted key would receive the
+ * sealed drive key, so a mismatch refuses the seal outright (docs/agent-login.md §15).
  */
 export async function grantLogin(options: {
   code: string;
+  verify: string;
   drive?: string;
   readOnly?: boolean;
   scopes?: string[];
@@ -280,10 +292,20 @@ export async function grantLogin(options: {
       `This key does not hold ${scopes.join(' and ')}; pass --scope for what it may grant.`,
     );
   const writePaths = options.writePaths?.length ? options.writePaths : (who.writePaths ?? []);
+  const expected = normalizeVerificationCode(options.verify);
+  if (!expected)
+    throw new Error(
+      'Pass --verify with the verification code the new agent printed, exactly as shown ("a1b2 c3d4 e5f6 7890").',
+    );
   const request = await client.deviceRequest(code);
   options.log(
     `Request from ${request.client_name}${request.machine ? ` on ${request.machine}` : ''}, made ${request.created_at}.`,
   );
+  if ((await verificationCode(request.public_key)) !== expected)
+    throw new Error(
+      'The verification code does not match this request. Check the code the new agent printed; ' +
+        'if it is right, do not grant — the request may have been tampered with.',
+    );
   const sealedDriveKey = await sealDriveKey(request.public_key, drive, driveKey);
   await client.grantDevice(code, { driveId: drive, scopes, writePaths, sealedDriveKey });
   options.log(

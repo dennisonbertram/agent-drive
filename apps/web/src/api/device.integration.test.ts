@@ -55,10 +55,29 @@ function oauth(
   );
 }
 
+// The verification code for a public key: SHA-256(raw), first 8 bytes, four hex groups — the
+// value a person would have typed on /connect. Sync reference for verificationCode().
+const verify = (key = publicKey) =>
+  createHash('sha256')
+    .update(Buffer.from(key, 'base64url'))
+    .digest('hex')
+    .slice(0, 16)
+    .replace(/(.{4})(?=.)/gu, '$1 ');
+
 function consoleCall(userId: string, path: string, method = 'GET', body?: unknown) {
   const headers = new Headers();
   if (method !== 'GET') headers.set('origin', origin);
   if (body !== undefined) headers.set('content-type', 'application/json');
+  // Every approve body must carry deviceVerification (docs/agent-login.md §15). Tests that care
+  // about the field set it explicitly (including null for "missing"); the rest get the code the
+  // test's public key would have produced.
+  if (
+    path.endsWith('/approve') &&
+    body !== null &&
+    typeof body === 'object' &&
+    !('deviceVerification' in body)
+  )
+    body = { ...(body as Record<string, unknown>), deviceVerification: verify() };
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
   return handleConsoleApiRequest(new Request(`${origin}/api/console${path}`, init), userId);
@@ -949,6 +968,33 @@ describe('one-click connect (contract v2)', () => {
       driveIds: [drive],
     });
     expect(response.status).toBe(400);
+  });
+
+  it('requires deviceVerification on every approve shape and rejects a wrong code with 409', async () => {
+    const user = `device_verify_${suffix}`;
+    accountIds.push((await json(await consoleCall(user, '/session'))).account.id);
+    // Missing or malformed: 400. A well-formed but wrong code: 409 — the request was not the
+    // one the person verified, so nothing is granted and the request stays pending.
+    const started = await start();
+    const missing = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      deviceVerification: null,
+    });
+    expect(missing.status).toBe(400);
+    const malformed = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      deviceVerification: 'nope',
+    });
+    expect(malformed.status).toBe(400);
+    const wrong = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      deviceVerification: '0000 0000 0000 0000',
+    });
+    expect(wrong.status).toBe(409);
+    expect((await json(wrong)).error.message).toContain('verification code');
+    expect((await consoleCall(user, `/device/${started.user_code}`)).status).toBe(200);
+    // The right code approves — the value the page would have typed from the terminal.
+    const ok = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      deviceVerification: verify().toUpperCase(),
+    });
+    expect(ok.status).toBe(200);
   });
 
   it('validates known_drive_ids', async () => {

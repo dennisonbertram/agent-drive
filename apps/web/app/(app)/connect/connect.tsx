@@ -7,6 +7,10 @@ import {
   decodeDriveKey,
   DriveCryptoError,
 } from '../../../../../packages/agent-drive/src/crypto.ts';
+import {
+  normalizeVerificationCode,
+  verificationCode,
+} from '../../../../../packages/agent-drive/src/verification.ts';
 import { driveKeyFromBundle, BUNDLE_PREFIX } from '@/src/console/credentials-bundle';
 import { parseRecoveryFile, sealDriveKey, type SealedKey } from '@/src/device/seal';
 import { verifyDriveKey, type DriveKeyCheck } from '@/src/device/verify-key';
@@ -146,9 +150,14 @@ export default function Connect({
     uncheckedKey?: boolean;
   } | null>(null);
   const [formError, setFormError] = useState('');
-  const [fieldError, setFieldError] = useState<{ field: 'key' | 'folder'; message: string } | null>(
-    null,
-  );
+  const [fieldError, setFieldError] = useState<{
+    field: 'key' | 'folder' | 'verify';
+    message: string;
+  } | null>(null);
+  // The verification code the agent printed on its own terminal, typed here. The page never
+  // displays it: typing what the terminal shows is what makes the terminal an independent
+  // channel, and it commits this approval to that device's public key.
+  const [verifyText, setVerifyText] = useState('');
   const [delegate, setDelegate] = useState(false);
   // Add to an existing drive (docs/agent-login.md section 12). The key lives only in this state.
   const [accountDrives, setAccountDrives] = useState<Drive[]>([]);
@@ -177,6 +186,7 @@ export default function Connect({
     refetches.current = 0;
     refetchStopped.current = false;
     clearKey();
+    setVerifyText('');
     setPhase('entry');
     setProblem(null);
     setNotice('');
@@ -333,15 +343,48 @@ export default function Connect({
   // Bring a field error into view and put the cursor where the fix goes.
   useEffect(() => {
     if (!fieldError) return;
-    const id = fieldError.field === 'key' ? 'connect-key-error' : 'connect-folder-error';
-    document.getElementById(id)?.scrollIntoView({ block: 'center' });
-    document.getElementById(fieldError.field === 'key' ? 'connect-key' : 'connect-folder')?.focus();
+    const ids = {
+      key: 'connect-key',
+      folder: 'connect-folder',
+      verify: 'connect-verify',
+    } as const;
+    document.getElementById(`${ids[fieldError.field]}-error`)?.scrollIntoView({ block: 'center' });
+    document.getElementById(ids[fieldError.field])?.focus();
   }, [fieldError]);
 
   async function approve() {
     if (!request || busyRef.current) return;
     setFormError('');
     setFieldError(null);
+    // Recipient binding, checked before any key is sealed or posted: the typed code must be
+    // the fingerprint of the public key this request carries. A wrong code means either a typo
+    // or that the service showed this page a different key than the agent generated — either
+    // way nothing is approved.
+    const typed = normalizeVerificationCode(verifyText);
+    if (!typed) {
+      setFieldError({
+        field: 'verify',
+        message:
+          'Enter the verification code your agent printed, as four groups like a1b2 c3d4 e5f6 7890.',
+      });
+      return;
+    }
+    let deviceVerification: string;
+    try {
+      if (!request.public_key) throw new Error('This request has no agent key. Start again.');
+      deviceVerification = await verificationCode(request.public_key);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'The request could not be checked.');
+      return;
+    }
+    if (typed !== deviceVerification) {
+      setFieldError({
+        field: 'verify',
+        message:
+          'This code does not match the one your agent printed. Check the terminal again and type it exactly.',
+      });
+      return;
+    }
     const startedAt = ++generation.current;
     const live = () => startedAt === generation.current;
     setPhase('approving');
@@ -349,7 +392,9 @@ export default function Connect({
     try {
       // The revision binds this approval to the offer (or lack of one) the page showed.
       const offerRevision = request.offerRevision ?? 0;
-      let body: unknown = delegate ? { delegate: true, offerRevision } : { offerRevision };
+      let body: unknown = delegate
+        ? { delegate: true, offerRevision, deviceVerification }
+        : { offerRevision, deviceVerification };
       let uncheckedKey = false;
       let scopes: string[] = request.offer?.scopes ?? request.scopes ?? DEFAULT_SCOPES;
       let driveLabel = request.offer
@@ -415,6 +460,7 @@ export default function Connect({
           sealedDriveKeys: { [target]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
           offerRevision,
+          deviceVerification,
         };
       }
       if (!live()) return;
@@ -776,6 +822,34 @@ export default function Connect({
         </span>
         <small>If it does not, close this page; the request expires on its own.</small>
       </div>
+      <label className="connect-verify">
+        Verification code
+        <input
+          id="connect-verify"
+          value={verifyText}
+          disabled={busy}
+          onChange={(event) => setVerifyText(event.target.value)}
+          placeholder="a1b2 c3d4 e5f6 7890"
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-invalid={fieldError?.field === 'verify' || undefined}
+          aria-describedby={
+            fieldError?.field === 'verify' ? 'connect-verify-error' : 'connect-verify-hint'
+          }
+          className={fieldError?.field === 'verify' ? 'invalid' : undefined}
+        />
+      </label>
+      {fieldError?.field === 'verify' ? (
+        <p className="connect-field-error" role="alert" id="connect-verify-error">
+          {fieldError.message}
+        </p>
+      ) : (
+        <p className="connect-hint" id="connect-verify-hint">
+          Type the verification code your agent printed below its login code. This page never shows
+          it — that is what proves the code came from your terminal, not from us.
+        </p>
+      )}
       <div className="connect-actions">
         <button
           className="button primary connect-approve"

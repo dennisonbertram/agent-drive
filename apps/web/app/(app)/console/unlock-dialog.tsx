@@ -238,7 +238,8 @@ export function UnlockDialog({
         <p className="unlock-help">
           No recovery file? An agent that has this drive’s key can add it to your account: run{' '}
           <code>agent-drive account seal --drive {driveId}</code> on its machine — it also happens
-          automatically on the agent’s regular runs.{' '}
+          automatically on the agent’s regular runs. If it reports <code>unverified</code>, re-run
+          it with <code>--fingerprint</code> set to the account-key fingerprint under Settings.{' '}
           <CopyButton
             text={`agent-drive account seal --drive ${driveId}`}
             label="Copy account seal command"

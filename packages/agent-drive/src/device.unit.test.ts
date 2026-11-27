@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
 import { unsealDriveKey } from './seal.js';
+import { verificationCode } from './verification.js';
 import { DriveCryptoError } from './crypto.js';
 import {
   apiErrorLines,
@@ -148,6 +149,10 @@ describe('deviceLogin', () => {
     const printed = r.out.join('\n');
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');
+    // The verification code is the fingerprint of the public key this login generated — the
+    // value the owner types on /connect or relays to `grant --verify`.
+    const loginKey = r.calls[0]!.body.public_key as string;
+    expect(printed).toContain(`Verification code: ${await verificationCode(loginKey)}`);
     expect(printed).toMatch(/d2/u);
     expect(printed).toMatch(/No usable key for: d2\./u);
     for (const secret of ['adk_SECRETTOKEN', K1, saved.driveKeys.d3 ?? 'x'])
@@ -599,15 +604,18 @@ describe('grantLogin', () => {
   async function grant(
     options: Partial<Parameters<typeof grantLogin>[0]> = {},
     scopes = ['read', 'write', 'delegate'],
+    observed?: { posts: string[] },
   ) {
     const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
       'deriveBits',
     ]);
     const publicKey = b64(await subtle.exportKey('raw', pair.publicKey));
+    const verify = await verificationCode(publicKey);
     const bodies: string[] = [];
     const out: string[] = [];
     const fetcher = async (url: RequestInfo | URL, init?: RequestInit) => {
       if (init?.body) bodies.push(String(init.body));
+      if (init?.method === 'POST') observed?.posts.push(String(init.body ?? ''));
       if (String(url).endsWith('/whoami'))
         return json(200, {
           accountId: 'a',
@@ -635,12 +643,13 @@ describe('grantLogin', () => {
     });
     await grantLogin({
       code: 'bcdf-ghjk',
+      verify,
       client,
       config: { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } },
       log: (line) => out.push(line),
       ...options,
     });
-    return { pair, bodies, out };
+    return { pair, bodies, out, verify };
   }
 
   it('seals the key to the request public key, posts it, and prints no key', async () => {
@@ -682,17 +691,39 @@ describe('grantLogin', () => {
     });
     const config = { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } };
     await expect(
-      grantLogin({ code: 'BCDF-GHJK', client, config, drive: 'd1', log: () => undefined }),
+      grantLogin({
+        code: 'BCDF-GHJK',
+        verify: 'a1b2 c3d4 e5f6 7890',
+        client,
+        config,
+        drive: 'd1',
+        log: () => undefined,
+      }),
     ).rejects.toThrow(/no drive key for d1/);
     await expect(
       grantLogin({
         code: 'BCDF-GHJK',
+        verify: 'a1b2 c3d4 e5f6 7890',
         client,
         config: { driveKeys: { d1: K1 } },
         log: () => undefined,
       }),
     ).rejects.toThrow(/drive key/);
     expect(posts).toEqual([]);
+  });
+
+  it('refuses to seal when --verify does not match the request public key, and posts nothing', async () => {
+    // The negative case for recipient binding: a substituted key (or a wrong code relayed by
+    // the human) must stop the seal before the offer is posted.
+    const posts: string[] = [];
+    await expect(
+      grant({ verify: 'a1b2 c3d4 e5f6 7890' }, undefined, { posts }),
+    ).rejects.toThrow(/verification code does not match/);
+    expect(posts).toEqual([]);
+  });
+
+  it('refuses a malformed --verify before the request is even fetched', async () => {
+    await expect(grant({ verify: 'not-a-code' })).rejects.toThrow(/Pass --verify/);
   });
 
   it('summarizes the offer from scopes and paths', async () => {

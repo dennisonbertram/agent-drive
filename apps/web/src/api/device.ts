@@ -1,5 +1,9 @@
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
+import {
+  normalizeVerificationCode,
+  verificationCode,
+} from '../../../../packages/agent-drive/src/verification.ts';
 import { getPool, withTransaction } from '../db/client';
 import { billingOrigin } from '../billing/policy';
 import { enforceWriteBudget, lockBillingAccount } from '../billing/ledger';
@@ -439,7 +443,7 @@ function userCodeFrom(value: string | undefined) {
 
 const pendingRequest = `user_code = $1 AND status = 'pending' AND expires_at > now()`;
 
-const DEFAULTS_KEYS = new Set(['delegate', 'offerRevision']);
+const DEFAULTS_KEYS = new Set(['delegate', 'offerRevision', 'deviceVerification']);
 
 function approvalInput(body: Record<string, unknown>) {
   // Defaults body: only these keys, so the one-click page can send them. Anything else is explicit.
@@ -451,6 +455,17 @@ function approvalInput(body: Record<string, unknown>) {
     (!Number.isSafeInteger(body.offerRevision) || (body.offerRevision as number) < 0)
   )
     throw new ApiError('validation_error', 'offerRevision must be a non-negative integer.');
+  // The human-typed commitment to the requesting device's public key. Required on every
+  // approval shape; the server recomputes it before anything is granted.
+  const deviceVerification =
+    typeof body.deviceVerification === 'string'
+      ? normalizeVerificationCode(body.deviceVerification)
+      : undefined;
+  if (!deviceVerification)
+    throw new ApiError(
+      'validation_error',
+      'deviceVerification must be the verification code the agent printed.',
+    );
   const delegate = isDefaults && body.delegate === true;
   const driveIds = body.driveIds === undefined ? [] : body.driveIds;
   if (!Array.isArray(driveIds) || driveIds.length > 100)
@@ -502,6 +517,7 @@ function approvalInput(body: Record<string, unknown>) {
     isDefaults,
     delegate,
     offerRevision: body.offerRevision as number | undefined,
+    deviceVerification,
   };
 }
 
@@ -576,13 +592,23 @@ async function approve(
 ) {
   await lockBillingAccount(client, accountId);
   const found = await client.query(
-    `SELECT id, client_name, machine, requested_drive_ids, previous_api_key_id FROM device_authorizations
+    `SELECT id, client_name, machine, requested_drive_ids, previous_api_key_id, public_key
+      FROM device_authorizations
       WHERE ${pendingRequest}
       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
     [code],
   );
   const row = found.rows[0];
   if (!row) throw new ApiError('not_found', 'Device request not found.');
+
+  // Recipient binding: the typed code is the human's commitment to the requesting device's
+  // public key, carried through the terminal rather than the service. A request whose stored
+  // key does not match is not the one the human verified — refuse before granting anything.
+  if (input.deviceVerification !== (await verificationCode(row.public_key)))
+    throw new ApiError(
+      'conflict',
+      'The verification code does not match this device request; check the code the agent printed.',
+    );
 
   if (input.drives.length) {
     const owned = await client.query(

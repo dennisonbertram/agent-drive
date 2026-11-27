@@ -97,6 +97,33 @@
   color: var(--ink, #111);
 }
 
+/* the typed verification code: the terminal is the independent channel */
+.connect-shell label.connect-verify {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  font: 500 11px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted, #6b6963);
+}
+.connect-verify input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 6px;
+  font: 400 0.9375rem var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
+  letter-spacing: 0.08em;
+  color: var(--ink, #111);
+  background: var(--bg, #fff);
+  scroll-margin-bottom: 96px;
+}
+.connect-verify input.invalid {
+  border-color: var(--danger, #8b3027);
+}
+
 /* key / value list */
 .connect-facts {
   display: block;

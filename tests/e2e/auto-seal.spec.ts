@@ -1,5 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -92,6 +92,21 @@ async function seed(context: BrowserContext, baseURL: string): Promise<Seeded> {
   return { userId, post, agentId: agent.id };
 }
 
+// The fingerprint a human would copy from the console (Settings): SHA-256 of the raw
+// account public key, first 8 bytes, grouped — the independently sourced value that lets
+// `account seal` pin this origin's account key.
+async function accountFingerprint(context: BrowserContext) {
+  const got = await context.request.get('/api/console/account-key');
+  expect(got.status()).toBe(200);
+  const { publicKey } = (await got.json()) as { publicKey: string };
+  return createHash('sha256')
+    .update(Buffer.from(publicKey, 'base64url'))
+    .digest('hex')
+    .slice(0, 16)
+    .match(/.{4}/g)!
+    .join(' ');
+}
+
 const nameButton = (page: Page, name: string) =>
   page.getByTitle(`Preview ${name}`, { exact: true });
 const chip = (page: Page) => page.getByTestId('key-chip');
@@ -119,15 +134,13 @@ async function heldKeysConfig(
     }),
     { mode: 0o600 },
   );
-  return {
-    configPath,
-    environment: {
-      ...process.env,
-      AGENT_DRIVE_CONFIG: configPath,
-      AGENT_DRIVE_API_URL: baseURL,
-      AGENT_DRIVE_API_KEY: token,
-    },
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    AGENT_DRIVE_CONFIG: configPath,
+    AGENT_DRIVE_API_URL: baseURL,
+    AGENT_DRIVE_API_KEY: token,
   };
+  return { configPath, environment };
 }
 
 // Sets up passphrase unlock through the console UI: load drive A's recovery file, then create.
@@ -202,6 +215,7 @@ test('agent account seal posts held drive keys and the console opens them with n
       [a.id]: keys.a,
       [b.id]: keys.b,
     });
+    environment.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT = await accountFingerprint(context);
     const first = await cli(['account', 'seal'], environment);
     expect(first.status, first.stderr).toBe(0);
     expect(first.stdout).toContain(`${a.id}: already sealed`);
@@ -269,6 +283,7 @@ test('an agent-only drive is never sealed and asks for a recovery file in the co
       [a.id]: keys.a,
       [c.id]: keys.c,
     });
+    environment.AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT = await accountFingerprint(context);
     const seal = await cli(['account', 'seal'], environment);
     expect(seal.status, seal.stderr).toBe(0);
     expect(seal.stdout).toContain(`${c.id}: agent-only`);
