@@ -98,7 +98,9 @@ async function seed(context: BrowserContext, baseURL: string): Promise<Seeded> {
 async function accountFingerprint(context: BrowserContext) {
   const got = await context.request.get('/api/console/account-key');
   expect(got.status()).toBe(200);
-  const { publicKey } = (await got.json()) as { publicKey: string };
+  const { accountKey } = (await got.json()) as { accountKey?: { publicKey?: string } };
+  expect(accountKey?.publicKey).toBeTruthy();
+  const publicKey = accountKey!.publicKey!;
   return createHash('sha256')
     .update(Buffer.from(publicKey, 'base64url'))
     .digest('hex')
