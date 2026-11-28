@@ -237,8 +237,8 @@ export async function ingestOpenRouterTrace(input: {
   const stagedObjectKey = `objects/${token.account_id}/${driveId}/${versionId}`;
   let objectKey: string | null = null;
   try {
-    await putObject(stagedObjectKey, ciphertext);
     objectKey = stagedObjectKey;
+    await putObject(stagedObjectKey, ciphertext);
     return await withTransaction(async (client) => {
       await lockBillingAccount(client, token.account_id);
       const drive = await client.query(
@@ -246,6 +246,12 @@ export async function ingestOpenRouterTrace(input: {
         [driveId, token.account_id],
       );
       if (!drive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+      const activeToken = await client.query(
+        'SELECT 1 FROM drive_webhook_tokens WHERE drive_id = $1 AND token_hash = $2 AND revoked_at IS NULL',
+        [driveId, token.token_hash],
+      );
+      if (!activeToken.rowCount)
+        throw new ApiError('unauthorized', 'The webhook token is not valid.');
       const conflictFile = await putConflict(client, driveId, path, 'create');
       const inbox = await client.query(
         'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1 FOR SHARE',
