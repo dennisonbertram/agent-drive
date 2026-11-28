@@ -806,7 +806,7 @@ export default function Connect({
         Read only
       </label>
       <label className="cf-folder">
-        Only allow writes under (optional)
+        Write folder (optional)
         <input
           id="connect-folder"
           value={folder}
