@@ -10,7 +10,7 @@
     "slug": "quickstart",
     "file": "quickstart.md",
     "title": "Quickstart",
-    "summary": "Install the CLI, connect an agent, back up its key, store a file and share it.",
+    "summary": "Start here. Install the CLI, connect an agent, back up its key, store a file and share it.",
     "section": "Get started"
   },
   {
@@ -66,7 +66,7 @@
     "slug": "cli",
     "file": "cli.md",
     "title": "CLI reference",
-    "summary": "Every agent-drive command, flag, environment variable and exit behavior.",
+    "summary": "Every agent-drive command, flag, environment variable and exit behavior, including mounting in Finder on macOS.",
     "section": "Reference"
   },
   {

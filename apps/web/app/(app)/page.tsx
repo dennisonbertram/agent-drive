@@ -5,6 +5,7 @@ import { SiteHeader } from '../site-header';
 import { SiteFooter } from '../site-footer';
 import { billingRates, PLANS } from '@/src/billing/policy';
 import { allowance } from '@/src/content/plans';
+import { egressNotMetered } from '@/src/content/pricing';
 import { COMPARISONS } from '@/src/content/compare';
 import {
   CANONICAL_ORIGIN,
@@ -152,7 +153,7 @@ export default function Home() {
     ['Price / month', (p) => `$${p.baseCents / 100}`],
     ['Drives', (p) => String(p.drives)],
     ['Stored', (p) => allowance(p.storageBytes)],
-    ['Downloads / month', (p) => allowance(p.egressBytes)],
+    ['Downloads / month', (p) => (egressNotMetered() ? 'Not charged' : allowance(p.egressBytes))],
     ['API operations / month', (p) => ops.format(Number(p.operations))],
   ];
   return (
