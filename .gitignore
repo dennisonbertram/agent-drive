@@ -15,3 +15,9 @@ test-results/
 apps/web/public/cli/
 packages/agent-drive/native/linux-*/
 native/mount/target/
+# Setup UX review evidence lives in Agent Drive (/assets/agent-drive/ux-review-setup-nov27/)
+docs/ux-walker/setup-nov27/**/screenshots/
+docs/ux-walker/setup-nov27/**/videos/
+docs/ux-visual/setup-nov27/**/shots/
+docs/ux-visual/setup-nov27/**/audit.json
+docs/ux-visual/setup-nov27/**/audit.ndjson
