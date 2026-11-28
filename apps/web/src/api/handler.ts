@@ -3475,7 +3475,8 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 }
 
 type RequestMode =
-  { kind: 'bearer' } | { kind: 'console'; userId: string | null; reverified: boolean };
+  | { kind: 'bearer' }
+  | { kind: 'console'; userId: string | null; reverified: boolean };
 
 export function consoleRouteAllowed(method: string, parts: string[]) {
   if (parts[0] === 'device') {
