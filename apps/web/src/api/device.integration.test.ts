@@ -277,6 +277,37 @@ describe('device authorization', () => {
     expect((await json(await poll(started.device_code))).error).toBe('access_denied');
   });
 
+  it('reports existing_agent_name and account_has_drives for the approval warnings', async () => {
+    const freshUser = `device_fresh_${randomUUID()}`;
+    const freshAccount = (await json(await consoleCall(freshUser, '/session'))).account.id;
+    accountIds.push(freshAccount);
+    const name = `flag-${suffix}`;
+    // No drives, no agent under the name: both flags false.
+    const first = await start({ client_name: name });
+    const bare = await json(await consoleCall(freshUser, `/device/${first.user_code}`));
+    expect(bare).toMatchObject({
+      creates_drive: true,
+      existing_agent_name: false,
+      account_has_drives: false,
+    });
+    // A drive and a same-named agent: both flags true.
+    await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2)', [
+      freshAccount,
+      'flag-drive',
+    ]);
+    await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2)', [
+      freshAccount,
+      name,
+    ]);
+    const second = await start({ client_name: name });
+    const flagged = await json(await consoleCall(freshUser, `/device/${second.user_code}`));
+    expect(flagged).toMatchObject({
+      creates_drive: true,
+      existing_agent_name: true,
+      account_has_drives: true,
+    });
+  });
+
   it('reports expired_token and refuses to approve expired requests', async () => {
     const started = await start();
     await pool.query(

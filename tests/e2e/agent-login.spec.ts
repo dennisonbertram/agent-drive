@@ -369,6 +369,9 @@ test.describe('agent device login', () => {
     const env = cliEnv(baseURL!, root, 'delegate', machine);
     const { login, code, path, verify } = await startLogin(env, 'delegate-bot');
     await approve(page, path, 'delegate-bot', code, verify, true);
+    // The receipt names the delegate grant.
+    await expect(page.getByRole('status')).toContainText('Delegate');
+    await expect(page.getByRole('status')).toContainText('Can add other agents');
     const result = await login.done;
     expect(result.status, result.stderr).toBe(0);
     const who = await cli(['whoami'], env);
@@ -976,11 +979,63 @@ test.describe('agent device login', () => {
     await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
     await expect(page.getByText(/keeps its previous permissions/)).toBeVisible();
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('New encrypted drive');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(
+      'New encrypted drive',
+    );
     await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
     await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     again.login.child.kill();
+  });
+
+  test('same-name agent and new empty drive warn; duplicate drive names are disambiguated', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'dupe-a', 'm-dupe-a');
+    const a = await startLogin(envA, 'dupe-bot');
+    await approve(page, a.path, 'dupe-bot', a.code, a.verify);
+    expect((await a.login.done).status).toBe(0);
+    const [driveId] = Object.keys((await readConfig(envA)).driveKeys);
+
+    // A second agent asking for the same name, on an account that already has a drive.
+    const envB = cliEnv(baseURL!, root, 'dupe-b', 'm-dupe-b');
+    const b = await startLogin(envB, 'dupe-bot');
+    await page.goto(b.path);
+    await expect(
+      page.getByText(/You already have an agent named dupe-bot\. Approving signs this one in as/),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
+    await expect(page.locator('.connect-cmd')).toHaveText(`agent-drive grant ${b.code}`);
+    await approve(page, b.path, 'dupe-bot', b.code, b.verify);
+    expect((await b.login.done).status).toBe(0);
+
+    // Two drives can share a name (the picker cannot rely on the server always
+    // disambiguating); each duplicate gets a short id suffix.
+    await database.query(
+      'INSERT INTO drives (account_id, name) SELECT account_id, name FROM drives WHERE id = $1',
+      [driveId],
+    );
+    const envC = cliEnv(baseURL!, root, 'dupe-c', 'm-dupe-c');
+    const c = await startLogin(envC, 'dupe-bot');
+    await page.goto(c.path);
+    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
+    await chooseExistingDrive(page);
+    const options = page.locator('select option');
+    await expect(options).toHaveCount(3);
+    const texts = (await options.allTextContents()).map((text) => text.trim());
+    expect(new Set(texts).size).toBe(3);
+    expect(texts.filter((text) => /^dupe-bot \([0-9a-f-]{8}\)$/.test(text))).toHaveLength(2);
+    // Choosing an existing drive clears the new-drive warnings.
+    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toHaveCount(0);
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
+    c.login.child.kill();
   });
 
   test('grant: the first agent seals the key for a second login and the human approves the offer it saw', async ({
@@ -1057,9 +1112,9 @@ test.describe('agent device login', () => {
       `writes only in /inbox/b · offered by ${granter}`,
     );
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('Offered by');
-    await expect(page.locator('.connect-facts')).toContainText(granter);
-    await expect(page.locator('.connect-facts')).toContainText('/inbox/b');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(granter);
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('/inbox/b');
     await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     await mkdir('docs/design/shots/spec-connect-share', { recursive: true });
     for (const [width, height] of [
@@ -1146,8 +1201,8 @@ test.describe('agent device login', () => {
       / · read only · offered by granter2-bot$/,
     );
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
-    await expect(page.locator('.connect-facts')).toContainText('No writes');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('granter2-bot');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('No writes');
     await page.locator('#connect-verify').fill(b.verify);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByRole('status')).toContainText('Approval saved');
@@ -1166,23 +1221,28 @@ test.describe('agent device login', () => {
     expect(who.driveIds).toEqual([driveId]);
   });
 
-  test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
+  test('Deny refuses the request and ends the agent wait without a verification code', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     test.setTimeout(120_000);
     await newUser(context);
     const env = cliEnv(baseURL!, root, 'denied', 'deny-box');
-    const { login, path, code } = await startLogin(env, 'denied-bot');
+    const { login, path } = await startLogin(env, 'denied-bot');
     await page.goto(path);
-    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Connect denied-bot?' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve agent' })).toBeVisible();
-    // The server-side deny endpoint still works for other clients.
-    const denied = await page.request.post(`/api/console/device/${encodeURIComponent(code)}/deny`, {
-      data: {},
-      headers: { Origin: new URL(baseURL!).origin },
-    });
-    expect(denied.status(), await denied.text()).toBe(200);
+    // No verification code typed: refusing is always safe, so it never needs one.
+    await expect(page.locator('#connect-verify')).toHaveValue('');
+    await page.getByRole('button', { name: 'Deny' }).click();
+    const status = page.getByRole('status');
+    await expect(status).toContainText('Request denied');
+    await expect(status).toContainText('The agent got no access. You can close this page.');
     const result = await login.done;
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toMatch(/denied/i);
+    expect(result.stderr).toContain('The request was denied in the browser');
+    expect(result.stderr).toContain('No access was granted');
     await expect(readFile(env.AGENT_DRIVE_CONFIG!)).rejects.toThrow();
   });
 
@@ -1204,10 +1264,16 @@ test.describe('agent device login', () => {
     await page.goto(path);
     await expect(page.locator('.connect-explain')).toHaveCSS('font-size', '13px');
     await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '10px');
-    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Deny' })).toBeVisible();
+    await expect(page.getByText('Signed in as Local test session')).toBeVisible();
+    await expect(page.locator('.connect-rows')).toContainText('style-bot');
     await openDetails(page);
-    await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
-    await expect(page.locator('.connect-facts')).toContainText('Local test session');
+    await expect(
+      page.locator('.connect-details .connect-facts dt', { hasText: 'Drive' }),
+    ).toBeVisible();
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(
+      'New encrypted drive',
+    );
     // Nothing approves it, so the request stays pending; stop the CLI.
     cliLogin.child.kill();
   });
@@ -1237,18 +1303,21 @@ test.describe('agent device login', () => {
         page.locator(selector).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
       expect(await size('h1')).toBeGreaterThan(await size('.connect-code'));
       await expect(page.locator('.connect-code-line + .connect-actions')).toHaveCount(1);
-      await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Deny' })).toBeVisible();
       await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeHidden();
       await expect(page.locator('.connect-summary')).toHaveText(
         'New encrypted drive · full access',
       );
       await expect(page.locator('.connect-details')).not.toHaveAttribute('open', '');
-      await expect(page.getByText('Machine', { exact: true })).toBeHidden();
-      await expect(page.getByText('Account', { exact: true })).toBeHidden();
+      // The deciding facts are visible without opening Details.
+      await expect(page.getByText('Signed in as Local test session')).toBeVisible();
+      await expect(page.locator('.connect-rows')).toContainText('vp-bot');
+      await expect(page.locator('.connect-rows')).toContainText('vp-box');
+      await expect(page.getByText('Requested', { exact: true })).toBeHidden();
     }
     await page.locator('.connect-details > summary').click();
-    await expect(page.getByText('Machine', { exact: true })).toBeVisible();
-    await expect(page.getByText('Account', { exact: true })).toBeVisible();
+    await expect(page.getByText('Requested', { exact: true })).toBeVisible();
+    await expect(page.getByText('Drive', { exact: true })).toBeVisible();
     await openDetails(page);
     await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeVisible();
     login.child.kill();
@@ -1299,13 +1368,25 @@ test.describe('agent device login', () => {
     second.login.child.kill();
   });
 
-  test('approved state links to the console', async ({ page, context, baseURL }) => {
+  test('approved state lists the grants and links to the console', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     test.setTimeout(120_000);
     await newUser(context);
     const env = cliEnv(baseURL!, root, 'done-state', 'm-done');
     const { login, path, code, verify } = await startLogin(env, 'done-bot');
     await approve(page, path, 'done-bot', code, verify);
+    const status = page.getByRole('status');
     await expect(page.getByRole('heading', { name: 'Access approved for done-bot' })).toBeVisible();
+    // The receipt names what was granted.
+    await expect(status).toContainText('Drive');
+    await expect(status).toContainText('New encrypted drive');
+    await expect(status).toContainText('Access');
+    await expect(status).toContainText('read, write, delete and share');
+    await expect(status).toContainText('Local test session');
+    await expect(status.getByText('Delegate', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Open console' })).toHaveAttribute(
       'href',
       '/console',
@@ -1336,8 +1417,8 @@ test.describe('agent device login', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(page.getByText('offered a drive for this login')).toBeVisible();
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('Offered by');
-    await expect(page.locator('.connect-facts')).toContainText('focus-a-bot');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('focus-a-bot');
     await page.locator('#connect-verify').fill(b.verify);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByRole('status')).toContainText('Approval saved');
