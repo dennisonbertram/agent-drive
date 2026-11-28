@@ -203,11 +203,11 @@
 
 /* the deciding facts stay visible outside Details */
 .connect-shell dl.connect-rows {
-  margin: 0 0 12px;
+  margin: 0 0 6px;
   border-top: 0;
 }
 .connect-shell dl.connect-rows .connect-fact {
-  padding: 3px 0;
+  padding: 1px 0;
 }
 
 /* one primary action; Deny is secondary */
