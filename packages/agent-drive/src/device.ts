@@ -250,6 +250,13 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     apiKey: token.access_token,
     driveKeys,
     driveKeyOrigins: Object.fromEntries(Object.keys(driveKeys).map((id) => [id, origin])),
+    // The new drive's key was made here; every sealed key arrived from another agent.
+    driveKeySources: Object.fromEntries(
+      Object.keys(driveKeys).map((id) => [
+        id,
+        id === token.new_drive_id ? ('generated' as const) : ('grant' as const),
+      ]),
+    ),
   });
 
   if (backupsCleared)

@@ -180,6 +180,7 @@ describe('deviceLogin', () => {
       apiKey: string;
       driveKeys: Record<string, string>;
       driveKeyOrigins: Record<string, string>;
+      driveKeySources: Record<string, string>;
     };
     expect(saved.apiUrl).toBe('https://x.test/api');
     expect(saved.apiKey).toBe('adk_SECRETTOKEN');
@@ -187,6 +188,8 @@ describe('deviceLogin', () => {
     expect(saved.driveKeys.d2).toBeUndefined();
     expect(saved.driveKeys.d3).toBeTruthy();
     expect(saved.driveKeyOrigins).toEqual({ d1: 'https://x.test', d3: 'https://x.test' });
+    // The sealed key came from another agent; the new drive's key was generated here.
+    expect(saved.driveKeySources).toEqual({ d1: 'grant', d3: 'generated' });
     const printed = r.out.join('\n');
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');

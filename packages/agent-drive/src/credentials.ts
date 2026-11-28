@@ -32,7 +32,7 @@ export type Bundle = {
 };
 
 export const BACKUP_HINT =
-  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>` (the folder must already exist), or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Start with `--to 1password` if you use 1Password. Until then `agent-drive check` will not pass.";
+  "Back up this agent's credentials before this machine or sandbox goes away: run `agent-drive credentials export --to <a file outside the sandbox>` (the folder must already exist). For 1Password, the clipboard or another secret store, see `agent-drive credentials export --help`. Until then `agent-drive check` will not pass.";
 
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
@@ -109,6 +109,42 @@ export function decodeBundle(text: string): Bundle {
   return value as Bundle;
 }
 
+/** What `credentials import` accepts: a console recovery file or a credentials bundle. */
+export const IMPORT_FORMAT_ERROR =
+  'Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).';
+
+export type RecoveryFile = { driveId: string; key: string };
+
+/**
+ * Parses the console recovery file `agent-drive-<drive id>.key.json`, which downloads as
+ * `{"format":"agent-drive-key-v1","driveId":"…","key":"…"}`. Every malformed part fails with
+ * IMPORT_FORMAT_ERROR; the error never repeats the file's content.
+ */
+export function decodeRecoveryFile(text: string): RecoveryFile {
+  const bad = () => new Error(IMPORT_FORMAT_ERROR);
+  let value: unknown;
+  try {
+    value = JSON.parse(text.trim());
+  } catch {
+    throw bad();
+  }
+  const file = value as { format?: unknown; driveId?: unknown; key?: unknown } | null;
+  if (
+    !file ||
+    file.format !== 'agent-drive-key-v1' ||
+    typeof file.driveId !== 'string' ||
+    !UUID.test(file.driveId) ||
+    typeof file.key !== 'string'
+  )
+    throw bad();
+  try {
+    decodeDriveKey(file.key);
+  } catch {
+    throw bad();
+  }
+  return { driveId: file.driveId, key: file.key };
+}
+
 /** The AGENT_DRIVE_CREDENTIALS bundle, if set. Errors never include its content. */
 export function envBundle(): Bundle | undefined {
   const raw = process.env.AGENT_DRIVE_CREDENTIALS?.trim();
@@ -179,6 +215,14 @@ export async function loadConfig(
       if (driveKeyOrigins[id] === undefined && (savedKey === undefined || savedKey === bundleKey))
         driveKeyOrigins[id] = bundleOrigin;
   }
+  // A key the bundle supplies (or duplicates byte-for-byte) lives in AGENT_DRIVE_CREDENTIALS —
+  // it came from a credentials bundle, so a copy already exists off this machine. A different
+  // saved key wins the merge and keeps its own source.
+  const driveKeySources: AgentDriveConfig['driveKeySources'] = { ...saved.driveKeySources };
+  for (const [id, bundleKey] of Object.entries(bundle.driveKeys)) {
+    const savedKey = saved.driveKeys?.[id];
+    if (savedKey === undefined || savedKey === bundleKey) driveKeySources[id] = 'bundle';
+  }
   const keyBackup: Record<string, KeyBackup> = { ...saved.keyBackup };
   for (const id of Object.keys(bundle.driveKeys))
     if (
@@ -192,6 +236,7 @@ export async function loadConfig(
     ...(apiKey === undefined ? {} : { apiKey }),
     driveKeys,
     driveKeyOrigins,
+    driveKeySources,
     keyBackup,
     // Pins were read from config.json by the first version of auto-sealing; keep the legacy
     // read as a fallback. New pins only ever live in `<config>.state/account-seal.json`.
@@ -426,18 +471,40 @@ export async function confirmCredentials(method: 'stdout' | 'file' = 'stdout') {
   return { method, driveIds: ids, apiUrl, apiKey };
 }
 
-/** Merges a bundle into the saved config; imported keys count as backed up. */
+/**
+ * Merges a credentials bundle or a console recovery file into the saved config and records where
+ * each key came from. Imported keys count as backed up: the imported file is itself a copy that
+ * exists off this machine. A recovery file has no origin to record — readConfig's migration binds
+ * the key to the saved apiUrl's origin once there is one (e.g. after `agent-drive login`).
+ */
 export async function importCredentials(text: string, method: 'file' | 'stdout') {
-  const bundle = decodeBundle(text);
   const at = new Date().toISOString();
+  if (text.trimStart().startsWith('{')) {
+    const file = decodeRecoveryFile(text);
+    await writeConfig({
+      driveKeys: { [file.driveId]: file.key },
+      driveKeySources: { [file.driveId]: 'recovery-file' },
+      keyBackup: { [file.driveId]: { at, method } },
+    });
+    return { kind: 'recovery-file' as const, driveIds: [file.driveId] };
+  }
+  let bundle: Bundle;
+  try {
+    bundle = decodeBundle(text);
+  } catch {
+    throw new Error(IMPORT_FORMAT_ERROR);
+  }
   await writeConfig({
     apiUrl: bundle.apiUrl,
     apiKey: bundle.apiKey,
     driveKeys: bundle.driveKeys,
     driveKeyOrigins: bundle.driveKeyOrigins,
+    driveKeySources: Object.fromEntries(
+      Object.keys(bundle.driveKeys).map((id) => [id, 'bundle' as const]),
+    ),
     keyBackup: Object.fromEntries(Object.keys(bundle.driveKeys).map((id) => [id, { at, method }])),
   });
-  return Object.keys(bundle.driveKeys);
+  return { kind: 'bundle' as const, driveIds: Object.keys(bundle.driveKeys) };
 }
 
 export const REPORT_CONCURRENCY = 4;

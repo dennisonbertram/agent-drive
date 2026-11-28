@@ -12,6 +12,8 @@ export type AgentDriveConfig = {
   driveKeys?: Record<string, string>;
   /** Origin each drive key was saved for; keys with none are assigned the saved apiUrl's origin when read. */
   driveKeyOrigins?: Record<string, string>;
+  /** Where each stored drive key came from; absent in configs written before sources were tracked. */
+  driveKeySources?: Record<string, DriveKeySource>;
   /** Where each drive key was last backed up (§9). */
   keyBackup?: Record<string, KeyBackup>;
   /** Account public key SHA-256 fingerprint pinned per API origin (key substitution defence). */
@@ -23,6 +25,12 @@ export type AgentDriveConfig = {
 export type PendingExport = { apiKeyHash: string; driveIds: string[] };
 
 export type KeyBackup = { at: string; method: 'file' | 'stdout' | 'env' };
+
+/**
+ * 'generated' was made on this machine; 'recovery-file', 'bundle' and 'grant' arrived from
+ * elsewhere, so a copy already exists off this machine and no backup record is required.
+ */
+export type DriveKeySource = 'generated' | 'recovery-file' | 'bundle' | 'grant';
 
 export const DEFAULT_API_URL = 'https://agentdrive.xyz/api';
 
@@ -80,6 +88,11 @@ export async function readConfig(): Promise<AgentDriveConfig> {
         typeof record.driveKeyOrigins !== 'object' ||
         Array.isArray(record.driveKeyOrigins) ||
         Object.values(record.driveKeyOrigins).some((origin) => typeof origin !== 'string'))) ||
+    (record.driveKeySources !== undefined &&
+      (!record.driveKeySources ||
+        typeof record.driveKeySources !== 'object' ||
+        Array.isArray(record.driveKeySources) ||
+        Object.values(record.driveKeySources).some((source) => typeof source !== 'string'))) ||
     (record.keyBackup !== undefined &&
       (!record.keyBackup ||
         typeof record.keyBackup !== 'object' ||
@@ -111,6 +124,9 @@ export async function readConfig(): Promise<AgentDriveConfig> {
       : {}),
     ...(Object.keys(origins).length || record.driveKeyOrigins !== undefined
       ? { driveKeyOrigins: origins }
+      : {}),
+    ...(record.driveKeySources !== undefined
+      ? { driveKeySources: { ...(record.driveKeySources as Record<string, DriveKeySource>) } }
       : {}),
     ...(record.keyBackup !== undefined
       ? { keyBackup: { ...(record.keyBackup as Record<string, KeyBackup>) } }
@@ -177,10 +193,17 @@ async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
       ...(current.driveKeyOrigins || config.driveKeyOrigins
         ? { driveKeyOrigins: { ...current.driveKeyOrigins, ...config.driveKeyOrigins } }
         : {}),
+      ...(current.driveKeySources || config.driveKeySources
+        ? { driveKeySources: { ...current.driveKeySources, ...config.driveKeySources } }
+        : {}),
       ...(previousBackup || config.keyBackup
         ? { keyBackup: { ...previousBackup, ...config.keyBackup } }
         : {}),
     };
+    // A key overwritten without a new source must not inherit the previous value's provenance.
+    for (const [id, key] of Object.entries(config.driveKeys ?? {}))
+      if (key !== current.driveKeys?.[id] && config.driveKeySources?.[id] === undefined)
+        delete merged.driveKeySources?.[id];
     if (keyChanged && !config.keyBackup) delete merged.keyBackup;
     if (merged.pendingExport === null) delete merged.pendingExport;
     const handle = await open(temporary, 'wx', 0o600);

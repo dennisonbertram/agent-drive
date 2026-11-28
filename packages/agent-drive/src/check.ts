@@ -1,5 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { driveKeyEnvironmentName } from './config.js';
+import {
+  driveKeyEnvironmentName,
+  type AgentDriveConfig,
+  type DriveKeySource,
+} from './config.js';
 import { BACKUP_HINT } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 import { AgentDriveApiError, type AgentDriveClient } from './client.js';
@@ -146,4 +150,56 @@ export function backupCandidates(
       !env.AGENT_DRIVE_KEY &&
       !(keyFile && id === driveId),
   );
+}
+
+const SOURCE_LABELS: Record<Exclude<DriveKeySource, 'generated'>, string> = {
+  'recovery-file': 'a recovery file',
+  bundle: 'a credentials bundle',
+  grant: 'the approval (another agent or the browser sent it)',
+};
+
+/**
+ * Where the drive key this machine uses came from, in words; undefined when it was generated on
+ * this machine or the config predates source tracking — those are the keys a backup must cover.
+ * The resolution order matches resolveDriveKey: env vars, then --key-file, then the saved config.
+ */
+export function keySourceLabel(
+  driveId: string,
+  context: {
+    config: AgentDriveConfig;
+    checkedDriveId: string;
+    keyFile?: string;
+    env?: NodeJS.ProcessEnv;
+  },
+): string | undefined {
+  const env = context.env ?? process.env;
+  if (env[driveKeyEnvironmentName(driveId)] || env.AGENT_DRIVE_KEY)
+    return 'the AGENT_DRIVE_KEY environment variable';
+  if (context.keyFile && driveId === context.checkedDriveId)
+    return 'the file passed as --key-file';
+  const source = context.config.driveKeySources?.[driveId];
+  if (!source || source === 'generated') return undefined;
+  return SOURCE_LABELS[source];
+}
+
+/**
+ * Splits the usable drive keys into `missing` — keys made on this machine with no recorded
+ * backup, the only kind that fails check — and `notes`, keys that came from elsewhere (so a copy
+ * already exists off this machine) with a human label naming where.
+ */
+export function backupState(
+  keys: Record<string, boolean>,
+  checkedDriveId: string,
+  config: AgentDriveConfig,
+  keyFile: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const missing: string[] = [];
+  const notes: { driveId: string; label: string }[] = [];
+  for (const id of Object.keys(keys).filter((id) => keys[id])) {
+    const label = keySourceLabel(id, { config, checkedDriveId, keyFile, env });
+    if (label) notes.push({ driveId: id, label });
+    else if (!config.keyBackup?.[id]) missing.push(id);
+  }
+  return { missing, notes };
 }

@@ -40,6 +40,8 @@ For a self-hosted installation, pass its API URL:
 agent-drive login --name "<your agent name>" --api https://<your-origin>/api
 ```
 
+If you created the drive in the console instead, download its recovery file (`agent-drive-<drive id>.key.json`) there, then on this machine run `agent-drive credentials import --from agent-drive-<drive id>.key.json` before `agent-drive login`. That key already counts as backed up, so `check` in step 5 passes.
+
 ## 4. Back up the credentials
 
 Back up the credentials while this machine is available. If it holds the last copy of the drive key and is deleted, the files cannot be opened again. Back up the credentials now. Offer these choices in this order and let the person pick one.

@@ -105,7 +105,7 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `credentials export`  | Back up the API key and drive keys.                          | [Back up and recover your drive key](backup-and-recovery.md) |
 | `credentials issue`   | Create a new agent's credentials for a sandbox.              | [Using Agent Drive in sandboxes](sandboxes.md)               |
 | `credentials confirm` | Record that an exported bundle was stored.                   | [Back up and recover your drive key](backup-and-recovery.md) |
-| `credentials import`  | Merge a bundle into the config.                              | [Back up and recover your drive key](backup-and-recovery.md) |
+| `credentials import`  | Merge a bundle or a recovery file into the config.           | [Back up and recover your drive key](backup-and-recovery.md) |
 | `credentials status`  | Show which drive keys are backed up.                         | [Back up and recover your drive key](backup-and-recovery.md) |
 | `account seal`        | Seal held drive keys to the account key for the console.     | [Keys and recovery](keys-and-recovery.md)                    |
 | `skill install`       | Install the agent skill.                                     | [Agent skills](skills.md)                                    |
@@ -520,7 +520,7 @@ Proves that the drive key works end to end.
 
 A key without the `write` scope decrypts an existing file instead and prints `check ok drive=<id> (read-only)`. If the drive has nothing to decrypt yet, it prints `check not verified drive=<id>: ...` on stderr and exits with code 1.
 
-`check` fails with `drive key not backed up` until every usable key in the config is backed up. See [Back up and recover your drive key](backup-and-recovery.md).
+`check` fails with `drive key not backed up` when a key generated on this machine has no recorded backup, and the error names the one next step: `agent-drive credentials export --to 1password`. A key that came from a recovery file, a credentials bundle, another agent, or an `AGENT_DRIVE_KEY` environment variable already has a copy elsewhere, so `check` prints a note naming the source on stderr and passes. See [Back up and recover your drive key](backup-and-recovery.md).
 
 ## Drives, agents and keys
 
@@ -650,8 +650,8 @@ Needs the `delegate` scope. Creates a new agent named `NAME` with its own API ke
 ### credentials confirm, import and status
 
 - `confirm [--method stdout]` records that a `--stdout` or clipboard export was stored. `--method` accepts `stdout` or `file`.
-- `import [--from PATH]` merges a bundle from a file, or from stdin if `--from` is omitted, into the config, and marks its drives as backed up. It prints `imported N drive key(s) into <config path>`.
-- `status` prints JSON that shows, for each drive key, whether and when it was backed up.
+- `import [--from PATH]` merges a credentials bundle (`adcred1.…`) or a console recovery file (`agent-drive-<drive id>.key.json`) from a file — or from stdin if `--from` is omitted — into the config, and marks its drives as backed up. A recovery file is how a drive set up in the browser is given to a CLI: `agent-drive credentials import --from agent-drive-<drive id>.key.json`, then `agent-drive login` (with no API credentials yet, the import still saves the key and prints that next step). Anything else fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
+- `status` prints JSON that shows, for each drive key, whether and when it was backed up, and `keyFrom` for a key that came from a recovery file, a credentials bundle, another agent, or the environment.
 
 ### grant
 

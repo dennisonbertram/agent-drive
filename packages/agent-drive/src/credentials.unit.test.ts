@@ -18,7 +18,7 @@ import {
   REPORT_CONCURRENCY,
   unbackedUp,
 } from './credentials.js';
-import { backupCandidates, runCheck } from './check.js';
+import { backupCandidates, backupState, keySourceLabel, runCheck } from './check.js';
 
 const D1 = '11111111-1111-4111-8111-111111111111';
 const D2 = '22222222-2222-4222-8222-222222222222';
@@ -127,7 +127,7 @@ describe('import', () => {
   it('merges into the existing config and records the backup', async () => {
     const { dir, key } = await setup();
     const other = generateDriveKey();
-    await importCredentials(
+    const result = await importCredentials(
       encodeBundle({
         v: 1,
         apiUrl: 'https://x.test/api',
@@ -137,11 +137,67 @@ describe('import', () => {
       }),
       'file',
     );
+    expect(result).toEqual({ kind: 'bundle', driveIds: [D2] });
     const config = await readConfig();
     expect(config.apiKey).toBe('new');
     expect(config.driveKeys).toEqual({ [D1]: key, [D2]: other });
     expect(config.keyBackup?.[D2]?.method).toBe('file');
+    expect(config.driveKeySources?.[D2]).toBe('bundle');
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('imports a console recovery file and records where the key came from', async () => {
+    const { dir } = await setup();
+    const key = generateDriveKey();
+    const result = await importCredentials(
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: D2, key }),
+      'file',
+    );
+    expect(result).toEqual({ kind: 'recovery-file', driveIds: [D2] });
+    const config = await readConfig();
+    expect(config.driveKeys?.[D2]).toBe(key);
+    expect(config.driveKeySources?.[D2]).toBe('recovery-file');
+    expect(config.keyBackup?.[D2]?.method).toBe('file');
+    // The file holds no API URL or key: the existing connection is untouched, and the key
+    // binds to its origin through the same readConfig migration as a legacy key.
+    expect(config.apiUrl).toBe('https://x.test/api');
+    expect(config.apiKey).toBe('tok');
+    expect(config.driveKeyOrigins?.[D2]).toBe('https://x.test');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('imports a recovery file into a config with no credentials yet', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_CREDENTIALS', '');
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    const key = generateDriveKey();
+    const result = await importCredentials(
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: D1, key }, null, 2),
+      'file',
+    );
+    expect(result.kind).toBe('recovery-file');
+    const saved = await readConfig();
+    expect(saved.driveKeys?.[D1]).toBe(key);
+    expect(saved.driveKeySources?.[D1]).toBe('recovery-file');
+    expect(saved.apiKey).toBeUndefined();
+    expect(saved.apiUrl).toBeUndefined();
+  });
+
+  it('rejects input that is neither a recovery file nor a credentials bundle', async () => {
+    await setup();
+    const error = 'Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).';
+    for (const bad of [
+      'not credentials',
+      '{bad json',
+      '{"format":"other"}',
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: 'not-a-uuid', key: generateDriveKey() }),
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: D1, key: 'not-a-key' }),
+      JSON.stringify({ driveId: D1, key: generateDriveKey() }),
+    ])
+      await expect(importCredentials(bad, 'file')).rejects.toThrow(error);
   });
 });
 
@@ -286,6 +342,30 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
     const merged = await loadConfig();
     expect(merged.driveKeyOrigins?.[E1]).toBe('https://bundle.test');
     expect(await resolveDriveKey(E1, 'https://bundle.test/api', undefined, merged)).toBe(key);
+  });
+
+  it('marks keys an environment bundle supplies as coming from a credentials bundle', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-cred-'));
+    dirs.push(dir);
+    vi.stubEnv('AGENT_DRIVE_CONFIG', join(dir, 'config.json'));
+    vi.stubEnv('AGENT_DRIVE_API_URL', '');
+    vi.stubEnv('AGENT_DRIVE_API_KEY', '');
+    const key = generateDriveKey();
+    vi.stubEnv(
+      'AGENT_DRIVE_CREDENTIALS',
+      encodeBundle({
+        v: 1,
+        apiUrl: 'https://env.test/api',
+        apiKey: 'envtok',
+        driveKeys: { [E1]: key },
+        driveKeyOrigins: { [E1]: 'https://env.test' },
+      }),
+    );
+    const config = await loadConfig();
+    expect(config.driveKeySources?.[E1]).toBe('bundle');
+    // A saved key that wins the merge over different bundle bytes keeps its own source.
+    await writeConfig({ driveKeys: { [E1]: generateDriveKey() } });
+    expect((await loadConfig()).driveKeySources?.[E1]).toBeUndefined();
   });
 
   it('issues an explicit environment drive key for the selected origin', async () => {
@@ -448,6 +528,82 @@ describe('review fixes', () => {
     const keys = { [D1]: true, [D2]: true };
     expect(backupCandidates(keys, D1, '/k', {} as NodeJS.ProcessEnv)).toEqual([D2]);
     expect(backupCandidates(keys, D1, undefined, {} as NodeJS.ProcessEnv)).toEqual([D1, D2]);
+  });
+
+  it('backupState excuses keys that came from elsewhere and only fails keys made here', () => {
+    const keys = { [D1]: true, [D2]: true, [E1]: true, [IA]: true };
+    const config = {
+      driveKeySources: {
+        [D1]: 'recovery-file',
+        [D2]: 'bundle',
+        [E1]: 'grant',
+        [IA]: 'generated',
+      },
+    } as const;
+    const { missing, notes } = backupState(keys, D1, config, undefined, {} as NodeJS.ProcessEnv);
+    expect(missing).toEqual([IA]);
+    expect(notes).toEqual([
+      { driveId: D1, label: 'a recovery file' },
+      { driveId: D2, label: 'a credentials bundle' },
+      { driveId: E1, label: 'the approval (another agent or the browser sent it)' },
+    ]);
+  });
+
+  it('backupState still fails a key with no source (a config from before tracking)', () => {
+    const { missing, notes } = backupState(
+      { [D1]: true },
+      D1,
+      { driveKeys: { [D1]: 'k' } },
+      undefined,
+      {} as NodeJS.ProcessEnv,
+    );
+    expect(missing).toEqual([D1]);
+    expect(notes).toEqual([]);
+    // A recorded backup excuses it even without a source.
+    expect(
+      backupState(
+        { [D1]: true },
+        D1,
+        { keyBackup: { [D1]: { at: 'now', method: 'file' } } },
+        undefined,
+        {} as NodeJS.ProcessEnv,
+      ).missing,
+    ).toEqual([]);
+  });
+
+  it('keySourceLabel prefers env and --key-file over the stored source', () => {
+    const config = { driveKeySources: { [D1]: 'grant' as const } };
+    expect(
+      keySourceLabel(D1, {
+        config,
+        checkedDriveId: D1,
+        env: { AGENT_DRIVE_KEY: 'k' } as NodeJS.ProcessEnv,
+      }),
+    ).toBe('the AGENT_DRIVE_KEY environment variable');
+    expect(
+      keySourceLabel(D1, {
+        config,
+        checkedDriveId: D1,
+        env: { [`AGENT_DRIVE_KEY_${D1.toUpperCase().replace(/[^A-Z0-9]/gu, '_')}`]: 'k' } as NodeJS.ProcessEnv,
+      }),
+    ).toBe('the AGENT_DRIVE_KEY environment variable');
+    expect(
+      keySourceLabel(D1, {
+        config,
+        checkedDriveId: D1,
+        keyFile: '/k',
+        env: {} as NodeJS.ProcessEnv,
+      }),
+    ).toBe('the file passed as --key-file');
+    // --key-file covers the checked drive only; another drive falls back to its source.
+    expect(
+      keySourceLabel(D2, {
+        config: { driveKeySources: { [D2]: 'bundle' as const } },
+        checkedDriveId: D1,
+        keyFile: '/k',
+        env: {} as NodeJS.ProcessEnv,
+      }),
+    ).toBe('a credentials bundle');
   });
 
   it('rejects bundles with invalid fields', () => {

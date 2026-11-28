@@ -112,7 +112,7 @@ Or from standard input, for example after copying the bundle out of a password m
 pbpaste | agent-drive credentials import
 ```
 
-The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. A text that is not a valid bundle fails with `Not a valid Agent Drive credentials bundle.`
+The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. It also accepts the console recovery file `agent-drive-<drive id>.key.json`, which holds only the drive key — no API credentials — so it is followed by `agent-drive login`. Text in neither format fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
 
 3. Check that the drive key opens the files.
 

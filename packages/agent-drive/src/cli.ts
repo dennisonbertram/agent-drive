@@ -7,12 +7,13 @@ import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js'
 import { decodeDriveKey, generateDriveKey } from './crypto.js';
 import {
   apiErrorLines,
+  backupState,
   createdDriveNote,
+  keySourceLabel,
   localKeyMap,
   notBackedUpMessage,
   pickCheckDrive,
   runCheck,
-  backupCandidates,
 } from './check.js';
 import {
   BACKUP_HINT,
@@ -22,7 +23,6 @@ import {
   issueCredentials,
   loadConfig,
   reportEnvBackups,
-  unbackedUp,
   reportKeyBackup,
 } from './credentials.js';
 import { installSkill, packagedSkillPath } from './skill.js';
@@ -821,8 +821,39 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'import') {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
-      const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
-      process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
+      const result = await importCredentials(text, args.values.from ? 'file' : 'stdout');
+      if (result.kind === 'bundle') {
+        process.stdout.write(
+          `imported ${result.driveIds.length} drive key(s) into ${configPath()}\n`,
+        );
+        await sealSavedConnectionAfterKeyChange();
+        return;
+      }
+      const id = result.driveIds[0]!;
+      // loadConfig covers env keys and a usable env bundle; fall back to the file alone so a
+      // malformed AGENT_DRIVE_CREDENTIALS cannot fail an import that already saved the key.
+      const saved = await loadConfig().catch(() => readConfig());
+      if (!saved.apiKey && !process.env.AGENT_DRIVE_API_KEY) {
+        process.stdout.write(
+          `Saved the drive key for drive ${id}. Next: run \`agent-drive login\` to connect this machine to your account.\n`,
+        );
+        return;
+      }
+      process.stdout.write(`Saved the drive key for drive ${id} into ${configPath()}.\n`);
+      // Say plainly when the account on this machine cannot see the imported drive.
+      const who = await resolveConnection()
+        .then((connection) =>
+          new AgentDriveClient({
+            apiUrl: connection.apiUrl,
+            apiKey: connection.apiKey,
+            machine: machineName(),
+          }).whoami(),
+        )
+        .catch(() => undefined);
+      if (who?.driveIds && !who.driveIds.includes(id))
+        process.stderr.write(
+          `Warning: the API key on this machine has no access to drive ${id}. The key is saved, but this account cannot use it.\n`,
+        );
       await sealSavedConnectionAfterKeyChange();
       return;
     }
@@ -830,12 +861,17 @@ async function run(command: string, raw: string[]) {
       const config = await loadConfig();
       return output({
         drives: Object.fromEntries(
-          Object.keys(config.driveKeys ?? {}).map((id) => [
-            id,
-            config.keyBackup?.[id]
-              ? { backedUp: true, ...config.keyBackup[id] }
-              : { backedUp: false },
-          ]),
+          Object.keys(config.driveKeys ?? {}).map((id) => {
+            const keyFrom = keySourceLabel(id, { config, checkedDriveId: id });
+            return [
+              id,
+              config.keyBackup?.[id]
+                ? { backedUp: true, ...config.keyBackup[id], ...(keyFrom ? { keyFrom } : {}) }
+                : keyFrom
+                  ? { backedUp: true, keyFrom }
+                  : { backedUp: false },
+            ];
+          }),
         ),
       });
     }
@@ -1344,11 +1380,17 @@ async function run(command: string, raw: string[]) {
       resolveDriveKey(id, connection.apiUrl, args.values['key-file'], connection.config),
     );
     const driveId = pickCheckDrive(explicit, candidates, keys);
-    const unbacked = unbackedUp(
+    const { missing, notes } = backupState(
+      keys,
+      driveId,
       connection.config,
-      backupCandidates(keys, driveId, args.values['key-file']),
+      args.values['key-file'],
     );
-    if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
+    if (missing.length) throw new Error(notBackedUpMessage(missing));
+    for (const note of notes)
+      process.stderr.write(
+        `The key for drive ${note.driveId} came from ${note.label}, so a copy exists elsewhere.\n`,
+      );
     const key = await resolveDriveKey(
       driveId,
       connection.apiUrl,
@@ -1392,6 +1434,7 @@ async function run(command: string, raw: string[]) {
       await writeConfig({
         driveKeys: { [drive.id]: key },
         driveKeyOrigins: { [drive.id]: origin },
+        driveKeySources: { [drive.id]: 'generated' },
       });
       output(drive);
       process.stderr.write(`${createdDriveNote(configPath())}\n${BACKUP_HINT}\n`);
@@ -1776,7 +1819,7 @@ Commands:
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
                                         Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
-  credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
+  credentials import [--from PATH]      Merge a credentials bundle or a console recovery file (agent-drive-<id>.key.json) into the config
   credentials status                    Which drive keys are backed up, when, and how
   account seal [--drive ID] [--fingerprint CODE] [--repin]
                                         Verify the console's account-key fingerprint before sealing or repinning
@@ -1787,8 +1830,9 @@ Commands:
 Without installing: npx -y @dennisonbertram/agent-drive@latest <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
-AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
-memory, never written to disk; its drives count as backed up).
+AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, AGENT_DRIVE_CREDENTIALS (a bundle merged in
+memory, never written to disk; its drives count as backed up), and AGENT_DRIVE_KEY or
+AGENT_DRIVE_KEY_<DRIVE_ID> (a drive key supplied by the environment).
 `;
 const skillHelp = `Usage: agent-drive skill install [--target claude|codex|DIR]
 

@@ -77,6 +77,21 @@ describe('private CLI configuration', () => {
     });
   });
 
+  it('keeps and drops drive-key sources with the values they describe', async () => {
+    await isolatedConfig();
+    await writeConfig({
+      driveKeys: { driveA: 'key-a', driveB: 'key-b' },
+      driveKeySources: { driveA: 'grant', driveB: 'grant' },
+    });
+    // A new value without a new source drops the stale one; a value written with its own
+    // source keeps it, and an unchanged key keeps its source too.
+    await writeConfig({ driveKeys: { driveA: 'key-a2' } });
+    await writeConfig({ driveKeys: { driveB: 'key-b2' }, driveKeySources: { driveB: 'bundle' } });
+    const config = await readConfig();
+    expect(config.driveKeys).toEqual({ driveA: 'key-a2', driveB: 'key-b2' });
+    expect(config.driveKeySources).toEqual({ driveB: 'bundle' });
+  });
+
   it('does not release a live SQLite lock when a same-process writer opens the lock file', async () => {
     await isolatedConfig();
     const lockDbPath = `${configPath()}.lock.sqlite`;

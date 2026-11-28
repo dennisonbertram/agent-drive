@@ -270,6 +270,7 @@ test.describe('agent device login', () => {
     apiKey: string;
     driveKeys: Record<string, string>;
     driveKeyOrigins?: Record<string, string>;
+    driveKeySources?: Record<string, string>;
   };
   const readConfig = async (env: NodeJS.ProcessEnv) =>
     JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as Config;
@@ -290,6 +291,9 @@ test.describe('agent device login', () => {
     const unbacked = await cli(['check'], env);
     expect(unbacked.status).toBe(1);
     expect(unbacked.stderr).toContain('drive key not backed up');
+    // A key made on this machine fails with exactly one next step: the default backup command.
+    expect(unbacked.stderr).toContain('agent-drive credentials export --to <a file outside the sandbox>');
+    expect(unbacked.stderr).not.toMatch(/--to clipboard|--stdout|secret store/);
     const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);
     expect(exported.stdout + exported.stderr).not.toMatch(/adk_|adcred1/);
@@ -695,11 +699,47 @@ test.describe('agent device login', () => {
     expect(output(denied)).toMatch(/403|only write under/);
     const allowed = await cli(['put', seed, '/inbox/b/hello.md', '--drive', driveId], envB);
     expect(allowed.status, allowed.stderr).toBe(0);
+    // The key the owner sealed to this login counts as a copy elsewhere: check passes before
+    // any local export and notes where the key came from.
+    const granted = await cli(['check'], envB);
+    expect(granted.status, granted.stderr).toBe(0);
+    expect(granted.stderr).toContain(
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it), so a copy exists elsewhere.`,
+    );
     const exported = await cli(['credentials', 'export', '--to', join(root, 'b-bundle')], envB);
     expect(exported.status, exported.stderr).toBe(0);
     const check = await cli(['check'], envB);
     expect(check.status, check.stderr).toBe(0);
-    for (const r of [get, denied, allowed, exported, check]) noSecrets(output(r));
+    for (const r of [get, denied, allowed, granted, exported, check]) noSecrets(output(r));
+
+    // A fresh CLI home takes the same recovery file: import, log in with the API key, and the
+    // imported copy means check passes without a new export.
+    const envC = {
+      ...cliEnv(baseURL!, root, 'recovery-agent', 'm-recovery'),
+      AGENT_DRIVE_API_KEY: configB.apiKey,
+    };
+    const imported = await cli(['credentials', 'import', '--from', recovery], envC);
+    expect(imported.status, imported.stderr).toBe(0);
+    expect(imported.stdout).toContain(`Saved the drive key for drive ${driveId}`);
+    expect((await cli(['login'], envC)).status).toBe(0);
+    const checkC = await cli(['check'], envC);
+    expect(checkC.status, checkC.stderr).toBe(0);
+    expect(checkC.stdout).toContain(`check ok drive=${driveId}`);
+    expect(checkC.stderr).toContain(
+      `The key for drive ${driveId} came from a recovery file, so a copy exists elsewhere.`,
+    );
+    for (const r of [imported, checkC]) noSecrets(output(r));
+
+    // A recovery file for a drive this account cannot see still saves but says so plainly.
+    const other = join(root, 'other.json');
+    await writeFile(
+      other,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: randomUUID(), key: driveKey }),
+    );
+    const wrongDrive = await cli(['credentials', 'import', '--from', other], envC);
+    expect(wrongDrive.status).toBe(0);
+    expect(wrongDrive.stderr).toContain('has no access to drive');
+    expect(output(wrongDrive)).not.toContain(driveKey);
 
     const rows = await database.query(
       'SELECT row_to_json(d)::text AS t FROM device_authorizations d WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
@@ -1067,7 +1107,15 @@ test.describe('agent device login', () => {
     expect(stored.rows[0]!.row).not.toContain(driveKey);
     const configB = await readConfig(envB);
     expect(configB.driveKeys[driveId]).toBe(driveKey);
+    expect(configB.driveKeySources?.[driveId]).toBe('grant');
     expect(resultB.stdout + resultB.stderr).not.toContain(configB.apiKey);
+
+    // The granted key already exists off this machine, so check passes without a local export.
+    const grantedCheck = await cli(['check'], envB);
+    expect(grantedCheck.status, grantedCheck.stderr).toBe(0);
+    expect(grantedCheck.stderr).toContain(
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it), so a copy exists elsewhere.`,
+    );
   });
 
   test('grant: a page loaded before the offer gets a 409 notice, reloads, and approves the offer', async ({
