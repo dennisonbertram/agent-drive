@@ -3619,9 +3619,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
                             <p>
                               On a Mac?{' '}
-                              <a href="/docs/cli#mount-in-finder-on-macos">
+                              <Link href="/docs/cli#mount-in-finder-on-macos">
                                 Mount your drive in Finder
-                              </a>
+                              </Link>
                               .
                             </p>
                           </>

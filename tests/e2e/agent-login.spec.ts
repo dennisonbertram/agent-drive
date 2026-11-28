@@ -995,7 +995,6 @@ test.describe('agent device login', () => {
     const a = await startLogin(envA, 'dupe-bot');
     await approve(page, a.path, 'dupe-bot', a.code, a.verify);
     expect((await a.login.done).status).toBe(0);
-    const [driveId] = Object.keys((await readConfig(envA)).driveKeys);
 
     // A second agent asking for the same name, on an account that already has a drive.
     const envB = cliEnv(baseURL!, root, 'dupe-b', 'm-dupe-b');
