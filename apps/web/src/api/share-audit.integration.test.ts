@@ -162,12 +162,11 @@ describe('public share audit volume', () => {
       ]);
       const activeShareId = await addShare(accountId, driveId, fileId, versionId, agentId);
 
-      const first = await handlePublicShareRequest(activeShareId, true);
-      const second = await handlePublicShareRequest(activeShareId, true);
-      const third = await handlePublicShareRequest(activeShareId, true);
-      expect(first.status).toBe(200);
-      expect(second.status).toBe(200);
-      expect(third.status).toBe(429);
+      const burst = await Promise.all(
+        Array.from({ length: 6 }, () => handlePublicShareRequest(activeShareId, true)),
+      );
+      const statuses = burst.map((res) => res.status).sort((a, b) => a - b);
+      expect(statuses).toEqual([200, 200, 429, 429, 429, 429]);
       const auditCount = await pool.query<{ count: number }>(
         `SELECT count(*)::int AS count FROM audit_events
           WHERE account_id = $1 AND action = 'share.access'`,

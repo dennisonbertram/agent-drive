@@ -394,34 +394,30 @@ export async function enforceConsoleRateLimit(accountId: string) {
   }
 }
 
-export async function enforceShareRateLimit(accountId: string) {
+export async function enforceShareRateLimit(client: PoolClient, accountId: string) {
   const limit = requestLimitPerMinute(
     process.env.SHARE_REQUESTS_PER_MINUTE ?? '60',
     'The share rate limit is not configured correctly.',
   );
-  await withTransaction(async (client) => {
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
-      `share-rate:${accountId}`,
-    ]);
-    const result = await client.query<{ requests: number; retry_after: number }>(
-      `SELECT count(*)::int AS requests,
-              GREATEST(1, CEIL(EXTRACT(EPOCH FROM (MIN(created_at) + interval '1 minute' - now()))))::int AS retry_after
-         FROM audit_events
-        WHERE account_id = $1
-          AND action = 'share.access'
-          AND created_at > now() - interval '1 minute'`,
-      [accountId],
+  await lockBillingAccount(client, accountId);
+  const result = await client.query<{ requests: number; retry_after: number }>(
+    `SELECT count(*)::int AS requests,
+            GREATEST(1, CEIL(EXTRACT(EPOCH FROM (MIN(created_at) + interval '1 minute' - now()))))::int AS retry_after
+       FROM audit_events
+      WHERE account_id = $1
+        AND action = 'share.access'
+        AND created_at > now() - interval '1 minute'`,
+    [accountId],
+  );
+  const row = result.rows[0];
+  if (row && row.requests >= limit) {
+    throw new ApiError(
+      'rate_limited',
+      'This share link has reached its request limit. Retry shortly.',
+      429,
+      { retryAfter: row.retry_after || 60 },
     );
-    const row = result.rows[0];
-    if (row && row.requests >= limit) {
-      throw new ApiError(
-        'rate_limited',
-        'This share link has reached its request limit. Retry shortly.',
-        429,
-        { retryAfter: row.retry_after || 60 },
-      );
-    }
-  });
+  }
 }
 
 export type Transfer = {

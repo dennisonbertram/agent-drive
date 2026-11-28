@@ -576,6 +576,9 @@ async function reserveOperation(context: RequestContext) {
   const accountId = context.auth?.accountId ?? context.accountId;
   if (!accountId) throw new Error('An account is required to reserve an operation.');
   context.auditId = await withTransaction(async (client) => {
+    if (context.action === 'share.access') {
+      await enforceShareRateLimit(client, accountId);
+    }
     await enforceOperationBudget(client, accountId);
     return audit(context, client, true);
   });
@@ -3472,8 +3475,7 @@ async function derivedVersion(request: Request, auth: Auth, driveId: string, res
 }
 
 type RequestMode =
-  | { kind: 'bearer' }
-  | { kind: 'console'; userId: string | null; reverified: boolean };
+  { kind: 'bearer' } | { kind: 'console'; userId: string | null; reverified: boolean };
 
 export function consoleRouteAllowed(method: string, parts: string[]) {
   if (parts[0] === 'device') {
@@ -3730,11 +3732,8 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
-    // Rate-limit active share requests per account before reserving operation quota or download
-    // allowance so unauthenticated bursts cannot exhaust the owner's monthly budgets.
-    await enforceShareRateLimit(String(row.account_id));
     // Record attempts against an active share, including operation-budget failures. Unknown,
-    // revoked, expired and unavailable links are public failures and must not create unbounded
+    // revoked, expired, unavailable and rate-limited links must not create unbounded
     // per-request audit rows.
     auditEligible = true;
     await reserveOperation(context);
@@ -3765,6 +3764,7 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
     context.status = output.status;
   } catch (error) {
     const mapped = error instanceof ApiError ? error : errorFromDatabase(error);
+    if (mapped.code === 'rate_limited' && !context.auditId) auditEligible = false;
     output = responseForError(mapped);
     context.status = mapped.status;
     context.errorCode = mapped.code;
