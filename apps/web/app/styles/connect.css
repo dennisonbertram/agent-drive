@@ -7,7 +7,7 @@
 .connect-shell .panel.connect-card {
   margin-top: 24px;
   overflow: visible; /* .panel clips, which breaks the sticky Approve bar */
-  padding: 22px 24px 24px;
+  padding: 18px 24px 20px;
   border: 1px solid var(--line-strong, #111);
   border-radius: 14px;
   background: var(--panel, #fff);
@@ -15,7 +15,7 @@
   box-shadow: 0 3px 0 var(--line-strong, #111);
 }
 .connect-shell h1 {
-  margin: 14px 0 12px;
+  margin: 10px 0 10px;
   font: 500 1.75rem/1.15 var(--sans, 'Inter Tight', system-ui, sans-serif);
   letter-spacing: -0.01em;
 }

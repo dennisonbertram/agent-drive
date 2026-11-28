@@ -156,7 +156,9 @@ export function UnlockDialog({
           <p className="unlock-help" role="status">
             Your old account key is gone. After you set a new passphrase, each agent must pin the
             new key. The key menu on Files then shows the exact <code>account seal --repin</code>{' '}
-            command to copy and run on each agent&rsquo;s machine.
+            command to copy and run on each agent&rsquo;s machine. Drives from before the reset need
+            their recovery file once (or an agent re-pins them); after that this passphrase opens
+            them.
           </p>
         )}
         <NewPassphraseForm

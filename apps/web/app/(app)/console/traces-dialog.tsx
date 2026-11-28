@@ -232,6 +232,11 @@ export function TracesDialog({
       )}
       {active !== 'loading' && active !== 'error' && (
         <>
+          {notice && (
+            <div className="banner info" role="status">
+              {notice}
+            </div>
+          )}
           {active ? (
             <div className="trace-token" data-testid="webhook-token-row">
               <span className="share-when">Created {versionWhen(active.createdAt)}</span>
@@ -300,11 +305,6 @@ export function TracesDialog({
                 Add webhook
               </button>
             </div>
-          )}
-          {notice && (
-            <p className="share-help" role="status">
-              {notice}
-            </p>
           )}
           {busy && <p className="muted">Setting up…</p>}
           {error && (

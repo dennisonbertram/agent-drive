@@ -185,7 +185,9 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
     await page.getByRole('button', { name: 'Replace' }).click();
     await page.getByRole('button', { name: 'Replace token' }).click();
     await expect(
-      page.getByText('This changed in another tab. Showing the current setup.'),
+      dialog(page).locator('.banner.info', {
+        hasText: 'This changed in another tab. Showing the current setup.',
+      }),
     ).toBeVisible();
     await expect(addWebhook(page)).toBeVisible();
     await expect(page.getByTestId('webhook-created')).toHaveCount(0);

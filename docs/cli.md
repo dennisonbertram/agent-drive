@@ -21,7 +21,7 @@ The Linux npm package includes native mount helpers for x64 and arm64. The CLI d
 
 ### Mount in Finder on macOS
 
-Finder mounts need macOS 13 or later (tested on macOS 15.7.7) and the separate Agent Drive Finder app. The CLI package does not install the app. The released ZIP contains the signed app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) only checks that the app compiles; it produces no signed or published build. To build and sign the app yourself, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
+Finder mounts need macOS 13 or later and the separate Agent Drive Finder app. The CLI package does not install the app. Download the signed app from the release ZIP in step 2 below. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) only checks that the source compiles; its build is unsigned and is for development only. To build and sign the app yourself, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
 
 1. Complete [CLI login and drive-key setup](connect-an-agent.md).
 2. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip) and open the ZIP to extract `Agent Drive.app`.

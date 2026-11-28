@@ -695,11 +695,14 @@ test('change passphrase: the old one stops working, the new one works; reset rem
     await (await openMenu(page))
       .getByRole('button', { name: 'Forgot or exposed passphrase?' })
       .click();
-    const reset = page.getByRole('button', { name: 'Reset and remove all drives' });
+    const reset = page.getByRole('button', { name: 'Reset passphrase' });
     await expect(reset).toBeDisabled();
     await page.getByLabel('Type RESET to continue').fill('RESET');
     await reset.click();
     await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toContainText(
+      'Drives from before the reset need their recovery file once (or an agent re-pins them); after that this passphrase opens them.',
+    );
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.reload();
     await expect(chip(page)).toContainText('Key needed');
@@ -1158,7 +1161,7 @@ test('screenshots of setup, unlock, unlocked chip, change and reset', async ({
         .click();
       await page.screenshot({ path: join(folder, `${label}-reset.png`) });
       await page.getByLabel('Type RESET to continue').fill('RESET');
-      await page.getByRole('button', { name: 'Reset and remove all drives' }).click();
+      await page.getByRole('button', { name: 'Reset passphrase' }).click();
       await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toBeVisible();
       await page.getByRole('button', { name: 'Close dialog' }).click();
     }

@@ -714,6 +714,27 @@ export default function Connect({
   const held = !existing && !newInstead ? heldOf(request) : [];
   const shown = reconnect.length ? reconnect : held;
   const heldNames = held.map((d) => d.name).join(', ');
+  const canUseExisting =
+    !existing && !offer && request.creates_drive && !request.scopes && accountDrives.length > 0;
+  const newDriveBanner =
+    !existing &&
+    !offer &&
+    held.length === 0 &&
+    request.creates_drive === true &&
+    request.account_has_drives === true;
+  const useExistingButton = (
+    <button
+      type="button"
+      className="connect-link"
+      disabled={busy}
+      onClick={(event) => {
+        event.currentTarget.closest('details')?.removeAttribute('open');
+        setExisting(true);
+      }}
+    >
+      Use one of my drives instead (needs its recovery file)
+    </button>
+  );
   const grantScopes = offer
     ? offer.scopes
     : held.length
@@ -864,23 +885,7 @@ export default function Connect({
             {newInstead ? 'Use the drive this agent holds' : 'Use a new drive instead'}
           </button>
         )}
-        {!existing &&
-          !offer &&
-          request.creates_drive &&
-          !request.scopes &&
-          accountDrives.length > 0 && (
-            <button
-              type="button"
-              className="connect-link"
-              disabled={busy}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                setExisting(true);
-              }}
-            >
-              Use one of my drives instead (needs its recovery file)
-            </button>
-          )}
+        {canUseExisting && !newDriveBanner && useExistingButton}
         <label className="connect-delegate">
           <input
             type="checkbox"
@@ -1035,23 +1040,18 @@ export default function Connect({
           agent with a new API key.
         </div>
       )}
-      {!existing &&
-        !offer &&
-        held.length === 0 &&
-        request.creates_drive === true &&
-        request.account_has_drives === true && (
-          <div className="banner warn">
-            Approving creates a new, empty drive for this agent. To give it one of your existing
-            drives instead, open Details and choose &lsquo;Use one of my drives instead&rsquo;
-            (you&rsquo;ll need that drive&rsquo;s recovery file). Or, from an agent that was
-            approved with &lsquo;Let this agent add other agents&rsquo;, run{' '}
-            <code className="connect-cmd connect-cmd-wrap">
-              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
-              terminal&gt;
-            </code>
-            .
-          </div>
-        )}
+      {newDriveBanner && (
+        <div className="banner warn">
+          Approving creates a new, empty drive for this agent.
+          {canUseExisting && useExistingButton}
+          Or, from an agent that was approved with &lsquo;Let this agent add other agents&rsquo;,
+          run{' '}
+          <code className="connect-cmd connect-cmd-wrap">
+            agent-drive grant {request.user_code} --verify &lt;code from the new agent’s terminal&gt;
+          </code>
+          .
+        </div>
+      )}
       <div className="connect-actions">
         <button
           className="button primary connect-approve"

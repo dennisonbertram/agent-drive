@@ -1014,9 +1014,13 @@ test.describe('agent device login', () => {
     await expect(
       page.getByText(/Approving creates a new, empty drive for this agent\./),
     ).toBeVisible();
-    await expect(page.locator('.banner.warn')).toContainText(
-      "To give it one of your existing drives instead, open Details and choose 'Use one of my drives instead' (you'll need that drive's recovery file).",
-    );
+    // The existing-drive choice is visible without opening Details, and Approve fits at 1280x800.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const banner = page.locator('.banner.warn', { hasText: 'Approving creates a new, empty' });
+    await expect(
+      banner.getByRole('button', { name: /Use one of my drives instead/ }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve agent' })).toBeInViewport({ ratio: 1 });
     const grantLine = page.locator('.connect-cmd-wrap');
     await expect(grantLine).toHaveText(
       `agent-drive grant ${b.code} --verify <code from the new agent’s terminal>`,
@@ -1026,7 +1030,7 @@ test.describe('agent device login', () => {
       [390, 844],
     ] as const) {
       await page.setViewportSize({ width, height });
-      const card = await page.locator('.banner.warn').boundingBox();
+      const card = await page.locator('.banner.warn', { hasText: 'Approving creates a new, empty' }).boundingBox();
       const code = await grantLine.boundingBox();
       expect(code!.x + code!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
     }
