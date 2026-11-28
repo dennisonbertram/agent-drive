@@ -1058,6 +1058,7 @@ test('a fresh recovery file downloads from the key menu — account slot and loc
     ).toBeVisible();
     expect(wrongDownloads).toBe(0);
     // The recovery dialog includes the scoped command for the agent that holds this drive.
+    await page.getByText('Other ways').click();
     await expect(page.getByText('agent-drive account seal')).toBeVisible();
     await page.keyboard.press('Escape');
 
@@ -1090,6 +1091,7 @@ test('no passphrase yet: the key prompt offers the automatic account handoff', a
     await expect(dialog).toBeVisible();
     // The handoff is offered before any file: an agent can seal this drive to the account,
     // and passphrase setup is one click inside the same prompt.
+    await dialog.getByText('Other ways').click();
     await expect(dialog.getByText('agent-drive account seal')).toBeVisible();
     await dialog.getByRole('button', { name: 'Set up passphrase unlock' }).click();
     await expect(page.getByTestId('generated-passphrase')).toBeVisible();
