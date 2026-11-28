@@ -620,8 +620,11 @@ test.describe('agent device login', () => {
 
     // Scoped to this drive: other tests run in parallel and write their own events.
     const events = async () =>
-      (await database.query('SELECT count(*)::int AS n FROM file_events WHERE drive_id = $1', [driveId]))
-        .rows[0].n as number;
+      (
+        await database.query('SELECT count(*)::int AS n FROM file_events WHERE drive_id = $1', [
+          driveId,
+        ])
+      ).rows[0].n as number;
     const before = await events();
     const check = await cli(['check'], env);
     expect(check.status, check.stderr).toBe(0);

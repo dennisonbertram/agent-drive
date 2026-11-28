@@ -215,8 +215,8 @@ export function UnlockDialog({
       )}
       {recoveryNote && <p role="status">{recoveryNote}</p>}
       <p>
-        {recoveryNote ? '' : 'Choose the recovery file for this drive. '}The key stays in this tab only.
-        It is cleared when you reload, or after 30 minutes without use.
+        {recoveryNote ? '' : 'Choose the recovery file for this drive. '}The key stays in this tab
+        only. It is cleared when you reload, or after 30 minutes without use.
       </p>
       {pendingMessage && <p>{pendingMessage}</p>}
       <div className="drop-box">
