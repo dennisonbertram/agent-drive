@@ -303,7 +303,7 @@ function ConnectAgentBody() {
     ['Claude Code', 'claude mcp add agent-drive -- agent-drive mcp'],
     [
       'Codex (~/.codex/config.toml)',
-      '[mcp_servers.agent-drive]\ncommand = "agent-drive"\nargs = ["mcp"]',
+      '[mcp_servers.agent-drive]\ncommand = "agent-drive"\nargs = ["mcp"]\n\n[mcp_servers.agent-drive.tools.put]\napproval_mode = "approve"\n[mcp_servers.agent-drive.tools.download]\napproval_mode = "approve"',
     ],
     [
       'Cursor or any MCP client',
@@ -313,9 +313,10 @@ function ConnectAgentBody() {
   return (
     <>
       <p>
-        Paste this into your agent. It installs the CLI and gives you a link; open it and click
-        Approve. The agent sets up its own encrypted drive, or you add it to a drive your other
-        agents already use.
+        Paste this into your agent. It installs the CLI and gives you a link and a verification
+        code. Open the link, type the verification code from the terminal, and click Approve agent.
+        The agent sets up its own encrypted drive, or you add it to a drive your other agents
+        already use.
       </p>
       <div className="agent-give">
         <div className="terminal-command">
@@ -673,6 +674,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Set when the workspace load fails; unlike `error` it survives Dismiss, so the card stays.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [notice, setNotice] = useState('');
   const [modal, setModal] = useState<ModalName>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -1002,6 +1005,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         return nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives);
       });
       setReady(true);
+      setLoadFailed(false);
       setFileRefresh((value) => value + 1);
     } catch (reason) {
       if (owner === refreshOwner.current) throw reason;
@@ -1085,7 +1089,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         if (active) return refresh();
       })
       .catch((reason: Error) => {
-        if (active) setError(reason.message);
+        if (active) {
+          setLoadFailed(true);
+          setError(reason.message);
+        }
       });
     return () => {
       active = false;
@@ -2764,7 +2771,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       Dismiss
                     </button>
                   </>
-                ) : vault.status === 'none' && tab === 'Files' ? (
+                ) : vault.status === 'none' && tab === 'Files' && drives.length > 0 ? (
                   <>
                     <span className="notice-text">
                       Set a passphrase and agents will add every drive’s key to your account — then
@@ -2821,6 +2828,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                 <button
                   className="button primary"
                   disabled={busy || !drives.length || !activeAgents.length}
+                  title={
+                    !drives.length
+                      ? 'Create a drive first.'
+                      : !activeAgents.length
+                        ? 'Create an agent first.'
+                        : undefined
+                  }
                   onClick={() => open('key')}
                 >
                   + New API key
@@ -2829,14 +2843,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
             </div>
           </div>
           {!ready ? (
-            <section className={`panel empty ${error ? '' : 'loading'}`}>
-              <h2>{error ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
+            <section className={`panel empty ${loadFailed ? '' : 'loading'}`}>
+              <h2>{loadFailed ? 'Workspace unavailable' : 'Opening your workspace…'}</h2>
               <p>
-                {error
+                {loadFailed
                   ? 'Check the connection, then refresh to try again.'
                   : 'Loading your drives and access settings.'}
               </p>
-              {error && (
+              {loadFailed && (
                 <button
                   className="button secondary"
                   disabled={busy}
@@ -2854,8 +2868,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   <p className="eyebrow">CONNECT YOUR AGENT</p>
                   <h2>Give your first agent a home.</h2>
                   <p>
-                    Paste this line into your agent. It installs the CLI and gives you a link; open
-                    it and click Approve. The agent sets up its own encrypted drive.
+                    Paste this line into your agent. It installs the CLI and gives you a link and a
+                    verification code. Open the link, type the verification code from the terminal,
+                    and click Approve agent. The agent sets up its own encrypted drive.
                   </p>
                   <div className="onboarding-command">
                     <code>{agentInstruction}</code>
@@ -2874,7 +2889,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <i>2</i> The agent shows a pairing code.
                     </li>
                     <li>
-                      <i>3</i> You approve it once.
+                      <i>3</i> You type its verification code and approve it once.
                     </li>
                   </ol>
                   <div className="onboarding-alt">
@@ -3060,7 +3075,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               data-testid="traces-link"
                               onClick={showTraces}
                             >
-                              Traces
+                              View traces
                             </button>
                             <button
                               type="button"
@@ -3068,7 +3083,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               data-testid="capture-link"
                               onClick={() => openTraces()}
                             >
-                              Capture…
+                              Set up trace capture
                             </button>
                             <KeyChip
                               hasKey={hasKey}
@@ -3724,7 +3739,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                             const n = countKeys(agent.id);
                             askConfirm({
                               title: `Revoke access for ${agent.name}?`,
-                              message: `${n} active API ${n === 1 ? 'key stops' : 'keys stop'} working now. Commands and MCP sessions that use ${n === 1 ? 'it' : 'them'} fail at their next request. Files this agent wrote stay in your drives.`,
+                              message: `${n} active API ${n === 1 ? 'key stops' : 'keys stop'} working now. Commands and MCP sessions that use ${n === 1 ? 'it' : 'them'} fail at their next request. Files this agent wrote stay in your drives. This cannot be undone. If a credentials bundle for this agent leaked, it also contains the drive key, and revoking the API key does not change that.`,
                               confirmLabel: `Revoke ${n} ${n === 1 ? 'key' : 'keys'}`,
                               run: async () => {
                                 await api(`agents/${agent.id}/revoke`, 'POST', {});
@@ -3876,12 +3891,14 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                     <p className="eyebrow">FROM YOUR TERMINAL</p>
                     <h2>Connect without sharing your identity.</h2>
                     <p>
-                      Run the CLI from the repository after building it. Set your API URL and API
-                      key through <code>agent-drive login</code>. In Bash, read the secrets without
-                      putting them in shell history:
+                      Install the CLI (Node 24 or newer) with{' '}
+                      <code>npm install -g @dennisonbertram/agent-drive</code>. Save an existing API
+                      key with <code>agent-drive login --api URL --token-stdin</code>, which reads
+                      the key from stdin. In Bash, read both keys without putting them in shell
+                      history:
                     </p>
                     <pre>
-                      {`read -rs -p "API key: " AGENT_DRIVE_API_KEY; export AGENT_DRIVE_API_KEY\nagent-drive login --api ${origin}\nread -rs -p "Drive key: " AGENT_DRIVE_KEY; export AGENT_DRIVE_KEY\nagent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}\nagent-drive mcp`}
+                      {`read -rs -p "API key: " K; printf '%s' "$K" | agent-drive login --api ${origin}/api --token-stdin; unset K\nread -rs -p "Drive key: " AGENT_DRIVE_KEY; export AGENT_DRIVE_KEY\nagent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}\nagent-drive mcp`}
                     </pre>
                     <p>
                       To rotate access, create a replacement API key, update the agent, then revoke
@@ -4179,7 +4196,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               confirm: confirmState?.title ?? '',
               preview: preview?.file.path.split('/').at(-1) ?? 'Preview',
               share: `Share ${shareFile ? baseName(shareFile.path) : ''}`,
-              traces: 'Capture traces',
+              traces: 'Set up trace capture',
             }[modal]
           }
           className={modal === 'preview' ? 'preview' : undefined}
@@ -4257,10 +4274,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               ) : (
                 <div className="receipt-confirm" role="group" aria-label="Confirm save">
                   <h3>Did the recovery file save?</h3>
-                  <p>
-                    Without it nobody, including us, can open this drive. Check your downloads
-                    before you continue.
-                  </p>
+                  <p>Check your downloads before you continue.</p>
                   <button
                     className="button primary"
                     autoFocus
@@ -4416,7 +4430,11 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   await refresh();
                   setModal(null);
                   setTab('API keys');
-                  setNotice('Agent created. Create an API key to connect it.');
+                  setNotice(
+                    drives.length
+                      ? 'Agent created. Create an API key to connect it.'
+                      : 'Agent created. Create a drive, then an API key, to connect it.',
+                  );
                 })
               }
             >

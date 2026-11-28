@@ -847,6 +847,31 @@ test('console files: a failed refresh is reported in plain words and moves nothi
   }
 });
 
+test('console load failure: Dismiss keeps the failure card and its Try again button', async ({
+  page,
+  context,
+}) => {
+  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
+  try {
+    const login = await context.request.post('/api/test-session', {
+      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
+      data: { userId },
+    });
+    expect(login.status()).toBe(200);
+    await page.route('**/api/console/drives?*', (route) => route.abort('failed'));
+    await page.goto('/console');
+    await expect(page.getByRole('heading', { name: 'Workspace unavailable' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await page.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(page.getByRole('heading', { name: 'Workspace unavailable' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Opening your workspace…' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  } finally {
+    await cleanupUser(userId);
+  }
+});
+
 test('console files: a slow list shows skeleton, then Still loading with Retry', async ({
   page,
   context,

@@ -510,7 +510,6 @@ dialog textarea:focus-visible {
 }
 /* key fields are dark code panels */
 dialog textarea,
-dialog input[type='password'],
 dialog input[data-testid='api-key'],
 dialog input[data-testid='drive-key'] {
   border-color: var(--code-bg, #111);
@@ -527,11 +526,18 @@ dialog .copy-button {
   align-self: flex-start;
   justify-self: start;
   width: auto;
+  /* Solid light fill: readable on both the white dialog and the dark code blocks inside it. */
   border-color: var(--ink, #111);
+  background: var(--panel, #fff);
   color: var(--ink, #111);
 }
 dialog .copy-button:hover {
   background: var(--paper-2, #f6f5f2);
+}
+dialog .copy-button:focus-visible,
+.onboarding-command .button:focus-visible {
+  outline: 2px solid var(--sig, #ff4a1c);
+  outline-offset: 2px;
 }
 dialog select {
   width: 100%;

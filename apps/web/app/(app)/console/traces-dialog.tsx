@@ -16,7 +16,7 @@ type Active = { id: string; createdAt: string; status: 'active' | 'stale' };
 export type TracesKey = { key: string; source: Source };
 
 /**
- * Body of the "Capture traces" dialog. The drive key is passed in only for the moment a token is
+ * Body of the "Set up trace capture" dialog. The drive key is passed in only for the moment a token is
  * created; the token itself exists only in this component's state, shown once.
  */
 export function TracesDialog({
@@ -49,6 +49,7 @@ export function TracesDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [revoking, setRevoking] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const addButton = useRef<HTMLButtonElement>(null);
   const focusAdd = useRef(false);
   const working = busy || revoking;
@@ -138,6 +139,32 @@ export function TracesDialog({
   const install = `npm install -g @dennisonbertram/agent-drive`;
   return (
     <div className="traces-dialog">
+      {created && (
+        <div className="trace-created" data-testid="webhook-created">
+          <p className="share-help">
+            Copy these now. The token cannot be shown again. In OpenRouter, add a Webhook
+            destination.
+          </p>
+          <div className="trace-field">
+            <span>Webhook URL</span>
+            <span className="trace-command">
+              <code data-testid="webhook-url">{created.url}</code>
+              <CopyButton text={created.url} label="Copy webhook URL" />
+            </span>
+          </div>
+          <div className="trace-field">
+            <span>Headers</span>
+            <span className="trace-command">
+              <code data-testid="webhook-headers">{headers}</code>
+              <CopyButton text={headers} label="Copy headers JSON" />
+            </span>
+          </div>
+          <p className="share-help">
+            In OpenRouter, leave Privacy Mode off for this destination, or traces will contain no
+            prompts or replies.
+          </p>
+        </div>
+      )}
       <h3 className="share-heading">Local agents</h3>
       <p className="share-help">
         Connect to Agent Drive and load this drive’s key on your agent’s machine first. Run Claude
@@ -172,14 +199,40 @@ export function TracesDialog({
               <span className="share-state" data-status={active.status}>
                 {active.status === 'stale' ? 'Needs replacement' : 'Active'}
               </span>
-              <button
-                type="button"
-                className="button secondary"
-                disabled={busy}
-                onClick={() => void add()}
-              >
-                Replace
-              </button>
+              {confirmReplace ? (
+                <span role="group" aria-label="Confirm replace">
+                  <span className="share-help">
+                    The old token stops working immediately. Update OpenRouter with the new one.
+                  </span>{' '}
+                  <button
+                    type="button"
+                    className="button secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmReplace(false);
+                      void add();
+                    }}
+                  >
+                    Replace token
+                  </button>{' '}
+                  <button
+                    type="button"
+                    className="share-revoke"
+                    onClick={() => setConfirmReplace(false)}
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={busy}
+                  onClick={() => setConfirmReplace(true)}
+                >
+                  Replace
+                </button>
+              )}
               <RevokeControl
                 question="Stop this webhook?"
                 confirmLabel="Revoke webhook"
@@ -215,31 +268,6 @@ export function TracesDialog({
             </p>
           )}
         </>
-      )}
-      {created && (
-        <div className="trace-created" data-testid="webhook-created">
-          <p className="share-help">
-            Copy these now. The token is shown once. In OpenRouter, add a Webhook destination.
-          </p>
-          <div className="trace-field">
-            <span>Webhook URL</span>
-            <span className="trace-command">
-              <code data-testid="webhook-url">{created.url}</code>
-              <CopyButton text={created.url} label="Copy webhook URL" />
-            </span>
-          </div>
-          <div className="trace-field">
-            <span>Headers</span>
-            <span className="trace-command">
-              <code data-testid="webhook-headers">{headers}</code>
-              <CopyButton text={headers} label="Copy headers JSON" />
-            </span>
-          </div>
-          <p className="share-help">
-            In OpenRouter, leave Privacy Mode off for this destination, or traces will contain no
-            prompts or replies.
-          </p>
-        </div>
       )}
       <p className="share-help">
         OpenRouter sends this trace to our server over TLS. The server reads it once to encrypt it
