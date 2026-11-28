@@ -1043,10 +1043,11 @@ export default function Connect({
           <div className="banner warn">
             Approving creates a new, empty drive for this agent. To give it one of your existing
             drives instead, open Details and choose &lsquo;Use one of my drives instead&rsquo;
-            (you&rsquo;ll need that drive&rsquo;s recovery file). Or, from an agent that was approved
-            with &lsquo;Let this agent add other agents&rsquo;, run{' '}
+            (you&rsquo;ll need that drive&rsquo;s recovery file). Or, from an agent that was
+            approved with &lsquo;Let this agent add other agents&rsquo;, run{' '}
             <code className="connect-cmd connect-cmd-wrap">
-              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s terminal&gt;
+              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
+              terminal&gt;
             </code>
             .
           </div>
