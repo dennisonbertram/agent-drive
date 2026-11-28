@@ -947,11 +947,10 @@ export default function Connect({
         </div>
       )}
       <div className="connect-code-line">
-        <span>Does this code match your terminal?</span>
+        <span>Does this code match your terminal? If not, click Deny.</span>
         <span className="connect-code" aria-label={`Code ${request.user_code}`}>
           {request.user_code}
         </span>
-        <small>If it does not, close this page; the request expires on its own.</small>
         <label className="connect-verify">
           Verification code
           <input

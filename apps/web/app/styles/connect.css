@@ -196,7 +196,7 @@
 
 /* who is approving, under the title */
 .connect-shell p.connect-account {
-  margin: -8px 0 12px;
+  margin: -10px 0 6px;
   font-size: 0.8125rem;
   color: var(--muted, #6b6963);
 }
