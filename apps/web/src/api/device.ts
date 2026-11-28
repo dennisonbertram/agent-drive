@@ -880,6 +880,16 @@ async function consoleDeviceAction(
     if (!row) throw new ApiError('not_found', 'Device request not found.');
     const known = { rows: await reconnectDrives(getPool(), accountId, row) };
     const previous = await previousPermissions(getPool(), accountId, row);
+    // For the approval warnings: an agent already registered under the requested name, and
+    // whether approving would add yet another drive to an account that already has some.
+    const named = await getPool().query(
+      'SELECT 1 FROM agents WHERE account_id = $1 AND name = $2 LIMIT 1',
+      [accountId, row.client_name],
+    );
+    const hasDrives = await getPool().query(
+      'SELECT 1 FROM drives WHERE account_id = $1 AND deleting_at IS NULL LIMIT 1',
+      [accountId],
+    );
     const offered = (
       await getPool().query(
         `SELECT o.revision, o.scopes, o.write_paths, o.drive_id, d.name AS drive_name,
@@ -904,6 +914,8 @@ async function consoleDeviceAction(
       offerRevision: offered?.revision ?? 0,
       drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
+      existing_agent_name: named.rowCount > 0,
+      account_has_drives: hasDrives.rowCount > 0,
       scopes: previous?.scopes.filter((scope) => scope !== 'delegate') ?? null,
       write_paths: previous?.write_paths ?? null,
       user_code: row.user_code,

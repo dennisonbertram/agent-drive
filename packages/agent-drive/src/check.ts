@@ -8,7 +8,7 @@ export const SCOPE_HINT =
   'Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.';
 
 const DELEGATE_HINT =
-  'Run `agent-drive login` again; on the approval page, tick "Let this agent add other agents to its drives" (under "Optional") before approving.';
+  'Run `agent-drive login --name <name>` again with this agent\'s name; on the approval page, open Details and tick "Let this agent add other agents to its drives" before approving.';
 
 /** What a conflict loser should do next; shared by the CLI and the MCP `hint`. */
 export function conflictHint(error: AgentDriveApiError) {

@@ -24,6 +24,8 @@ type DeviceRequest = {
   expires_at: string;
   drives?: Drive[];
   creates_drive?: boolean;
+  existing_agent_name?: boolean;
+  account_has_drives?: boolean;
   public_key?: string;
   scopes?: string[] | null;
   write_paths?: string[] | null;
@@ -144,9 +146,13 @@ export default function Connect({
   const loading = phase === 'loading';
   const busy = phase === 'approving';
   const [done, setDone] = useState<{
+    denied?: boolean;
     name: string;
     access: string;
+    accessDetail: string;
     drive: string;
+    driveName: string;
+    delegate?: boolean;
     uncheckedKey?: boolean;
   } | null>(null);
   const [formError, setFormError] = useState<ReactNode>('');
@@ -419,6 +425,14 @@ export default function Connect({
         : (requested.drives ?? []).length > 0
           ? (requested.drives ?? []).map((d) => d.name).join(', ')
           : 'its new drive';
+      let driveName = requested.offer
+        ? requested.offer.drive.name
+        : (requested.drives ?? []).length > 0
+          ? (requested.drives ?? []).map((d) => d.name).join(', ')
+          : 'New encrypted drive';
+      let grantPaths = requested.offer
+        ? requested.offer.writePaths
+        : (requested.write_paths ?? []);
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
         // The selection is captured up front so a late render can never mix drives.
@@ -470,7 +484,9 @@ export default function Connect({
         }
         if (!live()) return;
         scopes = readOnly ? ['read'] : DEFAULT_SCOPES;
-        driveLabel = `the drive ${accountDrives.find((d) => d.id === target)?.name ?? ''}`.trim();
+        driveName = accountDrives.find((d) => d.id === target)?.name ?? '';
+        driveLabel = `the drive ${driveName}`.trim();
+        grantPaths = folder.trim() ? [folder.trim()] : [];
         body = {
           driveIds: [target],
           scopes: [...scopes, ...(delegate ? ['delegate'] : [])],
@@ -485,10 +501,17 @@ export default function Connect({
       if (!live()) return;
       clearKey();
       setPhase('done');
+      const access = describeScopes(scopes);
       setDone({
         name: requested.client_name,
-        access: describeScopes(scopes),
+        access,
+        accessDetail:
+          scopes.includes('write') && grantPaths.length
+            ? `${access}; writes only under ${grantPaths.join(', ')}`
+            : access,
         drive: driveLabel,
+        driveName,
+        delegate,
         uncheckedKey,
       });
     } catch (error) {
@@ -529,6 +552,52 @@ export default function Connect({
     }
   }
 
+  // Refusing is always safe, so it needs no verification code: the request is marked denied
+  // and the agent's poll ends with access_denied.
+  async function deny() {
+    if (!request || busyRef.current) return;
+    const requested = request;
+    busyRef.current = true;
+    setFormError('');
+    setFieldError(null);
+    setPhase('approving');
+    try {
+      await api(`device/${encodeURIComponent(requested.user_code)}/deny`, 'POST', {});
+      setDone({
+        denied: true,
+        name: requested.client_name,
+        access: '',
+        accessDetail: '',
+        drive: '',
+        driveName: '',
+      });
+      setPhase('done');
+    } catch (error) {
+      setPhase('review');
+      setFormError(
+        error instanceof HttpError && error.status === 404
+          ? 'This request already expired; the agent got no access.'
+          : error instanceof Error
+            ? error.message
+            : 'Could not deny the request.',
+      );
+    } finally {
+      busyRef.current = false;
+    }
+  }
+
+  if (done?.denied)
+    return (
+      <section className="panel connect-card" role="status">
+        <span className="connect-tag">
+          <span className="connect-led dim" aria-hidden="true" />
+          Denied
+        </span>
+        <h1>Request denied</h1>
+        <p>The agent got no access. You can close this page.</p>
+      </section>
+    );
+
   if (done)
     return (
       <section className="panel connect-card approved" role="status">
@@ -541,6 +610,26 @@ export default function Connect({
           You approved {done.name} to {done.access} {done.drive}. Return to your agent to finish
           setup and confirm it is ready.
         </p>
+        <dl className="connect-facts connect-rows">
+          <div className="connect-fact">
+            <dt>Drive</dt>
+            <dd>{done.driveName}</dd>
+          </div>
+          <div className="connect-fact">
+            <dt>Access</dt>
+            <dd>{done.accessDetail}</dd>
+          </div>
+          {done.delegate && (
+            <div className="connect-fact">
+              <dt>Delegate</dt>
+              <dd>Can add other agents</dd>
+            </div>
+          )}
+          <div className="connect-fact">
+            <dt>Account</dt>
+            <dd>{account}</dd>
+          </div>
+        </dl>
         {done.uncheckedKey && (
           <p className="connect-note">
             This drive has nothing to check the key against, so it could not be checked before
@@ -605,11 +694,12 @@ export default function Connect({
   const reconnect = request.drives ?? [];
   const offer = request.offer;
   const previous = request.scopes;
+  const grantScopes = offer ? offer.scopes : (previous ?? DEFAULT_SCOPES);
+  const grantWrites = offer ? offer.writePaths : (request.write_paths ?? []);
+  // The deciding facts stay visible outside Details: who is approving, which agent and machine
+  // are asking, and any restriction or extra permission the approval carries.
   const facts: [string, string][] = [];
-  if (request.machine) facts.push(['Machine', request.machine]);
-  facts.push(['Account', account]);
   if (!existing) {
-    const writes = offer ? offer.writePaths : (request.write_paths ?? []);
     facts.push([
       'Drive',
       offer
@@ -618,15 +708,11 @@ export default function Connect({
           ? reconnect.map((d) => d.name).join(', ')
           : 'New encrypted drive',
     ]);
-    facts.push(['Access', capitalize(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES))]);
-    facts.push([
-      'Writes',
-      describeWrites(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES), writes),
-    ]);
+    facts.push(['Access', capitalize(grantScopes)]);
+    facts.push(['Writes', describeWrites(grantScopes, grantWrites)]);
   }
   if (offer) facts.push(['Offered by', offer.agentName]);
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
-  const grantScopes = offer ? offer.scopes : (previous ?? DEFAULT_SCOPES);
   const summary = (
     existing
       ? ['Existing drive · choose below']
@@ -636,7 +722,7 @@ export default function Connect({
             : reconnect.length
               ? reconnect.map((d) => d.name).join(', ')
               : 'New encrypted drive',
-          summarizeAccess(grantScopes, offer ? offer.writePaths : (request.write_paths ?? [])),
+          summarizeAccess(grantScopes, grantWrites),
           offer ? `offered by ${offer.agentName}` : '',
         ]
   )
@@ -652,6 +738,15 @@ export default function Connect({
         : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
   const keyInvalid = fieldError?.field === 'key';
   const folderInvalid = fieldError?.field === 'folder';
+  // Two drives sharing a name get a short id suffix so the picker entries are distinguishable.
+  const duplicateNames = new Set<string>();
+  {
+    const seen = new Set<string>();
+    for (const d of accountDrives) {
+      if (seen.has(d.name)) duplicateNames.add(d.name);
+      seen.add(d.name);
+    }
+  }
   return (
     <section className="panel connect-card">
       <span className="connect-tag">
@@ -659,12 +754,37 @@ export default function Connect({
         Pairing request
       </span>
       <h1>Connect {request.client_name}?</h1>
+      <p className="connect-account">Signed in as {account}</p>
       {notice && (
         <div role="status" className="banner info">
           {notice}
         </div>
       )}
       <p className="connect-summary">{summary}</p>
+      <dl className="connect-facts connect-rows">
+        <div className="connect-fact">
+          <dt>Agent</dt>
+          <dd>{request.client_name}</dd>
+        </div>
+        {request.machine && (
+          <div className="connect-fact">
+            <dt>Machine</dt>
+            <dd>{request.machine}</dd>
+          </div>
+        )}
+        {!existing && grantScopes.includes('write') && grantWrites.length > 0 && (
+          <div className="connect-fact">
+            <dt>Writes</dt>
+            <dd>Only under {grantWrites.join(', ')}</dd>
+          </div>
+        )}
+        {delegate && (
+          <div className="connect-fact">
+            <dt>Delegate</dt>
+            <dd>Can add other agents</dd>
+          </div>
+        )}
+      </dl>
       <details className="connect-more connect-details">
         <summary>Details</summary>
         <dl className="connect-facts">
@@ -724,6 +844,7 @@ export default function Connect({
               {accountDrives.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
+                  {duplicateNames.has(d.name) ? ` (${d.id.slice(0, 8)})` : ''}
                 </option>
               ))}
             </select>
@@ -870,6 +991,23 @@ export default function Connect({
           </p>
         )}
       </div>
+      {!existing && request.existing_agent_name === true && (
+        <div className="banner warn">
+          You already have an agent named {request.client_name}. Approving signs this one in as
+          that agent with a new API key.
+        </div>
+      )}
+      {!existing &&
+        !offer &&
+        request.creates_drive === true &&
+        request.account_has_drives === true && (
+          <div className="banner warn">
+            Approving creates a new, empty drive for this agent. To give it an existing drive
+            instead, have an agent that already has that drive run{' '}
+            <code className="connect-cmd">agent-drive grant {request.user_code}</code> first,
+            then reload this page.
+          </div>
+        )}
       <div className="connect-actions">
         <button
           className="button primary connect-approve"
@@ -877,6 +1015,14 @@ export default function Connect({
           onClick={() => void approve()}
         >
           {busy ? 'Working…' : 'Approve agent'}
+        </button>
+        <button
+          type="button"
+          className="connect-deny"
+          disabled={busy}
+          onClick={() => void deny()}
+        >
+          Deny
         </button>
       </div>
       <p className="connect-note">You can revoke access any time in Console, Agents.</p>
