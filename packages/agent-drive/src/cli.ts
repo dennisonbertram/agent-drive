@@ -1813,7 +1813,7 @@ Commands:
   put LOCAL|- REMOTE --drive ID [--size N] [--if-version ID | --overwrite]
                                         --size starts the 10-minute upload intent before stdin; input, upload and commit must fit.
                                         Without it, stdin is spooled first; upload and commit then have 10 minutes.
-  get REMOTE --drive ID [--output FILE|-]   Use --output - for raw binary stdout
+  get REMOTE [LOCAL] --drive ID [--output FILE|-]   LOCAL refuses an existing file; --output can replace it; --output - for raw binary stdout
   connect NAME MOUNTPOINT --sandbox ID --root PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]
                                         Save and start a live workspace mount without Agent Drive credentials
   mounts forget NAME                    Forget an offline live workspace registration
