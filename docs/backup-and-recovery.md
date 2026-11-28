@@ -78,11 +78,14 @@ After a file, 1Password or `confirm` backup, the CLI also tells the service that
 agent-drive credentials status
 ```
 
-The output is JSON. Each drive key on this machine is listed with `backedUp`, and when backed up, `at` and `method`:
+The output is JSON. Each drive key on this machine is listed with `backedUp`. There are two shapes when `backedUp` is true:
 
 ```json
 { "drives": { "<drive id>": { "backedUp": true, "at": "<ISO time>", "method": "file" } } }
+{ "drives": { "<drive id>": { "backedUp": true, "keyFrom": "a recovery file" } } }
 ```
+
+The first shape means this machine recorded a backup, so `at` and `method` are present. The second shape means the key came from somewhere else (a recovery file, a credentials bundle, an approval, or an environment variable or `--key-file`), so a copy already exists off this machine. It has `keyFrom` and no `at` or `method`. A record with `at` and `method` can also carry `keyFrom`. `backedUp: false` has none of these fields. Consumers should check `at` and `method` separately and not assume they exist when `backedUp` is true.
 
 The method is `file` for a file export or a `--from` import, `stdout` for 1Password, `credentials confirm` and imports from standard input, and `env` for a key that came from `AGENT_DRIVE_CREDENTIALS`.
 
@@ -164,13 +167,13 @@ Key backup is separate from file backup. To upload a working directory to the dr
 
 ## A login that replaces the API key
 
-When `agent-drive login` saves a different API key, the CLI clears all local backup records. The old bundle holds the revoked key, so it no longer counts as a backup. The CLI prints:
+When `agent-drive login` saves a different API key, the CLI keeps the backup record of each drive key that did not change and drops only the records of drive keys that changed. A saved bundle still holds the old API key, so the CLI prints this one-line note:
 
 ```text
 Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.
 ```
 
-`agent-drive check` then fails with `drive key not backed up` until you export again. The backup date that the console shows is stored by the service. Login does not clear it, so the console keeps showing the last reported backup until you export again.
+`agent-drive check` still passes for drive keys that did not change. It fails with `drive key not backed up` only for a drive key that changed, until you export again. The backup date that the console shows is stored by the service. Login does not clear it, so the console keeps showing the last reported backup until you export again.
 
 ## If the key is lost
 
