@@ -35,7 +35,7 @@ export type DriveKeySource = 'generated' | 'recovery-file' | 'bundle' | 'grant';
 export const DEFAULT_API_URL = 'https://agentdrive.xyz/api';
 
 export async function resolveLoginApiUrl(flag: string | undefined) {
-  return flag ?? process.env.AGENT_DRIVE_API_URL ?? (await readConfig()).apiUrl ?? DEFAULT_API_URL;
+  return flag || process.env.AGENT_DRIVE_API_URL || (await readConfig()).apiUrl || DEFAULT_API_URL;
 }
 
 /** The --drive flag, else the only drive key saved for this API origin, else an error naming the choices. */
