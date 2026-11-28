@@ -1713,14 +1713,14 @@ describe('credentials import of a recovery file', () => {
 
   it('warns plainly when the saved account cannot see the imported drive', async () => {
     const key = generateDriveKey();
-    const file = await recoveryFile(A, key);
+    const file = await recoveryFile(B, key);
     const r = await cli(['credentials', 'import', '--from', file], one, (path) =>
       path === 'whoami'
-        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [B] }
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [A] }
         : {},
     );
-    expect(r.out).toContain(`Saved the drive key for drive ${A}`);
-    expect(r.err).toContain(`the API key on this machine has no access to drive ${A}`);
+    expect(r.out).toContain(`Saved the drive key for drive ${B}`);
+    expect(r.err).toContain(`the API key on this machine has no access to drive ${B}`);
     expect(r.out + r.err).not.toContain(key);
   });
 
@@ -1741,13 +1741,13 @@ describe('credentials import of a recovery file', () => {
   });
 
   it('stays silent when the account holds the imported drive', async () => {
-    const file = await recoveryFile(A, generateDriveKey());
+    const file = await recoveryFile(B, generateDriveKey());
     const r = await cli(['credentials', 'import', '--from', file], one, (path) =>
       path === 'whoami'
-        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [A] }
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [A, B] }
         : {},
     );
-    expect(r.out).toContain(`Saved the drive key for drive ${A}`);
+    expect(r.out).toContain(`Saved the drive key for drive ${B}`);
     expect(r.err).not.toContain('no access to drive');
   });
 });

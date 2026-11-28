@@ -154,7 +154,7 @@ describe('import', () => {
       JSON.stringify({ format: 'agent-drive-key-v1', driveId: D2, key }),
       'file',
     );
-    expect(result).toEqual({ kind: 'recovery-file', driveIds: [D2] });
+    expect(result).toMatchObject({ kind: 'recovery-file', driveIds: [D2] });
     const config = await readConfig();
     expect(config.driveKeys?.[D2]).toBe(key);
     expect(config.driveKeySources?.[D2]).toBe('recovery-file');

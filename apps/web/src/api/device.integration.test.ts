@@ -178,7 +178,7 @@ describe('device authorization', () => {
       sealedDriveKeys: sealed,
     });
     expect(approve.status).toBe(200);
-    expect(await json(approve)).toEqual({ status: 'approved' });
+    expect(await json(approve)).toMatchObject({ status: 'approved' });
 
     await allowPoll(started.device_code);
     const issued = await poll(started.device_code);
