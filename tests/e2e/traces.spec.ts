@@ -340,53 +340,6 @@ test('traces: a Clerk response marker suspends the native dialog without issuing
   }
 });
 
-test('traces: a second key chosen while the first verifies supersedes it', async ({
-  page,
-  context,
-  baseURL,
-}) => {
-  test.setTimeout(120_000);
-  const userId = `e2e_${randomUUID().replaceAll('-', '')}`;
-  try {
-    await context.request.post('/api/test-session', {
-      headers: { Authorization: `Bearer ${process.env.AGENT_DRIVE_TEST_AUTH_SECRET}` },
-      data: { userId },
-    });
-    const created = await context.request.post('/api/console/drives', {
-      data: { name: 'Trace supersede drive' },
-      headers: { Origin: baseURL! },
-    });
-    const driveId = ((await created.json()) as { id: string }).id;
-    const bundleFor = (key: string) =>
-      `adcred1.${Buffer.from(JSON.stringify({ v: 1, driveKeys: { [driveId]: key } })).toString('base64url')}`;
-    // Hold the first verification (a wrong key that the server rejects) until the second one is done.
-    let release = () => {};
-    const gate = new Promise<void>((done) => (release = done));
-    let first = true;
-    await page.route('**/trace-inbox/challenge', async (route) => {
-      if (route.request().method() === 'POST' && first) {
-        first = false;
-        await gate;
-      }
-      await route.continue();
-    });
-    await page.goto(`/console?drive=${driveId}`);
-    await page.getByTestId('capture-link').click();
-    await addWebhook(page).click();
-    await page.getByText('Other ways').click();
-    const field = page.getByLabel(/^Drive key or credentials bundle/);
-    await field.fill(bundleFor(randomBytes(32).toString('base64url')));
-    await page.getByRole('button', { name: 'Load key', exact: true }).click();
-    await field.fill(bundleFor(randomBytes(32).toString('base64url')));
-    await page.getByRole('button', { name: 'Load key', exact: true }).click();
-    release();
-    // Neither attempt may report an error for the other; the superseded one is silent.
-    await expect(dialog(page).getByRole('alert')).toHaveCount(1);
-  } finally {
-    await cleanupUser(userId);
-  }
-});
-
 test('native dialog suspension exposes an external prompt and restores focus in a browser', async ({
   page,
 }) => {

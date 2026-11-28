@@ -886,6 +886,17 @@ export default function Connect({
           </button>
         )}
         {canUseExisting && !newDriveBanner && useExistingButton}
+        {newDriveBanner && (
+          <p className="connect-grant">
+            To give this agent a drive another agent already has: from an agent approved with
+            &lsquo;Let this agent add other agents&rsquo;, run{' '}
+            <code className="connect-cmd connect-cmd-wrap">
+              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
+              terminal&gt;
+            </code>
+            .
+          </p>
+        )}
         <label className="connect-delegate">
           <input
             type="checkbox"
@@ -902,7 +913,7 @@ export default function Connect({
           </span>
         </label>
       </details>
-      <p className="connect-explain">{explain}</p>
+      {!newDriveBanner && <p className="connect-explain">{explain}</p>}
       {existing && (
         <div className="connect-existing">
           <label className="cf-drive">
@@ -1034,23 +1045,20 @@ export default function Connect({
           </p>
         )}
       </div>
-      {request.existing_agent_name === true && (
+      {(request.existing_agent_name === true || newDriveBanner) && (
         <div className="banner warn">
-          You already have an agent named {request.client_name}. Approving signs this one in as that
-          agent with a new API key.
-        </div>
-      )}
-      {newDriveBanner && (
-        <div className="banner warn">
-          Approving creates a new, empty drive for this agent.
-          {canUseExisting && useExistingButton}
-          Or, from an agent that was approved with &lsquo;Let this agent add other agents&rsquo;,
-          run{' '}
-          <code className="connect-cmd connect-cmd-wrap">
-            agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
-            terminal&gt;
-          </code>
-          .
+          {request.existing_agent_name === true && (
+            <>
+              You already have an agent named {request.client_name}. Approving signs this one in as
+              that agent with a new API key.{' '}
+            </>
+          )}
+          {newDriveBanner && (
+            <>
+              Approving creates a new, empty drive for this agent.
+              {canUseExisting && useExistingButton}
+            </>
+          )}
         </div>
       )}
       <div className="connect-actions">
