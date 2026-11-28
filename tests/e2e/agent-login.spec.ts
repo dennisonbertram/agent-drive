@@ -1153,7 +1153,7 @@ test.describe('agent device login', () => {
     const { login: cliLogin, path } = await startLogin(env, 'style-bot');
     await page.goto(path);
     await expect(page.locator('.connect-explain')).toHaveCSS('font-size', '13px');
-    await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '16px');
+    await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '10px');
     await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
     await openDetails(page);
     await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
