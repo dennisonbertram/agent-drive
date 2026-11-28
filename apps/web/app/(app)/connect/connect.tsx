@@ -738,15 +738,6 @@ export default function Connect({
         : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
   const keyInvalid = fieldError?.field === 'key';
   const folderInvalid = fieldError?.field === 'folder';
-  // Two drives sharing a name get a short id suffix so the picker entries are distinguishable.
-  const duplicateNames = new Set<string>();
-  {
-    const seen = new Set<string>();
-    for (const d of accountDrives) {
-      if (seen.has(d.name)) duplicateNames.add(d.name);
-      seen.add(d.name);
-    }
-  }
   return (
     <section className="panel connect-card">
       <span className="connect-tag">
@@ -844,7 +835,6 @@ export default function Connect({
               {accountDrives.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
-                  {duplicateNames.has(d.name) ? ` (${d.id.slice(0, 8)})` : ''}
                 </option>
               ))}
             </select>

@@ -988,7 +988,7 @@ test.describe('agent device login', () => {
     again.login.child.kill();
   });
 
-  test('same-name agent and new empty drive warn; duplicate drive names are disambiguated', async ({
+  test('same-name agent and new empty drive warn', async ({
     page,
     context,
     baseURL,
@@ -1015,23 +1015,12 @@ test.describe('agent device login', () => {
     await approve(page, b.path, 'dupe-bot', b.code, b.verify);
     expect((await b.login.done).status).toBe(0);
 
-    // Two drives can share a name (the picker cannot rely on the server always
-    // disambiguating); each duplicate gets a short id suffix.
-    await database.query(
-      'INSERT INTO drives (account_id, name) SELECT account_id, name FROM drives WHERE id = $1',
-      [driveId],
-    );
     const envC = cliEnv(baseURL!, root, 'dupe-c', 'm-dupe-c');
     const c = await startLogin(envC, 'dupe-bot');
     await page.goto(c.path);
     await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
     await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
     await chooseExistingDrive(page);
-    const options = page.locator('select option');
-    await expect(options).toHaveCount(3);
-    const texts = (await options.allTextContents()).map((text) => text.trim());
-    expect(new Set(texts).size).toBe(3);
-    expect(texts.filter((text) => /^dupe-bot \([0-9a-f-]{8}\)$/.test(text))).toHaveLength(2);
     // Choosing an existing drive clears the new-drive warnings.
     await expect(page.getByText(/You already have an agent named dupe-bot\./)).toHaveCount(0);
     await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
