@@ -822,8 +822,19 @@ describe('pipe command guard validation', () => {
       one,
       (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
     );
-    expect(result.err).toContain('credential backups are out of date');
+    expect(result.err).toContain('Your saved credentials backup has the old API key');
     expect(result.paths).toContain('whoami');
+  });
+
+  it('explains relative remote paths and the get LOCAL argument before connecting', async () => {
+    const put = await cli(['put', 'local.md', 'notes.md', '--drive', A], one);
+    expect(put.err).toContain('Remote paths start with /, for example /notes.md.');
+    expect(put.paths).toEqual([]);
+    const get = await cli(['get', 'notes.md', '--drive', A], one);
+    expect(get.err).toContain('Remote paths start with /, for example /notes.md.');
+    const both = await cli(['get', '/x', 'out.txt', '--output', 'o.txt', '--drive', A], one);
+    expect(both.err).toContain('either as LOCAL or with --output');
+    expect(both.paths).toEqual([]);
   });
 
   it('rejects empty and whitespace version guards before connecting', async () => {
@@ -1086,7 +1097,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
           : {},
       { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
     );
-    expect(r.err).toContain('no passphrase yet');
+    expect(r.err).toContain('Optional: set a passphrase in the console');
     expect(r.origins.length).toBeGreaterThan(0);
     expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
   });

@@ -167,7 +167,7 @@ Key backup is separate from file backup. To upload a working directory to the dr
 When `agent-drive login` saves a different API key, the CLI clears all local backup records. The old bundle holds the revoked key, so it no longer counts as a backup. The CLI prints:
 
 ```text
-The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.
+Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.
 ```
 
 `agent-drive check` then fails with `drive key not backed up` until you export again. The backup date that the console shows is stored by the service. Login does not clear it, so the console keeps showing the last reported backup until you export again.

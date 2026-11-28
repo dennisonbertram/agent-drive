@@ -181,11 +181,19 @@ async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
     lockOwned = true;
 
     const current = await readConfig();
-    // A new API key invalidates every exported bundle, so earlier backup records are stale.
+    // A new API key makes an exported bundle's API key stale, but a drive key that did not
+    // change is still backed up there. Only records of drive keys that changed are dropped;
+    // backupsCleared tells the caller to mention the stale API key in that bundle.
     const keyChanged = config.apiKey !== undefined && config.apiKey !== current.apiKey;
     backupsCleared = keyChanged && Object.keys(current.keyBackup ?? {}).length > 0;
-    const previousBackup = keyChanged ? undefined : current.keyBackup;
     const mergedDriveKeys = { ...current.driveKeys, ...config.driveKeys };
+    const previousBackup = keyChanged
+      ? Object.fromEntries(
+          Object.entries(current.keyBackup ?? {}).filter(
+            ([id]) => current.driveKeys?.[id] === mergedDriveKeys[id],
+          ),
+        )
+      : current.keyBackup;
     const merged: AgentDriveConfig = {
       ...current,
       ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined)),
@@ -196,7 +204,7 @@ async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
       ...(current.driveKeySources || config.driveKeySources
         ? { driveKeySources: { ...current.driveKeySources, ...config.driveKeySources } }
         : {}),
-      ...(previousBackup || config.keyBackup
+      ...(Object.keys(previousBackup ?? {}).length || config.keyBackup
         ? { keyBackup: { ...previousBackup, ...config.keyBackup } }
         : {}),
     };
@@ -204,7 +212,8 @@ async function writeConfigUnlocked(config: AgentDriveConfig, path: string) {
     for (const [id, key] of Object.entries(config.driveKeys ?? {}))
       if (key !== current.driveKeys?.[id] && config.driveKeySources?.[id] === undefined)
         delete merged.driveKeySources?.[id];
-    if (keyChanged && !config.keyBackup) delete merged.keyBackup;
+    if (keyChanged && !config.keyBackup && !Object.keys(previousBackup ?? {}).length)
+      delete merged.keyBackup;
     if (merged.pendingExport === null) delete merged.pendingExport;
     const handle = await open(temporary, 'wx', 0o600);
     temporaryCreated = true;

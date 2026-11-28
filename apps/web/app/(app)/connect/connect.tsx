@@ -1041,14 +1041,14 @@ export default function Connect({
         request.creates_drive === true &&
         request.account_has_drives === true && (
           <div className="banner warn">
-            Approving creates a new, empty drive for this agent. To give it an existing drive
-            instead, have an agent that already has that drive run{' '}
-            <code className="connect-cmd">
-              agent-drive grant {request.user_code} --verify &lt;verification code from the new
-              agent’s terminal&gt;
-            </code>{' '}
-            first, then reload this page. If that agent has several drives, add{' '}
-            <code className="connect-cmd">--drive &lt;drive id&gt;</code>.
+            Approving creates a new, empty drive for this agent. To give it one of your existing
+            drives instead, open Details and choose &lsquo;Use one of my drives instead&rsquo;
+            (you&rsquo;ll need that drive&rsquo;s recovery file). Or, from an agent that was approved
+            with &lsquo;Let this agent add other agents&rsquo;, run{' '}
+            <code className="connect-cmd connect-cmd-wrap">
+              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s terminal&gt;
+            </code>
+            .
           </div>
         )}
       <div className="connect-actions">

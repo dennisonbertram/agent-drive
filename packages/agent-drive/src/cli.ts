@@ -138,7 +138,7 @@ function output(value: unknown) {
 }
 
 const STALE_BACKUP_NOTE =
-  'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.\n';
+  'Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.\n';
 
 /** Resolves once stdout has accepted the text; rejects on EPIPE or any write error. */
 function writeStdout(text: string) {
@@ -592,6 +592,15 @@ async function run(command: string, raw: string[]) {
       throw new Error('--overwrite and --if-version are mutually exclusive.');
     if (args.values['if-version'] !== undefined && !args.values['if-version'].trim())
       throw new Error('--if-version must not be empty.');
+  }
+  // Remote paths are absolute; say so before any request (the server's message is cryptic).
+  const remoteArgument = command === 'put' ? args.positionals[1] : args.positionals[0];
+  if ((command === 'put' || command === 'get') && remoteArgument && !remoteArgument.startsWith('/'))
+    throw new Error('Remote paths start with /, for example /notes.md.');
+  if (command === 'get') {
+    if (args.positionals.length > 2) throw new Error('Usage: get REMOTE [LOCAL] [--output PATH|-]');
+    if (args.positionals[1] && args.values.output)
+      throw new Error('Give the local file either as LOCAL or with --output, not both.');
   }
   if (command === 'get' && args.values.version !== undefined && !args.values.version.trim())
     throw new Error('--version must not be empty.');
@@ -1659,17 +1668,19 @@ async function run(command: string, raw: string[]) {
   if (command === 'get') {
     const remote = args.positionals[0];
     if (!remote) throw new Error('get requires REMOTE.');
-    if (args.values.output) {
-      if (args.values.output === '-') {
+    const outputPath = args.values.output ?? args.positionals[1];
+    if (outputPath) {
+      if (outputPath === '-') {
         await getPipe(client, requiredDrive(args), remote, process.stdout, {
           ...(args.values.version ? { versionId: args.values.version } : {}),
         });
         return;
       }
       return output(
-        await getFile(client, requiredDrive(args), remote, args.values.output, {
+        await getFile(client, requiredDrive(args), remote, outputPath, {
           ...(args.values.version ? { versionId: args.values.version } : {}),
-          overwrite: true,
+          // --output has always replaced the file; a bare LOCAL never overwrites silently.
+          overwrite: Boolean(args.values.output),
         }),
       );
     }

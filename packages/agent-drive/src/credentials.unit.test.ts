@@ -464,14 +464,17 @@ describe('AGENT_DRIVE_CREDENTIALS', () => {
 });
 
 describe('login replacing the API key', () => {
-  it('clears backup records, which describe a stale bundle', async () => {
+  it('keeps backup records of unchanged drive keys and flags the stale API key', async () => {
     await setup();
     await exportCredentials({ to: join(dirs[0]!, 'b') }, io(true));
     expect((await readConfig()).keyBackup?.[D1]).toBeTruthy();
     expect(await writeConfig({ apiKey: 'tok' })).toEqual({ backupsCleared: false });
     expect((await readConfig()).keyBackup?.[D1]).toBeTruthy();
     expect(await writeConfig({ apiKey: 'new' })).toEqual({ backupsCleared: true });
-    expect((await readConfig()).keyBackup).toBeUndefined();
+    expect((await readConfig()).keyBackup?.[D1]).toBeTruthy();
+    // A replaced drive key is no longer backed up.
+    await writeConfig({ apiKey: 'newer', driveKeys: { [D1]: generateDriveKey() } });
+    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
   });
 });
 

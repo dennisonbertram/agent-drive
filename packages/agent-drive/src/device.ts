@@ -268,7 +268,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
 
   if (backupsCleared)
     options.log(
-      'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.',
+      'Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.',
     );
   const usable = [
     ...new Set(

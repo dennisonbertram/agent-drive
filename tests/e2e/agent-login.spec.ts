@@ -316,6 +316,14 @@ test.describe('agent device login', () => {
     const get = await cli(['get', '/notes/hello.bin', '--drive', driveId, '--output', back], env);
     expect(get.status, get.stderr).toBe(0);
     expect((await readFile(back)).equals(original)).toBe(true);
+    // A second positional is the local output path.
+    const positional = join(root, 'hello.positional');
+    const get2 = await cli(['get', '/notes/hello.bin', positional, '--drive', driveId], env);
+    expect(get2.status, get2.stderr).toBe(0);
+    expect((await readFile(positional)).equals(original)).toBe(true);
+    const relative = await cli(['put', local, 'notes.md', '--drive', driveId], env);
+    expect(relative.status).not.toBe(0);
+    expect(relative.stderr).toContain('Remote paths start with /, for example /notes.md.');
 
     // backup
     const source = join(root, 'source');
@@ -1006,12 +1014,22 @@ test.describe('agent device login', () => {
     await expect(
       page.getByText(/Approving creates a new, empty drive for this agent\./),
     ).toBeVisible();
-    await expect(page.locator('.connect-cmd').first()).toHaveText(
-      `agent-drive grant ${b.code} --verify <verification code from the new agent’s terminal>`,
+    await expect(page.locator('.banner.warn')).toContainText(
+      "To give it one of your existing drives instead, open Details and choose 'Use one of my drives instead' (you'll need that drive's recovery file).",
     );
-    await expect(
-      page.getByText('If that agent has several drives, add --drive <drive id>.'),
-    ).toBeVisible();
+    const grantLine = page.locator('.connect-cmd-wrap');
+    await expect(grantLine).toHaveText(
+      `agent-drive grant ${b.code} --verify <code from the new agent’s terminal>`,
+    );
+    for (const [width, height] of [
+      [1280, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      const card = await page.locator('.banner.warn').boundingBox();
+      const code = await grantLine.boundingBox();
+      expect(code!.x + code!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
+    }
     await approve(page, b.path, 'dupe-bot', b.code, b.verify);
     expect((await b.login.done).status).toBe(0);
 
