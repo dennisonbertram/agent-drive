@@ -303,7 +303,9 @@ describe('expectedTokenId', () => {
         tokenPosts += 1;
         throw Object.assign(new Error(TAB_CHANGED), { status: 409 });
       }
-      return (f.strictRequest as unknown as (p: string, m: string, b?: unknown) => Promise<unknown>)(path, method, body);
+      return (
+        f.strictRequest as unknown as (p: string, m: string, b?: unknown) => Promise<unknown>
+      )(path, method, body);
     }) as never;
     await expect(
       setUpWebhook({

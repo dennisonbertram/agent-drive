@@ -988,11 +988,7 @@ test.describe('agent device login', () => {
     again.login.child.kill();
   });
 
-  test('same-name agent and new empty drive warn', async ({
-    page,
-    context,
-    baseURL,
-  }) => {
+  test('same-name agent and new empty drive warn', async ({ page, context, baseURL }) => {
     test.setTimeout(240_000);
     await newUser(context);
     const envA = cliEnv(baseURL!, root, 'dupe-a', 'm-dupe-a');

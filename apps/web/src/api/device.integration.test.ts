@@ -295,10 +295,7 @@ describe('device authorization', () => {
       freshAccount,
       'flag-drive',
     ]);
-    await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2)', [
-      freshAccount,
-      name,
-    ]);
+    await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2)', [freshAccount, name]);
     const second = await start({ client_name: name });
     const flagged = await json(await consoleCall(freshUser, `/device/${second.user_code}`));
     expect(flagged).toMatchObject({

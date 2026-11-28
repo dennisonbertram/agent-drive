@@ -1057,12 +1057,7 @@ export default function Connect({
         >
           {busy ? 'Working…' : 'Approve agent'}
         </button>
-        <button
-          type="button"
-          className="connect-deny"
-          disabled={busy}
-          onClick={() => void deny()}
-        >
+        <button type="button" className="connect-deny" disabled={busy} onClick={() => void deny()}>
           Deny
         </button>
       </div>

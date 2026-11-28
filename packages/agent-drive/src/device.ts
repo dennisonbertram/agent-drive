@@ -212,7 +212,7 @@ export async function deviceLogin(options: DeviceLoginOptions) {
         typeof result.data.error_description === 'string'
           ? safeTerminalText(result.data.error_description)
           : 'The request was denied in the browser. No access was granted. ' +
-              'Run the same login command again if that was a mistake.',
+            'Run the same login command again if that was a mistake.',
       );
     else if (code === 'expired_token') throw expired();
     else
