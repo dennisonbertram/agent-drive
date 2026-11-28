@@ -348,7 +348,7 @@ def respond(request):
             os.close(fd)
             os.close(stage_dir_fd)
             handle=secrets.token_urlsafe(24)
-            HANDLES[handle]={'path':path,'parentPath':parent_path,'base':base,'baseMode':base_mode,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
+            HANDLES[handle]={'path':path,'parentPath':parent_path,'base':base,'baseMode':base_mode,'dirty':base is None,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
             return {'handleId':handle,'recoveryPath':recovery(HANDLES[handle]),'size':size}
         finally: os.close(parent)
     if op=='finalizeWrite':
@@ -398,11 +398,11 @@ def respond(request):
                     n=os.pwrite(fd,data[pos:],off+pos)
                     if n<=0: fail('EIO')
                     pos+=n
-                record['size']=max(record['size'],off+pos); return {'bytesWritten':pos}
+                record['size']=max(record['size'],off+pos); record['dirty']=True; return {'bytesWritten':pos}
             if op=='truncate':
                 size=request.get('size')
                 if not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_FILE: fail('EINVAL')
-                os.ftruncate(fd,size); record['size']=size; return {'size':size}
+                os.ftruncate(fd,size); record['size']=size; record['dirty']=True; return {'size':size}
             if op=='readStaged':
                 off=request.get('offset'); size=request.get('size')
                 if not isinstance(off,int) or isinstance(off,bool) or off<0 or not isinstance(size,int) or isinstance(size,bool) or size<0 or size>MAX_IO: fail('EINVAL')
@@ -410,6 +410,10 @@ def respond(request):
             if op=='completeWrite': return {}
             if op=='flushStatus': return {'flushed':record['committed'],'version':record['result']}
             if op in ('flush','release'):
+                if op=='release' and not record['committed'] and record['base'] is not None and not record.get('dirty',True):
+                    result={'id':record['base'],'path':record['path']}
+                    cleanup_record(handle,record)
+                    return {'version':result}
                 result=record['result'] if record['committed'] else commit_record(handle,record,request.get('operationId',''))
                 if op=='release': cleanup_record(handle,record)
                 return {'version':result}
