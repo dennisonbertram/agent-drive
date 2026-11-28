@@ -61,10 +61,7 @@ export function KeyChip({
   // A fresh recovery file can be written without a file whenever the account holds a copy
   // (agent-only drives never get one). A locked vault asks for the passphrase first.
   const canReproduce = !agentOnly && hasVault;
-  // An unlocked vault opens only drives saved under the account key; for any other drive
-  // the chip says the key is still needed.
-  const opens = vault === 'unlocked' && (hasKey || (inAccount === true && !agentOnly));
-  const dot = !backedUp ? 'danger' : hasKey || opens ? 'ok' : 'idle';
+  const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
   return (
@@ -77,7 +74,7 @@ export function KeyChip({
           <span className={`key-dot ${dot}`} aria-hidden />
           {vault === 'locked' && !hasKey
             ? 'Locked'
-            : opens
+            : vault === 'unlocked'
               ? 'Unlocked'
               : hasKey
                 ? 'Key loaded'

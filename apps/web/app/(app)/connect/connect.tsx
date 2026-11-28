@@ -985,10 +985,8 @@ export default function Connect({
             </p>
           ) : (
             <p className="connect-hint cf-note">
-              The key is checked against the drive before it is sent. A drive with no files or trace
-              inbox has nothing to check it against. No recovery file? In the console, use the key
-              menu, Download recovery file (only if that browser has the key), or have an agent that
-              has this drive run{' '}
+              The key is checked against the drive before it is sent (an empty drive has nothing to
+              check). No recovery file? Have an agent that has this drive run{' '}
               <code className="connect-cmd connect-cmd-wrap">
                 agent-drive credentials export --drive {driveId || '<drive id>'} --recovery-file
                 &lt;file&gt;

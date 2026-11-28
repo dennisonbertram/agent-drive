@@ -618,8 +618,10 @@ test.describe('agent device login', () => {
     const exported = await cli(['credentials', 'export', '--to', join(root, 'reader-bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);
 
+    // Scoped to this drive: other tests run in parallel and write their own events.
     const events = async () =>
-      (await database.query('SELECT count(*)::int AS n FROM file_events')).rows[0].n as number;
+      (await database.query('SELECT count(*)::int AS n FROM file_events WHERE drive_id = $1', [driveId]))
+        .rows[0].n as number;
     const before = await events();
     const check = await cli(['check'], env);
     expect(check.status, check.stderr).toBe(0);
@@ -1480,7 +1482,7 @@ test.describe('agent device login', () => {
     await branch.click();
     // The access to be granted shows in the summary, and the key field says where a file comes from.
     await expect(page.locator('.connect-summary')).toContainText('full access');
-    await expect(page.getByText(/No recovery file\? In the console/)).toBeVisible();
+    await expect(page.getByText(/No recovery file\? Have an agent/)).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     const card = await page.locator('.connect-card').boundingBox();
     expect(card!.height).toBeLessThanOrEqual(850);
