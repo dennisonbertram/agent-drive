@@ -724,12 +724,16 @@ async function run(command: string, raw: string[]) {
     return;
   }
   if (command === 'skill' && args.positionals[0] === 'install') {
-    const written = await installSkill(args.values.target);
-    if (!written.length)
-      process.stdout.write(
-        `No ~/.claude or ~/.codex directory found. The skill is at ${packagedSkillPath()}; copy it to <skills dir>/agent-drive/SKILL.md, or use --target <dir>.\n`,
+    const replaced: string[] = [];
+    const written = await installSkill(args.values.target, undefined, replaced);
+    if (!written.length) {
+      process.stderr.write(
+        `Nothing installed: no ~/.claude or ~/.codex directory found. The skill is at ${packagedSkillPath()}; copy it to <skills dir>/agent-drive/SKILL.md, or use --target claude|codex|DIR.\n`,
       );
-    for (const path of written) process.stdout.write(`wrote ${path}\n`);
+      process.exitCode = 1;
+    }
+    for (const path of written)
+      process.stdout.write(`${replaced.includes(path) ? 'replaced' : 'wrote'} ${path}\n`);
     return;
   }
   if (command === 'credentials') {
@@ -772,7 +776,7 @@ async function run(command: string, raw: string[]) {
         return;
       }
       process.stderr.write(
-        `Backed up credentials for ${result.driveIds.length} drive(s) (${result.method}).\n`,
+        `Backed up credentials for ${result.driveIds.length} drive(s) to ${args.values.to} (${result.method}). Keep that file outside any repository or synced folder.\n`,
       );
       await reportKeyBackup(result.apiUrl, result.apiKey, result.driveIds, result.method);
       return;
@@ -1785,12 +1789,24 @@ Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
 AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
 memory, never written to disk; its drives count as backed up).
 `;
+const skillHelp = `Usage: agent-drive skill install [--target claude|codex|DIR]
+
+Copies the agent-drive SKILL.md into your agent's skills folder.
+  (no --target)  each of ~/.claude and ~/.codex that exists; exits 1 if neither does
+  --target claude  ~/.claude/skills/agent-drive/SKILL.md
+  --target codex   ~/.codex/skills/agent-drive/SKILL.md
+  --target DIR     DIR/SKILL.md (DIR itself is the skill folder; it is created if missing)
+An existing SKILL.md is replaced, and the output says "replaced".
+`;
 // Arguments after the `--` terminator are positionals — for `capture` and `jobs
 // work`, the delegated command — never this CLI's own flags.
 const terminator = raw.indexOf('--');
 const ownArgs = terminator < 0 ? raw : raw.slice(0, terminator);
 let done: Promise<void>;
-if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
+if (name === 'skill' && ownArgs.includes('--help')) {
+  process.stdout.write(skillHelp);
+  done = Promise.resolve();
+} else if (!name || name === 'help' || name === '--help' || ownArgs.includes('--help')) {
   process.stdout.write(help);
   done = Promise.resolve();
 } else if (name !== 'jobs' && ownArgs.includes('--once')) {
