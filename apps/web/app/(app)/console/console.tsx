@@ -940,6 +940,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     !collectionPages.agents.loading;
 
   const refreshOwner = useRef(0);
+  const readyNow = useRef(false);
   const usageOwner = useRef(0);
   const usageRequest = useRef<Promise<void> | null>(null);
   const loadUsage = useCallback(() => {
@@ -1004,11 +1005,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
         if (requested && drivePage.nextCursor) return current || pickDrive(nextDrives);
         return nextDrives.some((item) => item.id === current) ? current : pickDrive(nextDrives);
       });
+      readyNow.current = true;
       setReady(true);
       setLoadFailed(false);
       setFileRefresh((value) => value + 1);
     } catch (reason) {
-      if (owner === refreshOwner.current) throw reason;
+      if (owner === refreshOwner.current) {
+        if (!readyNow.current) setLoadFailed(true);
+        throw reason;
+      }
     }
   }, []);
 
@@ -1563,8 +1568,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (lastUser.current === identity.userId) return;
     const hadUser = lastUser.current !== null;
     lastUser.current = identity.userId;
+    const refreshQuietly = () =>
+      void refresh().catch((reason: Error) => setError(reason.message));
     if (!hadUser) {
-      void refresh();
+      refreshQuietly();
       return;
     }
     vault.clearBrowser();
@@ -1590,10 +1597,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     setFolderUsage(null);
     setFolderFailure(null);
     setSelected('');
+    readyNow.current = false;
     setReady(false);
+    setLoadFailed(false);
     lockAll('');
     void vault.load();
-    void refresh();
+    refreshQuietly();
   }, [identity.userId, refresh, vault]);
   // A key prompt or resume belongs to one drive.
   useEffect(() => {
@@ -4431,7 +4440,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                   setModal(null);
                   setTab('API keys');
                   setNotice(
-                    drives.length
+                    drivesNow.current.length
                       ? 'Agent created. Create an API key to connect it.'
                       : 'Agent created. Create a drive, then an API key, to connect it.',
                   );

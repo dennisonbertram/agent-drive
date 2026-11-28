@@ -153,7 +153,11 @@ export default function Home() {
     ['Price / month', (p) => `$${p.baseCents / 100}`],
     ['Drives', (p) => String(p.drives)],
     ['Stored', (p) => allowance(p.storageBytes)],
-    ['Downloads / month', (p) => (egressNotMetered() ? 'Not charged' : allowance(p.egressBytes))],
+    [
+      'Downloads / month',
+      (p) =>
+        egressNotMetered() ? `${allowance(p.egressBytes)} (not charged)` : allowance(p.egressBytes),
+    ],
     ['API operations / month', (p) => ops.format(Number(p.operations))],
   ];
   return (

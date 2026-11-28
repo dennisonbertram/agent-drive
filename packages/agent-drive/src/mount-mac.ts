@@ -414,7 +414,7 @@ async function readHelperPath(): Promise<string> {
     throw new Error(
       configured
         ? `The Finder helper set in AGENT_DRIVE_FINDER_HELPER was not found: ${normalized}.`
-        : 'Agent Drive.app is not installed in /Applications. Download Agent Drive Finder (steps: https://agentdrive.xyz/docs/cli#mount-in-finder-on-macos), drag Agent Drive.app to /Applications, then run `agent-drive mount` again.',
+        : 'Agent Drive.app is not installed in /Applications. Download Agent Drive Finder (steps: https://agentdrive.xyz/docs/cli#mount-in-finder-on-macos), drag Agent Drive.app to /Applications, then run your `agent-drive mount <mountpoint>` command again.',
     );
   });
   if (!metadata.isFile()) throw new Error('Finder helper is not a regular file');

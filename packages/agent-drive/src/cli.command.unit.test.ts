@@ -779,12 +779,30 @@ describe('pipe command guard validation', () => {
     }
   });
 
-  it('keeps --token-stdin available to login', async () => {
+  it('prefers the --token-stdin key over AGENT_DRIVE_API_KEY', async () => {
+    setTimeout(() => {
+      process.stdin.emit('data', 'stdin-key-fixture\n');
+      process.stdin.emit('end');
+    }, 20);
     const result = await cli(
       ['login', '--api', 'https://x.test/api', '--token-stdin'],
       one,
       (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
-      { AGENT_DRIVE_API_KEY: 'login-token-fixture' },
+      { AGENT_DRIVE_API_KEY: 'env-key-fixture' },
+    );
+    const whoami = result.calls.find(({ path }) => path === 'whoami');
+    expect(whoami?.authorization).toBe('Bearer stdin-key-fixture');
+  });
+
+  it('keeps --token-stdin available to login', async () => {
+    setTimeout(() => {
+      process.stdin.emit('data', 'login-token-fixture\n');
+      process.stdin.emit('end');
+    }, 20);
+    const result = await cli(
+      ['login', '--api', 'https://x.test/api', '--token-stdin'],
+      one,
+      (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
     );
     expect(result.err).toContain('credential backups are out of date');
     expect(result.paths).toContain('whoami');

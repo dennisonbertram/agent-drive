@@ -28,7 +28,7 @@ export const SEAL_DEADLINE_MS = 5_000;
 const ACCOUNT_SEAL_SALT = 'agent-drive-account-v1';
 const NO_ACCOUNT_KEY_WARNING =
   'Optional, after the backup: your account has no passphrase yet, so the console cannot open this drive. ' +
-  'Set a passphrase in the console (Files, key menu, "Set up passphrase unlock"); agents will add the drive then.';
+  'Set a passphrase in the console (Files, key menu, "Set up passphrase unlock"); a new agent can then add the drive, once it has the verified account-key fingerprint (`agent-drive account seal --fingerprint "<fingerprint>"`).';
 const UNREADABLE_PIN_FILE =
   'The account-key pin file is unreadable, so sealing is refused. Confirm the account key ' +
   'fingerprint in the console, then repair the file with `agent-drive account seal --repin --fingerprint <fingerprint>`.';

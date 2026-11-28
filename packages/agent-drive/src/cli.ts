@@ -657,7 +657,8 @@ async function run(command: string, raw: string[]) {
   if (command === 'login') {
     const apiUrl = await resolveLoginApiUrl(args.values.api);
     const apiKey =
-      process.env.AGENT_DRIVE_API_KEY ?? (args.values['token-stdin'] ? await stdinText() : '');
+      // An explicit --token-stdin key wins; the environment key must never be sent in its place.
+      (args.values['token-stdin'] ? await stdinText() : process.env.AGENT_DRIVE_API_KEY) ?? '';
     if (!apiKey) {
       await deviceLogin({
         apiUrl,

@@ -130,6 +130,23 @@ describe('device login start failures', () => {
   });
 });
 
+describe('device login URL display', () => {
+  it('strips userinfo and query from the 404 message', async () => {
+    await setup();
+    const r = run(() => json(400, {}), {
+      apiUrl: 'https://user:pw@x.test/api?token=SECRET',
+      startedStatus: 404,
+      started: { error: 'not_found' },
+    });
+    const error = await r.promise.then(
+      () => '',
+      (e: Error) => e.message,
+    );
+    expect(error).toContain('https://x.test/api/oauth/device_authorization');
+    expect(error).not.toMatch(/SECRET|user:pw/u);
+  });
+});
+
 describe('deviceLogin', () => {
   it('polls through pending and slow_down, saves config, never prints secrets', async () => {
     const path = await setup();

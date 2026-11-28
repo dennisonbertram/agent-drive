@@ -113,7 +113,7 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `version`             | Print the CLI version.                                       |                                                              |
 | `mcp`                 | Run the MCP server on stdio.                                 | [MCP server and tools](mcp-tools.md)                         |
 
-`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list. `agent-drive --version` and `agent-drive version` print the CLI version.
+`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list, except `skill --help`, which prints only the skill usage. `agent-drive --version` and `agent-drive version` print the CLI version.
 
 ## Mount a drive
 
@@ -675,7 +675,7 @@ The account public key is pinned per API origin in `<config path>.state/account-
 agent-drive skill install [--target claude|codex|DIR]
 ```
 
-Copies the packaged `SKILL.md` to `~/.claude/skills/agent-drive/` if `~/.claude` exists and to `~/.codex/skills/agent-drive/` if `~/.codex` exists, or to the target. It prints `wrote <path>` for each file. With none found it prints where the packaged file is. In a sandbox, in CI or on a shared machine, use `--target DIR` or skip it. See [Agent skills](skills.md).
+Copies the packaged `SKILL.md` to `~/.claude/skills/agent-drive/` if `~/.claude` exists and to `~/.codex/skills/agent-drive/` if `~/.codex` exists, or to the target. It prints `wrote <path>` for each new file and `replaced <path>` when it overwrites an existing `SKILL.md`. When neither `~/.claude` nor `~/.codex` exists and no target is given, it installs nothing, prints where the packaged file is, and exits with status 1. In a sandbox, in CI or on a shared machine, use `--target DIR` or skip it. See [Agent skills](skills.md).
 
 ## Capture
 

@@ -101,6 +101,7 @@ export function TracesDialog({
       });
       if (!alive.current) return;
       setCreated(token);
+      setConfirmReplace(false);
       setActive({ id: token.id, createdAt: token.createdAt, status: 'active' });
       onReady(found.key, found.source);
     } catch (reason) {
@@ -131,6 +132,7 @@ export function TracesDialog({
     if (!alive.current) return;
     focusAdd.current = true;
     setCreated(null);
+    setConfirmReplace(false);
     setActive(null);
   }
 

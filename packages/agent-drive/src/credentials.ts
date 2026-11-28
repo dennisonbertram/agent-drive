@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { lstat } from 'node:fs/promises';
+import { lstat, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { validateUrl, type AgentDriveClient } from './client.js';
 import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
@@ -269,6 +270,18 @@ export async function issueCredentials(
     );
     if (present) throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
   }
+  if (options.to) {
+    // Check before the agent and key are created, so a bad path cannot leave an orphan agent.
+    const parent = dirname(options.to);
+    const isFolder = await stat(parent).then(
+      (info) => info.isDirectory(),
+      () => false,
+    );
+    if (!isFolder)
+      throw new Error(
+        `Unable to write ${options.to}: its parent folder does not exist. Create it first, or pick another path.`,
+      );
+  }
   const config = await loadConfig(options.apiUrl);
   const apiUrl =
     options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
@@ -297,8 +310,16 @@ export async function issueCredentials(
     [drive],
   );
   const line = `AGENT_DRIVE_CREDENTIALS=${bundle}`;
-  if (options.to) await writeBundleFile(options.to, line, options.force);
-  else await io.write(`${line}\n`);
+  if (options.to) {
+    try {
+      await writeBundleFile(options.to, line, options.force);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unable to write the file.';
+      throw new Error(
+        `${reason} The agent '${options.name}' and its API key were already created; the key was not saved. Revoke it in the console, or retry with a new --name.`,
+      );
+    }
+  } else await io.write(`${line}\n`);
   return { agentName: options.name, keyId: key.id, scopes, writePaths };
 }
 
@@ -333,7 +354,7 @@ export async function exportCredentials(
   const ids = Object.keys(driveKeys);
   if (!ids.length)
     throw new Error(
-      'There are no drive keys on this machine to back up. If this agent gets its keys from AGENT_DRIVE_CREDENTIALS or AGENT_DRIVE_KEY, those are already stored outside this machine; otherwise run `agent-drive login` first.',
+      'No drive keys are saved on this machine to export. A key provided only through AGENT_DRIVE_KEY or AGENT_DRIVE_CREDENTIALS is not included; make sure you have a durable copy of it. Otherwise run `agent-drive login`.',
     );
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   const bundle = buildBundle({

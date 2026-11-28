@@ -98,7 +98,7 @@ agent run \`agent-drive login${api}\` and show you its code and verification cod
 \`agent-drive grant <its code> --verify <its verification code> --write-path <its folder>\`
 (add \`--read-only\` for read only). The human relays the verification code; you check it against
 the login's public key before sealing, so a tampered request never receives the drive key. You
-seal the drive key to that login; the human clicks Approve agent once on the page, which shows
+seal the drive key to that login; the human types the new agent's verification code on the page and clicks Approve agent; the page shows
 "Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
 
 Which handoff when: the new agent has a shell and a human is present, use \`grant\` if you hold
