@@ -2,7 +2,7 @@
 
 import '../../styles/connect.css';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   decodeDriveKey,
   DriveCryptoError,
@@ -149,7 +149,7 @@ export default function Connect({
     drive: string;
     uncheckedKey?: boolean;
   } | null>(null);
-  const [formError, setFormError] = useState('');
+  const [formError, setFormError] = useState<ReactNode>('');
   const [fieldError, setFieldError] = useState<{
     field: 'key' | 'folder' | 'verify';
     message: string;
@@ -196,7 +196,11 @@ export default function Connect({
       return;
     }
     if (!codePattern.test(code)) {
-      setProblem({ kind: 'error', message: 'Enter the code in the form XXXX-XXXX.' });
+      setProblem({
+        kind: 'error',
+        message:
+          'Enter the code in the form XXXX-XXXX, using only consonants: B C D F G H J K L M N P Q R S T V W X Z. Codes have no vowels and no Y.',
+      });
       return;
     }
     setPhase('loading');
@@ -368,7 +372,7 @@ export default function Connect({
       setFieldError({
         field: 'verify',
         message:
-          'Enter the verification code your agent printed, as four groups like a1b2 c3d4 e5f6 7890.',
+          'Enter the verification code your agent printed: 16 digits and letters a-f, with or without spaces or dashes, like a1b2 c3d4 e5f6 7890.',
       });
       return;
     }
@@ -514,7 +518,10 @@ export default function Connect({
         });
       else if (error instanceof HttpError && error.status === 404)
         setFormError(
-          'This request expired or was already used. Run `agent-drive login` in your agent to get a new code.',
+          <>
+            This request expired or was already used. Run {loginCommand} in your agent to get a new
+            code.
+          </>,
         );
       else setFormError(error instanceof Error ? error.message : 'Approval failed.');
     } finally {
@@ -838,6 +845,7 @@ export default function Connect({
           Verification code
           <input
             id="connect-verify"
+            autoFocus
             value={verifyText}
             disabled={busy}
             onChange={(event) => setVerifyText(event.target.value)}

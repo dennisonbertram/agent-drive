@@ -1395,6 +1395,9 @@ test.describe('agent device login', () => {
     await input.fill('');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByText('Enter the code your agent printed.')).toBeVisible();
+    await input.fill('ABCD-EFGH');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(banner).toContainText('no vowels');
   });
 
   test('signed out visitors are sent to sign-in', async ({ page }) => {
