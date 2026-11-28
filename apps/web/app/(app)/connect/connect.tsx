@@ -1047,7 +1047,8 @@ export default function Connect({
           Or, from an agent that was approved with &lsquo;Let this agent add other agents&rsquo;,
           run{' '}
           <code className="connect-cmd connect-cmd-wrap">
-            agent-drive grant {request.user_code} --verify &lt;code from the new agent’s terminal&gt;
+            agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
+            terminal&gt;
           </code>
           .
         </div>

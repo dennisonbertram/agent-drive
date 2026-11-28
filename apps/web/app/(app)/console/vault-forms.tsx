@@ -304,9 +304,9 @@ export function ResetForm({ onReset }: { onReset: Submit<[]> }) {
   return (
     <form onSubmit={(event) => void submit(event)}>
       <p>
-        Resetting deletes your account key and the drive keys saved under it. Files are not
-        deleted. Each drive needs its recovery file (or an agent) once to be added again. Anyone who
-        already opened a drive keeps its key.
+        Resetting deletes your account key and the drive keys saved under it. Files are not deleted.
+        Each drive needs its recovery file (or an agent) once to be added again. Anyone who already
+        opened a drive keeps its key.
       </p>
       <label>
         Type RESET to continue

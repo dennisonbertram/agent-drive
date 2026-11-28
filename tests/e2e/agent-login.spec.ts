@@ -1030,7 +1030,9 @@ test.describe('agent device login', () => {
       [390, 844],
     ] as const) {
       await page.setViewportSize({ width, height });
-      const card = await page.locator('.banner.warn', { hasText: 'Approving creates a new, empty' }).boundingBox();
+      const card = await page
+        .locator('.banner.warn', { hasText: 'Approving creates a new, empty' })
+        .boundingBox();
       const code = await grantLine.boundingBox();
       expect(code!.x + code!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
     }
