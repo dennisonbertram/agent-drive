@@ -1512,6 +1512,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // running holds its key and finishes.
   const anyKey = Object.keys(driveKeys).length > 0;
   const vaultOpen = vault.status === 'unlocked';
+  // An agent may have sealed the selected drive into the account after this tab unlocked. Look
+  // once per drive per unlock; until it answers the key chip does not claim "Key needed".
+  const [slotChecked, setSlotChecked] = useState<string[]>([]);
+  const slotPending =
+    vaultOpen &&
+    drive?.agentOnly !== true &&
+    !vault.hasSlot(selected) &&
+    !slotChecked.includes(selected);
+  useEffect(() => {
+    if (!vaultOpen) setSlotChecked((list) => (list.length ? [] : list));
+    else if (slotPending) {
+      const id = selected;
+      const done = () => setSlotChecked((list) => (list.includes(id) ? list : [...list, id]));
+      vault.ensureSlot(id).then(done, done);
+    }
+  }, [vaultOpen, slotPending, selected]);
   const unlockOpen = modal === 'unlock';
   // Everything that depends on a key goes away at once. Called by Lock, idle and stale records.
   function lockAll(message: string) {
@@ -3150,7 +3166,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               vault={vault.status}
                               fingerprint={vault.fingerprint}
                               agentOnly={drive?.agentOnly === true}
-                              inAccount={vault.hasSlot(selected)}
+                              inAccount={vault.hasSlot(selected) || slotPending}
                               passkey={
                                 hasPasskey && passkeyCapable
                                   ? 'use'

@@ -61,7 +61,10 @@ export function KeyChip({
   // A fresh recovery file can be written without a file whenever the account holds a copy
   // (agent-only drives never get one). A locked vault asks for the passphrase first.
   const canReproduce = !agentOnly && hasVault;
-  const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
+  // Unlocked, but this tab cannot open the selected drive: its key is not loaded, and the account
+  // key does not hold it (not saved there, or agent-only).
+  const keyNeeded = vault === 'unlocked' && !hasKey && (agentOnly === true || !inAccount);
+  const dot = !backedUp ? 'danger' : hasKey || (vault === 'unlocked' && !keyNeeded) ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
   return (
@@ -75,7 +78,9 @@ export function KeyChip({
           {vault === 'locked' && !hasKey
             ? 'Locked'
             : vault === 'unlocked'
-              ? 'Unlocked'
+              ? keyNeeded
+                ? 'Key needed'
+                : 'Unlocked'
               : hasKey
                 ? 'Key loaded'
                 : 'Key needed'}
@@ -111,10 +116,10 @@ export function KeyChip({
             : hasKey
               ? 'Unlocked. This drive’s key is loaded in this tab.'
               : agentOnly
-                ? 'Unlocked. This drive is agent-only — only its recovery file opens it.'
+                ? 'Key needed. This drive is agent-only — only its recovery file opens it.'
                 : inAccount
                   ? 'Unlocked. Drives you added to your account open when you use them.'
-                  : 'Unlocked, but this drive is not in your account yet. Load its recovery file once; after that your passphrase opens it.'}{' '}
+                  : 'Key needed. Your passphrase is unlocked, but this drive is not in your account yet. Load its recovery file once; after that your passphrase opens it.'}{' '}
         </p>
       )}
       {hasVault && fingerprint && (
