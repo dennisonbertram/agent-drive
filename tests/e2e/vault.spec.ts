@@ -523,7 +523,9 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
       await page.unroute(verificationRoute);
     }
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock this tab', exact: true }).click();
+    await (await openMenu(page))
+      .getByRole('button', { name: 'Lock this tab', exact: true })
+      .click();
     await expect(chip(page)).toContainText('Locked');
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
@@ -576,7 +578,9 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
     );
     await expect(notice).toBeVisible();
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock this tab', exact: true }).click();
+    await (await openMenu(page))
+      .getByRole('button', { name: 'Lock this tab', exact: true })
+      .click();
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();

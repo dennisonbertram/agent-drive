@@ -193,7 +193,11 @@ describe('import', () => {
       'not credentials',
       '{bad json',
       '{"format":"other"}',
-      JSON.stringify({ format: 'agent-drive-key-v1', driveId: 'not-a-uuid', key: generateDriveKey() }),
+      JSON.stringify({
+        format: 'agent-drive-key-v1',
+        driveId: 'not-a-uuid',
+        key: generateDriveKey(),
+      }),
       JSON.stringify({ format: 'agent-drive-key-v1', driveId: D1, key: 'not-a-key' }),
       JSON.stringify({ driveId: D1, key: generateDriveKey() }),
     ])
@@ -584,7 +588,9 @@ describe('review fixes', () => {
       keySourceLabel(D1, {
         config,
         checkedDriveId: D1,
-        env: { [`AGENT_DRIVE_KEY_${D1.toUpperCase().replace(/[^A-Z0-9]/gu, '_')}`]: 'k' } as NodeJS.ProcessEnv,
+        env: {
+          [`AGENT_DRIVE_KEY_${D1.toUpperCase().replace(/[^A-Z0-9]/gu, '_')}`]: 'k',
+        } as NodeJS.ProcessEnv,
       }),
     ).toBe('the AGENT_DRIVE_KEY environment variable');
     expect(

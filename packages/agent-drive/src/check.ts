@@ -1,9 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import {
-  driveKeyEnvironmentName,
-  type AgentDriveConfig,
-  type DriveKeySource,
-} from './config.js';
+import { driveKeyEnvironmentName, type AgentDriveConfig, type DriveKeySource } from './config.js';
 import { BACKUP_HINT } from './credentials.js';
 import { DriveCryptoError } from './crypto.js';
 import { AgentDriveApiError, type AgentDriveClient } from './client.js';
@@ -175,8 +171,7 @@ export function keySourceLabel(
   const env = context.env ?? process.env;
   if (env[driveKeyEnvironmentName(driveId)] || env.AGENT_DRIVE_KEY)
     return 'the AGENT_DRIVE_KEY environment variable';
-  if (context.keyFile && driveId === context.checkedDriveId)
-    return 'the file passed as --key-file';
+  if (context.keyFile && driveId === context.checkedDriveId) return 'the file passed as --key-file';
   const source = context.config.driveKeySources?.[driveId];
   if (!source || source === 'generated') return undefined;
   return SOURCE_LABELS[source];

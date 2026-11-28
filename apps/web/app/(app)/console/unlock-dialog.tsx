@@ -9,12 +9,7 @@ import {
 import type { Source } from '@/src/console/webhook-setup';
 import type { VaultStatus } from '@/src/console/vault';
 import { CopyButton } from '../copy-button';
-import {
-  NewPassphraseForm,
-  PassphraseForm,
-  ResetForm,
-  sealCommand,
-} from './vault-forms';
+import { NewPassphraseForm, PassphraseForm, ResetForm, sealCommand } from './vault-forms';
 
 export type UnlockMode =
   | 'passphrase'

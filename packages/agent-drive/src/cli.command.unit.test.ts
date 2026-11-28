@@ -1670,10 +1670,7 @@ describe('credentials import of a recovery file', () => {
     const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-'));
     dirs.push(dir);
     const path = join(dir, `agent-drive-${driveId}.key.json`);
-    await writeFile(
-      path,
-      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2),
-    );
+    await writeFile(path, JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2));
     return path;
   };
 
@@ -1740,10 +1737,12 @@ describe('credentials import of a recovery file', () => {
 });
 
 describe('check backup gate', () => {
-  const whoami = (driveIds: string[] | null, scopes = ['read']) => (path: string) =>
-    path === 'whoami'
-      ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes, driveIds }
-      : { items: [], nextCursor: null };
+  const whoami =
+    (driveIds: string[] | null, scopes = ['read']) =>
+    (path: string) =>
+      path === 'whoami'
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes, driveIds }
+        : { items: [], nextCursor: null };
 
   it.each([undefined, 'generated' as DriveKeySource])(
     'fails with exactly one next step for a locally generated unbacked key (source=%s)',
@@ -1760,7 +1759,9 @@ describe('check backup gate', () => {
       );
       expect(r.exitCode).toBe(1);
       expect(r.err).toContain(`drive key not backed up: ${A}`);
-      expect(r.err).toContain('run `agent-drive credentials export --to <a file outside the sandbox>`');
+      expect(r.err).toContain(
+        'run `agent-drive credentials export --to <a file outside the sandbox>`',
+      );
       expect(r.err).not.toMatch(/--to clipboard|--stdout|--to 1password/u);
     },
   );
@@ -1769,35 +1770,29 @@ describe('check backup gate', () => {
     ['recovery-file' as DriveKeySource, 'a recovery file'],
     ['bundle' as DriveKeySource, 'a credentials bundle'],
     ['grant' as DriveKeySource, 'the approval (another agent or the browser sent it)'],
-  ])(
-    'passes the backup gate for a key that came from %s, and notes it',
-    async (source, label) => {
-      const r = await cli(
-        ['check'],
-        {
-          keys: { [A]: generateDriveKey() },
-          origins: { [A]: 'https://x.test' },
-          backup: false,
-          sources: { [A]: source },
-        },
-        whoami([A]),
-      );
-      expect(r.err).toContain(
-        `The key for drive ${A} came from ${label}, so a copy exists elsewhere.`,
-      );
-      expect(r.err).not.toContain('not backed up');
-      // The gate passed; the read-only check then found nothing to decrypt.
-      expect(r.err).toContain('check not verified');
-    },
-  );
-
-  it('passes the backup gate for a key supplied by AGENT_DRIVE_KEY, and notes it', async () => {
+  ])('passes the backup gate for a key that came from %s, and notes it', async (source, label) => {
     const r = await cli(
       ['check'],
-      { keys: {}, origins: {}, backup: false },
+      {
+        keys: { [A]: generateDriveKey() },
+        origins: { [A]: 'https://x.test' },
+        backup: false,
+        sources: { [A]: source },
+      },
       whoami([A]),
-      { AGENT_DRIVE_KEY: generateDriveKey() },
     );
+    expect(r.err).toContain(
+      `The key for drive ${A} came from ${label}, so a copy exists elsewhere.`,
+    );
+    expect(r.err).not.toContain('not backed up');
+    // The gate passed; the read-only check then found nothing to decrypt.
+    expect(r.err).toContain('check not verified');
+  });
+
+  it('passes the backup gate for a key supplied by AGENT_DRIVE_KEY, and notes it', async () => {
+    const r = await cli(['check'], { keys: {}, origins: {}, backup: false }, whoami([A]), {
+      AGENT_DRIVE_KEY: generateDriveKey(),
+    });
     expect(r.err).toContain(
       `The key for drive ${A} came from the AGENT_DRIVE_KEY environment variable, so a copy exists elsewhere.`,
     );
@@ -1807,15 +1802,12 @@ describe('check backup gate', () => {
 
 describe('credentials status and help', () => {
   it('status reports where an imported key came from', async () => {
-    const r = await cli(
-      ['credentials', 'status'],
-      {
-        keys: { [A]: generateDriveKey() },
-        origins: { [A]: 'https://x.test' },
-        backup: false,
-        sources: { [A]: 'recovery-file' },
-      },
-    );
+    const r = await cli(['credentials', 'status'], {
+      keys: { [A]: generateDriveKey() },
+      origins: { [A]: 'https://x.test' },
+      backup: false,
+      sources: { [A]: 'recovery-file' },
+    });
     const parsed = JSON.parse(r.out) as { drives: Record<string, Record<string, unknown>> };
     expect(parsed.drives[A]).toEqual({ backedUp: true, keyFrom: 'a recovery file' });
   });

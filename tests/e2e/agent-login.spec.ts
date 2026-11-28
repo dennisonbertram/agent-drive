@@ -292,7 +292,9 @@ test.describe('agent device login', () => {
     expect(unbacked.status).toBe(1);
     expect(unbacked.stderr).toContain('drive key not backed up');
     // A key made on this machine fails with exactly one next step: the default backup command.
-    expect(unbacked.stderr).toContain('agent-drive credentials export --to <a file outside the sandbox>');
+    expect(unbacked.stderr).toContain(
+      'agent-drive credentials export --to <a file outside the sandbox>',
+    );
     expect(unbacked.stderr).not.toMatch(/--to clipboard|--stdout|secret store/);
     const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);

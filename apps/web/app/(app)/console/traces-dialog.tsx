@@ -100,7 +100,9 @@ export function TracesDialog({
       // Another tab may have added, replaced or revoked the token since this dialog loaded.
       // Replacing then would revoke a token this tab never saw, so show the current state instead.
       if (seen.current !== undefined) {
-        const { token } = await request<{ token: Active | null }>(`drives/${driveId}/webhook-token`);
+        const { token } = await request<{ token: Active | null }>(
+          `drives/${driveId}/webhook-token`,
+        );
         if (!alive.current) return;
         if ((token?.id ?? null) !== seen.current) {
           seen.current = token?.id ?? null;
