@@ -2726,7 +2726,23 @@ async function traceEndpoint(
       'A full verified trace inbox record is required. Reload the console or update the client before creating a token.';
     if (request.body === null) throw new ApiError('validation_error', verifiedRecordRequired);
     const body = await jsonBody(request);
-    onlyFields(body, ['keyId', 'publicKey', 'wrappedPrivateKey', 'challengeId', 'proof']);
+    onlyFields(body, [
+      'keyId',
+      'publicKey',
+      'wrappedPrivateKey',
+      'challengeId',
+      'proof',
+      'expectedTokenId',
+    ]);
+    // The token id the page last saw (null for Add). A different active token means another tab
+    // or agent changed it since.
+    const expectedTokenId = body.expectedTokenId;
+    if (
+      expectedTokenId !== undefined &&
+      expectedTokenId !== null &&
+      typeof expectedTokenId !== 'string'
+    )
+      throw new ApiError('validation_error', 'expectedTokenId must be a string or null.');
     if (
       typeof body.keyId !== 'string' ||
       typeof body.publicKey !== 'string' ||
@@ -2767,10 +2783,12 @@ async function traceEndpoint(
          RETURNING id`,
         [auth.accountId],
       );
-      await client.query(
-        'UPDATE drive_webhook_tokens SET revoked_at = now() WHERE drive_id = $1 AND revoked_at IS NULL',
+      const revokedRows = await client.query(
+        'UPDATE drive_webhook_tokens SET revoked_at = now() WHERE drive_id = $1 AND revoked_at IS NULL RETURNING id',
         [driveId],
       );
+      if (expectedTokenId !== undefined && (revokedRows.rows[0]?.id ?? null) !== expectedTokenId)
+        throw new ApiError('conflict', 'This changed in another tab.');
       const inserted = await client.query(
         `INSERT INTO drive_webhook_tokens
            (drive_id, account_id, agent_id, token_hash, inbox_key_id, inbox_record_hash)

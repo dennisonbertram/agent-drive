@@ -19,6 +19,7 @@ import {
   BACKUP_HINT,
   confirmCredentials,
   exportCredentials,
+  exportRecoveryFile,
   importCredentials,
   issueCredentials,
   loadConfig,
@@ -107,6 +108,7 @@ function parse(raw: string[]) {
       gitignore: { type: 'boolean' },
       yes: { type: 'boolean' },
       to: { type: 'string' },
+      'recovery-file': { type: 'string' },
       from: { type: 'string' },
       force: { type: 'boolean' },
       vault: { type: 'string' },
@@ -739,6 +741,24 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'credentials') {
     const sub = args.positionals[0];
+    if (sub === 'export' && args.values['recovery-file']) {
+      const drive = args.values.drive?.[0];
+      if (!drive || args.values.to || args.values.stdout)
+        throw new Error(
+          '--recovery-file needs --drive <id> and cannot be combined with --to or --stdout.',
+        );
+      const path = args.values['recovery-file'];
+      await exportRecoveryFile({
+        drive,
+        to: path,
+        ...(args.values.force ? { force: true } : {}),
+        ...(args.values.api ? { apiUrl: args.values.api } : {}),
+      });
+      process.stdout.write(
+        `Wrote the recovery file for drive ${drive} to ${path}. Give it to the person who needs it; they choose it in the console's Load key dialog.\n`,
+      );
+      return;
+    }
     if (sub === 'export') {
       const result = await exportCredentials(
         {
@@ -821,7 +841,11 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'import') {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
-      const result = await importCredentials(text, args.values.from ? 'file' : 'stdout');
+      const result = await importCredentials(
+        text,
+        args.values.from ? 'file' : 'stdout',
+        await resolveLoginApiUrl(args.values.api),
+      );
       if (result.kind === 'bundle') {
         process.stdout.write(
           `imported ${result.driveIds.length} drive key(s) into ${configPath()}\n`,
@@ -841,7 +865,7 @@ async function run(command: string, raw: string[]) {
       }
       process.stdout.write(`Saved the drive key for drive ${id} into ${configPath()}.\n`);
       // Say plainly when the account on this machine cannot see the imported drive.
-      const who = await resolveConnection()
+      const who = await resolveConnection(result.apiUrl)
         .then((connection) =>
           new AgentDriveClient({
             apiUrl: connection.apiUrl,
@@ -876,7 +900,7 @@ async function run(command: string, raw: string[]) {
       });
     }
     throw new Error(
-      'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
+      'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout | --drive ID --recovery-file PATH [--force]) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
   if (command === 'connect') {
@@ -1389,7 +1413,7 @@ async function run(command: string, raw: string[]) {
     if (missing.length) throw new Error(notBackedUpMessage(missing));
     for (const note of notes)
       process.stderr.write(
-        `The key for drive ${note.driveId} came from ${note.label}, so a copy exists elsewhere.\n`,
+        `The key for drive ${note.driveId} came from ${note.label}. Keep that copy; it is this key's backup.\n`,
       );
     const key = await resolveDriveKey(
       driveId,
@@ -1816,6 +1840,8 @@ Commands:
                                         Check the new agent's printed verification code before sealing; the owner then approves on /connect
   credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
                                         Back up the API key and drive keys (bundle "adcred1.…"). Offer 1Password first, then the clipboard (for Apple Passwords or another manager), then a file outside the repo
+  credentials export --drive ID --recovery-file PATH [--force]
+                                        Write one drive's key as a console recovery file (agent-drive-<id>.key.json); load it in the console's Load key dialog. Not an account backup
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
                                         Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)

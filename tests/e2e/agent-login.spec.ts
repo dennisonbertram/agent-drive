@@ -1011,7 +1011,12 @@ test.describe('agent device login', () => {
     await expect(
       page.getByText(/Approving creates a new, empty drive for this agent\./),
     ).toBeVisible();
-    await expect(page.locator('.connect-cmd')).toHaveText(`agent-drive grant ${b.code}`);
+    await expect(page.locator('.connect-cmd').first()).toHaveText(
+      `agent-drive grant ${b.code} --verify <verification code from the new agent’s terminal>`,
+    );
+    await expect(
+      page.getByText('If that agent has several drives, add --drive <drive id>.'),
+    ).toBeVisible();
     await approve(page, b.path, 'dupe-bot', b.code, b.verify);
     expect((await b.login.done).status).toBe(0);
 
@@ -1021,8 +1026,9 @@ test.describe('agent device login', () => {
     await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
     await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
     await chooseExistingDrive(page);
-    // Choosing an existing drive clears the new-drive warnings.
-    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toHaveCount(0);
+    // Choosing an existing drive clears the new-drive warning, but the same-name warning stays:
+    // the approval still signs in as the agent that already has that name.
+    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
     await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
     c.login.child.kill();
   });
@@ -1233,6 +1239,85 @@ test.describe('agent device login', () => {
     expect(result.stderr).toContain('The request was denied in the browser');
     expect(result.stderr).toContain('No access was granted');
     await expect(readFile(env.AGENT_DRIVE_CONFIG!)).rejects.toThrow();
+  });
+
+  test('Deny on a request that is no longer pending does not claim the agent got no access', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'deny-gone', 'deny-gone-box');
+    const { login, code, path } = await startLogin(env, 'deny-gone-bot');
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: 'Connect deny-gone-bot?' })).toBeVisible();
+    // The request expires (or is decided elsewhere) while the page is open.
+    await database.query(
+      "UPDATE device_authorizations SET expires_at = now() - interval '1 second' WHERE user_code = $1",
+      [code],
+    );
+    await page.getByRole('button', { name: 'Deny' }).click();
+    await expect(page.getByRole('alert')).toContainText(
+      'This request is no longer pending, so it may already have been approved or expired. Check Agents in the console.',
+    );
+    await expect(page.getByText('The agent got no access')).toHaveCount(0);
+    login.child.kill();
+  });
+
+  test('an agent that holds a drive key but has no API key is connected to that drive, not a new one', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'held-a', 'm-held-a');
+    const first = await startLogin(envA, 'held-a-bot');
+    await approve(page, first.path, 'held-a-bot', first.code, first.verify);
+    expect((await first.login.done).status).toBe(0);
+    const [driveId, driveKey] = Object.entries((await readConfig(envA)).driveKeys)[0]!;
+
+    // A fresh machine that restored only the drive key (a recovery file): no API key to prove it.
+    const envB = cliEnv(baseURL!, root, 'held-b', 'm-held-b');
+    await writeFile(
+      envB.AGENT_DRIVE_CONFIG!,
+      JSON.stringify({
+        apiUrl: `${baseURL}/api`,
+        driveKeys: { [driveId]: driveKey },
+        driveKeyOrigins: { [driveId]: new URL(baseURL!).origin },
+      }),
+      { mode: 0o600 },
+    );
+    const second = await startLogin(envB, 'held-b-bot');
+    await page.goto(second.path);
+    await expect(
+      page.getByText(
+        'This agent already has the key for your drive held-a-bot. Approving connects it to that drive.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.locator('#connect-verify').fill(second.verify);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = JSON.parse((await approveRequest).postData() ?? '{}') as Record<string, unknown>;
+    expect(sent.driveIds).toEqual([driveId]);
+    expect(sent).not.toHaveProperty('sealedDriveKeys');
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    await expect(page.getByRole('status')).toContainText('held-a-bot');
+
+    const result = await second.login.done;
+    expect(result.status, result.stderr).toBe(0);
+    const configB = await readConfig(envB);
+    expect(Object.keys(configB.driveKeys)).toEqual([driveId]);
+    expect(configB.driveKeys[driveId]).toBe(driveKey);
+    const count = await database.query<{ n: string }>(
+      'SELECT count(*) AS n FROM drives WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
+      [driveId],
+    );
+    expect(Number(count.rows[0]!.n)).toBe(1);
   });
 
   test('connect card presentation: banner, note, account, login command', async ({

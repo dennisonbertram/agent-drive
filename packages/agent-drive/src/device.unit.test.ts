@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { importCredentials } from './credentials.js';
 import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
 import { unsealDriveKey } from './seal.js';
@@ -24,6 +25,7 @@ const b64 = (bytes: ArrayBuffer | Uint8Array) =>
 const dirs: string[] = [];
 const K1 = Buffer.alloc(32, 1).toString('base64url');
 const K2 = Buffer.alloc(32, 2).toString('base64url');
+const UID = '11111111-1111-4111-8111-111111111111';
 const K9 = Buffer.alloc(32, 9).toString('base64url');
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -353,6 +355,18 @@ describe('deviceLogin', () => {
     });
     await other.promise;
     expect(other.calls[0]?.body.known_drive_ids).toBeUndefined();
+  });
+
+  it('sends known_drive_ids for a key imported from a recovery file', async () => {
+    const path = await setup();
+    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k' }));
+    await importCredentials(
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: UID, key: K1 }),
+      'file',
+    );
+    const r = run(() => json(200, { access_token: 't', drive_ids: [UID] }));
+    await r.promise;
+    expect(r.calls[0]?.body.known_drive_ids).toEqual([UID]);
   });
 
   it('migrates legacy keys without origins to the saved apiUrl origin', async () => {

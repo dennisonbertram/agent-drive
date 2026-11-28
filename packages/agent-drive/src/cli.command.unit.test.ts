@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { randomUUID, webcrypto } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1724,6 +1724,22 @@ describe('credentials import of a recovery file', () => {
     expect(r.out + r.err).not.toContain(key);
   });
 
+  it('refuses to replace a different saved key for the same drive', async () => {
+    const saved = generateDriveKey();
+    const other = generateDriveKey();
+    const file = await recoveryFile(A, other);
+    const r = await cli(['credentials', 'import', '--from', file], {
+      keys: { [A]: saved },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      `This machine already has a different key for drive ${A}. Nothing was changed.`,
+    );
+    expect(r.out + r.err).not.toContain(other);
+    expect((await readConfig()).driveKeys?.[A]).toBe(saved);
+  });
+
   it('stays silent when the account holds the imported drive', async () => {
     const file = await recoveryFile(A, generateDriveKey());
     const r = await cli(['credentials', 'import', '--from', file], one, (path) =>
@@ -1733,6 +1749,52 @@ describe('credentials import of a recovery file', () => {
     );
     expect(r.out).toContain(`Saved the drive key for drive ${A}`);
     expect(r.err).not.toContain('no access to drive');
+  });
+});
+
+describe('credentials export --recovery-file', () => {
+  it('writes only that drive key as a 0600 console recovery file and never prints it', async () => {
+    const key = generateDriveKey();
+    const other = generateDriveKey();
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-out-'));
+    dirs.push(dir);
+    const path = join(dir, `agent-drive-${A}.key.json`);
+    const r = await cli(['credentials', 'export', '--drive', A, '--recovery-file', path], {
+      keys: { [A]: key, [B]: other },
+      origins: { [A]: 'https://x.test', [B]: 'https://x.test' },
+      backup: false,
+    });
+    expect(r.exitCode).toBeUndefined();
+    expect(r.out).toContain(
+      `Wrote the recovery file for drive ${A} to ${path}. Give it to the person who needs it; they choose it in the console's Load key dialog.`,
+    );
+    expect(r.out + r.err).not.toContain(key);
+    const text = await readFile(path, 'utf8');
+    expect(JSON.parse(text)).toEqual({ format: 'agent-drive-key-v1', driveId: A, key });
+    expect(text).not.toContain(other);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await readConfig()).keyBackup?.[A]).toBeUndefined();
+    const again = await cli(['credentials', 'export', '--drive', A, '--recovery-file', path], {
+      keys: { [A]: key },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(again.exitCode).toBe(1);
+    expect(again.err).toContain('already exists');
+  });
+
+  it('fails without a key for the drive or without its parent folder', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-out-'));
+    dirs.push(dir);
+    const noKey = await cli(
+      ['credentials', 'export', '--drive', B, '--recovery-file', join(dir, 'a.json')],
+      { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
+    );
+    expect(noKey.err).toContain(`There is no drive key for ${B} on this machine.`);
+    const noParent = await cli(
+      ['credentials', 'export', '--drive', A, '--recovery-file', join(dir, 'missing', 'a.json')],
+      { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
+    );
+    expect(noParent.err).toContain('its parent folder does not exist');
   });
 });
 
@@ -1782,7 +1844,7 @@ describe('check backup gate', () => {
       whoami([A]),
     );
     expect(r.err).toContain(
-      `The key for drive ${A} came from ${label}, so a copy exists elsewhere.`,
+      `The key for drive ${A} came from ${label}. Keep that copy; it is this key's backup.`,
     );
     expect(r.err).not.toContain('not backed up');
     // The gate passed; the read-only check then found nothing to decrypt.
@@ -1794,7 +1856,7 @@ describe('check backup gate', () => {
       AGENT_DRIVE_KEY: generateDriveKey(),
     });
     expect(r.err).toContain(
-      `The key for drive ${A} came from the AGENT_DRIVE_KEY environment variable, so a copy exists elsewhere.`,
+      `The key for drive ${A} came from the AGENT_DRIVE_KEY environment variable. Keep that copy; it is this key's backup.`,
     );
     expect(r.err).not.toContain('not backed up');
   });

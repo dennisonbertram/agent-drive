@@ -15,6 +15,7 @@ import {
   readConfig,
   resolveDriveKey,
   resolveDriveId,
+  resolveLoginApiUrl,
   writeConfig,
   DEFAULT_API_URL,
   type AgentDriveConfig,
@@ -278,6 +279,17 @@ async function writeBundleFile(path: string, bundle: string, force?: boolean) {
   }
 }
 
+async function requireParentFolder(path: string) {
+  const isFolder = await stat(dirname(path)).then(
+    (info) => info.isDirectory(),
+    () => false,
+  );
+  if (!isFolder)
+    throw new Error(
+      `Unable to write ${path}: its parent folder does not exist. Create it first, or pick another path.`,
+    );
+}
+
 /**
  * Mints a new agent's key through a `delegate` key and prints a bundle holding only that key and
  * the chosen drive's key. The caller's own key and saved config are never part of it or changed.
@@ -317,15 +329,7 @@ export async function issueCredentials(
   }
   if (options.to) {
     // Check before the agent and key are created, so a bad path cannot leave an orphan agent.
-    const parent = dirname(options.to);
-    const isFolder = await stat(parent).then(
-      (info) => info.isDirectory(),
-      () => false,
-    );
-    if (!isFolder)
-      throw new Error(
-        `Unable to write ${options.to}: its parent folder does not exist. Create it first, or pick another path.`,
-      );
+    await requireParentFolder(options.to);
   }
   const config = await loadConfig(options.apiUrl);
   const apiUrl =
@@ -450,6 +454,39 @@ export async function exportCredentials(
 }
 
 /**
+ * Writes one drive's key as the console recovery file (0600). This is a copy for someone else to
+ * load in the console, not an account backup, so it records nothing in keyBackup.
+ */
+export async function exportRecoveryFile(options: {
+  drive: string;
+  to: string;
+  force?: boolean;
+  apiUrl?: string;
+}) {
+  if (
+    !options.force &&
+    (await lstat(options.to).then(
+      () => true,
+      () => false,
+    ))
+  )
+    throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
+  await requireParentFolder(options.to);
+  const config = await loadConfig(options.apiUrl);
+  const apiUrl =
+    options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
+  const key = await resolveDriveKey(options.drive, apiUrl, undefined, config);
+  if (!key) throw new Error(`There is no drive key for ${options.drive} on this machine.`);
+  try {
+    decodeDriveKey(key);
+  } catch {
+    throw new Error(`The drive key for ${options.drive} on this machine is not a valid drive key.`);
+  }
+  const file = { format: 'agent-drive-key-v1', driveId: options.drive, key };
+  await writeBundleFile(options.to, JSON.stringify(file, null, 2), options.force);
+}
+
+/**
  * Records that the last export was stored (`credentials confirm`). Only drives named by a
  * pending export made with the current API key are recorded, and the marker is then cleared.
  */
@@ -474,19 +511,30 @@ export async function confirmCredentials(method: 'stdout' | 'file' = 'stdout') {
 /**
  * Merges a credentials bundle or a console recovery file into the saved config and records where
  * each key came from. Imported keys count as backed up: the imported file is itself a copy that
- * exists off this machine. A recovery file has no origin to record — readConfig's migration binds
- * the key to the saved apiUrl's origin once there is one (e.g. after `agent-drive login`).
+ * exists off this machine. A recovery file names no origin, so its key is bound to the API the CLI
+ * would use now (`apiUrl`, else AGENT_DRIVE_API_URL, else the saved apiUrl, else the default).
+ * It never replaces a different key already saved for the same drive.
  */
-export async function importCredentials(text: string, method: 'file' | 'stdout') {
+export async function importCredentials(text: string, method: 'file' | 'stdout', apiUrl?: string) {
   const at = new Date().toISOString();
   if (text.trimStart().startsWith('{')) {
     const file = decodeRecoveryFile(text);
+    const existing = (await readConfig()).driveKeys?.[file.driveId];
+    if (existing !== undefined && existing !== file.key)
+      throw new Error(
+        `This machine already has a different key for drive ${file.driveId}. Nothing was changed.`,
+      );
+    const url = apiUrl ?? (await resolveLoginApiUrl(undefined));
+    // The same key is already saved: nothing to change.
+    if (existing !== undefined)
+      return { kind: 'recovery-file' as const, driveIds: [file.driveId], apiUrl: url };
     await writeConfig({
       driveKeys: { [file.driveId]: file.key },
+      driveKeyOrigins: { [file.driveId]: new URL(url).origin },
       driveKeySources: { [file.driveId]: 'recovery-file' },
       keyBackup: { [file.driveId]: { at, method } },
     });
-    return { kind: 'recovery-file' as const, driveIds: [file.driveId] };
+    return { kind: 'recovery-file' as const, driveIds: [file.driveId], apiUrl: url };
   }
   let bundle: Bundle;
   try {

@@ -97,6 +97,7 @@ async function createWebhookToken(
   f: Awaited<ReturnType<typeof fixture>>,
   inbox: Awaited<ReturnType<typeof createTraceInbox>>,
   reverified = true,
+  extra: Record<string, unknown> = {},
 ) {
   const issued = await challenge(f, 'issue-token', inbox, reverified);
   if (!issued.proof) return issued.response;
@@ -104,7 +105,7 @@ async function createWebhookToken(
     f.userId,
     `drives/${f.driveId}/webhook-token`,
     'POST',
-    { ...inbox, ...issued.proof },
+    { ...inbox, ...issued.proof, ...extra },
     reverified,
   );
 }
@@ -457,6 +458,28 @@ describe('webhook token', () => {
     expect(row.inbox_record_hash).toBe(
       inboxRecordDigest(body.keyId, body.publicKey, body.wrappedPrivateKey),
     );
+  });
+
+  it('rejects a token change when the active token is not the one the page saw', async () => {
+    const f = await fixture();
+    const body = await inboxBody(f);
+    await enrollInbox(f, body);
+    // Add with expectedTokenId null succeeds when there is no active token.
+    const first = await json(await createWebhookToken(f, body, true, { expectedTokenId: null }));
+    // A second tab that still expects "none" must not replace the token it never saw.
+    const stale = await createWebhookToken(f, body, true, { expectedTokenId: null });
+    expect(stale.status).toBe(409);
+    expect((await json(stale)).error.message).toBe('This changed in another tab.');
+    const active = await pool.query(
+      'SELECT id FROM drive_webhook_tokens WHERE drive_id = $1 AND revoked_at IS NULL',
+      [f.driveId],
+    );
+    expect(active.rows).toEqual([{ id: first.id }]);
+    // Replacing the token it did see works, and the old one is revoked.
+    const second = await createWebhookToken(f, body, true, { expectedTokenId: first.id });
+    expect(second.status).toBe(201);
+    const bad = await createWebhookToken(f, body, true, { expectedTokenId: 7 });
+    expect(bad.status).toBe(400);
   });
 
   it('refuses token issuance when the verified inbox record changed under the same keyId', async () => {

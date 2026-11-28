@@ -520,7 +520,7 @@ Proves that the drive key works end to end.
 
 A key without the `write` scope decrypts an existing file instead and prints `check ok drive=<id> (read-only)`. If the drive has nothing to decrypt yet, it prints `check not verified drive=<id>: ...` on stderr and exits with code 1.
 
-`check` fails with `drive key not backed up` when a key generated on this machine has no recorded backup, and the error names the one next step: `agent-drive credentials export --to 1password`. A key that came from a recovery file, a credentials bundle, another agent, or an `AGENT_DRIVE_KEY` environment variable already has a copy elsewhere, so `check` prints a note naming the source on stderr and passes. See [Back up and recover your drive key](backup-and-recovery.md).
+`check` fails with `drive key not backed up` when a key generated on this machine has no recorded backup, and the error says to run `agent-drive credentials export --to <a file outside the sandbox>` (the folder must already exist), points to `agent-drive credentials export --help` for 1Password, the clipboard and other secret stores, and adds that `agent-drive check` will not pass until then. A key that came from a recovery file, a credentials bundle, another agent, or an `AGENT_DRIVE_KEY` environment variable already has a copy elsewhere, so `check` prints `The key for drive <id> came from <source>. Keep that copy; it is this key's backup.` on stderr and passes. See [Back up and recover your drive key](backup-and-recovery.md).
 
 ## Drives, agents and keys
 
@@ -619,6 +619,7 @@ See [Files, versions and sync](files-and-sync.md) for the rules.
 ```sh
 agent-drive grant CODE --verify "VCODE" [--drive ID] [--read-only] [--scope S]... [--write-path P]...
 agent-drive credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
+agent-drive credentials export --drive ID --recovery-file PATH [--force]
 agent-drive credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
 agent-drive credentials confirm [--method stdout]
 agent-drive credentials import [--from PATH]
@@ -643,6 +644,8 @@ set -o pipefail
 agent-drive credentials export --stdout | <your secret store command> && agent-drive credentials confirm
 ```
 
+`credentials export --drive ID --recovery-file PATH` writes only that drive's key as the console recovery file (`{"format":"agent-drive-key-v1","driveId":"…","key":"…"}`) with mode `0600`. It refuses an existing path without `--force`, needs the parent folder to exist, never prints the key, and fails if this machine has no key for that drive. It prints `Wrote the recovery file for drive <id> to <path>. Give it to the person who needs it; they choose it in the console's Load key dialog.` It does not record an account backup, because the file is a copy for someone else.
+
 ### credentials issue
 
 Needs the `delegate` scope. Creates a new agent named `NAME` with its own API key (scopes default to `read` and `write` and must be within your own) and prints one `AGENT_DRIVE_CREDENTIALS=adcred1.…` line holding only that key and the chosen drive's key. Your own key is not included. `--to` and `--stdout` follow the same rules as `export`. An existing agent name returns a 409 conflict; pick another name. Revoke the issued key alone from the console under Agents. See [Using Agent Drive in sandboxes](sandboxes.md).
@@ -650,7 +653,7 @@ Needs the `delegate` scope. Creates a new agent named `NAME` with its own API ke
 ### credentials confirm, import and status
 
 - `confirm [--method stdout]` records that a `--stdout` or clipboard export was stored. `--method` accepts `stdout` or `file`.
-- `import [--from PATH]` merges a credentials bundle (`adcred1.…`) or a console recovery file (`agent-drive-<drive id>.key.json`) from a file — or from stdin if `--from` is omitted — into the config, and marks its drives as backed up. A recovery file is how a drive set up in the browser is given to a CLI: `agent-drive credentials import --from agent-drive-<drive id>.key.json`, then `agent-drive login` (with no API credentials yet, the import still saves the key and prints that next step). Anything else fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
+- `import [--from PATH]` merges a credentials bundle (`adcred1.…`) or a console recovery file (`agent-drive-<drive id>.key.json`) from a file — or from stdin if `--from` is omitted — into the config, and marks its drives as backed up. A recovery file is how a drive set up in the browser is given to a CLI: `agent-drive credentials import --from agent-drive-<drive id>.key.json`, then `agent-drive login`; the approval page says the agent already has the key for that drive and connects it, with no new drive. The import binds the key to the API the CLI uses at that moment, refuses to replace a different saved key for the same drive (`This machine already has a different key for drive <id>. Nothing was changed.`), and with no API credentials yet still saves the key and prints that next step. Anything else fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
 - `status` prints JSON that shows, for each drive key, whether and when it was backed up, and `keyFrom` for a key that came from a recovery file, a credentials bundle, another agent, or the environment.
 
 ### grant

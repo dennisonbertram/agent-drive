@@ -7,6 +7,7 @@ import {
   assertKeyForDrive,
   isDriveBoundSource,
   keySourceFor,
+  TAB_CHANGED,
   setUpWebhook,
   type Source,
 } from './webhook-setup';
@@ -274,6 +275,49 @@ describe('setUpWebhook', () => {
       challengeId: 'challenge-id',
       proof: 'proof',
     });
+  });
+});
+
+describe('expectedTokenId', () => {
+  it('is posted with the token request, including null for Add', async () => {
+    for (const expectedTokenId of [null, 't0']) {
+      const f = fake({ inbox: true });
+      await setUpWebhook({
+        request: f.request,
+        strictRequest: f.strictRequest,
+        driveId,
+        key,
+        source: 'bundle',
+        verify: async () => 'inbox',
+        answerChallenge: f.answerChallenge,
+        expectedTokenId,
+      });
+      expect(f.posted.at(-1)).toMatchObject({ expectedTokenId });
+    }
+  });
+  it('stops on "changed in another tab" without retrying', async () => {
+    const f = fake({ inbox: true });
+    let tokenPosts = 0;
+    const strictRequest = (async (path: string, method = 'GET', body?: unknown) => {
+      if (path.endsWith('/webhook-token')) {
+        tokenPosts += 1;
+        throw Object.assign(new Error(TAB_CHANGED), { status: 409 });
+      }
+      return f.strictRequest(path, method, body);
+    }) as never;
+    await expect(
+      setUpWebhook({
+        request: f.request,
+        strictRequest,
+        driveId,
+        key,
+        source: 'bundle',
+        verify: async () => 'inbox',
+        answerChallenge: f.answerChallenge,
+        expectedTokenId: null,
+      }),
+    ).rejects.toThrow(TAB_CHANGED);
+    expect(tokenPosts).toBe(1);
   });
 });
 

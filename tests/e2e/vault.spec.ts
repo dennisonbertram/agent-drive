@@ -438,6 +438,13 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
         { exact: true },
       ),
     ).toBeVisible();
+    // The fallback asks for this drive's key only, never the agent's API key or other drives.
+    await expect(
+      page.getByText(
+        `agent-drive credentials export --drive ${seeded.b.id} --recovery-file agent-drive-${seeded.b.id}.key.json`,
+        { exact: true },
+      ),
+    ).toBeVisible();
     await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
     await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
       `OTHER ${seeded.sentinel}`,

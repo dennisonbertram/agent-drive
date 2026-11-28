@@ -38,6 +38,11 @@ export const keySourceFor = (
 
 const conflict = (reason: unknown) => (reason as { status?: number } | null)?.status === 409;
 
+/** The server's answer when the active token is not the one the page last saw. */
+export const TAB_CHANGED = 'This changed in another tab.';
+export const changedInAnotherTab = (reason: unknown) =>
+  conflict(reason) && (reason as Error).message === TAB_CHANGED;
+
 /**
  * Creates the trace inbox (if the drive has none) and a new webhook token, after proving the key
  * belongs to this drive. A wrong key sealed into the inbox would make every later trace unreadable.
@@ -49,6 +54,8 @@ export async function setUpWebhook(args: {
   key: string;
   source: Source;
   verify: (driveId: string, key: string) => Promise<Verdict>;
+  /** The active token id the page last saw (null: none). Omitted when unknown. */
+  expectedTokenId?: string | null;
   /** Test seam; production opens the challenge using the exact locally unwrapped inbox key. */
   answerChallenge?: typeof answerTraceInboxChallenge;
 }): Promise<WebhookToken> {
@@ -132,21 +139,25 @@ export async function setUpWebhook(args: {
     }
   }
 
+  const expected =
+    args.expectedTokenId === undefined ? {} : { expectedTokenId: args.expectedTokenId };
   let record = await ensureInbox();
   try {
     const proof = await requestProof('issue-token', record);
     return await strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
       ...proof,
+      ...expected,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,
     });
   } catch (reason) {
-    if (!conflict(reason)) throw reason;
+    if (!conflict(reason) || changedInAnotherTab(reason)) throw reason;
     record = await ensureInbox();
     const proof = await requestProof('issue-token', record);
     return strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
       ...proof,
+      ...expected,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,

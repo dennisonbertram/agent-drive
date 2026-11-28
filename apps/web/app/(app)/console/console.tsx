@@ -740,6 +740,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The key the unlock dialog just loaded for the webhook dialog, handed over once as it opens.
   const [tracesBusy, setTracesBusy] = useState(false);
   const [tracesResume, setTracesResume] = useState<TracesKey | undefined>();
+  const webhookSeen = useRef<string | null | undefined>(undefined);
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
   const previewRequest = useRef(0);
@@ -1776,11 +1777,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
 
   // The drive key for the webhook dialog, which needs no file: the tab's copy, else the account's
   // slot. With neither, asks for it (the dialog comes back through keyLoaded or the passphrase).
-  async function webhookKey(): Promise<TracesKey | undefined> {
+  async function webhookKey(seen?: string | null): Promise<TracesKey | undefined> {
     const driveId = selected;
+    // The dialog closes while the unlock dialog is open; the token id it saw rides along.
+    if (seen !== undefined) webhookSeen.current = seen;
     const cached = driveKeys[driveId];
     if (cached)
       return {
+        driveId,
+        seen: webhookSeen.current,
         key: cached,
         source: keySourceFor(
           trustedDrives.current.get(driveId),
@@ -1800,7 +1805,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (key) {
         setDriveKeys((current) => ({ ...current, [driveId]: key }));
         keySources.current.set(driveId, 'vault');
-        return { key, source: 'vault' };
+        return { key, source: 'vault', driveId, seen: webhookSeen.current };
       }
       // The slot exists but could not be opened with the account key: a recovery file repairs it.
       invalid = true;
@@ -2070,13 +2075,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     toastsNow.current = toasts;
   }, [toasts]);
   const selectedNow = useRef(selected);
+  const pendingNow = useRef(pendingAction);
   const tabNow = useRef(tab);
   const folderNow = useRef(folder);
   useEffect(() => {
     selectedNow.current = selected;
+    pendingNow.current = pendingAction;
     tabNow.current = tab;
     folderNow.current = folder;
-  }, [selected, tab, folder]);
+  }, [selected, pendingAction, tab, folder]);
   function unhide(driveId: string, path: string, exactKey?: string) {
     setHiddenRows((current) => {
       const next = new Map(
@@ -2403,11 +2410,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     // The webhook dialog caches the key only after it has proven the key belongs to this drive.
     // A key that does not match is refused here, with the unlock dialog still open.
     if (pending?.kind === 'webhook') {
+      // The key is verified for pending.driveId only. Once the check returns, the action must be
+      // the same one, on the same drive, with no Lock or newer action in between.
+      const mark = actionEpoch.current;
+      const epoch = vault.epochNow;
       assertKeyForDrive((id, k) => vault.verifyKey(id, k), pending.driveId, key).then(
         () => {
+          if (
+            mark !== actionEpoch.current ||
+            epoch !== vault.epochNow ||
+            pendingNow.current !== pending ||
+            selectedNow.current !== pending.driveId
+          )
+            return;
           setPendingAction(null);
           setModal(null);
-          if (pending.driveId === selected) openTraces({ key, source });
+          openTraces({ key, source, driveId: pending.driveId, seen: webhookSeen.current });
         },
         (reason: unknown) =>
           setRecoveryNote(reason instanceof Error ? reason.message : 'That key could not be used.'),
@@ -4434,7 +4452,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               request={api}
               strictRequest={strictApi}
               verify={(id, key) => vault.verifyKey(id, key)}
-              getKey={webhookKey}
+              getKey={(seen) => webhookKey(seen)}
               onBusy={setTracesBusy}
               resumeWith={tracesResume}
               onReady={(key, source) => {

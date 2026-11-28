@@ -40,7 +40,7 @@ For a self-hosted installation, pass its API URL:
 agent-drive login --name "<your agent name>" --api https://<your-origin>/api
 ```
 
-If you created the drive in the console instead, download its recovery file (`agent-drive-<drive id>.key.json`) there, then on this machine run `agent-drive credentials import --from agent-drive-<drive id>.key.json` before `agent-drive login`. That key already counts as backed up, so `check` in step 5 passes.
+If you created the drive in the console instead, download its recovery file (`agent-drive-<drive id>.key.json`) there, then on this machine run `agent-drive credentials import --from agent-drive-<drive id>.key.json` before `agent-drive login`. Import refuses to replace a different key already saved for that drive. The approval page then says this agent already has the key for that drive and connects it, so no new drive is created. That key already counts as backed up, so `check` in step 5 passes (it notes that the key came from a recovery file; keep that file, it is the key's backup).
 
 ## 4. Back up the credentials
 

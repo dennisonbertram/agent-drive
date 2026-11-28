@@ -512,6 +512,12 @@
     grid-area: 5 / 2;
     margin: 0 0 8px;
   }
+  /* held drives show only read-only and the write folder, side by side */
+  .connect-held .cf-check,
+  .connect-held .cf-folder,
+  .connect-held .cf-folder-error {
+    grid-area: auto;
+  }
 }
 
 /* one-line summary; the key/value table sits in a closed <details> */

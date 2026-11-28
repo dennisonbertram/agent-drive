@@ -112,7 +112,7 @@ Or from standard input, for example after copying the bundle out of a password m
 pbpaste | agent-drive credentials import
 ```
 
-The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. It also accepts the console recovery file `agent-drive-<drive id>.key.json`, which holds only the drive key — no API credentials — so it is followed by `agent-drive login`. Text in neither format fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
+The command merges the API URL, API key and drive keys into the config and marks those drives as backed up. It prints `imported <N> drive key(s) into <config path>`. It also accepts the console recovery file `agent-drive-<drive id>.key.json`, which holds only the drive key — no API credentials — so it is followed by `agent-drive login`; the approval page then says the agent already has the key for that drive and connects it, without creating a new drive. The key is bound to the API the CLI would use at that moment (`--api`, `AGENT_DRIVE_API_URL`, the saved API URL, or the default). If this machine already has a different key for that drive, the import stops with `This machine already has a different key for drive <id>. Nothing was changed.`; importing the same key again changes nothing. Text in neither format fails with `Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).`
 
 3. Check that the drive key opens the files.
 
@@ -141,6 +141,16 @@ The console shows file names and metadata without any key. To decrypt and downlo
 The key stays in that browser tab. It is cleared when you reload the page or after 30 minutes without use. It is not sent to the service and not saved in browser storage.
 
 If you have no recovery file, prefer the path that pastes no secret: set up passphrase unlock in the console, then ask the agent that holds the drive to run `agent-drive account seal --drive <drive id>` and unlock with your passphrase. If you skip the passphrase, ask the agent to run `agent-drive credentials export --to <a file on your machine>` and choose that file — an `adcred1.` bundle works in the file chooser too. Do not let the agent paste the bundle into a chat. An agent-only drive is never sealed, so it always needs a recovery file or bundle.
+
+### Write a recovery file from the CLI
+
+To give a person the key for one drive without handing over the whole bundle, run:
+
+```sh
+agent-drive credentials export --drive <drive id> --recovery-file <path>
+```
+
+The file holds only that drive's key, in the same format as the console download, with mode `0600`. The command refuses an existing path (add `--force` to replace it), needs the parent folder to exist, and never prints the key. The person chooses the file in the console's Load key dialog. This is a copy for someone else, so it is not recorded as an account backup; use `credentials export --to …` for that.
 
 ### Download a recovery file
 

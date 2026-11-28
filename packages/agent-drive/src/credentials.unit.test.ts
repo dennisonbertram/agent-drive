@@ -9,6 +9,7 @@ import {
   encodeBundle,
   confirmCredentials,
   exportCredentials,
+  exportRecoveryFile,
   importCredentials,
   issueCredentials,
   buildBundle,
@@ -164,6 +165,62 @@ describe('import', () => {
     expect(config.apiKey).toBe('tok');
     expect(config.driveKeyOrigins?.[D2]).toBe('https://x.test');
     await rm(dir, { recursive: true, force: true });
+  });
+
+  it('binds a recovery-file key to the API the CLI would use now', async () => {
+    await setup();
+    const key = generateDriveKey();
+    const text = JSON.stringify({ format: 'agent-drive-key-v1', driveId: D2, key });
+    vi.stubEnv('AGENT_DRIVE_API_URL', 'https://env.test/api');
+    const result = await importCredentials(text, 'file');
+    expect(result).toMatchObject({ apiUrl: 'https://env.test/api' });
+    expect((await readConfig()).driveKeyOrigins?.[D2]).toBe('https://env.test');
+    const explicit = JSON.stringify({
+      format: 'agent-drive-key-v1',
+      driveId: E1,
+      key: generateDriveKey(),
+    });
+    await importCredentials(explicit, 'file', 'https://flag.test/api');
+    expect((await readConfig()).driveKeyOrigins?.[E1]).toBe('https://flag.test');
+  });
+
+  it('refuses a different key for a drive already saved, and treats the same key as a no-op', async () => {
+    const { key } = await setup();
+    const file = (k: string) =>
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: D1, key: k });
+    await expect(importCredentials(file(generateDriveKey()), 'file')).rejects.toThrow(
+      `This machine already has a different key for drive ${D1}. Nothing was changed.`,
+    );
+    const before = await readConfig();
+    expect(before.driveKeys?.[D1]).toBe(key);
+    await expect(importCredentials(file(key), 'file')).resolves.toMatchObject({
+      kind: 'recovery-file',
+    });
+    expect(await readConfig()).toEqual(before);
+  });
+
+  it('exports one drive as a console recovery file without recording a backup', async () => {
+    const { dir, key } = await setup();
+    await writeConfig({
+      driveKeys: { [D2]: generateDriveKey() },
+      driveKeyOrigins: { [D2]: 'https://x.test' },
+    });
+    const path = join(dir, 'out.key.json');
+    await exportRecoveryFile({ drive: D1, to: path });
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual({
+      format: 'agent-drive-key-v1',
+      driveId: D1,
+      key,
+    });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
+    await expect(exportRecoveryFile({ drive: D1, to: path })).rejects.toThrow('already exists');
+    await expect(exportRecoveryFile({ drive: E1, to: join(dir, 'x.json') })).rejects.toThrow(
+      `There is no drive key for ${E1} on this machine.`,
+    );
+    await expect(
+      exportRecoveryFile({ drive: D1, to: join(dir, 'nope', 'x.json') }),
+    ).rejects.toThrow('its parent folder does not exist');
   });
 
   it('imports a recovery file into a config with no credentials yet', async () => {

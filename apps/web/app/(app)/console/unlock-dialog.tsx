@@ -39,6 +39,10 @@ export type VaultActions = {
   onReset: () => Promise<string>;
 };
 
+// Exports only this drive's key, not the agent's API key or other drives.
+const recoveryExport = (driveId: string) =>
+  `agent-drive credentials export --drive ${driveId} --recovery-file agent-drive-${driveId}.key.json`;
+
 /** Body of the "Load the key" dialog. Errors stay here so the dialog never changes size. */
 export function UnlockDialog({
   driveId,
@@ -233,12 +237,8 @@ export function UnlockDialog({
         {agentOnly
           ? 'No recovery file? Ask the agent that created this drive to run '
           : 'No recovery file? Ask an agent that has this drive to run '}
-        <code>agent-drive credentials export --to agent-drive-credentials.txt</code> and send you
-        that file, then choose it above.{' '}
-        <CopyButton
-          text="agent-drive credentials export --to agent-drive-credentials.txt"
-          label="Copy credentials export command"
-        />
+        <code>{recoveryExport(driveId)}</code>, then choose that file above.{' '}
+        <CopyButton text={recoveryExport(driveId)} label="Copy credentials export command" />
       </p>
       <details>
         <summary>Other ways</summary>

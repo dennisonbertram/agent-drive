@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Request } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import {
+  changedInAnotherTab,
   setUpWebhook,
+  TAB_CHANGED,
   type Source,
   type Verdict,
   type WebhookToken,
@@ -13,7 +15,13 @@ import { CopyButton } from '../copy-button';
 import { RevokeControl } from './share-dialog';
 
 type Active = { id: string; createdAt: string; status: 'active' | 'stale' };
-export type TracesKey = { key: string; source: Source };
+/** `driveId` is the drive the key was verified for; `seen` the token id the dialog saw before unlocking. */
+export type TracesKey = {
+  key: string;
+  source: Source;
+  driveId?: string;
+  seen?: string | null | undefined;
+};
 
 /**
  * Body of the "Set up trace capture" dialog. The drive key is passed in only for the moment a token is
@@ -35,8 +43,11 @@ export function TracesDialog({
   /** Enrollment and token issuance are strict routes: this wraps the Clerk reverification. */
   strictRequest: Request;
   verify: (driveId: string, key: string) => Promise<Verdict>;
-  /** The key this tab already has, or undefined after opening the unlock dialog for it. */
-  getKey: () => Promise<TracesKey | undefined>;
+  /**
+   * The key this tab already has, or undefined after opening the unlock dialog for it. `seen` is
+   * the token id this dialog has observed, carried through the unlock dialog.
+   */
+  getKey: (seen: string | null | undefined) => Promise<TracesKey | undefined>;
   /** A key the unlock dialog just loaded for this action. */
   resumeWith?: TracesKey | undefined;
   /** The inbox now exists and `key` is verified: seal it into the account. */
@@ -80,6 +91,8 @@ export function TracesDialog({
       (result) => {
         if (!alive.current) return;
         seen.current = result.token?.id ?? null;
+        // A one-time token display must not outlive the state it described.
+        setCreated((shown) => (shown && shown.id === seen.current ? shown : null));
         setActive(result.token);
       },
       () => alive.current && setActive('error'),
@@ -97,22 +110,7 @@ export function TracesDialog({
     setError('');
     setNotice('');
     try {
-      // Another tab may have added, replaced or revoked the token since this dialog loaded.
-      // Replacing then would revoke a token this tab never saw, so show the current state instead.
-      if (seen.current !== undefined) {
-        const { token } = await request<{ token: Active | null }>(
-          `drives/${driveId}/webhook-token`,
-        );
-        if (!alive.current) return;
-        if ((token?.id ?? null) !== seen.current) {
-          seen.current = token?.id ?? null;
-          setActive(token);
-          setConfirmReplace(false);
-          setNotice('This changed in another tab. Showing the current setup.');
-          return;
-        }
-      }
-      const found = have ?? (await getKey());
+      const found = have ?? (await getKey(seen.current));
       if (!found) return; // The unlock dialog took over; it comes back with resumeWith.
       const token = await setUpWebhook({
         request,
@@ -121,6 +119,7 @@ export function TracesDialog({
         key: found.key,
         source: found.source,
         verify,
+        ...(seen.current === undefined ? {} : { expectedTokenId: seen.current }),
       });
       if (!alive.current) return;
       seen.current = token.id;
@@ -129,7 +128,12 @@ export function TracesDialog({
       setActive({ id: token.id, createdAt: token.createdAt, status: 'active' });
       onReady(found.key, found.source);
     } catch (reason) {
-      if (alive.current)
+      if (alive.current && changedInAnotherTab(reason)) {
+        // Show what the other tab left, and let the user decide again.
+        setConfirmReplace(false);
+        setNotice(`${TAB_CHANGED} Showing the current setup.`);
+        fetchToken();
+      } else if (alive.current)
         setError(reason instanceof Error ? reason.message : 'Could not set up the webhook.');
     } finally {
       if (alive.current) setBusy(false);
@@ -138,8 +142,10 @@ export function TracesDialog({
   // Once, with the key the unlock dialog loaded.
   const resumed = useRef(false);
   useEffect(() => {
-    if (resumeWith && !resumed.current) {
+    if (resumeWith && !resumed.current && (resumeWith.driveId ?? driveId) === driveId) {
       resumed.current = true;
+      // Carry the token id observed before the unlock dialog opened.
+      seen.current = resumeWith.seen;
       void add(resumeWith);
     }
     // add reads only state that is current on this first run.
