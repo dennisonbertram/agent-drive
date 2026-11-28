@@ -162,7 +162,7 @@ def entry(name, info):
     if stat.S_ISDIR(info.st_mode):
         return {'name': name, 'kind': 'directory', 'size': 0, 'mtimeMs': int(info.st_mtime_ns / 1000000)}
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1: return None
-    return {'name': name, 'kind': 'file', 'size': info.st_size, 'mtimeMs': int(info.st_mtime_ns / 1000000), 'versionId': version(info), 'readOnly': True}
+    return {'name': name, 'kind': 'file', 'size': info.st_size, 'mtimeMs': int(info.st_mtime_ns / 1000000), 'versionId': version(info)}
 
 def expire_listings():
     now=time.monotonic()
@@ -299,22 +299,56 @@ def respond(request):
             if base is not None and (not isinstance(base,str) or len(base)>64): fail('EINVAL')
             actual=current(parent,name)
             if actual!=base: fail('ESTALE')
-            if base is not None: fail('EROFS')
+            existing_fd=None
+            base_mode=None
+            if base is not None:
+                existing_fd=file_fd(parent,name)
+                try:
+                    existing_info=os.fstat(existing_fd)
+                    if version(existing_info)!=base: fail('ESTALE')
+                    if existing_info.st_size>MAX_FILE: fail('EFBIG')
+                    base_mode=stat.S_IMODE(existing_info.st_mode)
+                except Exception:
+                    os.close(existing_fd); raise
             parts=canonical(path); parent_path='/'+'/'.join(parts[:-1]) if len(parts)>1 else '/'
-            stage_dir,stage_dir_fd=create_stage(parent)
+            try:
+                stage_dir,stage_dir_fd=create_stage(parent)
+            except Exception:
+                if existing_fd is not None: os.close(existing_fd)
+                raise
             stage='stage-'+secrets.token_hex(16)
             fd=None
             try:
                 fd=os.open(stage,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600,dir_fd=stage_dir_fd)
-                os.fsync(fd); size=0
+                size=0
+                if existing_fd is not None:
+                    while True:
+                        chunk=os.read(existing_fd,MAX_IO)
+                        if not chunk: break
+                        pos=0
+                        while pos<len(chunk):
+                            n=os.write(fd,chunk[pos:])
+                            if n<=0: fail('EIO')
+                            pos+=n
+                        size+=pos
+                        if size>MAX_FILE: fail('EFBIG')
+                os.fsync(fd)
             except Exception:
                 if fd is not None: os.close(fd)
+                if existing_fd is not None: os.close(existing_fd)
+                try: os.unlink(stage,dir_fd=stage_dir_fd)
+                except Exception: pass
+                try: os.unlink('.gitignore',dir_fd=stage_dir_fd)
+                except Exception: pass
                 os.close(stage_dir_fd)
+                try: os.rmdir(stage_dir,dir_fd=parent)
+                except Exception: pass
                 raise
+            if existing_fd is not None: os.close(existing_fd)
             os.close(fd)
             os.close(stage_dir_fd)
             handle=secrets.token_urlsafe(24)
-            HANDLES[handle]={'path':path,'parentPath':parent_path,'base':None,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
+            HANDLES[handle]={'path':path,'parentPath':parent_path,'base':base,'baseMode':base_mode,'stageDir':stage_dir,'stage':stage,'size':size,'result':None,'retained':False,'committed':False}
             return {'handleId':handle,'recoveryPath':recovery(HANDLES[handle]),'size':size}
         finally: os.close(parent)
     if op=='finalizeWrite':
@@ -395,16 +429,23 @@ def commit_record(handle,record,operation):
     stageparent=os.open(record['stageDir'],os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
     stagefile=None
     try:
-        if current(parent,record['path'].split('/')[-1])!=record['base']: fail('ESTALE')
+        target=record['path'].split('/')[-1]
+        if current(parent,target)!=record['base']: fail('ESTALE')
         stagefile=os.open(record['stage'],os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=stageparent)
         selected=os.fstat(stagefile)
         if not stat.S_ISREG(selected.st_mode) or selected.st_nlink!=1 or selected.st_uid!=os.getuid() or selected.st_mode&0o077: fail('EACCES')
         os.fsync(stagefile)
-        try: os.link(record['stage'],record['path'].split('/')[-1],src_dir_fd=stageparent,dst_dir_fd=parent,follow_symlinks=False)
-        except FileExistsError: fail('ESTALE')
-        os.unlink(record['stage'],dir_fd=stageparent)
+        if record['base'] is None:
+            try: os.link(record['stage'],target,src_dir_fd=stageparent,dst_dir_fd=parent,follow_symlinks=False)
+            except FileExistsError: fail('ESTALE')
+            os.unlink(record['stage'],dir_fd=stageparent)
+        else:
+            if record.get('baseMode') is not None:
+                os.fchmod(stagefile,record['baseMode'])
+            if current(parent,target)!=record['base']: fail('ESTALE')
+            os.replace(record['stage'],target,src_dir_fd=stageparent,dst_dir_fd=parent)
         os.fsync(stageparent); os.fsync(parent)
-        committed=os.stat(record['path'].split('/')[-1],dir_fd=parent,follow_symlinks=False)
+        committed=os.stat(target,dir_fd=parent,follow_symlinks=False)
         result={'id':version(committed),'path':record['path']}
         record['fd']=stagefile; stagefile=None
         record['result']=result; record['operation']=operation; record['committed']=True
