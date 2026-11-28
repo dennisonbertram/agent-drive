@@ -429,7 +429,7 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     // Drive B is not in the account yet; the vault is already unlocked, so the dialog goes
     // straight to the recovery file.
     await page.goto(`/console?drive=${seeded.b.id}`);
-    await expect(chip(page)).toContainText('Unlocked');
+    await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     await expect(
@@ -473,7 +473,7 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
-    await expect(chip(page)).toContainText('Unlocked');
+    await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
 
@@ -563,7 +563,7 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
       });
     });
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
-    await expect(chip(page)).toContainText('Unlocked');
+    await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     const slotResponse = page.waitForResponse(
@@ -606,7 +606,7 @@ test('ux round 08: late slot-save completion after a drive switch stays silent',
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
-    await expect(chip(page)).toContainText('Unlocked');
+    await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     let releaseSave!: () => void;
