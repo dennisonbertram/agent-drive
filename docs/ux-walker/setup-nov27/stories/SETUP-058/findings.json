@@ -1,6 +1,6 @@
 {
- "story": "SETUP-058",
- "status": "partial",
- "note": "mounts forget success, unknown-name and usage errors walked. Refusal while a login service exists not reproducible (service cannot be installed without Instabox).",
- "findings": []
+  "story": "SETUP-058",
+  "status": "partial",
+  "note": "mounts forget success, unknown-name and usage errors walked. Refusal while a login service exists not reproducible (service cannot be installed without Instabox).",
+  "findings": []
 }

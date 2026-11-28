@@ -1,10 +1,98 @@
 [
-{"id":"F-SETUP-035-01","severity":"high","category":"flow","criterion":"Copy disagrees with another surface / dead end","score":"fail","description":"The CLI tells the user to set the passphrase 'in the console under Settings', but the page at /console/settings is titled 'Activity & deletion', says 'Passphrase unlock: Not set up.' with only a 'Manage in Files' button, and the word Settings appears nowhere.","expected":"The CLI points to Files (Set up) or the Settings page contains the setup form.","actual":"User is sent to the wrong page and then back to Files.","screenshot":"screenshots/step-2.png","suggested_fix":"Reword the CLI/dialog text to 'in the console Files page, click Set up' and rename the page."},
-{"id":"F-SETUP-035-02","severity":"medium","category":"flow","criterion":"Data re-entry","score":"warn","description":"The Load-the-key dialog tells the owner to copy the fingerprint from Settings by hand, although the console already knows it; the Copy button copies a command without the fingerprint, so the first seal always ends 'unverified'.","expected":"The dialog shows the fingerprint and Copy puts a complete command with --fingerprint on the clipboard.","actual":"Seal run printed '<id>: unverified' and a second command was needed.","screenshot":"screenshots/step-8.png","suggested_fix":"Include --fingerprint \"799c c0f8 98db 81e2\" in the copied command."},
-{"id":"F-SETUP-035-03","severity":"medium","category":"error-handling","criterion":"Actionable error","score":"warn","description":"A fingerprint typed from the login 'Verification code' (same shape) is reported as 'does not match the account key the service returned (799c c0f8 98db 81e2)... the API may be answering with a different account key.' The message prints the real key (defeating the check) and blames the API instead of saying the user may have pasted the wrong code.","expected":"'That looks like the login verification code; use the console fingerprint.' Do not print the server's value.","actual":"As quoted.","screenshot":"CLI output (account seal --fingerprint '442c 93ea debb 6aa5')","suggested_fix":"Reword; consider not echoing the service fingerprint."},
-{"id":"F-SETUP-035-04","severity":"medium","category":"hierarchy","criterion":"Importance encoding / state accuracy","score":"warn","description":"After setup the chip says 'Unlocked' and 'Drives you added to your account open when you use them' although no drive has been added yet (1 of 1 drive not yet sealed); the user sees a green state, then 'Load the key' dialog on the first click.","expected":"Chip reflects 'Passphrase ready, 0 drives added'.","actual":"Green 'Unlocked'.","screenshot":"screenshots/step-7.png","suggested_fix":"Show added-drive state or explain in menu."},
-{"id":"F-SETUP-035-05","severity":"low","category":"simplicity","criterion":"Information density","score":"warn","description":"The key chip menu stacks seven same-weight buttons (Load key, Download..., Lock, Lock this browser, Add a passkey, Change passphrase, Forgot or exposed passphrase?).","expected":"Group or collapse rare actions.","actual":"See screenshot.","screenshot":"screenshots/step-7.png","suggested_fix":"Move Change/Forgot/Passkey into a submenu."},
-{"id":"F-SETUP-035-06","severity":"low","category":"layout","criterion":"Text fit","score":"warn","description":"Drive picker truncates 'second-drive' to 'second-driv...' at 1280px.","expected":"Full name.","actual":"Truncated.","screenshot":"screenshots/step-6a.png","suggested_fix":"Give the picker more width."},
-{"id":"F-SETUP-035-07","severity":"low","category":"error-handling","criterion":"CLI input errors","score":"warn","description":"`agent-drive put notes.md notes.md` fails with only 'path must be a canonical absolute POSIX path.' without saying the remote path needs a leading slash.","expected":"Suggest '/notes.md'.","actual":"As quoted.","screenshot":"CLI output","suggested_fix":"Include the corrected path."},
-{"id":"F-SETUP-035-08","severity":"low","category":"flow","criterion":"Walkability","score":"warn","description":"Not walkable: fresh agent-created-drive login (rate limit slow_down; the CLI message gives no hint how long to wait), Clerk prompt, final decryption (storage URL unreachable from the browser).","expected":"n/a","actual":"'Agent Drive refused the login request: slow_down'","screenshot":"CLI output","suggested_fix":"Tell the user to wait and retry."}
+  {
+    "id": "F-SETUP-035-01",
+    "severity": "high",
+    "category": "flow",
+    "criterion": "Copy disagrees with another surface / dead end",
+    "score": "fail",
+    "description": "The CLI tells the user to set the passphrase 'in the console under Settings', but the page at /console/settings is titled 'Activity & deletion', says 'Passphrase unlock: Not set up.' with only a 'Manage in Files' button, and the word Settings appears nowhere.",
+    "expected": "The CLI points to Files (Set up) or the Settings page contains the setup form.",
+    "actual": "User is sent to the wrong page and then back to Files.",
+    "screenshot": "screenshots/step-2.png",
+    "suggested_fix": "Reword the CLI/dialog text to 'in the console Files page, click Set up' and rename the page."
+  },
+  {
+    "id": "F-SETUP-035-02",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Data re-entry",
+    "score": "warn",
+    "description": "The Load-the-key dialog tells the owner to copy the fingerprint from Settings by hand, although the console already knows it; the Copy button copies a command without the fingerprint, so the first seal always ends 'unverified'.",
+    "expected": "The dialog shows the fingerprint and Copy puts a complete command with --fingerprint on the clipboard.",
+    "actual": "Seal run printed '<id>: unverified' and a second command was needed.",
+    "screenshot": "screenshots/step-8.png",
+    "suggested_fix": "Include --fingerprint \"799c c0f8 98db 81e2\" in the copied command."
+  },
+  {
+    "id": "F-SETUP-035-03",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Actionable error",
+    "score": "warn",
+    "description": "A fingerprint typed from the login 'Verification code' (same shape) is reported as 'does not match the account key the service returned (799c c0f8 98db 81e2)... the API may be answering with a different account key.' The message prints the real key (defeating the check) and blames the API instead of saying the user may have pasted the wrong code.",
+    "expected": "'That looks like the login verification code; use the console fingerprint.' Do not print the server's value.",
+    "actual": "As quoted.",
+    "screenshot": "CLI output (account seal --fingerprint '442c 93ea debb 6aa5')",
+    "suggested_fix": "Reword; consider not echoing the service fingerprint."
+  },
+  {
+    "id": "F-SETUP-035-04",
+    "severity": "medium",
+    "category": "hierarchy",
+    "criterion": "Importance encoding / state accuracy",
+    "score": "warn",
+    "description": "After setup the chip says 'Unlocked' and 'Drives you added to your account open when you use them' although no drive has been added yet (1 of 1 drive not yet sealed); the user sees a green state, then 'Load the key' dialog on the first click.",
+    "expected": "Chip reflects 'Passphrase ready, 0 drives added'.",
+    "actual": "Green 'Unlocked'.",
+    "screenshot": "screenshots/step-7.png",
+    "suggested_fix": "Show added-drive state or explain in menu."
+  },
+  {
+    "id": "F-SETUP-035-05",
+    "severity": "low",
+    "category": "simplicity",
+    "criterion": "Information density",
+    "score": "warn",
+    "description": "The key chip menu stacks seven same-weight buttons (Load key, Download..., Lock, Lock this browser, Add a passkey, Change passphrase, Forgot or exposed passphrase?).",
+    "expected": "Group or collapse rare actions.",
+    "actual": "See screenshot.",
+    "screenshot": "screenshots/step-7.png",
+    "suggested_fix": "Move Change/Forgot/Passkey into a submenu."
+  },
+  {
+    "id": "F-SETUP-035-06",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Text fit",
+    "score": "warn",
+    "description": "Drive picker truncates 'second-drive' to 'second-driv...' at 1280px.",
+    "expected": "Full name.",
+    "actual": "Truncated.",
+    "screenshot": "screenshots/step-6a.png",
+    "suggested_fix": "Give the picker more width."
+  },
+  {
+    "id": "F-SETUP-035-07",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "CLI input errors",
+    "score": "warn",
+    "description": "`agent-drive put notes.md notes.md` fails with only 'path must be a canonical absolute POSIX path.' without saying the remote path needs a leading slash.",
+    "expected": "Suggest '/notes.md'.",
+    "actual": "As quoted.",
+    "screenshot": "CLI output",
+    "suggested_fix": "Include the corrected path."
+  },
+  {
+    "id": "F-SETUP-035-08",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Walkability",
+    "score": "warn",
+    "description": "Not walkable: fresh agent-created-drive login (rate limit slow_down; the CLI message gives no hint how long to wait), Clerk prompt, final decryption (storage URL unreachable from the browser).",
+    "expected": "n/a",
+    "actual": "'Agent Drive refused the login request: slow_down'",
+    "screenshot": "CLI output",
+    "suggested_fix": "Tell the user to wait and retry."
+  }
 ]

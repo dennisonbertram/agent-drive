@@ -9,11 +9,13 @@ Geometry audit: pageOverflowX 0; only unevenRows hit is the Refresh/Connect an a
 ## Steps
 
 ### Step 1: Add webhook with the strict request blocked (Clerk reverification cannot be shown here, so I blocked the browser's request to the webhook endpoint as a stand-in for a failed step)
+
 - Screenshot: `/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-063/screenshots/step-1.png`
 - What the screenshot shows: Capture dialog shows 'Could not load the webhook. Retry' in grey with a red Retry link, no Add webhook button, no explanation. This is a network error on load, not the Clerk cancel text from the story.
 - Geometry: ok
 
 ### Step 2: Remove the block, click Retry (different origin than the server expects at that time)
+
 - What the screenshot shows: Dialog showed the exact text 'A same-origin request is required. Retry' next to Add webhook. The text is cryptic for a user, but I caused it by opening the app on another host name, so it is a test artifact and probably rare. Retry could not fix it.
 - Geometry: n/a
 

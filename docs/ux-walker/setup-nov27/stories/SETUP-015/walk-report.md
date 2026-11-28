@@ -3,6 +3,7 @@
 Session uxw-install-login-solo, account e2e_install_login_15 (fresh). CLI home ~/uxw/install-login-015. The test key and recovery file are throwaway data for a local test server; the key value is not recorded here.
 
 ## Steps
+
 1. `/console` for a brand-new account (step-1.png): h1 Files; at the top "Set a passphrase and agents will add every drive's key to your account — then each one opens here automatically. Set up"; onboarding card "CONNECT YOUR AGENT / Give your first agent a home." with the llms.txt line + orange `Copy`, three mini-steps "1 Paste one line into your agent. 2 The agent shows a pairing code. 3 You approve it once." and below "Prefer to set up a drive yourself? [New drive]". The sentence in the header about passphrases is unexplained for a user who has no drive yet. Geometry: overflow 0; the three onboarding steps differ in width (190/204/134, text length, fine).
 2. `New drive` (step-2.png): dialog "CREATE A DRIVE": "We'll generate a unique encryption key in your browser. Save it somewhere safe: the server cannot recover it." Field Drive name (prefilled `my-drive`, selected), checkbox "Agent-only — never add this drive to passphrase unlock" (jargon at first contact), orange `Create drive`. Typed `ops-archive`.
 3. Receipt dialog (step-3.png) "YOUR DRIVE. YOUR KEY.": explanation, collapsed "Show drive key", warning "The recovery file contains a secret in plaintext...", orange `Download recovery file and continue`. No close/escape button (deliberate). Background already shows the drive with chip "Key loaded · Not backed up".
@@ -20,6 +21,7 @@ Session uxw-install-login-solo, account e2e_install_login_15 (fresh). CLI home ~
 15. Mobile 390x844 API keys page (mobile-check.png): no overflow, code block wraps (long lines break mid-flag), acceptable. A collapsed "Connect an agent" box above the key list renders as an empty-looking bordered bar.
 
 ## Flow Log
+
 - Ideal 7. Actual: New drive (3: name, create, download+I saved it) + Agents Create (2) + New API key (3 incl. save checkbox) + terminal login (1) + a working drive key (undocumented env var; the documented recovery-file import fails) = more than ideal and a dead end for the supposed path.
 - Hesitations: why an agent identity is needed before a key; what "Agent-only" means; which file the terminal wants; "Run the CLI from the repository".
 - Re-entry: the drive id and drive key must be hand-copied into env vars. Duplicated: llms.txt Copy block appears in onboarding and again in the Agents tab (different tabs).

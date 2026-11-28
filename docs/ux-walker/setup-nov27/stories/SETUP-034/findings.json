@@ -1,10 +1,98 @@
 [
-{"id":"F-SETUP-034-01","severity":"medium","category":"consistency","criterion":"Information stated once / backed-up status","score":"warn","description":"After the owner saves the console recovery file and approves the agent with that drive, the CLI still says the drive key is not backed up and tells the user to set a passphrase 'under Settings'.","expected":"Either the CLI knows the owner already holds the file, or the wording explains that CLI backup is a separate step.","actual":"agent-drive check: 'drive key not backed up: da137623-...' plus the credentials export hint; login output: 'Your account has no account key yet, so the console cannot open this drive. Set a passphrase in the console under Settings'.","screenshot":"screenshots/step-10d.png","suggested_fix":"Explain in the post-approval screen and CLI that console and CLI backups are tracked separately, or record the console backup when the agent receives the key from the owner."},
-{"id":"F-SETUP-034-02","severity":"medium","category":"happy-path","criterion":"Primary CTA findable","score":"warn","description":"The path for an owner who holds the key ('Use one of my drives instead') is hidden inside the collapsed Details row and is a small underlined link.","expected":"A visible choice on the first screen for owners who created a drive themselves.","actual":"Must click Details, then find the link; the label says 'needs its recovery file' while the form also accepts a pasted key.","screenshot":"screenshots/step-10a.png","suggested_fix":"Surface the link outside Details and say 'recovery file or key'."},
-{"id":"F-SETUP-034-03","severity":"medium","category":"error-handling","criterion":"Recovery/data loss","score":"warn","description":"If the tab reloads before the receipt is finished, the drive remains as an empty shell with chip 'Key needed - Not backed up' and no message that its key is gone for good.","expected":"A warning or recovery guidance (delete the empty drive and create a new one).","actual":"Console silently shows 'Key needed' with an empty drive. Observed after an unplanned dev-server reload.","screenshot":"screenshots/step-5b-after-lost-tab.png","suggested_fix":"Show a notice on a drive that has never been backed up and has no key, or warn on beforeunload while the receipt is open."},
-{"id":"F-SETUP-034-04","severity":"low","category":"layout","criterion":"Text fit","score":"warn","description":"The drive picker button truncates an 11-character name ('research-no...') at 1280px width while there is spare room in the toolbar.","expected":"Name fits or the toolbar gives the picker more width.","actual":"Button 109.7px wide vs 124px content.","screenshot":"screenshots/step-6.png","suggested_fix":"Let the picker grow (min-width) before the search box does."},
-{"id":"F-SETUP-034-05","severity":"low","category":"visual","criterion":"Spacing / component polish","score":"warn","description":"In the key receipt the revealed key sits in a 76px-tall black box for a single line and the Copy button touches the box (about 2px gap).","expected":"Box sized to content, normal gap before Copy.","actual":"See screenshot.","screenshot":"screenshots/step-5.png","suggested_fix":"Auto-size the textarea; add 8px margin above Copy."},
-{"id":"F-SETUP-034-06","severity":"low","category":"layout","criterion":"Edge alignment / reading order","score":"warn","description":"On /connect existing-drive form the two columns interleave: 'Only allow writes under (optional)' is beside the Drive select and Drive key is beside Choose a file; its label wraps to two lines and pushes the row; the Drive key placeholder is clipped ('Paste the drive key or a').","expected":"Drive, key, file in a clear order; optional write-path last.","actual":"See screenshot.","screenshot":"screenshots/step-10b.png","suggested_fix":"Single column for Drive / Drive key / file; move write-path next to Read only."},
-{"id":"F-SETUP-034-07","severity":"low","category":"disclosure","criterion":"Help text","score":"warn","description":"The 'Agent-only' checkbox and the receipt dialog give no explanation or close control; Esc does nothing; Copy drive key has no plaintext-clipboard warning.","expected":"One line explaining agent-only; a way to cancel out of the receipt.","actual":"As described.","screenshot":"screenshots/step-2.png","suggested_fix":"Add helper text under the checkbox."},
-{"id":"F-SETUP-034-08","severity":"low","category":"error-handling","criterion":"Actionable error","score":"warn","description":"When the CLI API URL lacks the /api suffix the login fails with only 'Agent Drive refused the login request: 404'.","expected":"A hint about the API URL.","actual":"'Agent Drive refused the login request: 404'","screenshot":"CLI output","suggested_fix":"Mention the URL that was called and the expected form."}
+  {
+    "id": "F-SETUP-034-01",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Information stated once / backed-up status",
+    "score": "warn",
+    "description": "After the owner saves the console recovery file and approves the agent with that drive, the CLI still says the drive key is not backed up and tells the user to set a passphrase 'under Settings'.",
+    "expected": "Either the CLI knows the owner already holds the file, or the wording explains that CLI backup is a separate step.",
+    "actual": "agent-drive check: 'drive key not backed up: da137623-...' plus the credentials export hint; login output: 'Your account has no account key yet, so the console cannot open this drive. Set a passphrase in the console under Settings'.",
+    "screenshot": "screenshots/step-10d.png",
+    "suggested_fix": "Explain in the post-approval screen and CLI that console and CLI backups are tracked separately, or record the console backup when the agent receives the key from the owner."
+  },
+  {
+    "id": "F-SETUP-034-02",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Primary CTA findable",
+    "score": "warn",
+    "description": "The path for an owner who holds the key ('Use one of my drives instead') is hidden inside the collapsed Details row and is a small underlined link.",
+    "expected": "A visible choice on the first screen for owners who created a drive themselves.",
+    "actual": "Must click Details, then find the link; the label says 'needs its recovery file' while the form also accepts a pasted key.",
+    "screenshot": "screenshots/step-10a.png",
+    "suggested_fix": "Surface the link outside Details and say 'recovery file or key'."
+  },
+  {
+    "id": "F-SETUP-034-03",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Recovery/data loss",
+    "score": "warn",
+    "description": "If the tab reloads before the receipt is finished, the drive remains as an empty shell with chip 'Key needed - Not backed up' and no message that its key is gone for good.",
+    "expected": "A warning or recovery guidance (delete the empty drive and create a new one).",
+    "actual": "Console silently shows 'Key needed' with an empty drive. Observed after an unplanned dev-server reload.",
+    "screenshot": "screenshots/step-5b-after-lost-tab.png",
+    "suggested_fix": "Show a notice on a drive that has never been backed up and has no key, or warn on beforeunload while the receipt is open."
+  },
+  {
+    "id": "F-SETUP-034-04",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Text fit",
+    "score": "warn",
+    "description": "The drive picker button truncates an 11-character name ('research-no...') at 1280px width while there is spare room in the toolbar.",
+    "expected": "Name fits or the toolbar gives the picker more width.",
+    "actual": "Button 109.7px wide vs 124px content.",
+    "screenshot": "screenshots/step-6.png",
+    "suggested_fix": "Let the picker grow (min-width) before the search box does."
+  },
+  {
+    "id": "F-SETUP-034-05",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Spacing / component polish",
+    "score": "warn",
+    "description": "In the key receipt the revealed key sits in a 76px-tall black box for a single line and the Copy button touches the box (about 2px gap).",
+    "expected": "Box sized to content, normal gap before Copy.",
+    "actual": "See screenshot.",
+    "screenshot": "screenshots/step-5.png",
+    "suggested_fix": "Auto-size the textarea; add 8px margin above Copy."
+  },
+  {
+    "id": "F-SETUP-034-06",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Edge alignment / reading order",
+    "score": "warn",
+    "description": "On /connect existing-drive form the two columns interleave: 'Only allow writes under (optional)' is beside the Drive select and Drive key is beside Choose a file; its label wraps to two lines and pushes the row; the Drive key placeholder is clipped ('Paste the drive key or a').",
+    "expected": "Drive, key, file in a clear order; optional write-path last.",
+    "actual": "See screenshot.",
+    "screenshot": "screenshots/step-10b.png",
+    "suggested_fix": "Single column for Drive / Drive key / file; move write-path next to Read only."
+  },
+  {
+    "id": "F-SETUP-034-07",
+    "severity": "low",
+    "category": "disclosure",
+    "criterion": "Help text",
+    "score": "warn",
+    "description": "The 'Agent-only' checkbox and the receipt dialog give no explanation or close control; Esc does nothing; Copy drive key has no plaintext-clipboard warning.",
+    "expected": "One line explaining agent-only; a way to cancel out of the receipt.",
+    "actual": "As described.",
+    "screenshot": "screenshots/step-2.png",
+    "suggested_fix": "Add helper text under the checkbox."
+  },
+  {
+    "id": "F-SETUP-034-08",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Actionable error",
+    "score": "warn",
+    "description": "When the CLI API URL lacks the /api suffix the login fails with only 'Agent Drive refused the login request: 404'.",
+    "expected": "A hint about the API URL.",
+    "actual": "'Agent Drive refused the login request: 404'",
+    "screenshot": "CLI output",
+    "suggested_fix": "Mention the URL that was called and the expected form."
+  }
 ]

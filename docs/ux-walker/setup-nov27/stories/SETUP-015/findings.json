@@ -1,9 +1,79 @@
 [
-{"id":"F-015-1","story":"SETUP-015","severity":"high","category":"flow","description":"The CLI cannot import the recovery file the console gives a human-first user. `credentials import --from <agent-drive-<id>.key.json>` fails; only adcred1 bundles are accepted, and the error does not say so.","expected":"Import accepts the recovery file, or the error names the expected file and the working alternative (AGENT_DRIVE_KEY).","actual":"'Not a valid Agent Drive credentials bundle.'","evidence":"CLI output; file contents format=agent-drive-key-v1; screenshots/step-4.png","suggested_fix":"Accept agent-drive-key-v1 in `credentials import` (the docs already say the console accepts both in the other direction)."},
-{"id":"F-015-2","story":"SETUP-015","severity":"high","category":"error-handling","description":"After logging in with an API key and no local drive key, `agent-drive check` says 'There is no usable drive key on this machine. Run `agent-drive login` again.' Running login again cannot fix this for a key-based login.","expected":"Tell the user to provide the drive key: set AGENT_DRIVE_KEY / import the recovery file.","actual":"Misleading recovery instruction.","evidence":"CLI output of `check` in ~/uxw/install-login-015","suggested_fix":"Branch the message when the config was created by --token-stdin or an env API key."},
-{"id":"F-015-3","story":"SETUP-015","severity":"medium","category":"consistency","description":"The console API keys page says 'Run the CLI from the repository after building it', and shows `agent-drive login --api http://localhost:3811` plus env-var reads, while llms.txt/docs say install from npm and use `--api <origin>/api`; neither `--token-stdin` nor the recovery file is mentioned. The create-key dialog says only 'use it with agent-drive login'.","expected":"Same install and login commands as the docs, including `--token-stdin` and how to supply the drive key.","actual":"Developer-oriented wording and a different command shape.","evidence":"screenshots/step-7.png, step-9.png","suggested_fix":"Rewrite the 'From your terminal' block to match docs/quickstart and name `agent-drive login --token-stdin`."},
-{"id":"F-015-4","story":"SETUP-015","severity":"medium","category":"disclosure","description":"AGENT_DRIVE_KEY and AGENT_DRIVE_KEY_<DRIVE_ID> are the only working way to give the CLI a recovery-file key, but `agent-drive --help` does not list them.","expected":"Help lists all configuration environment variables.","actual":"Help lists AGENT_DRIVE_CONFIG, API_URL, API_KEY, MACHINE, CREDENTIALS only.","evidence":"`agent-drive --help` bottom section; `check ok` obtained with AGENT_DRIVE_KEY","suggested_fix":"Add the two variables to help."},
-{"id":"F-015-5","story":"SETUP-015","severity":"low","category":"happy-path","description":"`login --token-stdin` success output is a single line of whoami JSON with no sentence, config path or next step (no 'Usable drives', no hint that the drive key is still missing).","expected":"'Saved API key for agent <name>. Drive keys on this machine: none; run ...'","actual":"Raw JSON.","evidence":"CLI output, exit 0","suggested_fix":"Print a human summary and the drive-key reminder."},
-{"id":"F-015-6","story":"SETUP-015","severity":"low","category":"disclosure","description":"The first-use Create a drive dialog shows 'Agent-only — never add this drive to passphrase unlock' before the user has been told about passphrase unlock; the Files header line about passphrases is likewise unexplained.","expected":"Plain-language option or hidden under Advanced.","actual":"Jargon at first contact.","evidence":"screenshots/step-1.png, step-2.png","suggested_fix":"Move behind an 'Advanced' disclosure."},
-{"id":"F-015-7","story":"SETUP-015","severity":"low","category":"consistency","description":"Console onboarding steps say 'The agent shows a pairing code. You approve it once.' without the verification code the approve page requires.","expected":"Mention the verification code.","actual":"Pairing code only.","evidence":"screenshots/step-1.png","suggested_fix":"Change step 3 to 'Type the verification code and approve it once.'"}
+  {
+    "id": "F-015-1",
+    "story": "SETUP-015",
+    "severity": "high",
+    "category": "flow",
+    "description": "The CLI cannot import the recovery file the console gives a human-first user. `credentials import --from <agent-drive-<id>.key.json>` fails; only adcred1 bundles are accepted, and the error does not say so.",
+    "expected": "Import accepts the recovery file, or the error names the expected file and the working alternative (AGENT_DRIVE_KEY).",
+    "actual": "'Not a valid Agent Drive credentials bundle.'",
+    "evidence": "CLI output; file contents format=agent-drive-key-v1; screenshots/step-4.png",
+    "suggested_fix": "Accept agent-drive-key-v1 in `credentials import` (the docs already say the console accepts both in the other direction)."
+  },
+  {
+    "id": "F-015-2",
+    "story": "SETUP-015",
+    "severity": "high",
+    "category": "error-handling",
+    "description": "After logging in with an API key and no local drive key, `agent-drive check` says 'There is no usable drive key on this machine. Run `agent-drive login` again.' Running login again cannot fix this for a key-based login.",
+    "expected": "Tell the user to provide the drive key: set AGENT_DRIVE_KEY / import the recovery file.",
+    "actual": "Misleading recovery instruction.",
+    "evidence": "CLI output of `check` in ~/uxw/install-login-015",
+    "suggested_fix": "Branch the message when the config was created by --token-stdin or an env API key."
+  },
+  {
+    "id": "F-015-3",
+    "story": "SETUP-015",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The console API keys page says 'Run the CLI from the repository after building it', and shows `agent-drive login --api http://localhost:3811` plus env-var reads, while llms.txt/docs say install from npm and use `--api <origin>/api`; neither `--token-stdin` nor the recovery file is mentioned. The create-key dialog says only 'use it with agent-drive login'.",
+    "expected": "Same install and login commands as the docs, including `--token-stdin` and how to supply the drive key.",
+    "actual": "Developer-oriented wording and a different command shape.",
+    "evidence": "screenshots/step-7.png, step-9.png",
+    "suggested_fix": "Rewrite the 'From your terminal' block to match docs/quickstart and name `agent-drive login --token-stdin`."
+  },
+  {
+    "id": "F-015-4",
+    "story": "SETUP-015",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "AGENT_DRIVE_KEY and AGENT_DRIVE_KEY_<DRIVE_ID> are the only working way to give the CLI a recovery-file key, but `agent-drive --help` does not list them.",
+    "expected": "Help lists all configuration environment variables.",
+    "actual": "Help lists AGENT_DRIVE_CONFIG, API_URL, API_KEY, MACHINE, CREDENTIALS only.",
+    "evidence": "`agent-drive --help` bottom section; `check ok` obtained with AGENT_DRIVE_KEY",
+    "suggested_fix": "Add the two variables to help."
+  },
+  {
+    "id": "F-015-5",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "`login --token-stdin` success output is a single line of whoami JSON with no sentence, config path or next step (no 'Usable drives', no hint that the drive key is still missing).",
+    "expected": "'Saved API key for agent <name>. Drive keys on this machine: none; run ...'",
+    "actual": "Raw JSON.",
+    "evidence": "CLI output, exit 0",
+    "suggested_fix": "Print a human summary and the drive-key reminder."
+  },
+  {
+    "id": "F-015-6",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The first-use Create a drive dialog shows 'Agent-only — never add this drive to passphrase unlock' before the user has been told about passphrase unlock; the Files header line about passphrases is likewise unexplained.",
+    "expected": "Plain-language option or hidden under Advanced.",
+    "actual": "Jargon at first contact.",
+    "evidence": "screenshots/step-1.png, step-2.png",
+    "suggested_fix": "Move behind an 'Advanced' disclosure."
+  },
+  {
+    "id": "F-015-7",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "consistency",
+    "description": "Console onboarding steps say 'The agent shows a pairing code. You approve it once.' without the verification code the approve page requires.",
+    "expected": "Mention the verification code.",
+    "actual": "Pairing code only.",
+    "evidence": "screenshots/step-1.png",
+    "suggested_fix": "Change step 3 to 'Type the verification code and approve it once.'"
+  }
 ]

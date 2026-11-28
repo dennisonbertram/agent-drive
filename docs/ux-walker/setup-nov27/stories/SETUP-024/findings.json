@@ -1,5 +1,41 @@
 [
- {"id":"F-SETUP-024-01","severity":"low","category":"consistency","criterion":"Component consistency","score":"warn","description":"Two messages do the same job: the entry card says 'This code is wrong, expired, or already used. Run `agent-drive login`...' (command styled as code) while the approval banner says 'This request expired or was already used. Run `agent-drive login`...' with the backticks shown literally.","expected":"One wording, command styled as code in both.","actual":"Literal backtick characters in the banner.","screenshot":"docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-2.png","suggested_fix":"Render the command in a code element in the banner.","files_likely_involved":[]},
- {"id":"F-SETUP-024-02","severity":"low","category":"flow","criterion":"Dead ends","score":"warn","description":"After a request expires, the open page keeps the full form (verification code kept, Approve enabled). The page shows no expiry time or countdown; the user learns of expiry only after typing the code and clicking Approve.","expected":"Show 'Expires at HH:MM' or switch to an expired state.","actual":"Live-looking form.","screenshot":"docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-2.png","suggested_fix":"Use the request expiry to show a countdown and disable the form.","files_likely_involved":[]},
- {"id":"F-SETUP-024-03","severity":"low","category":"error-handling","criterion":"Error messages","score":"warn","description":"The entry-card message lumps three causes (wrong, expired, already used). After a successful approval, reopening the link implies failure, so a user who double-clicked or reloaded cannot tell the approval worked.","expected":"'This request was already approved' for a used code.","actual":"Generic message.","screenshot":"docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-1.png","suggested_fix":"Return a distinct state for approved requests.","files_likely_involved":[]}
+  {
+    "id": "F-SETUP-024-01",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Component consistency",
+    "score": "warn",
+    "description": "Two messages do the same job: the entry card says 'This code is wrong, expired, or already used. Run `agent-drive login`...' (command styled as code) while the approval banner says 'This request expired or was already used. Run `agent-drive login`...' with the backticks shown literally.",
+    "expected": "One wording, command styled as code in both.",
+    "actual": "Literal backtick characters in the banner.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-2.png",
+    "suggested_fix": "Render the command in a code element in the banner.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-024-02",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "After a request expires, the open page keeps the full form (verification code kept, Approve enabled). The page shows no expiry time or countdown; the user learns of expiry only after typing the code and clicking Approve.",
+    "expected": "Show 'Expires at HH:MM' or switch to an expired state.",
+    "actual": "Live-looking form.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-2.png",
+    "suggested_fix": "Use the request expiry to show a countdown and disable the form.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-024-03",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "The entry-card message lumps three causes (wrong, expired, already used). After a successful approval, reopening the link implies failure, so a user who double-clicked or reloaded cannot tell the approval worked.",
+    "expected": "'This request was already approved' for a used code.",
+    "actual": "Generic message.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-1.png",
+    "suggested_fix": "Return a distinct state for approved requests.",
+    "files_likely_involved": []
+  }
 ]

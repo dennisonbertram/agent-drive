@@ -1,7 +1,62 @@
 [
-{"id":"SETUP-029-F1","story":"SETUP-029","severity":"low","category":"layout","description":"On the share error card ('Share unavailable'), the 'Try again' button and 'Go to Agent Drive' link touch with no gap, desktop and mobile.","expected":"~12-16px gap between button and link","actual":"Button right edge and link left edge both at x=500","evidence":"screenshots/step-4b-after-download.png, step-4c-mobile.png","suggested_fix":"Add gap to the action row.","surface":"web /s/[id]"},
-{"id":"SETUP-029-F2","story":"SETUP-029","severity":"low","category":"copy","description":"--expires-in error does not state min/max or that seconds are unsupported; story text claims a 'between 2m and 30d' message.","expected":"Range in message","actual":"--expires-in must use a duration such as 30m, 24h, or 7d. (for 90s)","evidence":"CLI output","suggested_fix":"Return the range message for valid-format-but-out-of-range and say units are m, h, d.","surface":"CLI"},
-{"id":"SETUP-029-F3","story":"SETUP-029","severity":"low","category":"copy","description":"Re-put to an existing path suggests merging and --if-version, never mentions --overwrite, which is what a user replacing a file wants.","expected":"Mention --overwrite","actual":"The file already exists. Current version: <id>. Read the file again, merge your change, then retry with --if-version <id>.","evidence":"CLI output exit 1","suggested_fix":"Add 'or pass --overwrite to replace it'.","surface":"CLI"},
-{"id":"SETUP-029-F4","story":"SETUP-029","severity":"low","category":"visual","description":"Share download card keeps an empty status area under the Download button, leaving ~50px of dead space inside the card.","expected":"Tight card","actual":"empty space under button","evidence":"screenshots/step-4-share-page.png","suggested_fix":"Collapse empty status region.","surface":"web /s/[id]"},
-{"id":"SETUP-029-F5","story":"SETUP-029","severity":"info","category":"env","description":"Download in browser not walkable: ciphertext fetched from 127.0.0.1:9811 (local object store), unreachable from the browser; user sees 'The file could not be downloaded. Check your connection'.","expected":"Download starts","actual":"Share unavailable","evidence":"network request GET http://127.0.0.1:9811/agent-drive-local/objects/...","suggested_fix":"Test environment only; verify on staging.","surface":"web /s/[id]"}
+  {
+    "id": "SETUP-029-F1",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "layout",
+    "description": "On the share error card ('Share unavailable'), the 'Try again' button and 'Go to Agent Drive' link touch with no gap, desktop and mobile.",
+    "expected": "~12-16px gap between button and link",
+    "actual": "Button right edge and link left edge both at x=500",
+    "evidence": "screenshots/step-4b-after-download.png, step-4c-mobile.png",
+    "suggested_fix": "Add gap to the action row.",
+    "surface": "web /s/[id]"
+  },
+  {
+    "id": "SETUP-029-F2",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "copy",
+    "description": "--expires-in error does not state min/max or that seconds are unsupported; story text claims a 'between 2m and 30d' message.",
+    "expected": "Range in message",
+    "actual": "--expires-in must use a duration such as 30m, 24h, or 7d. (for 90s)",
+    "evidence": "CLI output",
+    "suggested_fix": "Return the range message for valid-format-but-out-of-range and say units are m, h, d.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-029-F3",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "copy",
+    "description": "Re-put to an existing path suggests merging and --if-version, never mentions --overwrite, which is what a user replacing a file wants.",
+    "expected": "Mention --overwrite",
+    "actual": "The file already exists. Current version: <id>. Read the file again, merge your change, then retry with --if-version <id>.",
+    "evidence": "CLI output exit 1",
+    "suggested_fix": "Add 'or pass --overwrite to replace it'.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-029-F4",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "visual",
+    "description": "Share download card keeps an empty status area under the Download button, leaving ~50px of dead space inside the card.",
+    "expected": "Tight card",
+    "actual": "empty space under button",
+    "evidence": "screenshots/step-4-share-page.png",
+    "suggested_fix": "Collapse empty status region.",
+    "surface": "web /s/[id]"
+  },
+  {
+    "id": "SETUP-029-F5",
+    "story": "SETUP-029",
+    "severity": "info",
+    "category": "env",
+    "description": "Download in browser not walkable: ciphertext fetched from 127.0.0.1:9811 (local object store), unreachable from the browser; user sees 'The file could not be downloaded. Check your connection'.",
+    "expected": "Download starts",
+    "actual": "Share unavailable",
+    "evidence": "network request GET http://127.0.0.1:9811/agent-drive-local/objects/...",
+    "suggested_fix": "Test environment only; verify on staging.",
+    "surface": "web /s/[id]"
+  }
 ]

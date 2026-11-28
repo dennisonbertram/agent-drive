@@ -1,8 +1,8 @@
 [
- {
-  "id": "F-SETUP-002-1",
-  "severity": "low",
-  "title": "selfhost-banner",
-  "description": "Public pricing shows self-hoster wording and Coming soon with no timeline"
- }
+  {
+    "id": "F-SETUP-002-1",
+    "severity": "low",
+    "title": "selfhost-banner",
+    "description": "Public pricing shows self-hoster wording and Coming soon with no timeline"
+  }
 ]

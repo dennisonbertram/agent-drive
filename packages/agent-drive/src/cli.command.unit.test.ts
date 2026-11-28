@@ -1050,7 +1050,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
           : {},
       { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
     );
-    expect(r.err).toContain('no account key yet');
+    expect(r.err).toContain('no passphrase yet');
     expect(r.origins.length).toBeGreaterThan(0);
     expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
   });

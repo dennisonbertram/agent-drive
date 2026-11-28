@@ -1,4 +1,5 @@
 # SETUP-051 walk report: Mount a drive in Finder for the first time
+
 Status: partial. Target: local app 0.5.1 at localhost:3811; CLI run on the Mac Studio (no Agent Drive.app installed).
 
 1. Landing page (screenshots/step-1.png). Header: Pricing, Docs, Sign in, Sign up free. No mention of Finder or mount anywhere on the page. Geometry: pageOverflowX 0; script reported nav/footer "uneven rows" and many "wrapped controls" that the screenshot does not show (false positives). Console errors: none.
@@ -7,9 +8,10 @@ Status: partial. Target: local app 0.5.1 at localhost:3811; CLI run on the Mac S
 4. Not-walkable: double-click the app, enable extension, Finder row, drag a file, Ctrl+C unmount.
 5. CLI `mount /Users/agent/uxw/m051/AgentDrive` without the app: "ENOENT: no such file or directory, stat '/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder'". `AGENT_DRIVE_FINDER_HELPER=relative` gives "Finder helper override must be an absolute path" (clear). Mount with no argument prints "Usage: mount MOUNTPOINT [--drive ID] [--read-only] | mount --name NAME".
 6. `--help`: mounts lines listed twice.
-Mobile: docs page checked at 390x844 (SETUP-055/screenshots/mobile-check.png).
+   Mobile: docs page checked at 390x844 (SETUP-055/screenshots/mobile-check.png).
 
 ## Flow Log
+
 - Specified: 7 steps; ideal path 5. Needed here: could reach 3 (docs, login, mount) before the missing app blocked.
 - Hesitations: where to find the app (no web/console pointer); raw ENOENT does not say "install the app".
 - Re-entry: login needed two attempts because of the URL.

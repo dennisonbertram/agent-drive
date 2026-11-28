@@ -1,5 +1,38 @@
 [
-{"id":"SETUP-033-F1","story":"SETUP-033","severity":"medium","category":"security-copy","description":"Docs and the TTY refusal imply --stdout is safe, but an agent's shell is not a terminal, so an unpiped `credentials export --stdout` prints the bundle into the agent transcript.","expected":"Doc warns agents to always pipe; guard or warning on unpiped use by agents","actual":"Non-TTY run printed the bundle (417 bytes) with no warning","evidence":"CLI: export --stdout | wc -c => 417; docs/sandboxes.md 'prints the bundle only when stdout is not a terminal'","suggested_fix":"State plainly in docs: always pipe to a store; never run it bare in an agent shell. Optionally add a required --yes-print flag.","surface":"CLI/docs"},
-{"id":"SETUP-033-F2","story":"SETUP-033","severity":"low","category":"error","description":"Missing/invalid-bundle errors do not tell the user how to recover or name the env variable when it is empty.","expected":"Recovery hint","actual":"'AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.' and, when empty, 'API configuration is missing. Run `agent-drive login` ...'","evidence":"CLI output","suggested_fix":"Add: 'Copy the full line from your secret store (it starts adcred1.) or run agent-drive credentials export on the original machine.'","surface":"CLI"},
-{"id":"SETUP-033-F3","story":"SETUP-033","severity":"low","category":"copy","description":"Clipboard failure says 'outside the repo' where sandbox docs and BACKUP_HINT say 'outside the sandbox'; neither mentions --stdout|confirm.","expected":"Consistent wording","actual":"Use `--to 1password` or `--to <a file outside the repo>` instead.","evidence":"CLI output","suggested_fix":"Unify wording and add the stdout route.","surface":"CLI"}
+  {
+    "id": "SETUP-033-F1",
+    "story": "SETUP-033",
+    "severity": "medium",
+    "category": "security-copy",
+    "description": "Docs and the TTY refusal imply --stdout is safe, but an agent's shell is not a terminal, so an unpiped `credentials export --stdout` prints the bundle into the agent transcript.",
+    "expected": "Doc warns agents to always pipe; guard or warning on unpiped use by agents",
+    "actual": "Non-TTY run printed the bundle (417 bytes) with no warning",
+    "evidence": "CLI: export --stdout | wc -c => 417; docs/sandboxes.md 'prints the bundle only when stdout is not a terminal'",
+    "suggested_fix": "State plainly in docs: always pipe to a store; never run it bare in an agent shell. Optionally add a required --yes-print flag.",
+    "surface": "CLI/docs"
+  },
+  {
+    "id": "SETUP-033-F2",
+    "story": "SETUP-033",
+    "severity": "low",
+    "category": "error",
+    "description": "Missing/invalid-bundle errors do not tell the user how to recover or name the env variable when it is empty.",
+    "expected": "Recovery hint",
+    "actual": "'AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.' and, when empty, 'API configuration is missing. Run `agent-drive login` ...'",
+    "evidence": "CLI output",
+    "suggested_fix": "Add: 'Copy the full line from your secret store (it starts adcred1.) or run agent-drive credentials export on the original machine.'",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-033-F3",
+    "story": "SETUP-033",
+    "severity": "low",
+    "category": "copy",
+    "description": "Clipboard failure says 'outside the repo' where sandbox docs and BACKUP_HINT say 'outside the sandbox'; neither mentions --stdout|confirm.",
+    "expected": "Consistent wording",
+    "actual": "Use `--to 1password` or `--to <a file outside the repo>` instead.",
+    "evidence": "CLI output",
+    "suggested_fix": "Unify wording and add the stdout route.",
+    "surface": "CLI"
+  }
 ]

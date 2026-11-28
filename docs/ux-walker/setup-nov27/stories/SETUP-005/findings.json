@@ -1,8 +1,8 @@
 [
- {
-  "id": "F-SETUP-005-1",
-  "severity": "high",
-  "title": "dismiss-stuck",
-  "description": "Dismiss on error leaves Opening your workspace forever"
- }
+  {
+    "id": "F-SETUP-005-1",
+    "severity": "high",
+    "title": "dismiss-stuck",
+    "description": "Dismiss on error leaves Opening your workspace forever"
+  }
 ]

@@ -9,15 +9,18 @@ Geometry audit: pageOverflowX 0; only unevenRows hit is the Refresh/Connect an a
 ## Steps
 
 ### Step 1: Open Capture... on a drive and read the Local agents section
+
 - Screenshot: `/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-2.png`
 - What the screenshot shows: Text: 'Connect to Agent Drive and load this drive's key on your agent's machine first. Run Claude Code or Codex through capture to save encrypted traces under /traces. Check terminal output: capture may be disabled, uploads may be queued, or calls may not be captured.' Two code boxes: `npm install -g @dennisonbertram/agent-drive` and `agent-drive capture --drive <id> -- claude`, each with a 'Copy' button. Copy buttons work ('Copied').
 - Geometry: pass
 
 ### Step 2: CLI: `agent-drive capture` with no arguments / bad agent name / no login
+
 - What the screenshot shows: Exact outputs: `Usage: capture [--drive ID] [--agent NAME] -- COMMAND [ARGS...]`; `--agent must be 1-40 characters: lowercase letters, digits, ".", "_" or "-".`; and with no saved login `capture disabled: API configuration is missing. Run `agent-drive login` or set AGENT_DRIVE_API_URL and AGENT_DRIVE_API_KEY; running echo without capture` followed by the command's own output. All clear and actionable, and the wrapped command still runs.
 - Geometry: n/a
 
 ### Step 3: CLI: `agent-drive login --no-browser` against the server (needed before a real capture run)
+
 - What the screenshot shows: Blocked. With AGENT_DRIVE_API_URL=http://localhost:3811 the output was `Agent Drive refused the login request: 404`. With http://localhost:3811/api (the form the app's llms.txt shows) it was `Agent Drive refused the login request: slow_down` on every attempt for about 15 minutes (the server is shared by many walkers). So no drive key could be saved and no traces were captured. Not walked: running a real capture, uploads summary line, the Traces view after capture.
 - Geometry: n/a
 

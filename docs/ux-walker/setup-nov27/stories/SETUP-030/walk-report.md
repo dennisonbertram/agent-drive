@@ -8,4 +8,5 @@ Status: NOT-WALKABLE in this run. Making a read-only reviewer needs either `agen
 What was checked statically: docs/sandboxes.md "Common failures" explains the result: "`check ok ... (read-only)` or `check not verified`: a read-only key cannot write the check file, so `check` decrypts an existing file instead. On an empty drive it prints `check not verified` and exits 1. Run it again after another agent writes a file. Do not report setup as complete until it prints `check ok`." The step text in the story (`check not verified drive=<id>: this read-only key has nothing to decrypt yet; run check again after another agent writes a file.` on stderr, exit 1) could not be observed. The story's concern (wording "not verified" and exit 1 read like a failed key) stays unconfirmed.
 
 ## Flow Log
+
 - Steps specified 4; walked 0. Blocker: login rate limit (see finding), not a product defect in the check command.

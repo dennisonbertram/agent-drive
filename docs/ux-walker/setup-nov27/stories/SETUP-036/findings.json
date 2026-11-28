@@ -1,6 +1,50 @@
 [
-{"id":"F-SETUP-036-01","severity":"medium","category":"error-handling","criterion":"Actionable error message","score":"warn","description":"A fingerprint pasted with the trailing comma is rejected with a generic format message that does not name the comma, although the console sentence puts a comma right after the fingerprint.","expected":"The CLI trims surrounding punctuation or says 'remove the trailing comma'.","actual":"--fingerprint must look like \"a1b2 c3d4 e5f6 7890\", exactly as the console shows it.","screenshot":"CLI output (agent-drive account seal --fingerprint \"377c 2967 79bd 5e29,\")","suggested_fix":"Strip leading/trailing non-hex punctuation before validating."},
-{"id":"F-SETUP-036-02","severity":"medium","category":"happy-path","criterion":"Labels/copy consistent across surfaces","score":"warn","description":"CLI messages and dialogs send the user to 'Settings' but the page is titled 'Activity & deletion' (sidebar link and header) and the passphrase card sits under the activity table.","expected":"The page or sidebar link is called Settings, or the messages name the real page.","actual":"Settings is not a visible label anywhere in the console.","screenshot":"screenshots/step-1.png","suggested_fix":"Rename the page or reword the CLI/dialog copy to 'Activity & deletion page'."},
-{"id":"F-SETUP-036-03","severity":"low","category":"happy-path","criterion":"Copy affordance","score":"warn","description":"The fingerprint is small grey prose with no Copy button; on a phone it wraps mid-value.","expected":"A monospaced fingerprint with a Copy button (as the passphrase and key already have).","actual":"Selecting text is the only way; the sentence's comma gets selected.","screenshot":"screenshots/mobile-check.png","suggested_fix":"Show the fingerprint in its own mono block with Copy."},
-{"id":"F-SETUP-036-04","severity":"low","category":"layout","criterion":"Overflow","score":"warn","description":"On the Activity table at 390px the WHEN and WHO header cells spill 20px and 12px.","expected":"No spill.","actual":"overflowSpills th When 20px, th Who 12px.","screenshot":"screenshots/mobile-check.png","suggested_fix":"Allow header wrapping or horizontal scroll container."}
+  {
+    "id": "F-SETUP-036-01",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Actionable error message",
+    "score": "warn",
+    "description": "A fingerprint pasted with the trailing comma is rejected with a generic format message that does not name the comma, although the console sentence puts a comma right after the fingerprint.",
+    "expected": "The CLI trims surrounding punctuation or says 'remove the trailing comma'.",
+    "actual": "--fingerprint must look like \"a1b2 c3d4 e5f6 7890\", exactly as the console shows it.",
+    "screenshot": "CLI output (agent-drive account seal --fingerprint \"377c 2967 79bd 5e29,\")",
+    "suggested_fix": "Strip leading/trailing non-hex punctuation before validating."
+  },
+  {
+    "id": "F-SETUP-036-02",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Labels/copy consistent across surfaces",
+    "score": "warn",
+    "description": "CLI messages and dialogs send the user to 'Settings' but the page is titled 'Activity & deletion' (sidebar link and header) and the passphrase card sits under the activity table.",
+    "expected": "The page or sidebar link is called Settings, or the messages name the real page.",
+    "actual": "Settings is not a visible label anywhere in the console.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Rename the page or reword the CLI/dialog copy to 'Activity & deletion page'."
+  },
+  {
+    "id": "F-SETUP-036-03",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Copy affordance",
+    "score": "warn",
+    "description": "The fingerprint is small grey prose with no Copy button; on a phone it wraps mid-value.",
+    "expected": "A monospaced fingerprint with a Copy button (as the passphrase and key already have).",
+    "actual": "Selecting text is the only way; the sentence's comma gets selected.",
+    "screenshot": "screenshots/mobile-check.png",
+    "suggested_fix": "Show the fingerprint in its own mono block with Copy."
+  },
+  {
+    "id": "F-SETUP-036-04",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Overflow",
+    "score": "warn",
+    "description": "On the Activity table at 390px the WHEN and WHO header cells spill 20px and 12px.",
+    "expected": "No spill.",
+    "actual": "overflowSpills th When 20px, th Who 12px.",
+    "screenshot": "screenshots/mobile-check.png",
+    "suggested_fix": "Allow header wrapping or horizontal scroll container."
+  }
 ]

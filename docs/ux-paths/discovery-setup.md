@@ -44,6 +44,7 @@ The primary actor is an AI agent running a shell. The human signs up, approves t
 ### 1. Landing, sign-up, first console visit
 
 Landing `/` (`apps/web/app/(app)/page.tsx`, copy in `apps/web/src/content/home.ts`):
+
 - Header (`apps/web/app/site-header.tsx`): links `Pricing`, `Docs`, `Sign in`; CTA `Sign up free` (to `/sign-up`). There is no "llms.txt" link in the header any more.
 - Hero: tag "Portable storage for agents", h1 "Agent files that outlive the sandbox.", panel "Give this to your agent" with `> Set up Agent Drive: https://agentdrive.xyz/llms.txt` and button "Copy prompt" (aria label "Copy agent instruction"). Line "Free to start. Your agent shows a pairing code, and you approve it in your account." Then "or in a terminal:" `npm install -g @dennisonbertram/agent-drive` with "Copy command".
 - Sections: problem ("Sandboxes end. Machines change. Platforms switch."), use cases, "See every file your agents saved.", "Encrypted. Sharable. Works anywhere.", comparisons (`/compare/...`), FAQ, "Start free." plan cards with `Choose plan` (to `/pricing`) and `Sign up free`, closing "Give your agent a drive." with `Sign up free`.
@@ -55,6 +56,7 @@ Pricing `/pricing`: cards Free ($0), Developer ($20), Team ($200). Free card but
 Sign-up `/sign-up` and sign-in `/sign-in`: Clerk components (`apps/web/app/(app)/sign-up/[[...sign-up]]/page.tsx`, `.../sign-in/[[...sign-in]]/page.tsx`), `fallbackRedirectUrl="/console"`. A validated `redirect_url` is honored (`safeRedirect` in `site-header.tsx`). If Clerk is not configured: panel "Sign-in is not configured on this installation. Configure the Agent Drive Clerk instance to enable human access." Page links to the other form via `AuthLinks`.
 
 First console visit `/console` (`apps/web/app/(app)/console/page.tsx`, `console.tsx`, 4,635 lines):
+
 - Unauthenticated: redirect to `/sign-in`. Note this redirect drops any intended return page (it is plain `redirect('/sign-in')`).
 - Loading: "Opening your workspace…" / "Loading your drives and access settings."
 - Load failure: "Workspace unavailable" / "Check the connection, then refresh to try again." with `Try again`.
@@ -64,15 +66,18 @@ First console visit `/console` (`apps/web/app/(app)/console/page.tsx`, `console.
 - Passphrase banner, shown on Files while the account has no account key: "Set a passphrase and agents will add every drive’s key to your account — then each one opens here automatically." with button `Set up` (`data-testid="setup-passphrase-banner"`).
 
 Human-first drive creation (alternative to the agent path), `New drive` dialog:
+
 - Text: "We’ll generate a unique encryption key in your browser. Save it somewhere safe: the server cannot recover it." Field `Drive name` (placeholder "Research workspace", default "my-drive" when first drive), checkbox "Agent-only — never add this drive to passphrase unlock", button `Create drive`.
 - Receipt dialog: "This key decrypts your drive. Without it nobody, including us, can open this drive. It is not sent to the service or saved in browser storage." `Show drive key`, `Copy drive key`, warning "The recovery file contains a secret in plaintext...", button `Download recovery file and continue`, then "Did the recovery file save?" with `I saved it` and `Download again`. `I saved it` records the backup (`recordBackup`).
 - Name collision: "A drive with this name already exists. Load its original drive key instead."
 
 Agents and API keys (manual path, console.tsx ~3680-3800, 4408-4560):
+
 - Agents tab: collapsible "Connect an agent" panel (open when there are no agents and no keys) with the instruction, link "Read what your agent will see (llms.txt)", and MCP snippets for Claude Code (`claude mcp add agent-drive -- agent-drive mcp`), Codex (`~/.codex/config.toml` snippet), and "Cursor or any MCP client". Empty state "Who’s doing the work?" / "Create an identity for your first agent, then issue a scoped API key." / `Create your first agent`.
 - API keys tab empty guards: "Create a drive first." / "Create an agent first." Secret shown once with the checkbox "I saved my API key securely".
 
 Passphrase, key menu and unlock (account key), `unlock-dialog.tsx`, `vault-forms.tsx`, `key-chip.tsx`, `apps/web/src/console/vault.ts`:
+
 - Key chip states: `Key needed`, `Key loaded`, `Locked`, `Unlocked`, suffix ` · Not backed up`. Help text "Not backed up. If the agent’s machine is lost, these files can’t be opened."
 - Menu items: `Set up passphrase unlock`, `Download recovery file` / `Download recovery file again`, `Lock this browser`, `Forgot or exposed passphrase?`, Add a passkey (offered in a notice after setup, `data-testid="passkey-offer"`).
 - Setup form: generated 20-character passphrase ("Your passphrase: we generated it in your browser. Save it in your password manager...") with `Copy passphrase`, or own passphrase ("at least 14 characters", "Type it again"), button text "Working… this takes a few seconds." while deriving; `Use a generated passphrase` / `Use my own passphrase` toggle. Checkbox `Keep this browser unlocked` (default on).
@@ -83,6 +88,7 @@ Passphrase, key menu and unlock (account key), `unlock-dialog.tsx`, `vault-forms
 ### 2. CLI install, login, approval, key transfer
 
 Install (all in docs; no installer script):
+
 - `npm install -g @dennisonbertram/agent-drive` (Node 24+). Fallback with no global install: `npx -y @dennisonbertram/agent-drive@latest <command>`. Sources: `docs/quickstart.md`, `docs/cli.md`, `apps/web/app/llms.txt/route.ts`, `docs/sandboxes.md`.
 - Self-host: `agent-drive login --name "<n>" --api https://<origin>/api` (`llms.txt` adds ` --api <origin>/api` on non-public origins automatically).
 - No Node version check is present in `packages/agent-drive/src/cli.ts` (I found none); the docs state the requirement.
@@ -91,6 +97,7 @@ Install (all in docs; no installer script):
 `/llms.txt` (`apps/web/app/llms.txt/route.ts`, plus `llmsIndex` in `apps/web/src/content/site.ts`, also `/llms-full.txt`): the agent script. Sections: "Set up (local agent with a shell)" steps 1 to 6 (install, connect, human approves, back up credentials, install skill, check), "Troubleshooting", "Sandboxes", "Adding another agent to your drive", "Several agents on one drive", "Hosted assistants", "MCP setup (optional)". Tells the human: open the link, check the code, type the verification code, click Approve.
 
 `agent-drive login [--name AGENT] [--no-browser]` (`cli.ts:657`, `device.ts`):
+
 - Prints exactly, in order: `Open this link to approve: <origin>/connect?code=XXXX-XXXX`, `Check that the code matches: XXXX-XXXX`, `Verification code: a1b2 c3d4 e5f6 7890`, `Waiting for approval...`. Opens the browser when stdout is a terminal and `CI` is unset; `--no-browser` prints only.
 - Polls `POST /api/oauth/token` every 5 seconds (adds 5 on `slow_down`). Code lifetime 10 minutes.
 - Success output: `Logged in as agent <name>.`, `Usable drives: <ids>`, `Scopes: ...`, optional `Writes limited to: ...`, `Config: <path>`, and for a new drive `New drive <id> created; its key is saved in the config file.` then `BACKUP_HINT` (credentials.ts:33). Reconnect prints `The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.`
@@ -98,6 +105,7 @@ Install (all in docs; no installer script):
 - After login the CLI runs account-key sealing in the background (`sealSavedConnectionAfterKeyChange`).
 
 Approval page `/connect?code=XXXX-XXXX` (`apps/web/app/(app)/connect/page.tsx`, `connect.tsx`, `/api/console/device/:code[/approve]`):
+
 - Signed out: redirect to `/sign-in?redirect_url=/connect?code=...`.
 - No code: card tag "Awaiting code", h1 "Connect an agent", "Enter the code your agent printed after running `agent-drive login`.", field "Code from your agent" (placeholder `XXXX-XXXX`), button `Continue` (`Looking up…`). Errors: "Enter the code your agent printed." / "Enter the code in the form XXXX-XXXX." / "This code is wrong, expired, or already used. Run `agent-drive login` in your agent to get a new code." Tag becomes "No pairing".
 - Review: tag "Pairing request", h1 "Connect <agent name>?", one-line summary (for example "New encrypted drive · full access"), collapsible `Details` (Machine, Account, Drive, Access, Writes, Offered by, Requested; link `Use one of my drives instead (needs its recovery file)`; checkbox "Let this agent add other agents to its drives" with small print), an explanation line, then "Does this code match your terminal?" with the code in large type, "If it does not, close this page; the request expires on its own.", a field `Verification code` (placeholder `a1b2 c3d4 e5f6 7890`, hint "Type the code from your agent’s terminal. This page never shows it."), button `Approve agent` (`Working…`), note "You can revoke access any time in Console, Agents."
@@ -112,17 +120,20 @@ Approval page `/connect?code=XXXX-XXXX` (`apps/web/app/(app)/connect/page.tsx`, 
 - There is no Deny control anywhere on this page, although the API has `POST /api/console/device/:code/deny` and the CLI handles `access_denied`.
 
 Add another agent / device (`docs/connect-an-agent.md`):
+
 - `agent-drive grant CODE --verify "a1b2 c3d4 e5f6 7890" [--drive ID] [--read-only] [--scope S]... [--write-path P]...` from an agent with `delegate`. Checks the verification code against the request public key before sealing; the owner then approves on `/connect` ("Offered by").
 - `agent-drive credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)` for sandboxes; prints `AGENT_DRIVE_CREDENTIALS=adcred1....`.
 - Recovery-file handoff on `/connect` (Details, "Use one of my drives instead").
 
 First-time account key transfer (agent seals drive key to the owner's account key), `packages/agent-drive/src/account-seal.ts`, `cli.ts:1095`:
+
 - Automatic: on `login`, `drive create`, `credentials import`, MCP start, and at most every 24 hours on commands that load a key. Best effort, never fails the command.
 - First use needs a human-verified fingerprint: `agent-drive account seal [--drive ID] [--fingerprint "a1b2 c3d4 e5f6 7890"] [--repin]` or env `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT`. Output per drive: `<drive id>: sealed | already sealed | unverified | no account key | agent-only | unknown type`.
 - Warnings: NO_ACCOUNT_KEY ("Your account has no account key yet, so the console cannot open this drive. Set a passphrase in the console under Settings; agents will add the drive then."), UNVERIFIED_HINT ("The account key has not been verified on this machine. Copy its fingerprint from the console (Settings) and run `agent-drive account seal --fingerprint "<the fingerprint>"`. Sealing stays off until then."), fingerprint mismatch and pin mismatch errors, `--repin requires --fingerprint.`, `--fingerprint must look like "a1b2 c3d4 e5f6 7890", exactly as the console shows it.`
 - Loop: owner sets passphrase in Files, reads fingerprint in Settings, types it into the agent terminal, agent seals, owner opens drive in Files with the passphrase.
 
 Backup, then check (`quickstart.md` steps 4 and 5):
+
 - `agent-drive credentials export --to 1password [--vault NAME]` (counts as backup at once), `--to clipboard [--keep-clipboard]` then `agent-drive credentials confirm`, `--to PATH [--force]` (mode 600, counts as backup), `--stdout | STORE && agent-drive credentials confirm`. `credentials import [--from PATH]`, `credentials status`.
 - `agent-drive check [--drive ID]` prints `check ok`, refuses with `drive key not backed up: <ids>` plus the hint, or for read-only keys `check ok ... (read-only)` / `check not verified drive=<id>: this read-only key has nothing to decrypt yet; run check again after another agent writes a file.`
 - First file: `put`, `get`, `share` (quickstart step 6).
@@ -140,10 +151,12 @@ Backup, then check (`quickstart.md` steps 4 and 5):
 ### 4. `connect`, mounts, sandboxes, Linux
 
 Two different meanings of "sandbox" appear in the docs:
+
 - A disposable machine where an agent runs. Persistence uses `AGENT_DRIVE_CREDENTIALS` (`docs/sandboxes.md`).
 - An Instabox sandbox whose folder you mount on your desktop (`docs/cli.md` "Live workspace mounts", `packages/agent-drive/README.md` "Mount an existing Instabox workspace", `skills/agent-drive/SKILL.md:171`).
 
 Live workspace commands (`cli.ts:840-1056`):
+
 - `agent-drive connect NAME MOUNTPOINT --sandbox ID --root /WORKSPACE/PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]`. Usage error text identical to the help line. "Use only one of --wake-on-access or --no-wake-on-access."
 - Release example: `agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" --sandbox "$SANDBOX_ID" --root "$WORKSPACE_ROOT" --persist`.
 - `agent-drive mounts wake NAME on|off`; `mounts list`; `mounts status [NAME]`; `mounts forget NAME`; `mounts service install|status|remove NAME`; `mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID]`; `agent-drive mount --name NAME`.
@@ -177,6 +190,7 @@ Sandbox persistence (`docs/sandboxes.md`): `agent-drive credentials export --std
 ## Navigation Structure of the setup (handoffs between surfaces)
 
 Primary loop, agent-first (the path the product promotes):
+
 1. Website `/` (copy `Set up Agent Drive: https://agentdrive.xyz/llms.txt`) to the human's agent (chat, outside any Agent Drive surface).
 2. Agent reads `/llms.txt`, runs npm install in a terminal, runs `agent-drive login`.
 3. CLI prints link, code and verification code; opens browser (if a TTY) at `/connect?code=...`.
@@ -211,6 +225,7 @@ Clerk (sign-up, sign-in, reverification, WebAuthn account). npm registry. GitHub
 ## Error, empty, loading and recovery states
 
 Website and console:
+
 - Clerk not configured (sign-in, sign-up panels).
 - Console session expired during API call: "Your session expired. Sign in again." and redirect to `/sign-in`.
 - Console loading ("Opening your workspace…"), failure ("Workspace unavailable", `Try again`), first-run empty (onboarding panel), "No drives yet." on Trash, "Ready for your first file." / "Connect an agent with the CLI or MCP to upload encrypted files.", "No recent files.", "No traces yet.", "Nothing in the trash.", "Who’s doing the work?", "Create a drive first.", "Create an agent first.", "No storage used yet."
@@ -219,6 +234,7 @@ Website and console:
 - `/connect` states: all listed in feature map 2 (wrong/expired/used code, mismatched verification code, bad key, wrong drive, key unverifiable, folder format, changed request, expired at approve, session expired). Not present: a Deny button, a countdown or visible expiry time, a "wrong account" warning (the page only shows `Account` inside collapsed `Details`).
 
 CLI:
+
 - `login`: "Could not reach Agent Drive at <base>. Check the network and try again.", "Agent Drive refused the login request: ...", "Agent Drive returned an invalid user code. Run `agent-drive login` again.", "The login code expired. Run `agent-drive login` again.", "Approval was denied. No access was granted.", "Lost contact with Agent Drive at <base>. Run `agent-drive login` again.", "Login failed: <code>. Run `agent-drive login` again.", "Login finished but this agent has no usable drive key. Run `agent-drive login` again; the owner's approval will create a drive for this agent.", "Could not unseal the key for drive <id>; it is not saved.", "No usable key for: <ids>. You can list names but not read contents.", "Ignored a different API URL returned by the server."
 - Config missing: "API configuration is missing. Run `agent-drive login` or set AGENT_DRIVE_API_URL and AGENT_DRIVE_API_KEY."
 - Backup: 1Password errors ("Nothing was exported. Install the 1Password CLI ... check that `op whoami` succeeds, then run this again."), clipboard on Linux or WSL exits non-zero, "Could not clear the clipboard; clear it yourself.", "--method must be "stdout" or "file"."

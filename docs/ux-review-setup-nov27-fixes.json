@@ -3,9 +3,7 @@
     "id": "Q1",
     "title": "Make dialog Copy buttons, focus ring and password inputs visible (C2)",
     "fix": "In console-panels.css give `dialog .copy-button` and details Copy buttons a visible light-on-dark or orange style at rest (current rule sets color var(--ink) on transparent over a #111 block, ratio 1); add a visible focus ring on the onboarding Copy; style dialog password inputs like other inputs; make a disabled primary visibly weaker than the adjacent secondary.",
-    "files": [
-      "apps/web/app/styles/console-panels.css"
-    ],
+    "files": ["apps/web/app/styles/console-panels.css"],
     "acceptance": [
       "layout-audit lowContrast reports no .copy-button on Connect dialog and the three MCP setup Copy buttons at 1440 and 375",
       "Copy button contrast >= 4.5:1 at rest; focus ring contrast >= 3:1 on onboarding Copy",
@@ -33,10 +31,7 @@
     "id": "Q3",
     "title": "/connect layout and message fixes (C3, C4)",
     "fix": "Stack the verification-code label above its input at all widths; keep Approve visible with Details open at 1280x800; raise field labels to >= 12px; make 'Enter the code in the form XXXX-XXXX.' name the no-vowels rule; accept the verification code with or without spaces and say so; render `agent-drive login` as code in the expired banner; autofocus the verification input on a pending request.",
-    "files": [
-      "apps/web/app/(app)/connect/connect.tsx",
-      "apps/web/app/styles/connect.css"
-    ],
+    "files": ["apps/web/app/(app)/connect/connect.tsx", "apps/web/app/styles/connect.css"],
     "acceptance": [
       "At 375px a typed 19-character verification code has scrollWidth <= clientWidth",
       "At 1280x800 with Details open the Approve button bottom edge <= 800",
@@ -78,9 +73,7 @@
     "id": "Q6",
     "title": "Explain device-login errors: rate limit and wrong API URL (C12)",
     "fix": "In device.ts map a start rejected with slow_down to a message stating it is a rate limit (20 login starts per IP per hour) and to retry later; on 404 print the URL tried and that the API URL normally ends in /api; explain or drop 'Ignored a different API URL returned by the server.' Do not change the limit or its duration.",
-    "files": [
-      "packages/agent-drive/src/device.ts"
-    ],
+    "files": ["packages/agent-drive/src/device.ts"],
     "acceptance": [
       "A rejected login start prints 'rate limit' and the stated limit",
       "A 404 prints the URL tried and the /api hint",
@@ -91,9 +84,7 @@
     "id": "Q7",
     "title": "Console copy and small-logic pass in console.tsx (C1 console parts, C13, C14, C15, C16, C19 toolbar, C21 line, C24)",
     "fix": "Approval steps (lines ~323, ~2877): add the verification code. Hide the passphrase banner (~2770) until a drive exists; remove or explain the Agent-only checkbox; delete the second 'Without it nobody...' sentence (~4231 and ~4261). Failure card (~2833): Dismiss only hides the error, keep Try again, state the error once. API keys panel (~3879): replace 'Run the CLI from the repository after building it' with the npm install and `login --token-stdin` command; show why '+ New API key' is disabled (~3776); fix the notice at ~4419 so it does not contradict the tab. Codex MCP snippet: use the documented one with per-tool approvals. Rename toolbar 'Capture...' to 'Set up trace capture' and 'Traces' to 'View traces'. Add 'This cannot be undone.' to the agent revoke dialog and the sentence that a leaked bundle also holds the drive key. Add one Finder line to the empty state.",
-    "files": [
-      "apps/web/app/(app)/console/console.tsx"
-    ],
+    "files": ["apps/web/app/(app)/console/console.tsx"],
     "acceptance": [
       "With /api/console blocked, Dismiss then unblock leaves a card with a working Try again; the error text appears once",
       "New account with no drive sees no passphrase banner",
@@ -121,9 +112,7 @@
     "id": "Q9",
     "title": "Missing Agent Drive.app gives an install instruction (C20)",
     "fix": "In mount-mac.ts catch the missing-helper failure (ENOENT for /Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder) and print: Agent Drive.app is not installed; download URL; drag to /Applications and open once.",
-    "files": [
-      "packages/agent-drive/src/mount-mac.ts"
-    ],
+    "files": ["packages/agent-drive/src/mount-mac.ts"],
     "acceptance": [
       "agent-drive mount on a Mac without the app prints the download URL and no raw system error",
       "mount-mac.unit.test.ts covers the missing-helper case"
@@ -133,9 +122,7 @@
     "id": "Q10",
     "title": "Rewrite the Finder paragraph in docs/cli.md as steps (C21)",
     "fix": "Split the dense Finder paragraph into numbered steps (download, drag to /Applications, open once, run mount); resolve the contradiction between 'signed' and 'compiles the app but does not sign'; define 'Instabox workspace' and where the m_... ID comes from; say mount is not supported on Windows; add a Finder link in the docs index. Regenerate docs.generated.json with the repo's docs generator.",
-    "files": [
-      "docs/cli.md"
-    ],
+    "files": ["docs/cli.md"],
     "acceptance": [
       "No sentence in docs/cli.md says both signed and not signed",
       "Finder steps are a numbered list",
@@ -146,10 +133,7 @@
     "id": "Q11",
     "title": "skill install exit code, target layout and help (C23)",
     "fix": "Exit non-zero (or print an unmistakable not-installed message) when no agent directory exists and nothing was written; document or normalize the `--target DIR` layout (DIR/SKILL.md vs skills/agent-drive/SKILL.md); print 'overwrote' on repeat install; scope `skill --help` to the skill command.",
-    "files": [
-      "packages/agent-drive/src/cli.ts",
-      "packages/agent-drive/src/skill.ts"
-    ],
+    "files": ["packages/agent-drive/src/cli.ts", "packages/agent-drive/src/skill.ts"],
     "acceptance": [
       "skill install with no ~/.claude or ~/.codex exits non-zero",
       "skill --help prints only skill usage",

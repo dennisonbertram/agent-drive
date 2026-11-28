@@ -752,7 +752,7 @@ describe('account sealing at the command level', () => {
     const { respond } = await api({ noAccountKey: true });
     const r = await cli(['drive', 'create', '--name', 'fresh'], { keys: {}, origins: {} }, respond);
     expect(r.out).toContain(B);
-    await vi.waitFor(() => expect(r.err).toContain('Your account has no account key yet'), {
+    await vi.waitFor(() => expect(r.err).toContain('your account has no passphrase yet'), {
       timeout: 3000,
     });
     expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);

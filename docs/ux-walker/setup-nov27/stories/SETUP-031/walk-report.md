@@ -7,9 +7,10 @@ Status: PASS with findings (CLI only; no browser screen; no screenshots apply). 
 3. `--target claude` with no ~/.claude: created it, `wrote /Users/agent/uxw/backup-first-file-031/.claude/skills/agent-drive/SKILL.md`.
 4. Second `skill install` with ~/.claude present: same `wrote ...` line; silently overwrites (no "updated"/"already installed" wording).
 5. `--target nowhere/x` wrote `nowhere/x/SKILL.md` without warning that the folder was created; `skill --help` prints the full CLI help (no skill-specific usage).
-Docs compare: llms.txt step 5 puts the skill before `check` (step 6) as required; docs/quickstart.md section 7 calls it "Optional". docs/skills.md offers `npx skills add dennisonbertram/agent-drive` (both skills) vs the CLI route with no advice on which to pick.
+   Docs compare: llms.txt step 5 puts the skill before `check` (step 6) as required; docs/quickstart.md section 7 calls it "Optional". docs/skills.md offers `npx skills add dennisonbertram/agent-drive` (both skills) vs the CLI route with no advice on which to pick.
 
 ## Flow Log
+
 - Specified 3 steps; needed 2 CLI runs to place the file (retry with --target); a user who guesses `--target ./.cursor/skills` needs a third to fix the layout.
 - Hesitations: where Cursor reads skills; DIR vs DIR/agent-drive.
 - Duplicated info: skill folder wording differs across llms.txt (~/.claude/skills or ~/.codex/skills), quickstart and CLI help.

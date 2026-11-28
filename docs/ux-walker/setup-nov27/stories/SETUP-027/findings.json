@@ -1,6 +1,50 @@
 [
-{"id":"SETUP-027-F1","story":"SETUP-027","severity":"medium","category":"error","description":"Exporting to ~/Documents/... when the Documents folder does not exist fails with no reason or recovery step.","expected":"Say the folder does not exist and how to fix (mkdir or pick another path)","actual":"Unable to write /Users/agent/uxw/backup-first-file-027/Documents/agent-drive-credentials.txt.","evidence":"CLI exit 1","suggested_fix":"Create parent dirs for the file target, or report ENOENT cause: 'Folder X does not exist.'","surface":"CLI"},
-{"id":"SETUP-027-F2","story":"SETUP-027","severity":"low","category":"copy","description":"check refusal lists three backup routes without a recommended default for someone who just wants to finish.","expected":"A single suggested next command","actual":"three options in one sentence","evidence":"check failure text","suggested_fix":"Lead with the one command and put alternatives after.","surface":"CLI"},
-{"id":"SETUP-027-F3","story":"SETUP-027","severity":"low","category":"error","description":"check --drive <unknown> says only that no key exists on this machine, with no pointer to `whoami` (lists drives) or `login`.","expected":"Recovery hint","actual":"There is no key for drive 0000... on this machine.","evidence":"CLI","suggested_fix":"Append 'Run agent-drive whoami to see usable drives.'","surface":"CLI"},
-{"id":"SETUP-027-F4","story":"SETUP-027","severity":"medium","category":"flow","description":"Device login start is limited to 20 per IP per hour; the CLI reports only 'Agent Drive refused the login request: slow_down' with no explanation or wait time. A team behind one NAT or a CI fleet would be stuck at the first step.","expected":"Explain the limit and say to retry in up to an hour","actual":"Agent Drive refused the login request: slow_down","evidence":"CLI login output; docs/api-device-login.md says 20 starts per IP per hour","suggested_fix":"Map slow_down on device_authorization to a sentence with the wait time.","surface":"CLI"}
+  {
+    "id": "SETUP-027-F1",
+    "story": "SETUP-027",
+    "severity": "medium",
+    "category": "error",
+    "description": "Exporting to ~/Documents/... when the Documents folder does not exist fails with no reason or recovery step.",
+    "expected": "Say the folder does not exist and how to fix (mkdir or pick another path)",
+    "actual": "Unable to write /Users/agent/uxw/backup-first-file-027/Documents/agent-drive-credentials.txt.",
+    "evidence": "CLI exit 1",
+    "suggested_fix": "Create parent dirs for the file target, or report ENOENT cause: 'Folder X does not exist.'",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-027-F2",
+    "story": "SETUP-027",
+    "severity": "low",
+    "category": "copy",
+    "description": "check refusal lists three backup routes without a recommended default for someone who just wants to finish.",
+    "expected": "A single suggested next command",
+    "actual": "three options in one sentence",
+    "evidence": "check failure text",
+    "suggested_fix": "Lead with the one command and put alternatives after.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-027-F3",
+    "story": "SETUP-027",
+    "severity": "low",
+    "category": "error",
+    "description": "check --drive <unknown> says only that no key exists on this machine, with no pointer to `whoami` (lists drives) or `login`.",
+    "expected": "Recovery hint",
+    "actual": "There is no key for drive 0000... on this machine.",
+    "evidence": "CLI",
+    "suggested_fix": "Append 'Run agent-drive whoami to see usable drives.'",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-027-F4",
+    "story": "SETUP-027",
+    "severity": "medium",
+    "category": "flow",
+    "description": "Device login start is limited to 20 per IP per hour; the CLI reports only 'Agent Drive refused the login request: slow_down' with no explanation or wait time. A team behind one NAT or a CI fleet would be stuck at the first step.",
+    "expected": "Explain the limit and say to retry in up to an hour",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI login output; docs/api-device-login.md says 20 starts per IP per hour",
+    "suggested_fix": "Map slow_down on device_authorization to a sentence with the wait time.",
+    "surface": "CLI"
+  }
 ]

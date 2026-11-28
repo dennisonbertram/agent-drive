@@ -3,6 +3,7 @@
 Session uxw-install-login-solo, account e2e_install_login_11. CLI home ~/uxw/install-login-011. Device-login starts were rate-limited for about 55 minutes (see F-011-1), so this story was walked after the limit cleared. Not walkable here: a real Docker/CI container, EACCES on `npm install -g`, a real `npx -y ...@latest` (would download from the public npm registry; `npm view` shows 0.5.1 is published), Node < 24, browser auto-open suppression under `CI` (the test shell is not a TTY either way).
 
 ## Steps
+
 1. `agent-drive --help` bottom lines: "Without installing: npx -y @dennisonbertram/agent-drive@latest <command>" and the global configuration list (AGENT_DRIVE_CONFIG, API_URL, API_KEY, MACHINE, CREDENTIALS). The npx fallback is discoverable from help and from llms.txt step 1.
 2. First attempt, `CI=1 agent-drive login` (no name): "Agent Drive refused the login request: slow_down" (the 20-starts-per-IP-per-hour limit; many walkers share localhost). No wait time, no explanation of the limit, and the word `slow_down` (a polling term) is the whole message. The same text repeated for ~55 minutes on every attempt.
 3. After the limit cleared: `agent-drive login --name research-bot --no-browser` printed link `http://localhost:3811/connect?code=VBJT-XQGF`, "Check that the code matches", "Verification code: 35cc cb0c 4a3f f751", "Waiting for approval..." (step-1 shows the page).
@@ -13,6 +14,7 @@ Session uxw-install-login-solo, account e2e_install_login_11. CLI home ~/uxw/ins
 8. Variation not walked: default agent name (`<hostname> agent`); the 009 run shows the Details "Machine" row names the host, which a sandbox owner could use.
 
 ## Flow Log
+
 - Ideal 5; actual 5 human/agent actions once login started (npx login, relay link+codes, human types code and approves, agent continues).
 - Hesitation: none on the web; in the terminal the post-login output offers 1Password/clipboard first, which a sandbox cannot use; llms.txt step 4 does list `--stdout` only in the Sandboxes section.
 - Duplicated info: the backup paragraph is repeated by login and by `check`.

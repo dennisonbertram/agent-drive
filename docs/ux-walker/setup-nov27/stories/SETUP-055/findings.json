@@ -1,59 +1,59 @@
 {
- "story": "SETUP-055",
- "status": "partial",
- "note": "Walked connect validation errors, parent/mountpoint errors, name and alias errors, mounts list/status, docs and mobile docs. Persist success, Finder row, drop-file and reboot restore are not-walkable (no Instabox, no Finder app).",
- "findings": [
-  {
-   "id": "F-SETUP-055-01",
-   "story": "SETUP-055",
-   "severity": "medium",
-   "category": "error-handling",
-   "criterion": "mounts add with --sandbox",
-   "description": "Run `mounts add coordinator <mp> --sandbox m_7f3a1234` (--help lists: mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID]).",
-   "expected": "Registers a live workspace, or help does not list --sandbox for mounts add.",
-   "actual": "\"A --drive ID is required. No drive key is configured for this API.\" With --root: \"--root is only supported by `connect`.\" So `mounts add` cannot register a live workspace although --help shows --sandbox on it.",
-   "evidence": "CLI output",
-   "suggested_fix": "Remove --sandbox from the mounts add help line, or accept --root; tell the user to use `connect`.",
-   "surface": "CLI help, mounts add"
-  },
-  {
-   "id": "F-SETUP-055-02",
-   "story": "SETUP-055",
-   "severity": "low",
-   "category": "error-handling",
-   "criterion": "mkdir of the full mountpoint",
-   "description": "mkdir the whole mountpoint, then run `connect ... --persist`.",
-   "expected": "Message says the mountpoint must not exist yet (remove the empty folder); docs say the same.",
-   "actual": "\"Finder mountpoint already exists: /Users/agent/uxw/m055/AgentWorkspaces/coordinator\" with no instruction; docs only show mkdir of the parent and never state that the mountpoint must be absent (Linux docs say an existing empty directory is required).",
-   "evidence": "CLI output; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
-   "suggested_fix": "Append 'Remove the empty folder and rerun' to the message and add one docs sentence.",
-   "surface": "CLI, docs"
-  },
-  {
-   "id": "F-SETUP-055-03",
-   "story": "SETUP-055",
-   "severity": "medium",
-   "category": "happy-path",
-   "criterion": "SANDBOX_ID has no source",
-   "description": "Read docs 'Live workspace mounts' and try `--sandbox my-sandbox`.",
-   "expected": "Docs explain what an Instabox sandbox is and where to find its m_... ID.",
-   "actual": "Docs use the placeholder SANDBOX_ID only. The CLI error \"Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias.\" is clear but nothing says where the ID comes from. /docs/sandboxes has no mention of connect or Instabox.",
-   "evidence": "CLI output; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
-   "suggested_fix": "Write 'm_...' in the example and say where the ID is shown.",
-   "surface": "docs/cli"
-  },
-  {
-   "id": "F-SETUP-055-04",
-   "story": "SETUP-055",
-   "severity": "low",
-   "category": "layout",
-   "criterion": "docs command index table clipped on mobile",
-   "description": "Open /docs/cli at 390x844 and scroll to the command index.",
-   "expected": "Table scrolls with a visible cue or reflows.",
-   "actual": "The Purpose column is cut at the right edge (\"Upload a folder (upload-c\", \"Back up the API key and\") with no scroll cue. pageOverflowX is 0, so the clipping is inside the table.",
-   "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/mobile-check.png",
-   "suggested_fix": "Reflow into stacked rows below 600px or add an overflow hint.",
-   "surface": "docs table"
-  }
- ]
+  "story": "SETUP-055",
+  "status": "partial",
+  "note": "Walked connect validation errors, parent/mountpoint errors, name and alias errors, mounts list/status, docs and mobile docs. Persist success, Finder row, drop-file and reboot restore are not-walkable (no Instabox, no Finder app).",
+  "findings": [
+    {
+      "id": "F-SETUP-055-01",
+      "story": "SETUP-055",
+      "severity": "medium",
+      "category": "error-handling",
+      "criterion": "mounts add with --sandbox",
+      "description": "Run `mounts add coordinator <mp> --sandbox m_7f3a1234` (--help lists: mounts add NAME MOUNTPOINT [--drive ID] [--api URL] [--read-only] [--sandbox ID]).",
+      "expected": "Registers a live workspace, or help does not list --sandbox for mounts add.",
+      "actual": "\"A --drive ID is required. No drive key is configured for this API.\" With --root: \"--root is only supported by `connect`.\" So `mounts add` cannot register a live workspace although --help shows --sandbox on it.",
+      "evidence": "CLI output",
+      "suggested_fix": "Remove --sandbox from the mounts add help line, or accept --root; tell the user to use `connect`.",
+      "surface": "CLI help, mounts add"
+    },
+    {
+      "id": "F-SETUP-055-02",
+      "story": "SETUP-055",
+      "severity": "low",
+      "category": "error-handling",
+      "criterion": "mkdir of the full mountpoint",
+      "description": "mkdir the whole mountpoint, then run `connect ... --persist`.",
+      "expected": "Message says the mountpoint must not exist yet (remove the empty folder); docs say the same.",
+      "actual": "\"Finder mountpoint already exists: /Users/agent/uxw/m055/AgentWorkspaces/coordinator\" with no instruction; docs only show mkdir of the parent and never state that the mountpoint must be absent (Linux docs say an existing empty directory is required).",
+      "evidence": "CLI output; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
+      "suggested_fix": "Append 'Remove the empty folder and rerun' to the message and add one docs sentence.",
+      "surface": "CLI, docs"
+    },
+    {
+      "id": "F-SETUP-055-03",
+      "story": "SETUP-055",
+      "severity": "medium",
+      "category": "happy-path",
+      "criterion": "SANDBOX_ID has no source",
+      "description": "Read docs 'Live workspace mounts' and try `--sandbox my-sandbox`.",
+      "expected": "Docs explain what an Instabox sandbox is and where to find its m_... ID.",
+      "actual": "Docs use the placeholder SANDBOX_ID only. The CLI error \"Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias.\" is clear but nothing says where the ID comes from. /docs/sandboxes has no mention of connect or Instabox.",
+      "evidence": "CLI output; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
+      "suggested_fix": "Write 'm_...' in the example and say where the ID is shown.",
+      "surface": "docs/cli"
+    },
+    {
+      "id": "F-SETUP-055-04",
+      "story": "SETUP-055",
+      "severity": "low",
+      "category": "layout",
+      "criterion": "docs command index table clipped on mobile",
+      "description": "Open /docs/cli at 390x844 and scroll to the command index.",
+      "expected": "Table scrolls with a visible cue or reflows.",
+      "actual": "The Purpose column is cut at the right edge (\"Upload a folder (upload-c\", \"Back up the API key and\") with no scroll cue. pageOverflowX is 0, so the clipping is inside the table.",
+      "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/mobile-check.png",
+      "suggested_fix": "Reflow into stacked rows below 600px or add an overflow hint.",
+      "surface": "docs table"
+    }
+  ]
 }

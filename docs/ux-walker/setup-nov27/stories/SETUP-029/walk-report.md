@@ -16,6 +16,7 @@ Error cases: `--expires-in 90s` -> `--expires-in must use a duration such as 30m
 Not walked: console folderUrl and share dialog (shared browser cookie is overwritten by other walkers, console showed other users' data); link expiry (24 h).
 
 ## Flow Log
+
 - Ideal path 3 (put, share, send URL): achieved in 2 CLI commands. get/cmp optional verification used, 2 more.
 - Hesitations: help shows `--drive ID` as if required. Re-put conflict hint omits --overwrite.
 - Re-entry: none. Duplicated info: none.

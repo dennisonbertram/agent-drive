@@ -1,4 +1,5 @@
 # SETUP-055 walk report: Connect a live Instabox workspace and keep it across logins
+
 Status: partial. No Instabox and no Finder app on the Studio.
 
 1. Console (screenshots/step-1.png). Fresh account Files page: empty state "Ready for your first file", "Connect an agent" button. No mention of mounts, Finder or Instabox. Geometry clean; no console errors.
@@ -17,4 +18,5 @@ Status: partial. No Instabox and no Finder app on the Studio.
 5. Mobile (mobile-check.png): docs command index table clips its Purpose column. pageOverflowX 0.
 
 ## Flow Log
+
 Specified 7 steps (ideal 3); walked 3 error paths only. Hesitations: sandbox ID source, mkdir of full path, `mounts add` alternate. Re-entry: rerun after failed persist is blocked by the leftover registration. Duplicated info: "sandbox" and "Finder mount" used for a Linux-neutral error.

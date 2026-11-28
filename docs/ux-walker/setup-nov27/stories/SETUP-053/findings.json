@@ -1,6 +1,6 @@
 {
- "story": "SETUP-053",
- "status": "not-walkable",
- "note": "Studio is macOS arm64; Linux FUSE cannot be exercised. Docs state requirements; the missing-fusermount error is unverified.",
- "findings": []
+  "story": "SETUP-053",
+  "status": "not-walkable",
+  "note": "Studio is macOS arm64; Linux FUSE cannot be exercised. Docs state requirements; the missing-fusermount error is unverified.",
+  "findings": []
 }

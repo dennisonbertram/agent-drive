@@ -1,6 +1,46 @@
 [
-{"id":"F-010-1","story":"SETUP-010","severity":"medium","category":"happy-path","description":"A signed-out visitor following an agent's approval link lands on a plain 'Sign in' screen with no mention that an agent pairing is waiting and no explicit 'create an account' path in the card; new users must notice the header button or the small 'New here? Sign up free' line.","expected":"Context line such as 'Sign in or create an account to approve your agent (code KHSP-BDBQ)', with sign-up as an equal option.","actual":"Generic 'Sign in' heading; Clerk card (not renderable here) plus 'New here? Sign up free' below.","evidence":"screenshots/step-1.png; URL /sign-in?redirect_url=%2Fconnect%3Fcode%3DKHSP-BDBQ","suggested_fix":"Show the pending-agent context and both choices on the redirect page."},
-{"id":"F-010-2","story":"SETUP-010","severity":"low","category":"error-handling","description":"/connect for an unknown or expired code sends a signed-out user to sign-in first; the wrong-code message appears only after signing in.","expected":"Fail fast or accept the detour, but tell the user the code may have expired.","actual":"/connect?code=ZZZZ-ZZZZ redirects to /sign-in?redirect_url=%2Fconnect%3Fcode%3DZZZZ-ZZZZ","evidence":"agent-browser get url output","suggested_fix":"Low priority; mention the 10-minute lifetime on the sign-in page."},
-{"id":"F-010-3","story":"SETUP-010","severity":"low","category":"flow","description":"After entering a code manually, the URL stays /connect, so a reload loses the pairing request.","expected":"URL updates to /connect?code=XXXX-XXXX.","actual":"URL remains http://localhost:3811/connect","evidence":"agent-browser get url after Continue; screenshots/step-4.png","suggested_fix":"Push the code into the URL (replaceState)."},
-{"id":"F-010-4","story":"SETUP-010","severity":"suggestion","category":"consistency","description":"quickstart.md begins with 'Sign up' while /llms.txt, which is what the agent reads, has no sign-up step; the order differs by surface.","expected":"One order.","actual":"quickstart step 1 'Create your account at /sign-up'; llms.txt has only 'The approval link asks the human to sign in'.","evidence":"GET /docs/quickstart.md and /llms.txt","suggested_fix":"Add one line to llms.txt: 'No account yet? The link lets you create one.'"}
+  {
+    "id": "F-010-1",
+    "story": "SETUP-010",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "A signed-out visitor following an agent's approval link lands on a plain 'Sign in' screen with no mention that an agent pairing is waiting and no explicit 'create an account' path in the card; new users must notice the header button or the small 'New here? Sign up free' line.",
+    "expected": "Context line such as 'Sign in or create an account to approve your agent (code KHSP-BDBQ)', with sign-up as an equal option.",
+    "actual": "Generic 'Sign in' heading; Clerk card (not renderable here) plus 'New here? Sign up free' below.",
+    "evidence": "screenshots/step-1.png; URL /sign-in?redirect_url=%2Fconnect%3Fcode%3DKHSP-BDBQ",
+    "suggested_fix": "Show the pending-agent context and both choices on the redirect page."
+  },
+  {
+    "id": "F-010-2",
+    "story": "SETUP-010",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "/connect for an unknown or expired code sends a signed-out user to sign-in first; the wrong-code message appears only after signing in.",
+    "expected": "Fail fast or accept the detour, but tell the user the code may have expired.",
+    "actual": "/connect?code=ZZZZ-ZZZZ redirects to /sign-in?redirect_url=%2Fconnect%3Fcode%3DZZZZ-ZZZZ",
+    "evidence": "agent-browser get url output",
+    "suggested_fix": "Low priority; mention the 10-minute lifetime on the sign-in page."
+  },
+  {
+    "id": "F-010-3",
+    "story": "SETUP-010",
+    "severity": "low",
+    "category": "flow",
+    "description": "After entering a code manually, the URL stays /connect, so a reload loses the pairing request.",
+    "expected": "URL updates to /connect?code=XXXX-XXXX.",
+    "actual": "URL remains http://localhost:3811/connect",
+    "evidence": "agent-browser get url after Continue; screenshots/step-4.png",
+    "suggested_fix": "Push the code into the URL (replaceState)."
+  },
+  {
+    "id": "F-010-4",
+    "story": "SETUP-010",
+    "severity": "suggestion",
+    "category": "consistency",
+    "description": "quickstart.md begins with 'Sign up' while /llms.txt, which is what the agent reads, has no sign-up step; the order differs by surface.",
+    "expected": "One order.",
+    "actual": "quickstart step 1 'Create your account at /sign-up'; llms.txt has only 'The approval link asks the human to sign in'.",
+    "evidence": "GET /docs/quickstart.md and /llms.txt",
+    "suggested_fix": "Add one line to llms.txt: 'No account yet? The link lets you create one.'"
+  }
 ]

@@ -3,6 +3,7 @@
 User e2e_second_agent_sandbox_47 (brand new, no drive). CLI home ~/uxw/second-agent-sandbox-047 on the Studio. Status: PASS with findings (the manual path works; the final CLI step needs a drive key pasted by hand).
 
 ## Steps
+
 1. /console first screen (step-1): "Give your first agent a home." with a one-line prompt, Copy, and 'Prefer to set up a drive yourself? New drive'. Clear, one primary.
 2. API keys tab with no drive (step-2): `+ New API key` is greyed out (no tooltip) and the empty state says "Create a drive first." with `Create drive`. The Connect an agent panel (prompt line, llms.txt link, three MCP setups) is open above it. The story expected "Create an agent first" here; a new account needs a drive first, so the path is drive -> agent -> key (3 creation steps before the key).
 3. Create a drive dialog (step-3): name prefilled "my-drive" and selected, checkbox "Agent-only — never add this drive to passphrase unlock" (jargon: the user has no passphrase yet). Created finance-archive. Slow-ish but fine.
@@ -18,6 +19,7 @@ User e2e_second_agent_sandbox_47 (brand new, no drive). CLI home ~/uxw/second-ag
 Browser errors: none.
 
 ## Flow Log
+
 - Story ideal 9. Needed: New drive (1) + name/create (2) + recovery file dialog (3) + back to API keys (1) + Create agent (2) + Create API key (3) + receipt (3) + server commands including pasting two secrets (5) = about 19 actions, versus 3 for the agent-first path shown on the first screen.
 - Hesitations: why a key cannot be created before an agent and a drive; slow unexplained disabled button; panel says build from repo.
 - Re-entry: drive key must be fetched from the recovery file or the console and pasted separately; drive id printed in the panel but the API key is not.

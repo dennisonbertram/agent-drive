@@ -31,6 +31,7 @@ Review artifact exclusion: device-login `slow_down` lockouts of 20+ minutes (F-0
 Reach: **All** = every first-time user; **Most** = most users who reach that step; **Subset** = users of a specific path (owner passphrase, second agent, desktop, capture). Effort: S <= 1 day, M a few days, L more. Severity: P0 blocks setup for most users (none found), P1 a main-path failure or a contradiction on a required step, P2 friction or a confusing edge, P3 polish. Walker "found by": W = walker, F = flow, V = visual.
 
 ### C1. Approval step is described wrongly on four surfaces; three codes have overlapping names
+
 - **Root cause:** Copy is hand-written separately in `home.ts`, the console onboarding/Connect dialog, `docs/quickstart.md` and `llms.txt`. Three have the human "approve" and the fourth requires typing a 16-hex verification code that the page never shows. The 8-letter pairing code, 16-hex verification code and account fingerprint share shape and vocabulary (F-SETUP-035-03 shows a user pasting the wrong one).
 - **Found by:** W F-SETUP-003-1, F-009-1, F-014-1, F-SETUP-018-01, F-015-7, F-PROD-01-2, F-013-3, F-SETUP-035-03; F redundancy "Duplicate Information 1/2", "Naming 1"; V F9 (connect), prod-public landing verdict. Seven independent filings (measured count from the findings list).
 - **Surfaces:** website, console, /connect, CLI docs.
@@ -41,6 +42,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (copy only; 4 files, no logic).
 
 ### C2. Invisible Copy buttons (and a cluster of dialog styling defects)
+
 - **Root cause:** `dialog .copy-button` sets `color: var(--ink)` with transparent background (`console-panels.css:526`), which on the #111 code block gives ratio 1. Same family: password fields render as solid black bars and the disabled primary reads weaker than the neighbouring secondary; the focus ring on the onboarding Copy is #111 on #111.
 - **Found by:** W F-SETUP-004-1 (high); V console-first-run F01 (P1), F06, F07, F08; V console-agents-keys F1 (P1, three MCP Copy buttons); F redundancy "Duplicate Paths 1".
 - **Surfaces:** console. **Severity:** P1 (the only action of the Connect dialog is invisible; measured). **Reach:** Most (every first-time user who opens "Connect an agent" or MCP setup). **Effort:** S.
@@ -50,6 +52,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C3. /connect layout degrades the primary action first
+
 - **Root cause:** The verification-code label sits beside the input, squeezing it to 153-168px at 375px; opening Details adds about 320px so Approve sits at y 794 of 800 at 1280x800; field labels are 11px grey mono.
 - **Found by:** W F-009-2, F-SETUP-017-01, F-043-05, F-013-5, F-SETUP-018-03, F-SETUP-022-04; F redundancy "Hierarchy 5"; V connect F1 (P1), F2 (P1, measured 218 vs 151), F6, F10, F12.
 - **Surfaces:** /connect. **Severity:** P1 (mobile users cannot read back the code they typed; measured). **Reach:** Most (mobile or laptop approvals). **Effort:** S.
@@ -59,6 +62,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C4. /connect code-entry and error messages are generic or wrong
+
 - **Root cause:** One message "Enter the code in the form XXXX-XXXX." (`connect.tsx:199`) covers wrong alphabet and wrong shape; the verification message implies spaces are required; one message covers unknown, expired and already-approved codes; literal backticks around `agent-drive login` in the expired banner.
 - **Found by:** W F-012-1..4, F-SETUP-017-02, F-SETUP-019-01, F-010-3, F-SETUP-024-01; V connect F5, F7, F9, F8.
 - **Surfaces:** /connect. **Severity:** P2. **Reach:** Subset (users who mistype or reload; F5: reload after approval shows an error). **Effort:** S.
@@ -68,6 +72,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (message text; the "already approved" wording is the only part that needs a server check).
 
 ### C5. /connect hides what the human decides on and gives no way to refuse
+
 - **Root cause:** Account and machine rows, the delegate checkbox, the existing-drive route and its fields are inside a collapsed Details; there is no Deny; the done card does not echo what was granted (delegate, write folder); two same-name drives in the picker are indistinguishable.
 - **Found by:** W F-013-1, F-013-2, F-SETUP-020-01, -02, F-SETUP-025-01, F-SETUP-023-01, -03, F-044-03, F-050-01, F-SETUP-022-01, -02, -03, F-SETUP-034-02, F-043-02; F redundancy "Hierarchy 1, 2"; V connect F3, F4.
 - **Surfaces:** /connect, CLI error text. **Severity:** P1 (security-relevant decision information is hidden; observed twice, one walker approved a request they had meant to refuse). **Reach:** All approvals see the account issue; Subset (orchestrators) for delegate. **Effort:** M.
@@ -77,6 +82,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN** (new Deny state, summary layout). Keep the desktop card hierarchy; do not redesign it.
 
 ### C6. Approving before a grant, or re-logging in with an existing name, silently creates a new empty drive
+
 - **Root cause:** A login request that expects a grant looks identical to a fresh one; a reused agent name with no saved key shows "New encrypted drive" with no notice.
 - **Found by:** W F-043-01 (high), F-SETUP-021-01 (high), F-043-03, F-043-04 (partly), F-050-02; F J/J4.md proposal 1.
 - **Surfaces:** /connect, CLI. **Severity:** P1 (produces a duplicate drive the user does not realise exists; observed twice). **Reach:** Subset (second agent, lost-config recovery). **Effort:** M.
@@ -86,6 +92,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN.**
 
 ### C7. "Settings" does not exist
+
 - **Root cause:** CLI and dialogs name a console "Settings" page; the sidebar has no such item and the settings route is titled "Activity & deletion" with the passphrase card as an off-topic block linking back to Files.
 - **Found by:** W F-SETUP-016-01, F-SETUP-035-01 (high), F-SETUP-036-02, F-SETUP-061-2; F redundancy "Hierarchy 3"; V first-run F04 (P1, DOM check "nav has Settings: false"), V agents-keys F14, F16.
 - **Surfaces:** CLI, console, llms.txt. **Severity:** P1 (instruction points to a place that is not there; measured). **Reach:** Subset (owners with a passphrase) but it is printed to every user after login. **Effort:** S.
@@ -95,6 +102,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C8. Account-key fingerprint hand-off is manual and error-prone
+
 - **Root cause:** The console knows the fingerprint but shows it as small grey prose with no Copy button; the generated seal command lacks `--fingerprint`; a trailing comma from the sentence is rejected by the CLI with a generic message.
 - **Found by:** W F-SETUP-035-02, -03, F-SETUP-036-01, -03, F-SETUP-041-04; F J/J3.md proposal 1.
 - **Surfaces:** console, CLI. **Severity:** P2. **Reach:** Subset. **Effort:** M.
@@ -104,6 +112,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN** (small).
 
 ### C9. Two backup records, forced backup before `check`, and scattered backup guidance
+
 - **Root cause:** Console `key_backup_at` and CLI config track backup independently and disagree; `check` demands a CLI backup even for agents that were granted a drive or received an env bundle; backup advice appears as three routes with no default and a second competing passphrase instruction.
 - **Found by:** W F-043-04, F-044-05, F-SETUP-034-01, F-015-2, F-SETUP-026-F3, -F4, SETUP-027-F2, F-009-6, F-049-01, F-045-02; F redundancy "Duplicate Paths 4", "Duplicate Information 3, 5"; F J/J4.md proposal 2.
 - **Surfaces:** CLI, console. **Severity:** P1 (the first `check` fails and the console shows "backed up" at the same time; observed in three walks). **Reach:** Most (every agent hits the backup gate; the contradiction hits second agents and the human-first path). **Effort:** M.
@@ -113,6 +122,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN.**
 
 ### C10. CLI backup, export and import error messages leave out the working route
+
 - **Root cause:** Each error message was written for one path; none points to the `--stdout | STORE && confirm` route used by sandboxes or names `AGENT_DRIVE_CREDENTIALS`.
 - **Found by:** W F-SETUP-026-F1, -F2, -F5, SETUP-027-F1, -F3, SETUP-028-F1, -F2, -F3, F-SETUP-033-F1, -F2, -F3, F-044-04, F-SETUP-029-F2, -F3, F-044-09; F J/J4.md proposal 3.
 - **Surfaces:** CLI. **Severity:** P2. **Reach:** Most (backup is mandatory). **Effort:** S.
@@ -122,6 +132,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (message text; 3 files).
 
 ### C11. The console's recovery file cannot be imported by the CLI
+
 - **Root cause:** Two formats do one job: the console recovery file (`agent-drive-key-v1`) and the CLI credentials bundle (`adcred1`). `credentials import --from agent-drive-<id>.key.json` fails with "Not a valid Agent Drive credentials bundle." and does not say which format is accepted.
 - **Found by:** W F-015-1 (high), F-015-4, F-SETUP-039-03, F-SETUP-022-03; F redundancy "Duplicate Paths 2", "Overlapping Features 2", "Naming 4"; F J/J2.md proposal 3.
 - **Surfaces:** CLI, console, /connect. **Severity:** P1 (the human-first branch offered on the first-run page ends in a dead end; observed; SETUP-015 status fail). **Reach:** Subset (human-first users), but it is the second option on the first-run screen. **Effort:** M.
@@ -131,6 +142,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN.**
 
 ### C12. Device-login errors are bare (rate limit, wrong API URL)
+
 - **Root cause:** `device.ts` surfaces server codes directly: `Agent Drive refused the login request: slow_down` (`packages/agent-drive/src/device.ts:137`). "slow_down" is also the polling term inside the same module (line 191). A URL without `/api` returns bare 404; "Ignored a different API URL returned by the server." has no explanation.
 - **Found by:** W F-011-1, F-SETUP-021-02, SETUP-027-F4, F-050-03 (message only), F-SETUP-035-08, F-SETUP-067-1, SETUP-030-F1, F-SETUP-006-1, F-009-4, F-009-5, F-044-01, -02, F-SETUP-016-03, F-SETUP-034-08, F-SETUP-051-03, SETUP-026-F6.
 - **Surfaces:** CLI. **Severity:** P2. **Reach:** Subset (shared-IP sandboxes, CI; URL typo). The lockout duration is a review artifact and is not counted. **Effort:** S.
@@ -140,6 +152,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C13. Console first-run shows concepts before they matter, and repeats itself
+
 - **Root cause:** The Files header offers passphrase unlock to an account with no drive; "Agent-only" appears in drive creation before passphrase unlock is explained; the receipt dialog repeats one sentence twice; the header subtitle truncates at 768px.
 - **Found by:** W F-SETUP-003-2, F-015-6, SETUP-032-F1, F-SETUP-004-2, F-SETUP-034-07, F-SETUP-040-03, F-047-03, F-047-05, F-009-6; F redundancy "Duplicate Information 4, 6", "Naming 7"; V first-run F05, F11, F03, F10.
 - **Surfaces:** console. **Severity:** P2. **Reach:** All (first-run page). **Effort:** S.
@@ -149,6 +162,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (small conditional logic on the banner).
 
 ### C14. Console load-failure card can get stuck
+
 - **Root cause:** Dismiss on the red error line changes the card to "Opening your workspace..." with no retry (`console.tsx:2833`); the same failure is also stated twice with three recovery controls.
 - **Found by:** W F-SETUP-005-1 (high, reproduced twice), F-SETUP-005-2; V first-run F13.
 - **Surfaces:** console. **Severity:** P2 (impact high, reach low: needs a network failure). **Reach:** Subset. **Effort:** S.
@@ -158,6 +172,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C15. API keys and Agents tabs give stale or contradictory setup guidance
+
 - **Root cause:** The API keys panel still says "Run the CLI from the repository after building it" with origin-only `--api` (`console.tsx:3879`); after "New agent" the notice says "Create an API key to connect it" while the tab says "Create a drive first." and a disabled button with no reason (`console.tsx:3776`, `4419`); completing the recovery file dialog moves the user to Files.
 - **Found by:** W F-015-3, F-044-06, F-047-01, -02, -07, F-044-07, -08, F-045-03, -04; F redundancy "Overlapping Features 4"; V agents-keys F2 (P1), F3, F4, F5, F11, F12, F13.
 - **Surfaces:** console. **Severity:** P2. **Reach:** Subset (manual API-key path; 19 actions measured, SETUP-047). **Effort:** S for text, M for continuity.
@@ -167,6 +182,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (text); return-to-tab is DESIGN-lite.
 
 ### C16. Console Codex MCP snippet is incomplete
+
 - **Root cause:** The snippet is the bare three-line server block; `/docs/mcp-tools` and llms.txt include per-tool approval blocks.
 - **Found by:** W F-048-01 (high), F-048-02, F-048-03.
 - **Surfaces:** console, docs. **Severity:** P2. **Reach:** Subset (Codex users). **Effort:** S.
@@ -176,6 +192,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX.**
 
 ### C17. Passphrase and key-lock model is hard to understand and leaves stuck users without a route
+
 - **Root cause:** "Lock" locks the tab only; "Lock this browser" is adjacent with no explanation; "Keep this browser unlocked" is ticked by default with no consequence text; the Unlock dialog has no reset route and "Use a recovery file instead" loops back; the chip says green "Unlocked" with nothing added; seven same-weight buttons in the menu; a passkey step that cannot be closed.
 - **Found by:** W F-SETUP-042-01, -02, -03, F-SETUP-038-01..04, F-SETUP-035-04, -05, F-SETUP-037-01, -02, F-SETUP-040-02, F-SETUP-041-01, -03, -04, SETUP-060-1; F J/J3.md (verdict convoluted), redundancy "Naming 6", "Hierarchy 6"; V first-run F06, F07, F12.
 - **Surfaces:** console. **Severity:** P1 (three high findings; a locked-out owner cannot find reset; observed). **Reach:** Subset (owners who set a passphrase). **Effort:** L.
@@ -185,6 +202,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN.** Not walked: success paths of passkey and second laptop (SETUP-037).
 
 ### C18. Load-key dialog is a jargon wall with the slow route first
+
 - **Root cause:** Five recovery routes in one dialog, in an order that puts the slower account-seal route first, with terms the user has not met ("account seal --drive <uuid>", "unverified"), plus an agent-only text that says "ask the agent that created this drive" when the drive was created in the browser. A long drive name pushes the Close button 581px outside the dialog.
 - **Found by:** W F-SETUP-039-01, -02, -03, F-SETUP-040-01, F-SETUP-061-1, F-SETUP-062-1, F-SETUP-061-2; F redundancy "Overlapping Features 2"; V first-run F04 (P1), F02 (P1), F03.
 - **Surfaces:** console. **Severity:** P1 (visual P1; the dialog is the only way back in for a key-needed drive). **Reach:** Subset. **Effort:** M.
@@ -194,6 +212,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **NEEDS DESIGN.**
 
 ### C19. Trace capture: naming, token warnings, stale tab, wrong-key acceptance
+
 - **Root cause:** Same action has three labels plus a neighbouring "Traces" button; Replace and a second tab's Add silently revoke the live token; a wrong-key file is accepted at unlock then fails in the Capture dialog; setup silently creates an `openrouter` agent.
 - **Found by:** W F-SETUP-059-1..4, F-SETUP-064-1, F-SETUP-066-1, F-SETUP-068-1, F-SETUP-061-1, F-SETUP-062-1, SETUP-060-1; F J/J6.md; F redundancy "Naming 5".
 - **Surfaces:** trace capture, console. **Severity:** P2. **Reach:** Subset. **Effort:** M (S for naming and Replace warning).
@@ -203,6 +222,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX for the naming and Replace warning part; NEEDS DESIGN for stale-tab and wrong-key.**
 
 ### C20. Finder / Instabox dead ends
+
 - **Root cause:** Mount code reports raw system errors; Instabox is undefined; help text lists impossible options; a failed `--persist` leaves state.
 - **Found by:** W F-SETUP-051-01 (high), -04, F-SETUP-055-01..04, F-SETUP-056-01, -02, F-SETUP-057-01, F-SETUP-054-01; F J/J5.md proposal 1.
 - **Surfaces:** CLI, Finder/desktop. **Severity:** P2 (one high-severity finding, but narrow reach). **Reach:** Subset. **Effort:** S (messages), M (persist rollback).
@@ -212,6 +232,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX for the missing-app message (1 file); NEEDS DESIGN for the rest.** Success path never observed.
 
 ### C21. Finder app is undiscoverable and the CLI docs bury it
+
 - **Root cause:** One dense ~9-line paragraph inside a 19,286px page; absent from landing, docs index, sidebar, console and llms.txt. Same paragraph says "signed" and "does not sign".
 - **Found by:** W F-PROD-01-4, -5, F-SETUP-051-02, F-SETUP-055-04; V prod-public PP1, PP3, PP4; F redundancy "Hierarchy 4"; F J/J5.md proposal 3.
 - **Surfaces:** website, console, Finder. **Severity:** P2. **Reach:** Subset. **Effort:** S.
@@ -221,6 +242,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (the console one-liner belongs with C13's `console.tsx` change).
 
 ### C22. Entry cues on the public site and sign-in
+
 - **Root cause:** Hero never says sign-up is needed; hero CTAs compete (outline Copy prompt vs filled orange "Sign up free"); signed-out visitors following an approval link see a plain sign-in with no mention of the pending pairing; landing plan table disagrees with /pricing on downloads; quickstart order differs from llms.txt; docs index has no "start here".
 - **Found by:** W F-SETUP-001-1, F-010-1, -2, -4, F-PROD-01-1, -3, -6, -7, -8, -9, F-SETUP-002-1 (local build only, see Not verified), F-SETUP-007-1, F-014-2, -3, -4, F-PROD-01-10; V prod-public PP2, PP5, PP6, PP7, PP11; F redundancy "Duplicate Information 1".
 - **Surfaces:** website, sign-in. **Severity:** P2. **Reach:** All first-time visitors. **Effort:** S (copy), M (sign-in context needs Clerk configuration).
@@ -230,6 +252,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX for copy** (files share `home.ts` with C1; merged in the fixes file); sign-in context is NEEDS DESIGN.
 
 ### C23. Skill install is inconsistent
+
 - **Root cause:** llms.txt makes it required step 5; quickstart makes it optional step 7; `--target DIR` writes a different layout; exit 0 when nothing was written; overwrite is silent; `skill --help` prints the whole CLI help.
 - **Found by:** W SETUP-031-F1..F5, F-009-3; F redundancy "Duplicate Paths 6".
 - **Surfaces:** CLI, docs. **Severity:** P2. **Reach:** Most. **Effort:** S.
@@ -239,6 +262,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (docs part rides with C1).
 
 ### C24. Revoke and lifecycle copy omits what matters
+
 - **Root cause:** Revoke dialogs do not warn that a leaked sandbox bundle also holds the drive key, which revoking the API key does not invalidate; revoked sandboxes see a backup warning before the real error; revoked agent rows stay and still count.
 - **Found by:** W F-045-01, -02, -03, -04, F-044-08.
 - **Surfaces:** console, CLI. **Severity:** P2. **Reach:** Subset. **Effort:** S.
@@ -248,6 +272,7 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 - **QUICK FIX** (console part merged into the C13 item; `check.ts` is in C10's item).
 
 ### C25. Polish: targets, scale, spacing, keyboard (P3)
+
 - **Root cause:** Many controls under 24px, off-scale spacing values (measured 3, 5, 6, 9, 10, 11, 14, 18), no skip link (11 Tab presses to the main action, measured), dead band under the empty Files panel (400px, measured), tracked all-caps revoke titles up to 5 lines.
 - **Found by:** V first-run F09, F10, F14, F15, F17, F18; V agents-keys F9, F10, F17, F19, F20, F24, F25, F26; V connect F13, F14, F15; V prod-public PP8, PP9, PP10; W SETUP-029-F1, -F4, F-SETUP-036-04.
 - **Severity:** P3. **Reach:** All, low impact. **Effort:** M across the set. **Fix:** batch by file when a related change is open. **Acceptance:** audit smallTargets empty on the setup pages.
@@ -260,33 +285,33 @@ Reach: **All** = every first-time user; **Most** = most users who reach that ste
 
 Score = severity weight (P1 = 4, P2 = 2, P3 = 1) x reach (All = 3, Most = 2.5, Subset = 1) x centrality (on the main first-run path = 1.5, side path = 1) / effort (S = 1, M = 2, L = 4). Weights are my judgement, not measured; use them for ordering only.
 
-| Rank | Cluster | Score | Sev | Reach | Effort | Type |
-|---|---|---|---|---|---|---|
-| 1 | C1 Approval wording | 18 | P1 | All | S | QUICK |
-| 2 | C2 Invisible Copy buttons | 15 | P1 | Most | S | QUICK |
-| 3 | C3 /connect layout | 15 | P1 | Most | S | QUICK |
-| 4 | C5 /connect hidden info and Deny | 9 | P1 | All | M | DESIGN |
-| 5 | C13 Console first-run clutter | 9 | P2 | All | S | QUICK |
-| 6 | C22 Public site cues | 9 | P2 | All | S | QUICK (copy) |
-| 7 | C9 Backup state | 7.5 | P1 | Most | M | DESIGN |
-| 8 | C10 CLI backup messages | 7.5 | P2 | Most | S | QUICK |
-| 9 | C7 "Settings" does not exist | 6 | P1 | Subset (text printed to all) | S | QUICK |
-| 10 | C23 Skill install | 5 | P2 | Most | S | QUICK |
-| 11 | C11 Recovery file import | 3 | P1 | Subset | M | DESIGN |
-| 12 | C12 Device-login errors | 3 | P2 | Subset | S | QUICK |
-| 13 | C4 /connect messages | 3 | P2 | Subset | S | QUICK |
-| 14 | C6 Approve-before-grant | 2 | P1 | Subset | M | DESIGN |
-| 15 | C14 Stuck failure card | 2 | P2 | Subset | S | QUICK |
-| 16 | C15 API keys / Agents copy | 2 | P2 | Subset | S | QUICK |
-| 17 | C16 Codex MCP snippet | 2 | P2 | Subset | S | QUICK |
-| 18 | C18 Load-key dialog | 2 | P1 | Subset | M | DESIGN |
-| 19 | C20 Finder / Instabox dead ends | 2 | P2 | Subset | S | split |
-| 20 | C21 Finder discoverability | 2 | P2 | Subset | S | QUICK |
-| 21 | C24 Revoke copy | 2 | P2 | Subset | S | QUICK |
-| 22 | C25 Polish | 1.5 | P3 | All | M | batch later |
-| 23 | C19 Trace capture | 1 | P2 | Subset | M | split |
-| 24 | C17 Passphrase and lock model | 1 | P1 | Subset | L | DESIGN |
-| 25 | C8 Fingerprint hand-off | 1 | P2 | Subset | M | DESIGN |
+| Rank | Cluster                          | Score | Sev | Reach                        | Effort | Type         |
+| ---- | -------------------------------- | ----- | --- | ---------------------------- | ------ | ------------ |
+| 1    | C1 Approval wording              | 18    | P1  | All                          | S      | QUICK        |
+| 2    | C2 Invisible Copy buttons        | 15    | P1  | Most                         | S      | QUICK        |
+| 3    | C3 /connect layout               | 15    | P1  | Most                         | S      | QUICK        |
+| 4    | C5 /connect hidden info and Deny | 9     | P1  | All                          | M      | DESIGN       |
+| 5    | C13 Console first-run clutter    | 9     | P2  | All                          | S      | QUICK        |
+| 6    | C22 Public site cues             | 9     | P2  | All                          | S      | QUICK (copy) |
+| 7    | C9 Backup state                  | 7.5   | P1  | Most                         | M      | DESIGN       |
+| 8    | C10 CLI backup messages          | 7.5   | P2  | Most                         | S      | QUICK        |
+| 9    | C7 "Settings" does not exist     | 6     | P1  | Subset (text printed to all) | S      | QUICK        |
+| 10   | C23 Skill install                | 5     | P2  | Most                         | S      | QUICK        |
+| 11   | C11 Recovery file import         | 3     | P1  | Subset                       | M      | DESIGN       |
+| 12   | C12 Device-login errors          | 3     | P2  | Subset                       | S      | QUICK        |
+| 13   | C4 /connect messages             | 3     | P2  | Subset                       | S      | QUICK        |
+| 14   | C6 Approve-before-grant          | 2     | P1  | Subset                       | M      | DESIGN       |
+| 15   | C14 Stuck failure card           | 2     | P2  | Subset                       | S      | QUICK        |
+| 16   | C15 API keys / Agents copy       | 2     | P2  | Subset                       | S      | QUICK        |
+| 17   | C16 Codex MCP snippet            | 2     | P2  | Subset                       | S      | QUICK        |
+| 18   | C18 Load-key dialog              | 2     | P1  | Subset                       | M      | DESIGN       |
+| 19   | C20 Finder / Instabox dead ends  | 2     | P2  | Subset                       | S      | split        |
+| 20   | C21 Finder discoverability       | 2     | P2  | Subset                       | S      | QUICK        |
+| 21   | C24 Revoke copy                  | 2     | P2  | Subset                       | S      | QUICK        |
+| 22   | C25 Polish                       | 1.5   | P3  | All                          | M      | batch later  |
+| 23   | C19 Trace capture                | 1     | P2  | Subset                       | M      | split        |
+| 24   | C17 Passphrase and lock model    | 1     | P1  | Subset                       | L      | DESIGN       |
+| 25   | C8 Fingerprint hand-off          | 1     | P2  | Subset                       | M      | DESIGN       |
 
 Ties are broken by whether the failure is a dead end. C17 ranks low only because of effort; do its "Forgot passphrase?" link as the first slice.
 

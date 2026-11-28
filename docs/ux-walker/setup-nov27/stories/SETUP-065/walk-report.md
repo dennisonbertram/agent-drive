@@ -9,6 +9,7 @@ Geometry audit: pageOverflowX 0; only unevenRows hit is the Refresh/Connect an a
 ## Steps
 
 ### Step 1: Try to reach the stale state
+
 - What the screenshot shows: The state needs a changed inbox record from another API call plus Clerk reverification. A normal user cannot create it from the console or the CLI, and the test session has no Clerk. Not walked. The Replace path itself (key check then new token) was walked in SETUP-064.
 - Geometry: n/a
 

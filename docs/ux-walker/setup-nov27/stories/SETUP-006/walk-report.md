@@ -1,3 +1,4 @@
 # SETUP-006 walk report (partial)
+
 CLI: login with AGENT_DRIVE_API_URL=http://localhost:3811 -> "Agent Drive refused the login request: 404"; with .../api works, prints link, code, verification code. Signed-out /connect -> /sign-in?redirect_url preserved (step-1.png), Clerk not-walkable. Connect page (step-2.png, step-2b-details.png), empty code error (step-3), wrong code error (step-4), correct code -> approved (step-5), Open console -> drive listed with "Key needed . Not backed up" (step-6, mobile-check.png). CLI finished; credentials export + check ok.
 Flow Log: specified 12, needed ~10 plus a Clerk sign-up detour not walkable. Sign-up cue is only "New here? Sign up free" under the card. After approval CLI prints "Ignored a different API URL returned by the server." and an account-key message the human also sees in the console.

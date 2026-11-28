@@ -2,10 +2,10 @@
 
 > ID note: stories in this file now use catalog IDs SETUP-034 to SETUP-042 (see `docs/ux-paths/catalog-setup.md`). Short references such as "story 03" or "see 02" mean the Nth story of this file: 01 = SETUP-034, 02 = SETUP-035, 03 = SETUP-036, 04 = SETUP-037, 05 = SETUP-038, 06 = SETUP-039, 07 = SETUP-040, 08 = SETUP-041, 09 = SETUP-042.
 
-
 Source: read from code in `/Users/dennison/develop/agent-drive-ux-setup` (branch `ux/setup-flow-review-nov27`). Nothing was run. All copy is quoted from source; file:line references are given for conflicts. Temporary IDs `STORY-OWNER-KEYS-NN` are renumbered later.
 
 Paths used below (all under the worktree):
+
 - `apps/web/app/(app)/console/console.tsx` (console)
 - `.../key-chip.tsx`, `.../unlock-dialog.tsx`, `.../vault-forms.tsx`, `.../settings/settings-client.tsx`, `.../drive-menu.tsx`
 - `apps/web/src/console/{vault,passkey,recovery-file,account-key}.ts`
@@ -33,6 +33,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: (a) agent-first: `agent-drive login` creates the drive and the CLI keeps the key (`BACKUP_HINT`, `credentials.ts:33`); (b) CLI `agent-drive drive create --name research-notes`; (c) after creation, the key chip menu offers `Download recovery file` / `Download recovery file again` at any time while the key is loaded in the tab; (d) the drive menu (top of Files) also has `New drive` (`drive-menu.tsx:139`) once a drive exists.
 
 ### Steps
+
 1. Open `/console`. → Onboarding panel, eyebrow "CONNECT YOUR AGENT", h2 "Give your first agent a home." Above it in the heading area the banner reads "Set a passphrase and agents will add every drive’s key to your account — then each one opens here automatically." with a `Set up` button (`console.tsx:2770-2778`). Maya sees two calls to action and no explanation of how they relate.
 2. She reads "Prefer to set up a drive yourself?" and clicks `New drive`. → Dialog "Create a drive": "We’ll generate a unique encryption key in your browser. Save it somewhere safe: the server cannot recover it."
 3. Field `Drive name` is prefilled and selected with "my-drive" (first drive only). She types "research-notes". She leaves the checkbox "Agent-only — never add this drive to passphrase unlock" unticked, unsure what it means (she hesitates, then moves on). She clicks `Create drive`. → Dialog title becomes "Your drive. Your key.": "This key decrypts your drive. Without it nobody, including us, can open this drive. It is not sent to the service or saved in browser storage."
@@ -45,6 +46,7 @@ Paths used below (all under the worktree):
 10. On `/connect` she clicks `Details`, then "Use one of my drives instead (needs its recovery file)". → Form with `Drive`, `Drive key` ("Paste the drive key or an adcred1… bundle"), `Or choose a file`, `Read only`, `Only allow writes under (optional)`. She picks "research-notes", chooses the downloaded `agent-drive-<id>.key.json`, types the verification code into `Verification code`, clicks `Approve agent`. → "Access approved for claude-code".
 
 ### Variations
+
 - She clicks the browser Back button or presses Esc while the receipt is open: the receipt dialog is not closable (`console.tsx:4187-4192` excludes `driveReceipt`), so Esc does nothing; there is no `Close` and no way to skip the download.
 - She clicks `Download again`: a second identical file is saved (names collide as `(1)`).
 - Name already used: error "A drive with this name already exists. Load its original drive key instead."
@@ -52,6 +54,7 @@ Paths used below (all under the worktree):
 - She ticks "Agent-only" by accident: see SETUP-040.
 
 ### Edge Cases
+
 - If she reloads the tab before step 5 the key exists nowhere (it is in tab memory only), and the drive is an empty, unrecoverable shell. The receipt text states this, but no copy warns about reloading.
 - The `/connect` link label says "needs its recovery file" but the form also accepts a pasted key or `adcred1.` bundle (`connect.tsx:685`).
 - Unverified (not traced in code): whether `agent-drive check` passes immediately after step 10 for a key the agent received through approval. The console already has a backup record, but the CLI keeps its own backup records.
@@ -71,6 +74,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: (a) set the passphrase first, then run `agent-drive login` with `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT` in the environment so the automatic seal after login works; (b) skip the passphrase and have the agent run `agent-drive credentials export --to <path>`, then `Choose recovery file` (see SETUP-039); (c) key chip menu `Set up passphrase unlock` instead of the banner `Set up`; (d) read the fingerprint from the key menu instead of Settings.
 
 ### Steps
+
 1. The agent's `login` finishes in the terminal. → Output includes `Logged in as agent claude-code.`, `New drive drv_7QK2 created; its key is saved in the config file.`, the backup hint, and a warning: "Your account has no account key yet, so the console cannot open this drive. Set a passphrase in the console under Settings; agents will add the drive then." (`account-seal.ts:30-31`).
 2. Priya follows the warning literally. She opens `/console/settings` (sidebar link `Activity & deletion`). → Card "Passphrase unlock" says "Not set up." with one button `Manage in Files`. She expected a setup form. She hesitates, then clicks `Manage in Files`. (Settings says "Status only. Setting up, unlocking, changing and resetting all happen in Files." only in a code comment, `settings-client.tsx:103`, not on screen.)
 3. On Files the heading area shows the banner "Set a passphrase and agents will add every drive’s key to your account — then each one opens here automatically." She clicks `Set up`. → Dialog "Set up passphrase unlock".
@@ -87,12 +91,14 @@ Paths used below (all under the worktree):
 14. The chip still says "· Not backed up". She opens the key menu and clicks `Download recovery file` (offered because a slot exists, `key-chip.tsx` `canReproduce`), saves the file, clicks `I saved it`. → Chip drops "· Not backed up". Meanwhile her agent also prints the backup hint; she tells it to run `agent-drive credentials export --to 1password`, which clears the CLI side.
 
 ### Variations
+
 - At step 6 she cancels the Clerk prompt: see SETUP-041.
 - At step 9 she runs the command without `--drive`; all held keys are sealed and one line is printed per drive.
 - If she is on a machine with several agents, every machine needs its own `--fingerprint` run once; the pin is per machine and per API origin (`account-seal.ts`, state in `<config>.state/account-seal.json`).
 - If she never runs step 11, a later automatic seal on the agent prints the same unverified warning at most once per 24 hours per drive (`SEAL_THROTTLE_MS`).
 
 ### Edge Cases
+
 - Settings is named in three CLI strings (`account-seal.ts:31`, `:37-39`, `cli.ts:1153`) and in `unlock-dialog.tsx:242`, but passphrase setup is not in Settings. The step-1 warning sends the user to the wrong page for setup, then Settings sends her back to Files.
 - The fingerprint has the same shape as the `Verification code: a1b2 c3d4 e5f6 7890` printed by `login` (`verification.ts`). The two values are different and used in different places. A user who keeps the login output open may type the verification code at step 11 and get: "The supplied fingerprint (…) does not match the account key the service returned (…). Check the fingerprint in the console under Settings; if it is right, the API may be answering with a different account key."
 - `notes.md` opened before step 11 would, with the vault unlocked, show NOT_IN_ACCOUNT: "Load this drive’s recovery file to open it. We’ll try to save its key for passphrase unlock." (`console.tsx:495`).
@@ -113,17 +119,20 @@ Paths used below (all under the worktree):
 **Alternate paths**: `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT="9c1e 4b7a 02d8 f356" agent-drive account seal`; open the key chip menu and copy `Fingerprint …` from there.
 
 ### Steps
+
 1. On `/console/settings` the card reads "Passphrase set up 11/27/2026, fingerprint 9c1e 4b7a 02d8 f356, 2 drives added." He drags from "9c1e" to the comma after "f356", so the selection ends with ",".
 2. He runs `agent-drive account seal --fingerprint "9c1e 4b7a 02d8 f356,"`. → Error: `--fingerprint must look like "a1b2 c3d4 e5f6 7890", exactly as the console shows it.` (`cli.ts:1151-1153`; the pattern accepts spaces, dots and dashes but not commas, `verification.ts`).
 3. He deletes the comma and re-runs. → One line per drive, `<id>: sealed`.
 
 ### Variations
+
 - He pastes the 16 hex digits with no spaces, or in capitals: accepted (spaces optional, case-insensitive).
 - He uses a hyphen-separated copy ("9c1e-4b7a-02d8-f356"): accepted.
 - He sets the env var wrongly: `AGENT_DRIVE_ACCOUNT_KEY_FINGERPRINT must look like "a1b2 c3d4 e5f6 7890".`
 - He adds `--fingerprint` to another command (`agent-drive put ...`): `--fingerprint is only supported by `account seal`.`
 
 ### Edge Cases
+
 - The Settings value sits inside a prose sentence with a comma after it. The key menu line `Fingerprint 9c1e 4b7a 02d8 f356` has no trailing punctuation.
 - Settings and the key menu show the date as `toLocaleDateString()`, so a non-US browser gives a different date format from the CLI.
 
@@ -141,6 +150,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: the `Add a passkey` button shown beside the "Passphrase set up." notice right after setup (`console.tsx:2747-2757`, `data-testid="passkey-offer"`); the passphrase stays available as a fallback at all times.
 
 ### Steps
+
 1. On laptop A, Files, he opens the key chip. → Menu shows `Add a passkey` (only visible when unlocked, no passkey yet, and the browser may support one, `key-chip.tsx:238-249`). He clicks it.
 2. Dialog "Add a passkey": "Confirm your account passphrase, then follow the device prompt. You can use the same passkey wherever your password manager syncs it." Field `Confirm with your passphrase`. He pastes the passphrase, clicks `Add a passkey` (shows "Adding passkey…").
 3. A Clerk reverification prompt appears (the passkey write is strict, `vault.ts` `addPasskey`). He confirms. Then the browser passkey sheet appears and he approves with Touch ID.
@@ -149,6 +159,7 @@ Paths used below (all under the worktree):
 6. He clicks `Unlock with passkey`. → Button shows "Waiting for your passkey…", Touch ID prompt, then the dialog closes and the file he clicked opens or downloads (pending action resumes).
 
 ### Variations
+
 - Cancelled Clerk prompt: "Confirm it’s you to add the passkey."
 - Wrong passphrase at step 2: "That passphrase is not correct."
 - Browser has no WebAuthn: "This browser cannot use passkeys." Device lacks PRF: "This passkey cannot protect the account key." Other failure: "Passkey setup did not complete."
@@ -157,6 +168,7 @@ Paths used below (all under the worktree):
 - Passkey fails at unlock: "This passkey could not unlock the account key."
 
 ### Edge Cases
+
 - Wording drifts: chip button `Unlock with passkey` (`key-chip.tsx:137`), dialog title "Unlock with your passkey" (`console.tsx:4170`), link "Use the passkey instead" (`unlock-dialog.tsx:114`), link "Use your passphrase instead" (`unlock-dialog.tsx:328`), chip button `Unlock with passphrase`.
 - The idle message says "Locked after 30 minutes without use. Enter your passphrase to continue." (`console.tsx:494`) even for a passkey user.
 - A passkey is not a drive-key backup; agent-only drives still need a recovery file (`docs/keys-and-recovery.md`).
@@ -175,6 +187,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: (a) load each recovery file instead of resetting (she has none); (b) ask the agent for `agent-drive credentials export --to <path>` and use `Choose recovery file` per drive (no reset needed to read files, but the passphrase stays lost); (c) if a key is loaded in the tab before reset, setup re-adds it automatically (`console.tsx:2464-2472`); (d) a passkey would have opened the drives without the passphrase (`docs/keys-and-recovery.md`).
 
 ### Steps
+
 1. She opens `/console`, clicks a file. → Dialog "Unlock with your passphrase": "Type your passphrase to open the drives you added to your account. The keys stay in this browser only." Two buttons: `Unlock` and `Use a recovery file instead`.
 2. She tries three guesses. → Each time: "That passphrase is not correct."
 3. She looks for "forgot" and finds none in the dialog. She clicks `Use a recovery file instead`. → Dialog "Load the key for <drive>": `Choose recovery file`, "Paste a key instead", the line "No recovery file? An agent that has this drive’s key can add it to your account… Your passphrase then opens this drive — no file needed." (it still assumes the passphrase works), and `Use my passphrase instead`. She is in a loop.
@@ -189,6 +202,7 @@ Paths used below (all under the worktree):
 12. She downloads a recovery file for each drive from the key menu and clicks `I saved it` each time.
 
 ### Variations
+
 - Without `--fingerprint`: `--repin requires --fingerprint. Copy the account-key fingerprint shown in the console (Settings) and pass --fingerprint.`
 - Other browser tabs still open on the old account key lock themselves: "Your passphrase was changed elsewhere. Enter it again to continue." (`console.tsx` lock reason `stale`) or "Your passphrase was changed elsewhere. Reload the page."
 - If she tries to type `reset` in lower case, the button stays disabled with no message.
@@ -196,6 +210,7 @@ Paths used below (all under the worktree):
 - Agent-only drives are never re-added; they still need a recovery file.
 
 ### Edge Cases
+
 - The reset link is reachable only from the key menu; the Unlock dialog (the screen she is on when she is stuck) has no path to it (`vault-forms.tsx:85`, `key-chip.tsx:264`).
 - "Remove every drive" and "Files are not deleted" appear together in one paragraph; "every drive must be added again" (generated-passphrase copy, `vault-forms.tsx:178`) means the same thing in other words.
 - `docs/keys-and-recovery.md` says a passkey wrapper "goes with" the reset; the reset dialog does not mention passkeys.
@@ -215,6 +230,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: (a) set a passphrase and run `agent-drive account seal --fingerprint "<print>"` (SETUP-035); (b) `Paste a key instead` with the bundle (not advised: the bundle includes an API key); (c) `agent-drive credentials export --to 1password`.
 
 ### Steps
+
 1. In Files he clicks a file. → Dialog "Load the key for invoices": "Choose the recovery file for this drive. The key stays in this tab only. It is cleared when you reload, or after 30 minutes without use." The key chip says "Key needed".
 2. He reads the lower help text: "No recovery file? An agent that has this drive’s key can add it to your account: run `agent-drive account seal --drive drv_K9`…" and, because no passphrase exists, "Set up a passphrase below first — sealing needs your account key." and `Set up passphrase unlock`. He wants the fast path instead, and finds the second help line: "Or ask the agent to run `agent-drive credentials export`, then choose or paste what it gives you." with `Copy credentials export command`.
 3. He copies the command and asks the agent to run it with a path: `agent-drive credentials export --to ~/Desktop/agent-drive-credentials.txt`. → A file with mode 600 is written and counts as the backup at once.
@@ -222,12 +238,14 @@ Paths used below (all under the worktree):
 5. He opens the chip menu and clicks `Download recovery file`, saves it into 1Password, clicks `I saved it`. → Notice "Recovery file saved. Store it in a password manager."
 
 ### Variations
+
 - If the vault is unlocked when he loads the key, the console adds the drive to the account: "Added to your account. Next time your passphrase opens it." (`console.tsx:1832`).
 - Wrong file: "That is not a recovery file. Choose the agent-drive-….key.json file you downloaded." Wrong drive: "That recovery file is not for this drive." Bundle without this drive: "That credentials bundle has no key for this drive." Unreadable bundle: "That credentials bundle could not be read." File over 16,384 characters is treated as not a recovery file.
 - Pasted raw key that is not 43 characters: "That key is not valid. Paste the whole key or credentials bundle."
 - If no copy of the key exists anywhere: `docs/keys-and-recovery.md` and `docs/backup-and-recovery.md` say the files can never be decrypted; the dialog does not say this.
 
 ### Edge Cases
+
 - The dialog offers `account seal` first, which is the slower path when no passphrase exists, and `credentials export` last.
 - `docs/backup-and-recovery.md` quotes the error as `That is not a recovery file.` The code string is longer (`recovery-file.ts:7-8`).
 - The `Choose recovery file` label is the same for a `.key.json` file and an `adcred1.` bundle saved as text; nothing says the bundle works there except `docs/console.md:23`.
@@ -246,6 +264,7 @@ Paths used below (all under the worktree):
 **Alternate paths**: CLI `agent-drive drive create --name client-exports --agent-only` (the agent keeps the key; no recovery file exists until `credentials export`); the agent creates a normal drive and she does not tick the box (it will seal to her account).
 
 ### Steps
+
 1. In Files she opens the drive menu and clicks `New drive` (`drive-menu.tsx:139`). → Dialog "Create a drive".
 2. She types "client-exports", ticks "Agent-only — never add this drive to passphrase unlock", clicks `Create drive`. → Receipt "Your drive. Your key.", same as SETUP-034.
 3. `Download recovery file and continue`, then `I saved it`. → Files, the new drive selected.
@@ -256,12 +275,14 @@ Paths used below (all under the worktree):
 8. She chooses the saved file. → Key loaded.
 
 ### Variations
+
 - Passphrase setup after this drive exists never adds it (`console.tsx:2469-2471`).
 - Keeping a recovery file is the only backup. If she loses it, only the agent's config or a bundle can recover the key (`docs/keys-and-recovery.md`).
 - CLI-created agent-only drive: `agent-drive drive create --name N --agent-only` records the intent locally before the API call (`cli.ts:1369-1373`).
 - If an agent runs `account seal --drive <agent-only id>` the result is `agent-only`; if the key lacks `read` scope and cannot list drives, the status can be `unknown type` with "unknown drive type: run 'agent-drive account seal --drive ID' with a key that can read drives" (`account-seal.ts:34-35`).
 
 ### Edge Cases
+
 - The dialog line "Ask the agent that created this drive" (`unlock-dialog.tsx:263`) is wrong for Lena: she created the drive in the browser; no agent created it.
 - The drive menu has no visible agent-only marker. A drive named like another normal drive is indistinguishable until the key chip or unlock dialog is opened.
 - Tick-box wording ("never add this drive to passphrase unlock") uses product words the new owner has not met yet; `docs/console.md` spells out that the API refuses a slot.
@@ -281,17 +302,20 @@ Paths used below (all under the worktree):
 **Alternate paths**: generated passphrase (adds `I saved it`, skips typing).
 
 ### Steps
+
 1. He clicks `Set up`, then `Use my own passphrase`. Field label "Passphrase (at least 14 characters)", second field `Type it again`. He types "correct horse battery staple 2026" in both.
 2. He clicks `Create`. → "Creating… this takes a few seconds." then a Clerk prompt. He closes it.
 3. → The form shows: "Confirm it’s you to set up the passphrase." Both fields are now empty (typed values leave state before the slow work, `vault-forms.tsx` `submit`). He retypes both and clicks `Create` again, completes the prompt. → Notice "Passphrase set up. Your agent can now add its drives to your account." or "Passphrase set up. 1 drive added to your account."
 
 ### Variations
+
 - Too short: "Use at least 14 characters." Obvious pattern: "That passphrase is too easy to guess: it contains a common word." (or "it uses too few different characters", "it repeats one character", "it contains an ascending or descending sequence", "it contains a keyboard row pattern", "it contains your email name"). Mismatch: "The passphrases don’t match."
 - With a generated passphrase the code stays on screen after a cancel, so he can click `Create` again.
 - Network failure: "Could not reach Agent Drive. Check your connection and try again." Expired session: "Your session expired. Sign in again."
 - Dialog is not closable while the setup is busy.
 
 ### Edge Cases
+
 - While the Clerk prompt is open the console dialog is hidden (`native-dialog-suspension.ts`) and comes back after.
 - The "At least 14 characters" label and "Use at least 14 characters." error are the same fact twice; the generated passphrase is 20 characters and the copy never says why a longer one is better except the small print "The generated one can’t."
 
@@ -309,18 +333,21 @@ Paths used below (all under the worktree):
 **Alternate paths**: sign out through `UserButton` ("Your account"), which also clears the stored key (`docs/console.md`); key menu `Lock` (clears the tab only).
 
 ### Steps
+
 1. Jo signs in and clicks a file. → Dialog "Unlock with your passphrase": "Type your passphrase to open the drives you added to your account. The keys stay in this browser only." The checkbox `Keep this browser unlocked` is ticked by default.
 2. She reads "stay in this browser only" and does not realise the box means the browser keeps a key after she leaves. She types her passphrase and clicks `Unlock`. (Hesitation: the box is easy to skip.)
 3. File opens. After 40 minutes away: notice "Locked after 30 minutes without use. Enter your passphrase to continue."
 4. She finishes. She opens the key chip: buttons `Lock`, `Lock this browser`, `Change passphrase`, `Forgot or exposed passphrase?`. She clicks `Lock` first, reloads, and from the code I read the key restores without a prompt because the stored browser key survives `Lock` (`vault.ts` `lock` does not clear it; `restorePersisted` runs on load). She then picks `Lock this browser`, reloads, and sees chip "Locked".
 
 ### Variations
+
 - `Lock this browser` fails: "The stored key could not be removed; clear this browser’s site data to finish locking it."
 - She changes her passphrase on another device: "Your passphrase was changed elsewhere. Enter it again to continue."
 - Setup path: the setup form has no checkbox and still stores the key, so a user who sets up a passphrase on a shared machine is never asked.
 - Passkey users see the same checkbox on the passkey form.
 
 ### Edge Cases
+
 - `Lock` and `Lock this browser` sit next to each other; only the second deletes the stored key (`docs/console.md:26`).
 - `docs/console.md:28` says the tab key clears "when you leave the Files page" while `docs/backup-and-recovery.md` says only "reload ... or after 30 minutes".
 - Idle lock text promises to ask for a passphrase; whether a reload after an idle lock reopens silently with "Keep this browser unlocked" is from code reading, not observed. A walker should check this.
@@ -329,15 +356,15 @@ Paths used below (all under the worktree):
 
 ## Copy conflicts and repeated facts (summary)
 
-| # | Conflict | Where |
-|---|----------|-------|
-| 1 | CLI says set the passphrase "under Settings"; Settings can only show status and link to Files. | `account-seal.ts:30-31`, `settings-client.tsx:103,141`, banner `console.tsx:2770` |
-| 2 | Fingerprint and login "Verification code" have the same shape (`a1b2 c3d4 e5f6 7890`) but different purposes. | `verification.ts`, `cli.ts:1153`, `account-seal.ts:37-39` |
-| 3 | Fingerprint is "under Settings" in every instruction, but also in the key menu and inside a sentence with a trailing comma. | `unlock-dialog.tsx:242`, `key-chip.tsx:111`, `settings-client.tsx` |
-| 4 | Setup stores the key in the browser with no checkbox; docs say the checkbox is "used by setup". | `vault-forms.tsx` (no checkbox), `docs/keys-and-recovery.md` |
-| 5 | Reset is hidden in the key menu; the stuck-user dialog never links to it. | `key-chip.tsx:264`, `vault-forms.tsx:85` |
-| 6 | "Ask the agent that created this drive" is wrong for a drive created in the browser. | `unlock-dialog.tsx:263` |
-| 7 | Passkey wording differs across chip, title and links. | `key-chip.tsx:137`, `console.tsx:4170`, `unlock-dialog.tsx:114,328` |
-| 8 | Idle message mentions only the passphrase. | `console.tsx:494` |
-| 9 | Quickstart, home and onboarding omit the verification code the approval page requires. | `docs/quickstart.md:35`, `home.ts:8`, `console.tsx:2858,2874` vs `connect.tsx`, `llms.txt/route.ts` |
-| 10 | Error quoted in docs is shorter than the real string. | `docs/backup-and-recovery.md` vs `recovery-file.ts:7-8` |
+| #   | Conflict                                                                                                                    | Where                                                                                               |
+| --- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | CLI says set the passphrase "under Settings"; Settings can only show status and link to Files.                              | `account-seal.ts:30-31`, `settings-client.tsx:103,141`, banner `console.tsx:2770`                   |
+| 2   | Fingerprint and login "Verification code" have the same shape (`a1b2 c3d4 e5f6 7890`) but different purposes.               | `verification.ts`, `cli.ts:1153`, `account-seal.ts:37-39`                                           |
+| 3   | Fingerprint is "under Settings" in every instruction, but also in the key menu and inside a sentence with a trailing comma. | `unlock-dialog.tsx:242`, `key-chip.tsx:111`, `settings-client.tsx`                                  |
+| 4   | Setup stores the key in the browser with no checkbox; docs say the checkbox is "used by setup".                             | `vault-forms.tsx` (no checkbox), `docs/keys-and-recovery.md`                                        |
+| 5   | Reset is hidden in the key menu; the stuck-user dialog never links to it.                                                   | `key-chip.tsx:264`, `vault-forms.tsx:85`                                                            |
+| 6   | "Ask the agent that created this drive" is wrong for a drive created in the browser.                                        | `unlock-dialog.tsx:263`                                                                             |
+| 7   | Passkey wording differs across chip, title and links.                                                                       | `key-chip.tsx:137`, `console.tsx:4170`, `unlock-dialog.tsx:114,328`                                 |
+| 8   | Idle message mentions only the passphrase.                                                                                  | `console.tsx:494`                                                                                   |
+| 9   | Quickstart, home and onboarding omit the verification code the approval page requires.                                      | `docs/quickstart.md:35`, `home.ts:8`, `console.tsx:2858,2874` vs `connect.tsx`, `llms.txt/route.ts` |
+| 10  | Error quoted in docs is shorter than the real string.                                                                       | `docs/backup-and-recovery.md` vs `recovery-file.ts:7-8`                                             |

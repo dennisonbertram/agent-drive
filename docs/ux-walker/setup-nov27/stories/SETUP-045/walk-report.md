@@ -3,6 +3,7 @@
 Used the account from SETUP-044 (agent ci-file stood in for ci-nightly because only the ci-file bundle was saved to a sandbox; ci-nightly was opened in the key dialog and cancelled). Status: PASS with findings.
 
 ## Steps
+
 1. Console, Agents tab (step-1): rows with `1 ACTIVE KEY` and `Revoke access`. Clear, 1 click to the dialog.
 2. Click `Revoke access for ci-file` (step-2): dialog title "REVOKE ACCESS FOR CI-FILE?" (rendered all caps, which changes the agent name's case), body "1 active API key stops working now. Commands and MCP sessions that use it fail at their next request. Files this agent wrote stay in your drives." Buttons Cancel (focused) and red `Revoke 1 key`. Geometry: no overflow.
 3. Confirm (step-3): toast "Revoked access for ci-file." bottom-left, row badge becomes `ACCESS REVOKED`, button gone. Header badge still reads `3 AGENTS`. 3 actions, matches the Ideal path.
@@ -14,5 +15,6 @@ Used the account from SETUP-044 (agent ci-file stood in for ci-nightly because o
 Browser errors: none.
 
 ## Flow Log
+
 - Ideal 3, needed 3. No hesitation on the web path.
 - Gaps: dialog does not say the drive key inside the leaked bundle remains known to the holder (cannot be rotated here); revoked row cannot be removed and still counts in `3 AGENTS`.

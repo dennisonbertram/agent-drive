@@ -65,13 +65,13 @@ Already consistent: package name and install command match on every surface and 
 
 ## Counts
 
-| Section | Items |
-|---|---|
-| Duplicate Paths | 6 (plus 2 "already minimal" notes) |
-| Duplicate Information | 6 (plus 1 "already minimal" note) |
-| Overlapping Features | 5 (plus 1 "already minimal" note) |
-| Hierarchy & IA | 6 (plus 2 "already excellent" notes) |
-| Naming | 7 (plus 1 "already consistent" note) |
+| Section               | Items                                |
+| --------------------- | ------------------------------------ |
+| Duplicate Paths       | 6 (plus 2 "already minimal" notes)   |
+| Duplicate Information | 6 (plus 1 "already minimal" note)    |
+| Overlapping Features  | 5 (plus 1 "already minimal" note)    |
+| Hierarchy & IA        | 6 (plus 2 "already excellent" notes) |
+| Naming                | 7 (plus 1 "already consistent" note) |
 
 ## Top 5 recommendations (ordered by effect)
 

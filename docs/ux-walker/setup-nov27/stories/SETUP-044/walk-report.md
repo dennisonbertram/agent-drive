@@ -4,6 +4,7 @@ Target: local copy of 0.5.1 at http://localhost:3811, user e2e_second_agent_sand
 Status: PASS with findings (flow works end to end; copy and consistency problems).
 
 ## Steps
+
 0. Setup: first CLI call `agent-drive login --name "marcus-dev agent" --no-browser` with AGENT_DRIVE_API_URL=http://localhost:3811 (origin only, as the console panel shows) printed `Agent Drive refused the login request: 404`. With `.../api` appended it worked. See F-044-01 (may be local-dev only).
 1. Laptop agent approval at /connect (screenshots step-1, step-2). Step-1: card "Pairing request", h1 "Connect marcus-dev agent?", summary "New encrypted drive · full access", collapsed Details, code `DXQS-NKPF`, Verification code field, one orange primary "Approve agent". Clean. Step-2 (Details open): rows Machine/Account/Drive/Access/Writes/Requested, then the checkbox "Let this agent add other agents to its drives". The checkbox is only inside Details; the summary line gives no hint. Geometry: no overflow; the "summary Details" wrapped-control hit is a false positive (label is on one line, row is 44px). Minor: Details label sits about 3px above its chevron.
 2. Typed the verification code from the terminal, ticked delegate, Approve (step-3): "Access approved for marcus-dev agent ... read, write, delete and share its new drive." The page does not mention delegate was granted. CLI printed `Logged in as agent marcus-dev agent.`, `Scopes: read write delete share delegate`, and a long backup paragraph. It also printed `Ignored a different API URL returned by the server.` with no explanation.
@@ -18,6 +19,7 @@ Status: PASS with findings (flow works end to end; copy and consistency problems
 Browser errors: none. Console: only HMR/React devtools info.
 
 ## Flow Log
+
 - Story ideal path: 6. Needed: laptop login+approve (4 actions incl. ticking delegate inside Details and typing the verification code), backup export (not in story, forced by `check`), issue, set secret, sandbox whoami/check, console confirm. 8-9 actions for a first-timer.
 - Hesitations: 404 on origin-only API URL; delegate checkbox hidden in Details; `check` failing right after login; refusal to print to terminal (clear); whole-line paste error.
 - Re-entry: verification code typed from terminal; drive id passed again to put.

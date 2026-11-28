@@ -1,8 +1,10 @@
 # SETUP-022 walk report: use one of my drives (recovery file / key handoff)
+
 User e2e_approve_connect_024 (account with two drives, both named `luis-claude`), request `hana-cursor`, code `LZFJ-SZGH`.
 Recovery file download from the console is not walkable (no passphrase / account key on this copy); I used the credentials bundle (`adcred1.…`) from `agent-drive credentials export --to <file>`, which the page accepts in the Drive key field. A file chosen with the file input was not exercised; the browser file chooser is not scripted here.
 
 ## Steps
+
 1. Opened the link, opened Details (screenshots/step-1.png). The link "Use one of my drives instead (needs its recovery file)" sits at the bottom of the Details panel as a small underlined text link, above the delegate checkbox. It is not visible until Details is opened.
 2. Clicked it (screenshots/step-2.png). Summary becomes "Existing drive · choose below"; the form shows Drive select, Drive key (placeholder cut off: "Paste the drive key or a"), "Or choose a file", "Only allow writes under (optional)", Read only, and a secondary "Use a new drive instead" button. The Drive select lists two options both called `luis-claude` ("luis-claude" and "luis-claude (Dennisons-Mac-Studio.local)"); the user cannot tell which is which. The DOM order is Drive, Drive key, folder, file; visually the folder field sits right of Drive and the file chooser right of Drive key, so "Or choose a file" reads as an alternative to the key but is under the folder field. Details, once opened in this mode, shows only Machine and Account and the delegate checkbox.
 3. Clicked Approve with everything empty (screenshots/step-3.png): the error shown is only the verification code message; the empty Drive key is not flagged. After fixing one, the other would appear (one error at a time).
@@ -14,6 +16,7 @@ Recovery file download from the console is not walkable (no passphrase / account
 9. CLI output for the agent: `Logged in as agent hana-cursor.`, `Scopes: read`, `Writes limited to: /papers`. A read-only key says writes are limited to /papers, which is contradictory.
 
 ## Flow Log
+
 - Steps specified: 9. Steps needed: 8 (open Details, switch mode, choose drive, paste key, tick Read only, folder, verification code, approve) plus error-recovery retries.
 - Hesitations: the link wording says "needs its recovery file" while pasting a key/bundle also works; two drives with identical names; Read only plus folder.
 - Re-entry: the verification code and key are not lost after an error (good).

@@ -1,20 +1,20 @@
 {
- "story": "SETUP-054",
- "status": "not-walkable",
- "note": "Host is macOS; the Windows error cannot be produced. Docs check found no 'Windows unsupported' statement (finding).",
- "findings": [
-  {
-   "id": "F-SETUP-054-01",
-   "story": "SETUP-054",
-   "severity": "medium",
-   "category": "happy-path",
-   "criterion": "Windows not mentioned for mounting",
-   "description": "Search docs/cli, quickstart, sandboxes and /llms.txt for Windows.",
-   "expected": "A sentence saying mount is not available on Windows, with the console or get/put as alternatives.",
-   "actual": "Only mention is 'Clipboard (macOS and Windows)' for credentials export; no mount text says Windows is unsupported. The runtime error could not be observed (host is macOS).",
-   "evidence": "grep of docs .md pages and /llms.txt",
-   "suggested_fix": "Add a platform support line to the mount docs.",
-   "surface": "docs"
-  }
- ]
+  "story": "SETUP-054",
+  "status": "not-walkable",
+  "note": "Host is macOS; the Windows error cannot be produced. Docs check found no 'Windows unsupported' statement (finding).",
+  "findings": [
+    {
+      "id": "F-SETUP-054-01",
+      "story": "SETUP-054",
+      "severity": "medium",
+      "category": "happy-path",
+      "criterion": "Windows not mentioned for mounting",
+      "description": "Search docs/cli, quickstart, sandboxes and /llms.txt for Windows.",
+      "expected": "A sentence saying mount is not available on Windows, with the console or get/put as alternatives.",
+      "actual": "Only mention is 'Clipboard (macOS and Windows)' for credentials export; no mount text says Windows is unsupported. The runtime error could not be observed (host is macOS).",
+      "evidence": "grep of docs .md pages and /llms.txt",
+      "suggested_fix": "Add a platform support line to the mount docs.",
+      "surface": "docs"
+    }
+  ]
 }

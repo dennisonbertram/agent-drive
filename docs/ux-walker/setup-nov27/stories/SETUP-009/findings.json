@@ -1,8 +1,68 @@
 [
-{"id":"F-009-1","story":"SETUP-009","severity":"medium","category":"consistency","description":"Home hero says the agent 'shows a pairing code, and you approve it', console Agents panel says 'open it and click Approve', quickstart.md says 'check that the code matches ... and click Approve'; /llms.txt and /connect require a second, never-shown 16-hex verification code.","expected":"All surfaces mention the verification code the human must type.","actual":"Website copy mentions one code; the approve page demands another.","evidence":"home hero: 'Free to start. Your agent shows a pairing code, and you approve it in your account.'; console Agents panel; GET /docs/quickstart.md step 3","suggested_fix":"Add 'type the verification code your agent prints' to hero hint, console panel and quickstart."},
-{"id":"F-009-2","story":"SETUP-009","severity":"medium","category":"layout","description":"On a 390px viewport the Verification code input is ~165px wide; placeholder and typed value are cut off after three groups.","expected":"Field wide enough to show 'a1b2 c3d4 e5f6 7890' or label stacks above input.","actual":"Placeholder reads 'a1b2 c3d4 e5f6' and the last group is hidden.","evidence":"screenshots/first-run-shared-session/mobile-check.png","suggested_fix":"Stack label above the input on narrow screens."},
-{"id":"F-009-3","story":"SETUP-009","severity":"low","category":"error-handling","description":"`agent-drive skill install` with no ~/.claude or ~/.codex prints instructions but exits 0 although nothing was written.","expected":"Non-zero exit (or an explicit 'not installed').","actual":"Exit 0: 'No ~/.claude or ~/.codex directory found. The skill is at ...; copy it to <skills dir>/agent-drive/SKILL.md, or use --target <dir>.'","evidence":"CLI output quoted; rc=0","suggested_fix":"Exit non-zero, so an agent following llms.txt step 5 does not report the skill installed."},
-{"id":"F-009-4","story":"SETUP-009","severity":"low","category":"error-handling","description":"Login prints 'Ignored a different API URL returned by the server.' with no explanation of what was ignored or why (likely an artifact of the local origin).","expected":"Either silent or says which URL and that the --api value is kept.","actual":"Unexplained warning before 'Logged in as agent ...'.","evidence":"CLI out.log line before 'Logged in as agent billing-api agent.'","suggested_fix":"Name both URLs or drop the line when harmless."},
-{"id":"F-009-5","story":"SETUP-009","severity":"low","category":"error-handling","description":"Pointing AGENT_DRIVE_API_URL at the site origin (no /api) fails with a bare status and no URL or hint.","expected":"Message naming the URL tried and suggesting the /api suffix.","actual":"'Agent Drive refused the login request: 404'","evidence":"CLI output quoted","suggested_fix":"Include the URL and hint that the API URL ends in /api."},
-{"id":"F-009-6","story":"SETUP-009","severity":"low","category":"happy-path","description":"Right after a successful agent connection the console Files page says 'Ready for your first file. Connect an agent with the CLI or MCP to upload encrypted files.' and shows 'Key needed · Not backed up', as if no agent were connected.","expected":"Acknowledge that an agent is connected and wait for its first file; explain the 'Key needed' chip.","actual":"Generic empty state.","evidence":"screenshots/step-5.png","suggested_fix":"If the drive has an agent but no files, say 'billing-api agent is connected; its first file will appear here.'"}
+  {
+    "id": "F-009-1",
+    "story": "SETUP-009",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Home hero says the agent 'shows a pairing code, and you approve it', console Agents panel says 'open it and click Approve', quickstart.md says 'check that the code matches ... and click Approve'; /llms.txt and /connect require a second, never-shown 16-hex verification code.",
+    "expected": "All surfaces mention the verification code the human must type.",
+    "actual": "Website copy mentions one code; the approve page demands another.",
+    "evidence": "home hero: 'Free to start. Your agent shows a pairing code, and you approve it in your account.'; console Agents panel; GET /docs/quickstart.md step 3",
+    "suggested_fix": "Add 'type the verification code your agent prints' to hero hint, console panel and quickstart."
+  },
+  {
+    "id": "F-009-2",
+    "story": "SETUP-009",
+    "severity": "medium",
+    "category": "layout",
+    "description": "On a 390px viewport the Verification code input is ~165px wide; placeholder and typed value are cut off after three groups.",
+    "expected": "Field wide enough to show 'a1b2 c3d4 e5f6 7890' or label stacks above input.",
+    "actual": "Placeholder reads 'a1b2 c3d4 e5f6' and the last group is hidden.",
+    "evidence": "screenshots/first-run-shared-session/mobile-check.png",
+    "suggested_fix": "Stack label above the input on narrow screens."
+  },
+  {
+    "id": "F-009-3",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "`agent-drive skill install` with no ~/.claude or ~/.codex prints instructions but exits 0 although nothing was written.",
+    "expected": "Non-zero exit (or an explicit 'not installed').",
+    "actual": "Exit 0: 'No ~/.claude or ~/.codex directory found. The skill is at ...; copy it to <skills dir>/agent-drive/SKILL.md, or use --target <dir>.'",
+    "evidence": "CLI output quoted; rc=0",
+    "suggested_fix": "Exit non-zero, so an agent following llms.txt step 5 does not report the skill installed."
+  },
+  {
+    "id": "F-009-4",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Login prints 'Ignored a different API URL returned by the server.' with no explanation of what was ignored or why (likely an artifact of the local origin).",
+    "expected": "Either silent or says which URL and that the --api value is kept.",
+    "actual": "Unexplained warning before 'Logged in as agent ...'.",
+    "evidence": "CLI out.log line before 'Logged in as agent billing-api agent.'",
+    "suggested_fix": "Name both URLs or drop the line when harmless."
+  },
+  {
+    "id": "F-009-5",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Pointing AGENT_DRIVE_API_URL at the site origin (no /api) fails with a bare status and no URL or hint.",
+    "expected": "Message naming the URL tried and suggesting the /api suffix.",
+    "actual": "'Agent Drive refused the login request: 404'",
+    "evidence": "CLI output quoted",
+    "suggested_fix": "Include the URL and hint that the API URL ends in /api."
+  },
+  {
+    "id": "F-009-6",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Right after a successful agent connection the console Files page says 'Ready for your first file. Connect an agent with the CLI or MCP to upload encrypted files.' and shows 'Key needed · Not backed up', as if no agent were connected.",
+    "expected": "Acknowledge that an agent is connected and wait for its first file; explain the 'Key needed' chip.",
+    "actual": "Generic empty state.",
+    "evidence": "screenshots/step-5.png",
+    "suggested_fix": "If the drive has an agent but no files, say 'billing-api agent is connected; its first file will appear here.'"
+  }
 ]

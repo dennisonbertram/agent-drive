@@ -1,14 +1,14 @@
 [
- {
-  "id": "F-SETUP-003-1",
-  "severity": "medium",
-  "title": "approve-copy",
-  "description": "Onboarding says click Approve; real page needs typed verification code"
- },
- {
-  "id": "F-SETUP-003-2",
-  "severity": "medium",
-  "title": "passphrase-banner",
-  "description": "Passphrase banner shown before any drive exists"
- }
+  {
+    "id": "F-SETUP-003-1",
+    "severity": "medium",
+    "title": "approve-copy",
+    "description": "Onboarding says click Approve; real page needs typed verification code"
+  },
+  {
+    "id": "F-SETUP-003-2",
+    "severity": "medium",
+    "title": "passphrase-banner",
+    "description": "Passphrase banner shown before any drive exists"
+  }
 ]
