@@ -731,7 +731,7 @@ test.describe('agent device login', () => {
     expect(checkC.status, checkC.stderr).toBe(0);
     expect(checkC.stdout).toContain(`check ok drive=${driveId}`);
     expect(checkC.stderr).toContain(
-      `The key for drive ${driveId} came from a recovery file, so a copy exists elsewhere.`,
+      `The key for drive ${driveId} came from a recovery file. Keep that copy; it is this key's backup.`,
     );
     for (const r of [imported, checkC]) noSecrets(output(r));
 
