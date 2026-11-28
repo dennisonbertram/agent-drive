@@ -52,7 +52,14 @@ export function billingRates(): Rates | null {
   const names = ['DRIVE_MONTH', 'STORAGE_GIB_MONTH', 'EGRESS_GIB', 'OPERATIONS_1000'] as const;
   const values = names.map((name) => process.env[`BILLING_${name}_CENTS`]);
   if (values.some((value) => !value)) return null;
-  if (values.some((value) => !/^\d{1,7}$/u.test(value!) || Number(value) <= 0)) {
+  const egressUnmetered = process.env.S3_EGRESS_METERING === 'none';
+  if (
+    values.some((value, index) => {
+      if (!/^\d{1,7}$/u.test(value!)) return true;
+      const num = Number(value);
+      return index === 2 && egressUnmetered ? num < 0 : num <= 0;
+    })
+  ) {
     throw new ApiError('internal_error', 'Billing rates are not configured correctly.');
   }
   return {

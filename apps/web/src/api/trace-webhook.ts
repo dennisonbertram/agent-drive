@@ -177,8 +177,68 @@ export async function ingestOpenRouterTrace(input: {
   );
   const ciphertextSize = encryptedSize(jsonBytes.length);
 
+  // Pre-read drive/inbox/quota and encrypt/upload outside the account lock so S3 network I/O never
+  // stalls concurrent account operations, while still rejecting duplicates, missing drives, and
+  // over-quota deliveries before touching object storage. All invariants are re-verified under
+  // locks inside the commit transaction below.
+  const preDrive = await getPool().query(
+    'SELECT id FROM drives WHERE id = $1 AND account_id = $2 AND deleting_at IS NULL',
+    [driveId, token.account_id],
+  );
+  if (!preDrive.rowCount) throw new ApiError('not_found', 'Drive not found.');
+  const existing = await getPool().query<{ deleted_at: string | null }>(
+    'SELECT deleted_at FROM files WHERE drive_id = $1 AND path = $2',
+    [driveId, path],
+  );
+  if (existing.rows[0] && existing.rows[0].deleted_at === null) {
+    return json({ ok: true, stored: 0, duplicate: true });
+  }
+  const preInbox = await getPool().query<{
+    key_id: string;
+    public_key: string;
+    wrapped_private_key: string;
+  }>(
+    'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1',
+    [driveId],
+  );
+  if (!preInbox.rowCount) throw new ApiError('conflict', 'The drive has no trace inbox.');
+  const preRecord = preInbox.rows[0]!;
+  if (token.inbox_key_id !== null || token.inbox_record_hash !== null) {
+    if (
+      token.inbox_key_id === null ||
+      token.inbox_record_hash === null ||
+      token.inbox_key_id !== preRecord.key_id ||
+      token.inbox_record_hash !==
+        inboxRecordDigest(preRecord.key_id, preRecord.public_key, preRecord.wrapped_private_key)
+    )
+      throw new ApiError(
+        'conflict',
+        'The trace inbox changed. Create a new webhook token in the console.',
+      );
+  }
+  await checkDriveQuota(getPool(), driveId, ciphertextSize);
+
+  const fileKey = randomBytes(32);
+  let ciphertext: Uint8Array;
+  let wrappedKey: string;
+  try {
+    ciphertext = await seal(jsonBytes, fileKey, randomBytes(8));
+    wrappedKey = await sealFileKeyToInbox(encodeBase64Url(fileKey), {
+      driveId,
+      keyId: preRecord.key_id,
+      publicKey: preRecord.public_key,
+    });
+  } finally {
+    fileKey.fill(0);
+  }
+  if (ciphertext.length !== ciphertextSize) throw new Error('Unexpected ciphertext size.');
+
+  const versionId = randomUUID();
+  const stagedObjectKey = `objects/${token.account_id}/${driveId}/${versionId}`;
   let objectKey: string | null = null;
   try {
+    objectKey = stagedObjectKey;
+    await putObject(stagedObjectKey, ciphertext);
     return await withTransaction(async (client) => {
       await lockBillingAccount(client, token.account_id);
       const drive = await client.query(
@@ -186,14 +246,13 @@ export async function ingestOpenRouterTrace(input: {
         [driveId, token.account_id],
       );
       if (!drive.rowCount) throw new ApiError('not_found', 'Drive not found.');
-      let conflictFile: Awaited<ReturnType<typeof putConflict>>;
-      try {
-        conflictFile = await putConflict(client, driveId, path, 'create');
-      } catch (error) {
-        if (error instanceof ApiError && error.details.state === 'exists')
-          return json({ ok: true, stored: 0, duplicate: true });
-        throw error;
-      }
+      const activeToken = await client.query(
+        'SELECT 1 FROM drive_webhook_tokens WHERE drive_id = $1 AND token_hash = $2 AND revoked_at IS NULL',
+        [driveId, token.token_hash],
+      );
+      if (!activeToken.rowCount)
+        throw new ApiError('unauthorized', 'The webhook token is not valid.');
+      const conflictFile = await putConflict(client, driveId, path, 'create');
       const inbox = await client.query(
         'SELECT key_id, public_key, wrapped_private_key FROM drive_trace_inboxes WHERE drive_id = $1 FOR SHARE',
         [driveId],
@@ -204,6 +263,16 @@ export async function ingestOpenRouterTrace(input: {
         public_key: string;
         wrapped_private_key: string;
       };
+      if (
+        record.key_id !== preRecord.key_id ||
+        record.public_key !== preRecord.public_key ||
+        record.wrapped_private_key !== preRecord.wrapped_private_key
+      ) {
+        throw new ApiError(
+          'conflict',
+          'The trace inbox changed while storing the trace. Retry the delivery.',
+        );
+      }
       if (token.inbox_key_id !== null || token.inbox_record_hash !== null) {
         if (
           token.inbox_key_id === null ||
@@ -221,29 +290,11 @@ export async function ingestOpenRouterTrace(input: {
       await enforceWriteBudget(client, token.account_id, { bytes: BigInt(ciphertextSize) });
       await checkDriveQuota(client, driveId, ciphertextSize);
 
-      const fileKey = randomBytes(32);
-      let ciphertext: Uint8Array;
-      let wrappedKey: string;
-      try {
-        ciphertext = await seal(jsonBytes, fileKey, randomBytes(8));
-        wrappedKey = await sealFileKeyToInbox(encodeBase64Url(fileKey), {
-          driveId,
-          keyId: inbox.rows[0].key_id,
-          publicKey: record.public_key,
-        });
-      } finally {
-        fileKey.fill(0);
-      }
-      if (ciphertext.length !== ciphertextSize) throw new Error('Unexpected ciphertext size.');
-
-      const versionId = randomUUID();
-      objectKey = `objects/${token.account_id}/${driveId}/${versionId}`;
-      await putObject(objectKey, ciphertext);
       await commitPut(client, {
         accountId: token.account_id,
         driveId,
         path,
-        objectKey,
+        objectKey: stagedObjectKey,
         ciphertextSize,
         wrappedKey,
         agentId: token.agent_id,

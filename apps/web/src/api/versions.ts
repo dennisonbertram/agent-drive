@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { PoolClient, QueryResultRow } from 'pg';
+import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { ApiError } from './errors';
 import {
   assertNoExplicitDirectoryAtFilePath,
@@ -121,7 +121,7 @@ export async function putConflict(
 
 /** Throws quota_exceeded if adding `size` bytes of versions would exceed the drive quota. */
 export async function checkDriveQuota(
-  client: PoolClient,
+  client: Pool | PoolClient,
   driveId: string,
   size: number,
   // Optional quota already read off a row the caller locked in this transaction.
