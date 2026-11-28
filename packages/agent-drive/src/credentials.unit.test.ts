@@ -199,6 +199,18 @@ describe('import', () => {
     expect(await readConfig()).toEqual(before);
   });
 
+  it('exports only a drive-specific key, never the generic AGENT_DRIVE_KEY', async () => {
+    const { dir, key } = await setup();
+    const generic = generateDriveKey();
+    vi.stubEnv('AGENT_DRIVE_KEY', generic);
+    const path = join(dir, 'b.key.json');
+    await exportRecoveryFile({ drive: D1, to: path });
+    expect(JSON.parse(await readFile(path, 'utf8')).key).toBe(key);
+    await expect(exportRecoveryFile({ drive: E1, to: join(dir, 'e.json') })).rejects.toThrow(
+      `This machine has no saved key for drive ${E1}.`,
+    );
+  });
+
   it('exports one drive as a console recovery file without recording a backup', async () => {
     const { dir, key } = await setup();
     await writeConfig({
@@ -216,7 +228,7 @@ describe('import', () => {
     expect((await readConfig()).keyBackup?.[D1]).toBeUndefined();
     await expect(exportRecoveryFile({ drive: D1, to: path })).rejects.toThrow('already exists');
     await expect(exportRecoveryFile({ drive: E1, to: join(dir, 'x.json') })).rejects.toThrow(
-      `There is no drive key for ${E1} on this machine.`,
+      `This machine has no saved key for drive ${E1}.`,
     );
     await expect(
       exportRecoveryFile({ drive: D1, to: join(dir, 'nope', 'x.json') }),

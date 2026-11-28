@@ -14,6 +14,7 @@ import {
 import {
   readConfig,
   resolveDriveKey,
+  driveKeyEnvironmentName,
   resolveDriveId,
   resolveLoginApiUrl,
   writeConfig,
@@ -475,8 +476,16 @@ export async function exportRecoveryFile(options: {
   const config = await loadConfig(options.apiUrl);
   const apiUrl =
     options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
-  const key = await resolveDriveKey(options.drive, apiUrl, undefined, config);
-  if (!key) throw new Error(`There is no drive key for ${options.drive} on this machine.`);
+  // Only a key that is specifically for this drive: its per-drive env var, or the saved key
+  // recorded for this drive at this origin. AGENT_DRIVE_KEY is not bound to a drive id.
+  const origin = originOf(apiUrl);
+  const savedKey = config.driveKeys?.[options.drive];
+  const key =
+    process.env[driveKeyEnvironmentName(options.drive)]?.trim() ||
+    (origin !== undefined && config.driveKeyOrigins?.[options.drive] === origin
+      ? savedKey
+      : undefined);
+  if (!key) throw new Error(`This machine has no saved key for drive ${options.drive}.`);
   try {
     decodeDriveKey(key);
   } catch {

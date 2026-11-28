@@ -1275,20 +1275,19 @@ test.describe('agent device login', () => {
 
     // A fresh machine that restored only the drive key (a recovery file): no API key to prove it.
     const envB = cliEnv(baseURL!, root, 'held-b', 'm-held-b');
+    const recoveryFile = join(root, 'held-recovery.key.json');
     await writeFile(
-      envB.AGENT_DRIVE_CONFIG!,
-      JSON.stringify({
-        apiUrl: `${baseURL}/api`,
-        driveKeys: { [driveId]: driveKey },
-        driveKeyOrigins: { [driveId]: new URL(baseURL!).origin },
-      }),
+      recoveryFile,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key: driveKey }),
       { mode: 0o600 },
     );
+    const imported = await cli(['credentials', 'import', '--from', recoveryFile], envB);
+    expect(imported.status, imported.stderr).toBe(0);
     const second = await startLogin(envB, 'held-b-bot');
     await page.goto(second.path);
     await expect(
       page.getByText(
-        'This agent already has the key for your drive held-a-bot. Approving connects it to that drive.',
+        "This agent says it has the key for your drive held-a-bot. Approve only if you gave it that drive's recovery file or key.",
       ),
     ).toBeVisible();
     await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
@@ -1313,6 +1312,44 @@ test.describe('agent device login', () => {
       [driveId],
     );
     expect(Number(count.rows[0]!.n)).toBe(1);
+  });
+
+  test('choosing a new drive after opening the existing-drive picker creates a new drive for an agent that holds a key', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'held-n-a', 'm-held-n-a');
+    const first = await startLogin(envA, 'held-n-a-bot');
+    await approve(page, first.path, 'held-n-a-bot', first.code, first.verify);
+    expect((await first.login.done).status).toBe(0);
+    const [driveId, driveKey] = Object.entries((await readConfig(envA)).driveKeys)[0]!;
+    const envB = cliEnv(baseURL!, root, 'held-n-b', 'm-held-n-b');
+    const recoveryFile = join(root, 'held-n-recovery.key.json');
+    await writeFile(
+      recoveryFile,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key: driveKey }),
+      { mode: 0o600 },
+    );
+    expect((await cli(['credentials', 'import', '--from', recoveryFile], envB)).status).toBe(0);
+    const second = await startLogin(envB, 'held-n-b-bot');
+    await page.goto(second.path);
+    await expect(page.getByText(/This agent says it has the key for your drive/)).toBeVisible();
+    await openDetails(page);
+    await page.getByRole('button', { name: /Use one of my drives instead/ }).click();
+    await page.getByRole('button', { name: 'Use a new drive instead' }).click();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.locator('#connect-verify').fill(second.verify);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = JSON.parse((await approveRequest).postData() ?? '{}') as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('driveIds');
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    second.login.child.kill();
   });
 
   test('connect card presentation: banner, note, account, login command', async ({

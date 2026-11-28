@@ -766,7 +766,7 @@ export default function Connect({
     : offer
       ? `${offer.agentName} sealed the drive key for this login; Agent Drive never sees it.`
       : held.length > 0
-        ? `This agent already has the key for your ${held.length === 1 ? 'drive' : 'drives'} ${heldNames}. Approving connects it to ${held.length === 1 ? 'that drive' : 'those drives'}.`
+        ? `This agent says it has the key for your ${held.length === 1 ? 'drive' : 'drives'} ${heldNames}. Approve only if you gave it ${held.length === 1 ? "that drive's recovery file or key" : "those drives' recovery files or keys"}.`
         : reconnect.length > 0
           ? `It reconnects to the drive it used before${previous ? ' and keeps its previous permissions' : ''}.`
           : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
@@ -980,6 +980,8 @@ export default function Connect({
             disabled={busy}
             onClick={() => {
               setExisting(false);
+              // A request whose agent holds a drive would otherwise fall back to that drive.
+              setNewInstead(true);
               clearKey();
             }}
           >

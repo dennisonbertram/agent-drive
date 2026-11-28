@@ -1789,12 +1789,23 @@ describe('credentials export --recovery-file', () => {
       ['credentials', 'export', '--drive', B, '--recovery-file', join(dir, 'a.json')],
       { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
     );
-    expect(noKey.err).toContain(`There is no drive key for ${B} on this machine.`);
+    expect(noKey.err).toContain(`This machine has no saved key for drive ${B}.`);
     const noParent = await cli(
       ['credentials', 'export', '--drive', A, '--recovery-file', join(dir, 'missing', 'a.json')],
       { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
     );
     expect(noParent.err).toContain('its parent folder does not exist');
+  });
+
+  it('rejects --drive without --recovery-file', async () => {
+    const r = await cli(['credentials', 'export', '--drive', A], {
+      keys: { [A]: generateDriveKey() },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      '--drive only works with --recovery-file. To back up all credentials, run the command without --drive.',
+    );
   });
 });
 

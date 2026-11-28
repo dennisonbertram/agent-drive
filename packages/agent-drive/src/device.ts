@@ -123,7 +123,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   // The saved API key and drive keys are only trusted for the origin they were saved for.
   const origin = new URL(base).origin;
   const saved = await readConfig();
-  const savedKeys = sameOrigin(saved.apiUrl, base) ? keysForOrigin(saved, origin) : {};
+  // Drive keys are selected by their own recorded origin (a recovery-file import on a fresh
+  // machine has no saved apiUrl); only the API credential needs the saved apiUrl to match.
+  const savedKeys = keysForOrigin(saved, origin);
   const previousKey = sameOrigin(saved.apiUrl, base) ? saved.apiKey : undefined;
   const knownDriveIds = Object.keys(savedKeys).slice(0, 20);
   const { privateKey, publicKey } = await generateDeviceKeyPair();

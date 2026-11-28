@@ -741,6 +741,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   const [tracesBusy, setTracesBusy] = useState(false);
   const [tracesResume, setTracesResume] = useState<TracesKey | undefined>();
   const webhookSeen = useRef<string | null | undefined>(undefined);
+  const webhookAttempt = useRef(0);
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
   const previewRequest = useRef(0);
@@ -2414,9 +2415,12 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       // the same one, on the same drive, with no Lock or newer action in between.
       const mark = actionEpoch.current;
       const epoch = vault.epochNow;
+      // A second file chosen while this one verifies supersedes it, on success and on failure.
+      const attempt = ++webhookAttempt.current;
       assertKeyForDrive((id, k) => vault.verifyKey(id, k), pending.driveId, key).then(
         () => {
           if (
+            attempt !== webhookAttempt.current ||
             mark !== actionEpoch.current ||
             epoch !== vault.epochNow ||
             pendingNow.current !== pending ||
@@ -2427,8 +2431,16 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
           setModal(null);
           openTraces({ key, source, driveId: pending.driveId, seen: webhookSeen.current });
         },
-        (reason: unknown) =>
-          setRecoveryNote(reason instanceof Error ? reason.message : 'That key could not be used.'),
+        (reason: unknown) => {
+          if (
+            attempt !== webhookAttempt.current ||
+            mark !== actionEpoch.current ||
+            epoch !== vault.epochNow ||
+            pendingNow.current !== pending
+          )
+            return;
+          setRecoveryNote(reason instanceof Error ? reason.message : 'That key could not be used.');
+        },
       );
       return;
     }

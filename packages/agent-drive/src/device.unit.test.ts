@@ -369,6 +369,17 @@ describe('deviceLogin', () => {
     expect(r.calls[0]?.body.known_drive_ids).toEqual([UID]);
   });
 
+  it('sends known_drive_ids by per-key origin when no apiUrl or apiKey is saved', async () => {
+    const path = await setup();
+    await writeFile(
+      path,
+      JSON.stringify({ driveKeys: { a: K1 }, driveKeyOrigins: { a: 'https://x.test' } }),
+    );
+    const r = run(() => json(200, { access_token: 't', drive_ids: ['a'] }));
+    await r.promise;
+    expect(r.calls[0]?.body.known_drive_ids).toEqual(['a']);
+  });
+
   it('migrates legacy keys without origins to the saved apiUrl origin', async () => {
     const path = await setup();
     await writeFile(

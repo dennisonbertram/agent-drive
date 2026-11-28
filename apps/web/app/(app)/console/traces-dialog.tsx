@@ -86,16 +86,20 @@ export function TracesDialog({
     };
   }, []);
 
+  // Bumped by every token load and every successful change; a load only applies if no later
+  // one started or changed the token while it was in flight.
+  const latest = useRef(0);
   const fetchToken = useCallback(() => {
+    const mine = ++latest.current;
     request<{ token: Active | null }>(`drives/${driveId}/webhook-token`).then(
       (result) => {
-        if (!alive.current) return;
+        if (!alive.current || mine !== latest.current) return;
         seen.current = result.token?.id ?? null;
         // A one-time token display must not outlive the state it described.
         setCreated((shown) => (shown && shown.id === seen.current ? shown : null));
         setActive(result.token);
       },
-      () => alive.current && setActive('error'),
+      () => alive.current && mine === latest.current && setActive('error'),
     );
   }, [request, driveId]);
   useEffect(fetchToken, [fetchToken]);
@@ -122,6 +126,7 @@ export function TracesDialog({
         ...(seen.current === undefined ? {} : { expectedTokenId: seen.current }),
       });
       if (!alive.current) return;
+      latest.current++;
       seen.current = token.id;
       setCreated(token);
       setConfirmReplace(false);
@@ -160,6 +165,7 @@ export function TracesDialog({
       if (alive.current) setRevoking(false);
     }
     if (!alive.current) return;
+    latest.current++;
     focusAdd.current = true;
     seen.current = null;
     setCreated(null);

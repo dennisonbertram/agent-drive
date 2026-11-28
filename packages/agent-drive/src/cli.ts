@@ -741,6 +741,10 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'credentials') {
     const sub = args.positionals[0];
+    if (sub === 'export' && args.values.drive?.length && !args.values['recovery-file'])
+      throw new Error(
+        '--drive only works with --recovery-file. To back up all credentials, run the command without --drive.',
+      );
     if (sub === 'export' && args.values['recovery-file']) {
       const drive = args.values.drive?.[0];
       if (!drive || args.values.to || args.values.stdout)
