@@ -990,7 +990,9 @@ test.describe('agent device login', () => {
     await expect(page.locator('.connect-details .connect-facts')).toContainText(
       'New encrypted drive',
     );
-    await expect(page.getByText(/Approving creates a new, empty drive for this agent\./)).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     again.login.child.kill();
@@ -1206,7 +1208,9 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'grantee2', 'm-grantee2');
     const b = await startLogin(envB, 'grantee2-bot');
     await page.goto(b.path);
-    await expect(page.getByText(/Approving creates a new, empty drive for this agent\./)).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     const granted = await cli(['grant', b.code, '--read-only', '--verify', b.verify], envA);
     expect(granted.status, granted.stderr).toBe(0);
     await page.locator('#connect-verify').fill(b.verify);
@@ -1541,7 +1545,9 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'focus-b', 'm-focus-b');
     const b = await startLogin(envB, 'focus-b-bot');
     await page.goto(b.path);
-    await expect(page.getByText(/Approving creates a new, empty drive for this agent\./)).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     const granted = await cli(['grant', b.code, '--read-only', '--verify', b.verify], envA);
     expect(granted.status, granted.stderr).toBe(0);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
