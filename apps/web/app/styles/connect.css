@@ -123,8 +123,8 @@
 /* the typed verification code: the terminal is the independent channel */
 .connect-shell label.connect-verify {
   display: grid;
-  gap: 6px;
-  margin: 0 0 8px;
+  gap: 4px;
+  margin: 0 0 14px;
   font: 500 12px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.12em;
   text-transform: uppercase;

@@ -737,14 +737,14 @@ export default function Connect({
   );
   const grantScopes = offer
     ? offer.scopes
-    : held.length
+    : held.length || existing
       ? readOnly
         ? ['read']
         : DEFAULT_SCOPES
       : (previous ?? DEFAULT_SCOPES);
   const grantWrites = offer
     ? offer.writePaths
-    : held.length
+    : held.length || existing
       ? folder.trim()
         ? [folder.trim()]
         : []
@@ -768,7 +768,7 @@ export default function Connect({
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
   const summary = (
     existing
-      ? ['Existing drive · choose below']
+      ? ['Existing drive · choose below', summarizeAccess(grantScopes, grantWrites)]
       : [
           offer
             ? offer.drive.name
@@ -958,7 +958,7 @@ export default function Connect({
               id="connect-key"
               type="password"
               autoComplete="off"
-              placeholder="Paste the drive key or an adcred1… bundle"
+              placeholder="Paste the drive key"
               value={keyText}
               disabled={busy}
               aria-invalid={keyInvalid || undefined}
@@ -986,7 +986,14 @@ export default function Connect({
           ) : (
             <p className="connect-hint cf-note">
               The key is checked against the drive before it is sent. A drive with no files or trace
-              inbox has nothing to check it against.
+              inbox has nothing to check it against. No recovery file? In the console, use the key
+              menu, Download recovery file (only if that browser has the key), or have an agent that
+              has this drive run{' '}
+              <code className="connect-cmd connect-cmd-wrap">
+                agent-drive credentials export --drive {driveId || '<drive id>'} --recovery-file
+                &lt;file&gt;
+              </code>
+              .
             </p>
           )}
           {limits}

@@ -1478,6 +1478,9 @@ test.describe('agent device login', () => {
     const branch = page.getByRole('button', { name: /Use one of my drives instead/ });
     expect((await branch.boundingBox())!.height).toBeGreaterThanOrEqual(40);
     await branch.click();
+    // The access to be granted shows in the summary, and the key field says where a file comes from.
+    await expect(page.locator('.connect-summary')).toContainText('full access');
+    await expect(page.getByText(/No recovery file\? In the console/)).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     const card = await page.locator('.connect-card').boundingBox();
     expect(card!.height).toBeLessThanOrEqual(850);

@@ -429,7 +429,7 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     // Drive B is not in the account yet; the vault is already unlocked, so the dialog goes
     // straight to the recovery file.
     await page.goto(`/console?drive=${seeded.b.id}`);
-    await expect(chip(page)).toContainText('Unlocked');
+    await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
     await expect(
@@ -703,6 +703,7 @@ test('change passphrase: the old one stops working, the new one works; reset rem
     await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toContainText(
       'Drives from before the reset need their recovery file once (or an agent re-pins them); after that this passphrase opens them.',
     );
+    await expect(page.getByText(/Passphrase set up\. /)).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.reload();
     await expect(chip(page)).toContainText('Key needed');

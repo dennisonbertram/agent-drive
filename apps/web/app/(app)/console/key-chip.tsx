@@ -20,6 +20,7 @@ export function KeyChip({
   vault,
   fingerprint,
   agentOnly,
+  inAccount,
   passkey,
   vaultActions,
 }: {
@@ -36,6 +37,8 @@ export function KeyChip({
   vault: VaultStatus;
   fingerprint: string;
   agentOnly?: boolean;
+  /** The selected drive's key is saved under the account key, so the passphrase opens it. */
+  inAccount?: boolean;
   /** 'use' = a passkey exists and this browser can run it; 'add' = it could enroll one. */
   passkey?: 'use' | 'add' | undefined;
   vaultActions: {
@@ -58,7 +61,10 @@ export function KeyChip({
   // A fresh recovery file can be written without a file whenever the account holds a copy
   // (agent-only drives never get one). A locked vault asks for the passphrase first.
   const canReproduce = !agentOnly && hasVault;
-  const dot = !backedUp ? 'danger' : hasKey || vault === 'unlocked' ? 'ok' : 'idle';
+  // An unlocked vault opens only drives saved under the account key; for any other drive
+  // the chip says the key is still needed.
+  const opens = vault === 'unlocked' && (hasKey || (inAccount === true && !agentOnly));
+  const dot = !backedUp ? 'danger' : hasKey || opens ? 'ok' : 'idle';
   const closeMenu = (event: { currentTarget: HTMLElement }) =>
     event.currentTarget.closest<HTMLElement>('[popover]')?.hidePopover();
   return (
@@ -71,7 +77,7 @@ export function KeyChip({
           <span className={`key-dot ${dot}`} aria-hidden />
           {vault === 'locked' && !hasKey
             ? 'Locked'
-            : vault === 'unlocked'
+            : opens
               ? 'Unlocked'
               : hasKey
                 ? 'Key loaded'
@@ -109,7 +115,9 @@ export function KeyChip({
               ? 'Unlocked. This drive’s key is loaded in this tab.'
               : agentOnly
                 ? 'Unlocked. This drive is agent-only — only its recovery file opens it.'
-                : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
+                : inAccount
+                  ? 'Unlocked. Drives you added to your account open when you use them.'
+                  : 'Unlocked, but this drive is not in your account yet. Load its recovery file once; after that your passphrase opens it.'}{' '}
         </p>
       )}
       {hasVault && fingerprint && (

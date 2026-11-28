@@ -2556,6 +2556,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   async function resetPassphrase() {
     try {
       await vault.reset();
+      // The earlier "Passphrase set up" notice no longer describes the account.
+      setNotice('');
+      setPasskeyOffer(null);
       setUnlockMode('setup');
       return '';
     } catch (reason) {
@@ -3147,6 +3150,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               vault={vault.status}
                               fingerprint={vault.fingerprint}
                               agentOnly={drive?.agentOnly === true}
+                              inAccount={vault.hasSlot(selected)}
                               passkey={
                                 hasPasskey && passkeyCapable
                                   ? 'use'
