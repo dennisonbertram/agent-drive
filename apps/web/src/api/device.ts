@@ -11,8 +11,9 @@ import { ApiError } from './errors';
 import {
   assertDelegation,
   jsonBody,
-  MAX_BODY_BYTES,
   objectBody,
+  readBoundedBodyBytes,
+  secureTransportAllowed,
   stringField,
   uuid,
   writePaths,
@@ -176,141 +177,164 @@ type Issued = {
 };
 
 async function exchangeDeviceCode(deviceCode: string, origin: string): Promise<Issued> {
-  const outcome = await withTransaction(async (client): Promise<Issued | OAuthError> => {
-    // Lock order is account, agent, then request row. agents.revoke and approval take the agent
-    // lock before touching requests, so a revoke either lands first (the request is denied) or
-    // waits until this key exists and revokes it.
-    const owner = await client.query(
-      'SELECT account_id, agent_id FROM device_authorizations WHERE device_code_hash = $1',
-      [sha256(deviceCode)],
-    );
-    if (owner.rows[0]?.account_id) {
-      try {
-        await lockBillingAccount(client, owner.rows[0].account_id);
-      } catch (error) {
-        if (error instanceof ApiError) return new OAuthError('invalid_grant');
-        throw error;
-      }
-      await client.query('SELECT 1 FROM agents WHERE id = $1 FOR UPDATE', [owner.rows[0].agent_id]);
-    }
-    const found = await client.query(
-      `SELECT *, expires_at <= now() AS is_expired,
-              (last_polled_at IS NOT NULL
-                 AND last_polled_at + make_interval(secs => interval_seconds) > now()) AS too_fast
-         FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`,
-      [sha256(deviceCode)],
-    );
-    const row = found.rows[0];
-    if (!row || row.status === 'consumed') return new OAuthError('invalid_grant');
-    if (row.is_expired) return new OAuthError('expired_token');
-    if (row.too_fast) {
-      await client.query(
-        `UPDATE device_authorizations
-            SET interval_seconds = interval_seconds + 5, last_polled_at = now() WHERE id = $1`,
-        [row.id],
-      );
-      return new OAuthError('slow_down');
-    }
-    await client.query('UPDATE device_authorizations SET last_polled_at = now() WHERE id = $1', [
-      row.id,
-    ]);
-    if (row.status === 'pending') return new OAuthError('authorization_pending');
-    if (row.status === 'denied') return new OAuthError('access_denied');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const outcome = await withTransaction(
+      async (client): Promise<Issued | OAuthError | 'retry'> => {
+        // Lock order is account, agent, then request row. agents.revoke and approval take the agent
+        // lock before touching requests, so a revoke either lands first (the request is denied) or
+        // waits until this key exists and revokes it.
+        const owner = await client.query(
+          'SELECT account_id, agent_id FROM device_authorizations WHERE device_code_hash = $1',
+          [sha256(deviceCode)],
+        );
+        const lockedAccountId = owner.rows[0]?.account_id ?? null;
+        if (lockedAccountId) {
+          try {
+            await lockBillingAccount(client, lockedAccountId);
+          } catch (error) {
+            if (error instanceof ApiError) return new OAuthError('invalid_grant');
+            throw error;
+          }
+          await client.query('SELECT 1 FROM agents WHERE id = $1 FOR UPDATE', [
+            owner.rows[0].agent_id,
+          ]);
+        }
+        const found = await client.query(
+          `SELECT *, expires_at <= now() AS is_expired,
+                  (last_polled_at IS NOT NULL
+                     AND last_polled_at + make_interval(secs => interval_seconds) > now()) AS too_fast
+             FROM device_authorizations WHERE device_code_hash = $1 FOR UPDATE`,
+          [sha256(deviceCode)],
+        );
+        const row = found.rows[0];
+        if (!row || row.status === 'consumed') return new OAuthError('invalid_grant');
+        if (row.account_id && !lockedAccountId) {
+          // Approved concurrently between the unlocked owner lookup and FOR UPDATE; retry so
+          // account and agent locks are acquired in canonical order before minting a key.
+          return 'retry';
+        }
+        if (row.is_expired) return new OAuthError('expired_token');
+        if (row.too_fast) {
+          await client.query(
+            `UPDATE device_authorizations
+                SET interval_seconds = interval_seconds + 5, last_polled_at = now() WHERE id = $1`,
+            [row.id],
+          );
+          return new OAuthError('slow_down');
+        }
+        await client.query(
+          'UPDATE device_authorizations SET last_polled_at = now() WHERE id = $1',
+          [row.id],
+        );
+        if (row.status === 'pending') return new OAuthError('authorization_pending');
+        if (row.status === 'denied') return new OAuthError('access_denied');
 
-    const agent = await client.query(
-      `SELECT g.name FROM agents g JOIN accounts a ON a.id = g.account_id AND a.deleting_at IS NULL
-        WHERE g.id = $1 AND g.account_id = $2`,
-      [row.agent_id, row.account_id],
-    );
-    if (!agent.rows[0]) return new OAuthError('invalid_grant');
-    const drives = await client.query(
-      `SELECT id FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])`,
-      [row.account_id, row.drive_ids],
-    );
-    const driveIds = drives.rows.map((drive) => drive.id as string);
-    const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
-    // An approved offer is revalidated against the key that made it, which may have been revoked
-    // or narrowed since approval. Nothing is issued then.
-    if (row.approved_from_offer) {
-      const offered = row.approved_offer_id
-        ? await client.query<OfferRow>('SELECT * FROM device_offers WHERE id = $1', [
-            row.approved_offer_id,
-          ])
-        : { rows: [] };
-      // A missing offer or key row counts as withdrawn.
-      if (!offered.rows[0] || !(await offeringKeyAllows(client, offered.rows[0]))) {
-        await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
-          row.id,
-        ]);
-        return new OAuthError(
-          'access_denied',
-          'The offer was withdrawn; run agent-drive login again.',
+        const agent = await client.query(
+          `SELECT g.name FROM agents g JOIN accounts a ON a.id = g.account_id AND a.deleting_at IS NULL
+            WHERE g.id = $1 AND g.account_id = $2`,
+          [row.agent_id, row.account_id],
         );
-      }
-    }
-    // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's. Lock
-    // order: account, agent, request, then this key (handler.ts key revoke locks only the key row).
-    // Re-check it here: it may have been revoked, or used by another approved request, since approval.
-    if (row.previous_api_key_id) {
-      const previous = await client.query(
-        `SELECT 1 FROM api_keys
-          WHERE id = $1 AND account_id = $2 AND agent_id = $3 AND revoked_at IS NULL FOR UPDATE`,
-        [row.previous_api_key_id, row.account_id, row.agent_id],
-      );
-      if (!previous.rowCount && !row.new_drive_id) {
-        await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
-          row.id,
-        ]);
-        return new OAuthError(
-          'access_denied',
-          'The previous key was revoked; run agent-drive login again.',
+        if (!agent.rows[0]) return new OAuthError('invalid_grant');
+        const drives = await client.query(
+          `SELECT id FROM drives WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])`,
+          [row.account_id, row.drive_ids],
         );
-      }
-      if (previous.rowCount) {
-        const revoked = await client.query(
-          'UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL',
-          [row.previous_api_key_id],
+        const driveIds = drives.rows.map((drive) => drive.id as string);
+        const label = row.machine ? `${row.client_name} on ${row.machine}` : row.client_name;
+        // An approved offer is revalidated against the key that made it, which may have been revoked
+        // or narrowed since approval. Nothing is issued then.
+        if (row.approved_from_offer) {
+          const offered = row.approved_offer_id
+            ? await client.query<OfferRow>('SELECT * FROM device_offers WHERE id = $1', [
+                row.approved_offer_id,
+              ])
+            : { rows: [] };
+          // A missing offer or key row counts as withdrawn.
+          if (!offered.rows[0] || !(await offeringKeyAllows(client, offered.rows[0]))) {
+            await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
+              row.id,
+            ]);
+            return new OAuthError(
+              'access_denied',
+              'The offer was withdrawn; run agent-drive login again.',
+            );
+          }
+        }
+        // A reconnect replaces exactly the key the CLI proved it held, if it is this agent's. Lock
+        // order: account, agent, request, then this key (handler.ts key revoke locks only the key row).
+        // Re-check it here: it may have been revoked, or used by another approved request, since approval.
+        if (row.previous_api_key_id) {
+          const previous = await client.query(
+            `SELECT 1 FROM api_keys
+              WHERE id = $1 AND account_id = $2 AND agent_id = $3 AND revoked_at IS NULL FOR UPDATE`,
+            [row.previous_api_key_id, row.account_id, row.agent_id],
+          );
+          if (!previous.rowCount && !row.new_drive_id) {
+            await client.query("UPDATE device_authorizations SET status = 'denied' WHERE id = $1", [
+              row.id,
+            ]);
+            return new OAuthError(
+              'access_denied',
+              'The previous key was revoked; run agent-drive login again.',
+            );
+          }
+          if (previous.rowCount) {
+            const revoked = await client.query(
+              'UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL',
+              [row.previous_api_key_id],
+            );
+            if (revoked.rowCount !== 1) throw new Error('Previous key revocation did not apply.');
+          }
+        }
+        const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
+        const key = await client.query(
+          `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths)
+           VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[]) RETURNING id`,
+          [
+            row.account_id,
+            row.agent_id,
+            label,
+            sha256(token),
+            driveIds,
+            row.scopes,
+            row.write_paths,
+          ],
         );
-        if (revoked.rowCount !== 1) throw new Error('Previous key revocation did not apply.');
-      }
-    }
-    const token = `adk_${randomUUID().replaceAll('-', '')}${randomUUID().replaceAll('-', '')}`;
-    const key = await client.query(
-      `INSERT INTO api_keys (account_id, agent_id, label, token_hash, drive_ids, scopes, write_paths)
-       VALUES ($1, $2, $3, $4, $5::uuid[], $6::text[], $7::text[]) RETURNING id`,
-      [row.account_id, row.agent_id, label, sha256(token), driveIds, row.scopes, row.write_paths],
-    );
-    await client.query(
-      `UPDATE device_authorizations
-          SET status = 'consumed', consumed_at = now(), api_key_id = $2 WHERE id = $1`,
-      [row.id, key.rows[0].id],
-    );
-    // Same transaction as the key: if this insert fails, nothing commits and the client retries.
-    await client.query(
-      `INSERT INTO audit_events (account_id, agent_id, action, outcome, http_status)
-       VALUES ($1, $2, 'device.token', 'success', 200)`,
-      [row.account_id, row.agent_id],
-    );
-    return {
-      accountId: row.account_id,
-      agentId: row.agent_id,
-      body: {
-        access_token: token,
-        token_type: 'Bearer',
-        scope: (row.scopes as string[]).join(' '),
-        write_paths: row.write_paths,
-        api_url: `${origin}/api`,
-        account_id: row.account_id,
-        agent_id: row.agent_id,
-        agent_name: agent.rows[0].name,
-        drive_ids: driveIds,
-        new_drive_id: driveIds.includes(row.new_drive_id) ? row.new_drive_id : null,
-        sealed_drive_keys: row.sealed_drive_keys ?? {},
+        await client.query(
+          `UPDATE device_authorizations
+              SET status = 'consumed', consumed_at = now(), api_key_id = $2 WHERE id = $1`,
+          [row.id, key.rows[0].id],
+        );
+        // Same transaction as the key: if this insert fails, nothing commits and the client retries.
+        await client.query(
+          `INSERT INTO audit_events (account_id, agent_id, action, outcome, http_status)
+           VALUES ($1, $2, 'device.token', 'success', 200)`,
+          [row.account_id, row.agent_id],
+        );
+        return {
+          accountId: row.account_id,
+          agentId: row.agent_id,
+          body: {
+            access_token: token,
+            token_type: 'Bearer',
+            scope: (row.scopes as string[]).join(' '),
+            write_paths: row.write_paths,
+            api_url: `${origin}/api`,
+            account_id: row.account_id,
+            agent_id: row.agent_id,
+            agent_name: agent.rows[0].name,
+            drive_ids: driveIds,
+            new_drive_id: driveIds.includes(row.new_drive_id) ? row.new_drive_id : null,
+            sealed_drive_keys: row.sealed_drive_keys ?? {},
+          },
+        };
       },
-    };
-  });
-  if (outcome instanceof OAuthError) throw outcome;
-  return outcome;
+    );
+    if (outcome === 'retry') continue;
+    if (outcome instanceof OAuthError) throw outcome;
+    return outcome;
+  }
+  throw new OAuthError('slow_down', undefined, 429);
 }
 
 async function publicBody(request: Request): Promise<Record<string, unknown>> {
@@ -322,9 +346,20 @@ async function publicBody(request: Request): Promise<Record<string, unknown>> {
       throw new OAuthError('invalid_request', error instanceof Error ? error.message : undefined);
     }
   }
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES)
-    throw new OAuthError('invalid_request', 'The body is too large.');
+  let text: string;
+  try {
+    const bytes = await readBoundedBodyBytes(
+      request,
+      'The body is too large.',
+      'The request body could not be read.',
+    );
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw new OAuthError(
+      'invalid_request',
+      error instanceof Error ? error.message : 'The request body could not be read.',
+    );
+  }
   const params = new URLSearchParams(text);
   const body: Record<string, unknown> = Object.fromEntries(params);
   if (params.has('known_drive_ids')) body.known_drive_ids = params.getAll('known_drive_ids');
@@ -387,6 +422,8 @@ export async function handleOAuthRequest(request: Request): Promise<Response> {
   let errorCode: string | null = null;
   let audited = false;
   try {
+    if (!secureTransportAllowed(url.protocol, process.env.NODE_ENV))
+      throw new OAuthError('invalid_request', 'HTTPS is required in production.', 403);
     if (action === 'unknown' || request.method !== 'POST')
       throw new OAuthError('invalid_request', 'Endpoint not found.', 404);
     const origin = billingOrigin();

@@ -1456,4 +1456,31 @@ describe('grant by an existing agent (handoff a)', () => {
       expect((await call(h, second.user_code)).status).toBe(429);
     });
   }
+
+  it('rejects insecure HTTP in production and oversized form bodies on /api/oauth/*', async () => {
+    const previousEnv = process.env.NODE_ENV;
+    (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
+    try {
+      const httpReq = new Request('http://agentdrive.xyz/api/oauth/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=abc',
+      });
+      const httpRes = await handleOAuthRequest(httpReq);
+      expect(httpRes.status).toBe(403);
+    } finally {
+      if (previousEnv === undefined)
+        delete (process.env as Record<string, string | undefined>).NODE_ENV;
+      else (process.env as Record<string, string | undefined>).NODE_ENV = previousEnv;
+    }
+
+    const oversized = new Request('https://agentdrive.xyz/api/oauth/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: `device_code=${'a'.repeat(300 * 1024)}`,
+    });
+    const tooLarge = await handleOAuthRequest(oversized);
+    expect(tooLarge.status).toBe(400);
+    expect((await json(tooLarge)).error).toBe('invalid_request');
+  });
 });

@@ -210,16 +210,39 @@ type Captured = {
 function direction(tee: Tee, headers: IncomingHttpHeaders, label: string, truncated: string[]) {
   let bytes = tee.bytes;
   if (tee.truncated) truncated.push(label);
-  if (
-    String(headers['content-encoding'] ?? '')
-      .toLowerCase()
-      .includes('gzip')
-  ) {
+  const encodings = String(headers['content-encoding'] ?? '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part && part !== 'identity')
+    .reverse();
+  for (const encoding of encodings) {
     try {
-      bytes = zlib.gunzipSync(bytes, {
-        maxOutputLength: PER_DIRECTION,
-        finishFlush: zlib.constants.Z_SYNC_FLUSH,
-      });
+      if (encoding === 'gzip' || encoding === 'x-gzip') {
+        bytes = zlib.gunzipSync(bytes, {
+          maxOutputLength: PER_DIRECTION,
+          finishFlush: zlib.constants.Z_SYNC_FLUSH,
+        });
+      } else if (encoding === 'br') {
+        bytes = zlib.brotliDecompressSync(bytes, { maxOutputLength: PER_DIRECTION });
+      } else if (encoding === 'zstd') {
+        bytes = zlib.zstdDecompressSync(bytes, { maxOutputLength: PER_DIRECTION });
+      } else if (encoding === 'deflate') {
+        try {
+          bytes = zlib.inflateSync(bytes, {
+            maxOutputLength: PER_DIRECTION,
+            finishFlush: zlib.constants.Z_SYNC_FLUSH,
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ERR_BUFFER_TOO_LARGE') throw error;
+          bytes = zlib.inflateRawSync(bytes, {
+            maxOutputLength: PER_DIRECTION,
+            finishFlush: zlib.constants.Z_SYNC_FLUSH,
+          });
+        }
+      } else {
+        // Unknown encoding: leave remaining bytes undecoded so decodeBody marks them binary.
+        break;
+      }
     } catch {
       if (!truncated.includes(label)) truncated.push(label);
       return { bytes: null, omitted: { omitted: true, bytes: tee.size } };

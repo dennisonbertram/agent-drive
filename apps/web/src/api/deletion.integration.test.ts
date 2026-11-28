@@ -506,6 +506,24 @@ describe('deletion lifecycle', () => {
       (await pool.query('SELECT drive_ids FROM api_keys WHERE id=$1', [fixture.keyId])).rows[0]!
         .drive_ids,
     ).not.toContain(fixture.driveId);
+
+    // Completed jobs older than the 24-hour safety window stop being re-swept.
+    await pool.query(
+      `UPDATE deletion_jobs
+          SET completed_at=now()-interval '25 hours',
+              last_swept_at=now()-interval '25 hours',
+              lease_until=NULL
+        WHERE id=$1`,
+      [deletion.id],
+    );
+    const beforeExpiredSweep = (
+      await pool.query('SELECT last_swept_at FROM deletion_jobs WHERE id=$1', [deletion.id])
+    ).rows[0]!.last_swept_at;
+    await runDeletionMaintenance({ objectStore: s3, jobIds: [deletion.id] });
+    const afterExpiredSweep = (
+      await pool.query('SELECT last_swept_at FROM deletion_jobs WHERE id=$1', [deletion.id])
+    ).rows[0]!.last_swept_at;
+    expect(new Date(afterExpiredSweep).getTime()).toBe(new Date(beforeExpiredSweep).getTime());
   });
 
   it('uses exact microsecond cursors and isolates deletion and audit pages by account', async () => {

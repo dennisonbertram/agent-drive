@@ -124,4 +124,59 @@ describe('public share audit volume', () => {
     );
     expect(after.rows[0]!.count - before.rows[0]!.count).toBe(0);
   });
+
+  it('rate-limits active share bursts before consuming operation quota', async () => {
+    const previousLimit = process.env.SHARE_REQUESTS_PER_MINUTE;
+    process.env.SHARE_REQUESTS_PER_MINUTE = '2';
+    try {
+      const account = await pool.query<{ id: string }>(
+        'INSERT INTO accounts (name) VALUES ($1) RETURNING id',
+        [`share-rate-${randomUUID()}`],
+      );
+      const accountId = account.rows[0]!.id;
+      accountIds.push(accountId);
+      const agent = await pool.query<{ id: string }>(
+        'INSERT INTO agents (account_id, name) VALUES ($1, $2) RETURNING id',
+        [accountId, 'synthetic-share-rate'],
+      );
+      const agentId = agent.rows[0]!.id;
+      const drive = await pool.query<{ id: string }>(
+        'INSERT INTO drives (account_id, name) VALUES ($1, $2) RETURNING id',
+        [accountId, 'synthetic-share-rate'],
+      );
+      const driveId = drive.rows[0]!.id;
+      const file = await pool.query<{ id: string }>(
+        'INSERT INTO files (drive_id, path) VALUES ($1, $2) RETURNING id',
+        [driveId, '/rate.txt'],
+      );
+      const fileId = file.rows[0]!.id;
+      const version = await pool.query<{ id: string }>(
+        `INSERT INTO versions (file_id, drive_id, object_key, ciphertext_size, wrapped_key, agent_id)
+         VALUES ($1, $2, $3, 1, 'synthetic', $4) RETURNING id`,
+        [fileId, driveId, `synthetic/${randomUUID()}`, agentId],
+      );
+      const versionId = version.rows[0]!.id;
+      await pool.query('UPDATE files SET current_version_id = $2 WHERE id = $1', [
+        fileId,
+        versionId,
+      ]);
+      const activeShareId = await addShare(accountId, driveId, fileId, versionId, agentId);
+
+      const first = await handlePublicShareRequest(activeShareId, true);
+      const second = await handlePublicShareRequest(activeShareId, true);
+      const third = await handlePublicShareRequest(activeShareId, true);
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(third.status).toBe(429);
+      const auditCount = await pool.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM audit_events
+          WHERE account_id = $1 AND action = 'share.access'`,
+        [accountId],
+      );
+      expect(auditCount.rows[0]!.count).toBe(2);
+    } finally {
+      if (previousLimit === undefined) delete process.env.SHARE_REQUESTS_PER_MINUTE;
+      else process.env.SHARE_REQUESTS_PER_MINUTE = previousLimit;
+    }
+  });
 });

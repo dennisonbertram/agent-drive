@@ -68,6 +68,7 @@ import {
   enforceConsoleRateLimit,
   enforceKeyRateLimit,
   enforceOperationBudget,
+  enforceShareRateLimit,
   enforceWriteBudget,
   lockBillingAccount,
   queueBillingDeliveries,
@@ -3729,6 +3730,9 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
       throw new ApiError('share_expired', 'This share link has expired.');
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
+    // Rate-limit active share requests per account before reserving operation quota or download
+    // allowance so unauthenticated bursts cannot exhaust the owner's monthly budgets.
+    await enforceShareRateLimit(String(row.account_id));
     // Record attempts against an active share, including operation-budget failures. Unknown,
     // revoked, expired and unavailable links are public failures and must not create unbounded
     // per-request audit rows.

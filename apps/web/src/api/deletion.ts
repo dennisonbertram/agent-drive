@@ -427,6 +427,7 @@ export async function runDeletionMaintenance(adapters: Adapters = {}) {
      ), sweep_jobs AS (
        SELECT id FROM deletion_jobs
         WHERE completed_at IS NOT NULL
+          AND completed_at > now() - interval '24 hours'
           AND ($1::uuid[] IS NULL OR id=ANY($1::uuid[]))
           AND (last_swept_at IS NULL OR last_swept_at < now()-interval '1 minute')
           AND (lease_until IS NULL OR lease_until < clock_timestamp())
