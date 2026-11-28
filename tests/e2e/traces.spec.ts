@@ -177,6 +177,21 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
     // Management works with files present. Replace revokes the old bearer.
     await page.getByTestId('capture-link').click();
     await expect(page.getByTestId('webhook-token-row')).toBeVisible();
+    // Another tab revokes the token while this dialog is open: Replace must not act on stale state.
+    const gone = await context.request.delete(`/api/console/drives/${driveId}/webhook-token`, {
+      headers: { Origin: baseURL! },
+    });
+    expect(gone.ok()).toBe(true);
+    await page.getByRole('button', { name: 'Replace' }).click();
+    await page.getByRole('button', { name: 'Replace token' }).click();
+    await expect(
+      page.getByText('This changed in another tab. Showing the current setup.'),
+    ).toBeVisible();
+    await expect(addWebhook(page)).toBeVisible();
+    await expect(page.getByTestId('webhook-created')).toHaveCount(0);
+    // Add a token again so the rest of the test (replace, revoke) still has one to manage.
+    await addWebhook(page).click();
+    await expect(page.getByTestId('webhook-created')).toBeVisible();
     await page.getByRole('button', { name: 'Replace' }).click();
     await expect(page.getByText('The old token stops working immediately.')).toBeVisible();
     await page.getByRole('button', { name: 'Replace token' }).click();

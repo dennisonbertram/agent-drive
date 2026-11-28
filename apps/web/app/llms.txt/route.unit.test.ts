@@ -13,6 +13,7 @@ describe('GET /llms.txt', () => {
     expect(body).toContain('npx -y @dennisonbertram/agent-drive@latest');
     expect(body).toContain('agent-drive login --name');
     expect(body).toContain('agent-drive check');
+    expect(body).toContain('https://example.test/docs/cli.md#mount-in-finder-on-macos');
     expect(body).toContain('check ok');
     expect(body).toContain('no usable drive key');
     expect(body).toContain('Do not use');

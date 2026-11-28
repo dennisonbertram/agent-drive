@@ -31,6 +31,15 @@ export default function DocsIndex() {
         </section>
       ))}
       <section>
+        <h2 className="doc-section">On a Mac</h2>
+        <ul className="doc-list">
+          <li>
+            <Link href="/docs/cli#mount-in-finder-on-macos">Mount in Finder</Link>
+            <span>Open your drive as a folder in Finder with the Agent Drive Finder app.</span>
+          </li>
+        </ul>
+      </section>
+      <section>
         <h2 className="doc-section">For agents</h2>
         <ul className="doc-list">
           <li>

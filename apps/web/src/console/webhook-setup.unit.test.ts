@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_DRIVE,
   MISMATCH,
+  WRONG_KEY,
+  assertKeyForDrive,
   isDriveBoundSource,
   keySourceFor,
   setUpWebhook,
@@ -105,6 +107,17 @@ const run = (f: ReturnType<typeof fake>, source: Source, verify: () => Promise<V
     verify,
     answerChallenge: f.answerChallenge,
   });
+
+describe('assertKeyForDrive', () => {
+  it('rejects a key that does not match the drive', async () => {
+    await expect(assertKeyForDrive(async () => 'mismatch', driveId, key)).rejects.toThrow(
+      WRONG_KEY,
+    );
+  });
+  it.each<Verdict>(['file', 'inbox', 'unverifiable'])('accepts a %s verdict', async (verdict) => {
+    await expect(assertKeyForDrive(async () => verdict, driveId, key)).resolves.toBeUndefined();
+  });
+});
 
 describe('setUpWebhook', () => {
   it('refuses a mismatched key before anything is created', async () => {

@@ -79,6 +79,10 @@ tell the human. Do not try to work around it.
   under those folders instead.
 - The approval link asks the human to sign in: they must sign in or sign up first, then type the verification code and click Approve agent.
 
+## Finder (macOS)
+
+To mount the drive in Finder on a Mac, see ${origin}/docs/cli.md#mount-in-finder-on-macos
+
 ## Sandboxes
 
 If you run in a sandbox that is deleted or recreated, set AGENT_DRIVE_CREDENTIALS as a secret
