@@ -1056,6 +1056,7 @@ export default function Connect({
           {newDriveBanner && (
             <>
               Approving creates a new, empty drive for this agent.
+              {previous ? ' It keeps its previous permissions.' : ''}
               {canUseExisting && useExistingButton}
             </>
           )}
