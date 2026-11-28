@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GIB,
   PLANS,
+  billingRates,
   planLimits,
   quoteUsage,
   monthBounds,
@@ -145,5 +146,34 @@ describe('per-account storage limit override', () => {
     );
     expect(r.limit).toBe('storage');
     expect(r.message).toContain("Free plan's 100 GB storage (100 GB used)");
+  });
+});
+
+describe('billingRates', () => {
+  it('allows zero egress rate only when S3_EGRESS_METERING=none', () => {
+    const keys = [
+      'BILLING_DRIVE_MONTH_CENTS',
+      'BILLING_STORAGE_GIB_MONTH_CENTS',
+      'BILLING_EGRESS_GIB_CENTS',
+      'BILLING_OPERATIONS_1000_CENTS',
+      'S3_EGRESS_METERING',
+    ] as const;
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    try {
+      process.env.BILLING_DRIVE_MONTH_CENTS = '200';
+      process.env.BILLING_STORAGE_GIB_MONTH_CENTS = '5';
+      process.env.BILLING_EGRESS_GIB_CENTS = '0';
+      process.env.BILLING_OPERATIONS_1000_CENTS = '1';
+      delete process.env.S3_EGRESS_METERING;
+      expect(() => billingRates()).toThrow();
+
+      process.env.S3_EGRESS_METERING = 'none';
+      expect(billingRates()).toEqual({ drive: 200n, storage: 5n, egress: 0n, operations: 1n });
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
   });
 });

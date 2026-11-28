@@ -347,6 +347,7 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
         );
       const currentId = typeof base.price === 'string' ? base.price : base.price.id;
       await billingState(db, accountId);
+      let nextStatus = current.status;
       if (currentId !== targetPrice) {
         let updated: Stripe.Subscription;
         try {
@@ -392,11 +393,12 @@ export async function createCheckout(accountId: string, plan: 'developer' | 'tea
           updatedBasePrice !== targetPrice
         )
           throw new ApiError('conflict', 'Stripe returned an incompatible subscription update.');
+        nextStatus = updated.status;
       }
       await db.query(
         `UPDATE billing_accounts SET plan = $2, subscription_status = $3,
           stripe_subscription_id = $4 WHERE account_id = $1`,
-        [accountId, plan, current.status, billing.stripe_subscription_id],
+        [accountId, plan, nextStatus, billing.stripe_subscription_id],
       );
       await billingState(db, accountId);
       return { updated: true };
