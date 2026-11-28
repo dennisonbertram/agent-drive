@@ -295,7 +295,7 @@ test.describe('agent device login', () => {
     expect(unbacked.stderr).toContain(
       'agent-drive credentials export --to <a file outside the sandbox>',
     );
-    expect(unbacked.stderr).not.toMatch(/--to clipboard|--stdout|secret store/);
+    expect(unbacked.stderr).not.toMatch(/--to clipboard|--stdout|--to 1password/);
     const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);
     expect(exported.stdout + exported.stderr).not.toMatch(/adk_|adcred1/);
