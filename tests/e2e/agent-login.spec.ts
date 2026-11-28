@@ -709,7 +709,7 @@ test.describe('agent device login', () => {
     const granted = await cli(['check'], envB);
     expect(granted.status, granted.stderr).toBe(0);
     expect(granted.stderr).toContain(
-      `The key for drive ${driveId} came from the approval (another agent or the browser sent it), so a copy exists elsewhere.`,
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it). Keep that copy; it is this key's backup.`,
     );
     const exported = await cli(['credentials', 'export', '--to', join(root, 'b-bundle')], envB);
     expect(exported.status, exported.stderr).toBe(0);
@@ -1166,7 +1166,7 @@ test.describe('agent device login', () => {
     const grantedCheck = await cli(['check'], envB);
     expect(grantedCheck.status, grantedCheck.stderr).toBe(0);
     expect(grantedCheck.stderr).toContain(
-      `The key for drive ${driveId} came from the approval (another agent or the browser sent it), so a copy exists elsewhere.`,
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it). Keep that copy; it is this key's backup.`,
     );
   });
 
@@ -1258,7 +1258,7 @@ test.describe('agent device login', () => {
       [code],
     );
     await page.getByRole('button', { name: 'Deny' }).click();
-    await expect(page.getByRole('alert')).toContainText(
+    await expect(page.locator('.banner.error')).toContainText(
       'This request is no longer pending, so it may already have been approved or expired. Check Agents in the console.',
     );
     await expect(page.getByText('The agent got no access')).toHaveCount(0);
