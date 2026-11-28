@@ -710,7 +710,6 @@ test('change passphrase: the old one stops working, the new one works; reset rem
     await expect(page.getByText(/Passphrase set up\. /)).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.reload();
-    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
   });
 });
