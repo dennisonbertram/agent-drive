@@ -1568,8 +1568,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     if (lastUser.current === identity.userId) return;
     const hadUser = lastUser.current !== null;
     lastUser.current = identity.userId;
-    const refreshQuietly = () =>
-      void refresh().catch((reason: Error) => setError(reason.message));
+    const refreshQuietly = () => void refresh().catch((reason: Error) => setError(reason.message));
     if (!hadUser) {
       refreshQuietly();
       return;
