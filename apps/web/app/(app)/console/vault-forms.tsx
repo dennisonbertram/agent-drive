@@ -7,18 +7,42 @@ import { CopyButton } from '../copy-button';
 /** Each form returns '' on success or the message to show. Passphrases never leave these forms. */
 type Submit<A extends unknown[]> = (...args: A) => Promise<string>;
 
+/** The command an agent runs to add its drives to the account; --fingerprint makes it verified. */
+export function sealCommand(fingerprint: string, driveId?: string, repin = false) {
+  return [
+    'agent-drive account seal',
+    repin && '--repin',
+    driveId && `--drive ${driveId}`,
+    fingerprint && `--fingerprint "${fingerprint}"`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** The account-key fingerprint in a monospace box, with a Copy button. */
+export function FingerprintBox({ fingerprint }: { fingerprint: string }) {
+  return (
+    <span className="fingerprint-box" data-testid="vault-fingerprint">
+      <code>{fingerprint}</code>
+      <CopyButton text={fingerprint} label="Copy fingerprint" />
+    </span>
+  );
+}
+
 const grouped = (passphrase: string) => passphrase.match(/.{1,4}/gu)?.join(' ') ?? passphrase;
 
 export function PassphraseForm({
   email,
   onUnlock,
   onRecovery,
+  onForgot,
   note,
 }: {
   email: string;
   /** The passphrase, then the "Keep this browser unlocked" checkbox. */
   onUnlock: Submit<[string, boolean]>;
   onRecovery: () => void;
+  onForgot?: (() => void) | undefined;
   note?: string | undefined;
 }) {
   const [value, setValue] = useState('');
@@ -74,6 +98,9 @@ export function PassphraseForm({
         />
         Keep this browser unlocked
       </label>
+      <p className="unlock-help">
+        This browser remembers the key until you lock it. Untick on a shared computer.
+      </p>
       <p className="field-error" role="alert">
         {error}
       </p>
@@ -85,6 +112,13 @@ export function PassphraseForm({
           Use a recovery file instead
         </button>
       </div>
+      {onForgot && (
+        <p className="unlock-help">
+          <button type="button" disabled={busy} onClick={onForgot}>
+            Forgot passphrase?
+          </button>
+        </p>
+      )}
     </form>
   );
 }
@@ -270,9 +304,9 @@ export function ResetForm({ onReset }: { onReset: Submit<[]> }) {
   return (
     <form onSubmit={(event) => void submit(event)}>
       <p>
-        Resetting deletes your account key and removes every drive from it. Files are not deleted.
-        You will add each drive again by loading its recovery file. Anyone who already opened a
-        drive keeps its key.
+        Resetting deletes your account key and the drive keys saved under it. Files are not deleted.
+        Each drive needs its recovery file (or an agent) once to be added again. Anyone who already
+        opened a drive keeps its key.
       </p>
       <label>
         Type RESET to continue
@@ -290,7 +324,7 @@ export function ResetForm({ onReset }: { onReset: Submit<[]> }) {
       </p>
       <div className="dialog-actions">
         <button className="button danger" disabled={busy || typed !== 'RESET'}>
-          {busy ? 'Resetting…' : 'Reset and remove all drives'}
+          {busy ? 'Resetting…' : 'Reset passphrase'}
         </button>
       </div>
     </form>

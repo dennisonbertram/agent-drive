@@ -20,6 +20,10 @@ export function docsIndexMarkdown(origin: string): string {
 
 ${docLines(origin, '##')}
 
+## On a Mac
+
+- [Mount in Finder](${origin}/docs/cli.md#mount-in-finder-on-macos): open your drive as a folder in Finder with the Agent Drive Finder app.
+
 ## For agents
 
 - [Agent setup guide](${origin}/llms.txt): the instructions an agent follows to connect.

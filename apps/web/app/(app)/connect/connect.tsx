@@ -23,7 +23,10 @@ type DeviceRequest = {
   created_at: string;
   expires_at: string;
   drives?: Drive[];
+  held_drives?: Drive[];
   creates_drive?: boolean;
+  existing_agent_name?: boolean;
+  account_has_drives?: boolean;
   public_key?: string;
   scopes?: string[] | null;
   write_paths?: string[] | null;
@@ -38,6 +41,14 @@ type DeviceRequest = {
 };
 
 const codePattern = /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/;
+
+// What the server committed on approval; the receipt is drawn from this, not from the page's GET.
+type Receipt = {
+  drives: Drive[];
+  scopes: string[];
+  write_paths: string[];
+  created_drive: string | null;
+};
 
 class HttpError extends Error {
   constructor(
@@ -125,6 +136,12 @@ function normalizeCode(value: string) {
   return raw.length === 8 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : value.trim().toUpperCase();
 }
 
+// Drives the agent already holds a key for, when nothing else decides the drive: no offer, no
+// reconnect, and the user did not ask for a new drive.
+function heldOf(request: DeviceRequest) {
+  return request.offer || (request.drives ?? []).length > 0 ? [] : (request.held_drives ?? []);
+}
+
 export default function Connect({
   initialCode,
   account,
@@ -144,9 +161,13 @@ export default function Connect({
   const loading = phase === 'loading';
   const busy = phase === 'approving';
   const [done, setDone] = useState<{
+    denied?: boolean;
     name: string;
     access: string;
+    accessDetail: string;
     drive: string;
+    driveName: string;
+    delegate?: boolean;
     uncheckedKey?: boolean;
   } | null>(null);
   const [formError, setFormError] = useState<ReactNode>('');
@@ -165,6 +186,8 @@ export default function Connect({
   const [drivesLoading, setDrivesLoading] = useState(false);
   const [drivesError, setDrivesError] = useState('');
   const [existing, setExisting] = useState(false);
+  // The user chose a new drive although the agent already holds a key for an existing one.
+  const [newInstead, setNewInstead] = useState(false);
   const [driveId, setDriveId] = useState('');
   const [keyText, setKeyText] = useState('');
   const [keyFile, setKeyFile] = useState<File | null>(null);
@@ -210,6 +233,7 @@ export default function Connect({
       setRequest(found);
       setPhase('review');
       setExisting(false);
+      setNewInstead(false);
       setAccountDrives([]);
       setDriveCursor(null);
       setDrivesError('');
@@ -320,6 +344,7 @@ export default function Connect({
           const updatedAt = ++generation.current;
           setRequest(found);
           setExisting(false);
+          setNewInstead(false);
           setAccountDrives([]);
           setDriveCursor(null);
           setDrivesError('');
@@ -413,12 +438,17 @@ export default function Connect({
         ? { delegate: true, offerRevision, deviceVerification }
         : { offerRevision, deviceVerification };
       let uncheckedKey = false;
-      let scopes: string[] = requested.offer?.scopes ?? requested.scopes ?? DEFAULT_SCOPES;
-      let driveLabel = requested.offer
-        ? `the drive ${requested.offer.drive.name}`
-        : (requested.drives ?? []).length > 0
-          ? (requested.drives ?? []).map((d) => d.name).join(', ')
-          : 'its new drive';
+      // The agent already holds these drives' keys: approve them explicitly, sealing nothing.
+      const heldIds = (newInstead ? [] : heldOf(requested)).map((d) => d.id);
+      if (!existing && heldIds.length > 0) {
+        body = {
+          driveIds: heldIds,
+          scopes: [...(readOnly ? ['read'] : DEFAULT_SCOPES), ...(delegate ? ['delegate'] : [])],
+          writePaths: folder.trim() ? [folder.trim()] : [],
+          offerRevision,
+          deviceVerification,
+        };
+      }
       if (existing) {
         // Read the key, check it, seal it to the agent in the browser, post only the sealed blob.
         // The selection is captured up front so a late render can never mix drives.
@@ -469,11 +499,9 @@ export default function Connect({
           );
         }
         if (!live()) return;
-        scopes = readOnly ? ['read'] : DEFAULT_SCOPES;
-        driveLabel = `the drive ${accountDrives.find((d) => d.id === target)?.name ?? ''}`.trim();
         body = {
           driveIds: [target],
-          scopes: [...scopes, ...(delegate ? ['delegate'] : [])],
+          scopes: [...(readOnly ? ['read'] : DEFAULT_SCOPES), ...(delegate ? ['delegate'] : [])],
           sealedDriveKeys: { [target]: sealed },
           writePaths: folder.trim() ? [folder.trim()] : [],
           offerRevision,
@@ -481,14 +509,26 @@ export default function Connect({
         };
       }
       if (!live()) return;
-      await api(`device/${encodeURIComponent(requested.user_code)}/approve`, 'POST', body);
+      const receipt = await api<Receipt>(
+        `device/${encodeURIComponent(requested.user_code)}/approve`,
+        'POST',
+        body,
+      );
       if (!live()) return;
       clearKey();
       setPhase('done');
+      const access = describeScopes(receipt.scopes);
+      const names = receipt.drives.map((d) => d.name).join(', ');
       setDone({
         name: requested.client_name,
-        access: describeScopes(scopes),
-        drive: driveLabel,
+        access,
+        accessDetail:
+          receipt.scopes.includes('write') && receipt.write_paths.length
+            ? `${access}; writes only under ${receipt.write_paths.join(', ')}`
+            : access,
+        drive: receipt.created_drive ? 'its new drive' : `the drive ${names}`,
+        driveName: receipt.created_drive ? `New encrypted drive (${receipt.created_drive})` : names,
+        delegate: receipt.scopes.includes('delegate'),
         uncheckedKey,
       });
     } catch (error) {
@@ -529,6 +569,52 @@ export default function Connect({
     }
   }
 
+  // Refusing is always safe, so it needs no verification code: the request is marked denied
+  // and the agent's poll ends with access_denied.
+  async function deny() {
+    if (!request || busyRef.current) return;
+    const requested = request;
+    busyRef.current = true;
+    setFormError('');
+    setFieldError(null);
+    setPhase('approving');
+    try {
+      await api(`device/${encodeURIComponent(requested.user_code)}/deny`, 'POST', {});
+      setDone({
+        denied: true,
+        name: requested.client_name,
+        access: '',
+        accessDetail: '',
+        drive: '',
+        driveName: '',
+      });
+      setPhase('done');
+    } catch (error) {
+      setPhase('review');
+      setFormError(
+        error instanceof HttpError && error.status === 404
+          ? 'This request is no longer pending, so it may already have been approved or expired. Check Agents in the console.'
+          : error instanceof Error
+            ? error.message
+            : 'Could not deny the request.',
+      );
+    } finally {
+      busyRef.current = false;
+    }
+  }
+
+  if (done?.denied)
+    return (
+      <section className="panel connect-card" role="status">
+        <span className="connect-tag">
+          <span className="connect-led dim" aria-hidden="true" />
+          Denied
+        </span>
+        <h1>Request denied</h1>
+        <p>The agent got no access. You can close this page.</p>
+      </section>
+    );
+
   if (done)
     return (
       <section className="panel connect-card approved" role="status">
@@ -541,6 +627,26 @@ export default function Connect({
           You approved {done.name} to {done.access} {done.drive}. Return to your agent to finish
           setup and confirm it is ready.
         </p>
+        <dl className="connect-facts connect-rows">
+          <div className="connect-fact">
+            <dt>Drive</dt>
+            <dd>{done.driveName}</dd>
+          </div>
+          <div className="connect-fact">
+            <dt>Access</dt>
+            <dd>{done.accessDetail}</dd>
+          </div>
+          {done.delegate && (
+            <div className="connect-fact">
+              <dt>Delegate</dt>
+              <dd>Can add other agents</dd>
+            </div>
+          )}
+          <div className="connect-fact">
+            <dt>Account</dt>
+            <dd>{account}</dd>
+          </div>
+        </dl>
         {done.uncheckedKey && (
           <p className="connect-note">
             This drive has nothing to check the key against, so it could not be checked before
@@ -605,38 +711,71 @@ export default function Connect({
   const reconnect = request.drives ?? [];
   const offer = request.offer;
   const previous = request.scopes;
+  const held = !existing && !newInstead ? heldOf(request) : [];
+  const shown = reconnect.length ? reconnect : held;
+  const heldNames = held.map((d) => d.name).join(', ');
+  const canUseExisting =
+    !existing && !offer && request.creates_drive && !request.scopes && accountDrives.length > 0;
+  const newDriveBanner =
+    !existing &&
+    !offer &&
+    held.length === 0 &&
+    request.creates_drive === true &&
+    request.account_has_drives === true;
+  const useExistingButton = (
+    <button
+      type="button"
+      className="connect-link"
+      disabled={busy}
+      onClick={(event) => {
+        event.currentTarget.closest('details')?.removeAttribute('open');
+        setExisting(true);
+      }}
+    >
+      Use one of my drives instead (needs its recovery file)
+    </button>
+  );
+  const grantScopes = offer
+    ? offer.scopes
+    : held.length || existing
+      ? readOnly
+        ? ['read']
+        : DEFAULT_SCOPES
+      : (previous ?? DEFAULT_SCOPES);
+  const grantWrites = offer
+    ? offer.writePaths
+    : held.length || existing
+      ? folder.trim()
+        ? [folder.trim()]
+        : []
+      : (request.write_paths ?? []);
+  // The deciding facts stay visible outside Details: who is approving, which agent and machine
+  // are asking, and any restriction or extra permission the approval carries.
   const facts: [string, string][] = [];
-  if (request.machine) facts.push(['Machine', request.machine]);
-  facts.push(['Account', account]);
   if (!existing) {
-    const writes = offer ? offer.writePaths : (request.write_paths ?? []);
     facts.push([
       'Drive',
       offer
         ? offer.drive.name
-        : reconnect.length
-          ? reconnect.map((d) => d.name).join(', ')
+        : shown.length
+          ? shown.map((d) => d.name).join(', ')
           : 'New encrypted drive',
     ]);
-    facts.push(['Access', capitalize(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES))]);
-    facts.push([
-      'Writes',
-      describeWrites(offer ? offer.scopes : (previous ?? DEFAULT_SCOPES), writes),
-    ]);
+    facts.push(['Access', capitalize(grantScopes)]);
+    facts.push(['Writes', describeWrites(grantScopes, grantWrites)]);
   }
   if (offer) facts.push(['Offered by', offer.agentName]);
   if (!existing) facts.push(['Requested', new Date(request.created_at).toLocaleString()]);
-  const grantScopes = offer ? offer.scopes : (previous ?? DEFAULT_SCOPES);
   const summary = (
     existing
-      ? ['Existing drive · choose below']
+      ? ['Existing drive · choose below', summarizeAccess(grantScopes, grantWrites)]
       : [
           offer
             ? offer.drive.name
-            : reconnect.length
-              ? reconnect.map((d) => d.name).join(', ')
+            : shown.length
+              ? shown.map((d) => d.name).join(', ')
               : 'New encrypted drive',
-          summarizeAccess(grantScopes, offer ? offer.writePaths : (request.write_paths ?? [])),
+          summarizeAccess(grantScopes, grantWrites),
           offer ? `offered by ${offer.agentName}` : '',
         ]
   )
@@ -647,11 +786,47 @@ export default function Connect({
     ? 'Your browser seals the key to this agent’s login; Agent Drive never sees it.'
     : offer
       ? `${offer.agentName} sealed the drive key for this login; Agent Drive never sees it.`
-      : reconnect.length > 0
-        ? `It reconnects to the drive it used before${previous ? ' and keeps its previous permissions' : ''}.`
-        : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
+      : held.length > 0
+        ? `This agent says it has the key for your ${held.length === 1 ? 'drive' : 'drives'} ${heldNames}. Approve only if you gave it ${held.length === 1 ? "that drive's recovery file or key" : "those drives' recovery files or keys"}.`
+        : reconnect.length > 0
+          ? `It reconnects to the drive it used before${previous ? ' and keeps its previous permissions' : ''}.`
+          : `This agent gets its own encrypted drive. Its key is created and kept on that machine; Agent Drive never sees it.${previous ? ' It keeps its previous permissions.' : ''}`;
   const keyInvalid = fieldError?.field === 'key';
   const folderInvalid = fieldError?.field === 'folder';
+  // Read only and the write folder apply to an existing drive and to drives the agent holds.
+  const limits = (
+    <>
+      <label className="connect-check cf-check">
+        <input
+          type="checkbox"
+          checked={readOnly}
+          disabled={busy}
+          onChange={(event) => setReadOnly(event.target.checked)}
+        />
+        Read only
+      </label>
+      <label className="cf-folder">
+        Write folder (optional)
+        <input
+          id="connect-folder"
+          value={folder}
+          disabled={busy}
+          onChange={(event) => setFolder(event.target.value)}
+          placeholder="/inbox/x"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={folderInvalid || undefined}
+          aria-describedby={folderInvalid ? 'connect-folder-error' : undefined}
+          className={folderInvalid ? 'invalid' : undefined}
+        />
+      </label>
+      {folderInvalid && (
+        <p className="connect-field-error cf-folder-error" role="alert" id="connect-folder-error">
+          {fieldError.message}
+        </p>
+      )}
+    </>
+  );
   return (
     <section className="panel connect-card">
       <span className="connect-tag">
@@ -659,12 +834,37 @@ export default function Connect({
         Pairing request
       </span>
       <h1>Connect {request.client_name}?</h1>
+      <p className="connect-account">Signed in as {account}</p>
       {notice && (
         <div role="status" className="banner info">
           {notice}
         </div>
       )}
       <p className="connect-summary">{summary}</p>
+      <dl className="connect-facts connect-rows">
+        <div className="connect-fact">
+          <dt>Agent</dt>
+          <dd>{request.client_name}</dd>
+        </div>
+        {request.machine && (
+          <div className="connect-fact">
+            <dt>Machine</dt>
+            <dd>{request.machine}</dd>
+          </div>
+        )}
+        {!existing && grantScopes.includes('write') && grantWrites.length > 0 && (
+          <div className="connect-fact">
+            <dt>Writes</dt>
+            <dd>Only under {grantWrites.join(', ')}</dd>
+          </div>
+        )}
+        {delegate && (
+          <div className="connect-fact">
+            <dt>Delegate</dt>
+            <dd>Can add other agents</dd>
+          </div>
+        )}
+      </dl>
       <details className="connect-more connect-details">
         <summary>Details</summary>
         <dl className="connect-facts">
@@ -675,23 +875,28 @@ export default function Connect({
             </div>
           ))}
         </dl>
-        {!existing &&
-          !offer &&
-          request.creates_drive &&
-          !request.scopes &&
-          accountDrives.length > 0 && (
-            <button
-              type="button"
-              className="connect-link"
-              disabled={busy}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open');
-                setExisting(true);
-              }}
-            >
-              Use one of my drives instead (needs its recovery file)
-            </button>
-          )}
+        {!existing && heldOf(request).length > 0 && (
+          <button
+            type="button"
+            className="connect-link"
+            disabled={busy}
+            onClick={() => setNewInstead(!newInstead)}
+          >
+            {newInstead ? 'Use the drive this agent holds' : 'Use a new drive instead'}
+          </button>
+        )}
+        {canUseExisting && !newDriveBanner && useExistingButton}
+        {newDriveBanner && (
+          <p className="connect-grant">
+            To give this agent a drive another agent already has: from an agent approved with
+            &lsquo;Let this agent add other agents&rsquo;, run{' '}
+            <code className="connect-cmd connect-cmd-wrap">
+              agent-drive grant {request.user_code} --verify &lt;code from the new agent’s
+              terminal&gt;
+            </code>
+            .
+          </p>
+        )}
         <label className="connect-delegate">
           <input
             type="checkbox"
@@ -708,7 +913,7 @@ export default function Connect({
           </span>
         </label>
       </details>
-      <p className="connect-explain">{explain}</p>
+      {!newDriveBanner && <p className="connect-explain">{explain}</p>}
       {existing && (
         <div className="connect-existing">
           <label className="cf-drive">
@@ -753,7 +958,7 @@ export default function Connect({
               id="connect-key"
               type="password"
               autoComplete="off"
-              placeholder="Paste the drive key or an adcred1… bundle"
+              placeholder="Paste the drive key"
               value={keyText}
               disabled={busy}
               aria-invalid={keyInvalid || undefined}
@@ -780,49 +985,24 @@ export default function Connect({
             </p>
           ) : (
             <p className="connect-hint cf-note">
-              The key is checked against the drive before it is sent. A drive with no files or trace
-              inbox has nothing to check it against.
+              The key is checked against the drive before it is sent. No recovery file? Have an
+              agent that has this drive run{' '}
+              <code className="connect-cmd connect-cmd-wrap">
+                agent-drive credentials export --drive {driveId || '<drive id>'} --recovery-file
+                &lt;file&gt;
+              </code>
+              .
             </p>
           )}
-          <label className="connect-check cf-check">
-            <input
-              type="checkbox"
-              checked={readOnly}
-              disabled={busy}
-              onChange={(event) => setReadOnly(event.target.checked)}
-            />
-            Read only
-          </label>
-          <label className="cf-folder">
-            Only allow writes under (optional)
-            <input
-              id="connect-folder"
-              value={folder}
-              disabled={busy}
-              onChange={(event) => setFolder(event.target.value)}
-              placeholder="/inbox/x"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={folderInvalid || undefined}
-              aria-describedby={folderInvalid ? 'connect-folder-error' : undefined}
-              className={folderInvalid ? 'invalid' : undefined}
-            />
-          </label>
-          {folderInvalid && (
-            <p
-              className="connect-field-error cf-folder-error"
-              role="alert"
-              id="connect-folder-error"
-            >
-              {fieldError.message}
-            </p>
-          )}
+          {limits}
           <button
             type="button"
             className="button secondary connect-branch cf-back"
             disabled={busy}
             onClick={() => {
               setExisting(false);
+              // A request whose agent holds a drive would otherwise fall back to that drive.
+              setNewInstead(true);
               clearKey();
             }}
           >
@@ -830,17 +1010,17 @@ export default function Connect({
           </button>
         </div>
       )}
+      {held.length > 0 && <div className="connect-existing connect-held">{limits}</div>}
       {formError && (
         <div role="alert" className="banner error">
           {formError}
         </div>
       )}
       <div className="connect-code-line">
-        <span>Does this code match your terminal?</span>
+        <span>Does this code match your terminal? If not, click Deny.</span>
         <span className="connect-code" aria-label={`Code ${request.user_code}`}>
           {request.user_code}
         </span>
-        <small>If it does not, close this page; the request expires on its own.</small>
         <label className="connect-verify">
           Verification code
           <input
@@ -870,6 +1050,23 @@ export default function Connect({
           </p>
         )}
       </div>
+      {(request.existing_agent_name === true || newDriveBanner) && (
+        <div className="banner warn">
+          {request.existing_agent_name === true && (
+            <>
+              You already have an agent named {request.client_name}. Approving signs this one in as
+              that agent with a new API key.{' '}
+            </>
+          )}
+          {newDriveBanner && (
+            <>
+              Approving creates a new, empty drive for this agent.
+              {previous ? ' It keeps its previous permissions.' : ''}
+              {canUseExisting && useExistingButton}
+            </>
+          )}
+        </div>
+      )}
       <div className="connect-actions">
         <button
           className="button primary connect-approve"
@@ -877,6 +1074,9 @@ export default function Connect({
           onClick={() => void approve()}
         >
           {busy ? 'Working…' : 'Approve agent'}
+        </button>
+        <button type="button" className="connect-deny" disabled={busy} onClick={() => void deny()}>
+          Deny
         </button>
       </div>
       <p className="connect-note">You can revoke access any time in Console, Agents.</p>

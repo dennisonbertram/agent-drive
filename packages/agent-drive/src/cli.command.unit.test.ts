@@ -1,12 +1,12 @@
 import { createRequire } from 'node:module';
 import { randomUUID, webcrypto } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateDriveKey } from './crypto.js';
-import { writeConfig } from './config.js';
+import { readConfig, writeConfig, type DriveKeySource } from './config.js';
 import { encodeBundle, issueCredentials } from './credentials.js';
 import { unsealDriveKey, type SealedDriveKey } from './seal.js';
 import { verificationCode } from './verification.js';
@@ -25,7 +25,13 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
-type Saved = { keys: Record<string, string>; origins: Record<string, string> };
+type Saved = {
+  keys: Record<string, string>;
+  origins: Record<string, string>;
+  sources?: Record<string, DriveKeySource>;
+  /** `false` writes no keyBackup records — the state before any backup was made. */
+  backup?: boolean;
+};
 
 /** Runs the real CLI entry point in-process against a stubbed API. */
 // Emit stdin only once the CLI is listening, so the first (cold) module load cannot miss it.
@@ -41,7 +47,7 @@ function feedStdin(text: string) {
 
 async function cli(
   argv: string[],
-  saved: Saved,
+  saved: Saved | null,
   respond: (path: string, init?: RequestInit, search?: string) => unknown = (path) =>
     path === 'account-key' ? { accountKey: null } : {},
   env: Record<string, string> = {},
@@ -54,15 +60,22 @@ async function cli(
   vi.stubEnv('AGENT_DRIVE_API_KEY', '');
   vi.stubEnv('AGENT_DRIVE_KEY', '');
   for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
-  await writeConfig({
-    apiUrl: 'https://x.test/api',
-    apiKey: 'tok',
-    driveKeys: saved.keys,
-    driveKeyOrigins: saved.origins,
-    keyBackup: Object.fromEntries(
-      Object.keys(saved.keys).map((id) => [id, { at: 'now', method: 'file' as const }]),
-    ),
-  });
+  // A null `saved` is a fresh CLI home: no config file at all.
+  if (saved)
+    await writeConfig({
+      apiUrl: 'https://x.test/api',
+      apiKey: 'tok',
+      driveKeys: saved.keys,
+      driveKeyOrigins: saved.origins,
+      ...(saved.sources ? { driveKeySources: saved.sources } : {}),
+      ...(saved.backup === false
+        ? {}
+        : {
+            keyBackup: Object.fromEntries(
+              Object.keys(saved.keys).map((id) => [id, { at: 'now', method: 'file' as const }]),
+            ),
+          }),
+    });
   const paths: string[] = [];
   const queries: string[] = [];
   const origins: string[] = [];
@@ -809,8 +822,19 @@ describe('pipe command guard validation', () => {
       one,
       (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
     );
-    expect(result.err).toContain('credential backups are out of date');
+    expect(result.err).toContain('Your saved credentials backup has the old API key');
     expect(result.paths).toContain('whoami');
+  });
+
+  it('explains relative remote paths and the get LOCAL argument before connecting', async () => {
+    const put = await cli(['put', 'local.md', 'notes.md', '--drive', A], one);
+    expect(put.err).toContain('Remote paths start with /, for example /notes.md.');
+    expect(put.paths).toEqual([]);
+    const get = await cli(['get', 'notes.md', '--drive', A], one);
+    expect(get.err).toContain('Remote paths start with /, for example /notes.md.');
+    const both = await cli(['get', '/x', 'out.txt', '--output', 'o.txt', '--drive', A], one);
+    expect(both.err).toContain('either as LOCAL or with --output');
+    expect(both.paths).toEqual([]);
   });
 
   it('rejects empty and whitespace version guards before connecting', async () => {
@@ -1073,7 +1097,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
           : {},
       { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
     );
-    expect(r.err).toContain('no passphrase yet');
+    expect(r.err).toContain('Optional: set a passphrase in the console');
     expect(r.origins.length).toBeGreaterThan(0);
     expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
   });
@@ -1649,5 +1673,232 @@ describe('put folder link', () => {
     });
     expect(r.exitCode).toBe(1);
     expect(r.out).not.toContain('folderUrl');
+  });
+});
+
+describe('credentials import of a recovery file', () => {
+  const recoveryFile = async (driveId: string, key: string) => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-'));
+    dirs.push(dir);
+    const path = join(dir, `agent-drive-${driveId}.key.json`);
+    await writeFile(path, JSON.stringify({ format: 'agent-drive-key-v1', driveId, key }, null, 2));
+    return path;
+  };
+
+  it('saves the key into a fresh CLI home and names login as the one next step', async () => {
+    const key = generateDriveKey();
+    const file = await recoveryFile(A, key);
+    const r = await cli(['credentials', 'import', '--from', file], null);
+    expect(r.exitCode).toBeUndefined();
+    expect(r.out).toContain(
+      `Saved the drive key for drive ${A}. Next: run \`agent-drive login\` to connect this machine to your account.`,
+    );
+    expect(r.out + r.err).not.toContain(key);
+    const saved = await readConfig();
+    expect(saved.driveKeys?.[A]).toBe(key);
+    expect(saved.driveKeySources?.[A]).toBe('recovery-file');
+    expect(saved.keyBackup?.[A]?.method).toBe('file');
+    expect(saved.apiKey).toBeUndefined();
+  });
+
+  it('reads the recovery file from stdin when --from is omitted', async () => {
+    const key = generateDriveKey();
+    feedStdin(JSON.stringify({ format: 'agent-drive-key-v1', driveId: A, key }));
+    const r = await cli(['credentials', 'import'], null);
+    expect(r.exitCode).toBeUndefined();
+    expect(r.out).toContain(`Saved the drive key for drive ${A}`);
+    expect((await readConfig()).driveKeys?.[A]).toBe(key);
+  });
+
+  it('rejects input that is neither a recovery file nor a credentials bundle', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-import-'));
+    dirs.push(dir);
+    const file = join(dir, 'credentials.txt');
+    await writeFile(file, '{"format":"other"}');
+    const r = await cli(['credentials', 'import', '--from', file], null);
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      'Not a recovery file (agent-drive-….key.json) or credentials bundle (adcred1.…).',
+    );
+  });
+
+  it('warns plainly when the saved account cannot see the imported drive', async () => {
+    const key = generateDriveKey();
+    const file = await recoveryFile(B, key);
+    const r = await cli(['credentials', 'import', '--from', file], one, (path) =>
+      path === 'whoami'
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [A] }
+        : {},
+    );
+    expect(r.out).toContain(`Saved the drive key for drive ${B}`);
+    expect(r.err).toContain(`the API key on this machine has no access to drive ${B}`);
+    expect(r.out + r.err).not.toContain(key);
+  });
+
+  it('refuses to replace a different saved key for the same drive', async () => {
+    const saved = generateDriveKey();
+    const other = generateDriveKey();
+    const file = await recoveryFile(A, other);
+    const r = await cli(['credentials', 'import', '--from', file], {
+      keys: { [A]: saved },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      `This machine already has a different key for drive ${A}. Nothing was changed.`,
+    );
+    expect(r.out + r.err).not.toContain(other);
+    expect((await readConfig()).driveKeys?.[A]).toBe(saved);
+  });
+
+  it('stays silent when the account holds the imported drive', async () => {
+    const file = await recoveryFile(B, generateDriveKey());
+    const r = await cli(['credentials', 'import', '--from', file], one, (path) =>
+      path === 'whoami'
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes: ['read'], driveIds: [A, B] }
+        : {},
+    );
+    expect(r.out).toContain(`Saved the drive key for drive ${B}`);
+    expect(r.err).not.toContain('no access to drive');
+  });
+});
+
+describe('credentials export --recovery-file', () => {
+  it('writes only that drive key as a 0600 console recovery file and never prints it', async () => {
+    const key = generateDriveKey();
+    const other = generateDriveKey();
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-out-'));
+    dirs.push(dir);
+    const path = join(dir, `agent-drive-${A}.key.json`);
+    const r = await cli(['credentials', 'export', '--drive', A, '--recovery-file', path], {
+      keys: { [A]: key, [B]: other },
+      origins: { [A]: 'https://x.test', [B]: 'https://x.test' },
+      backup: false,
+    });
+    expect(r.exitCode).toBeUndefined();
+    expect(r.out).toContain(
+      `Wrote the recovery file for drive ${A} to ${path}. Give it to the person who needs it; they choose it in the console's Load key dialog.`,
+    );
+    expect(r.out + r.err).not.toContain(key);
+    const text = await readFile(path, 'utf8');
+    expect(JSON.parse(text)).toEqual({ format: 'agent-drive-key-v1', driveId: A, key });
+    expect(text).not.toContain(other);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await readConfig()).keyBackup?.[A]).toBeUndefined();
+    const again = await cli(['credentials', 'export', '--drive', A, '--recovery-file', path], {
+      keys: { [A]: key },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(again.exitCode).toBe(1);
+    expect(again.err).toContain('already exists');
+  });
+
+  it('fails without a key for the drive or without its parent folder', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-drive-recovery-out-'));
+    dirs.push(dir);
+    const noKey = await cli(
+      ['credentials', 'export', '--drive', B, '--recovery-file', join(dir, 'a.json')],
+      { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
+    );
+    expect(noKey.err).toContain(`This machine has no saved key for drive ${B}.`);
+    const noParent = await cli(
+      ['credentials', 'export', '--drive', A, '--recovery-file', join(dir, 'missing', 'a.json')],
+      { keys: { [A]: generateDriveKey() }, origins: { [A]: 'https://x.test' } },
+    );
+    expect(noParent.err).toContain('its parent folder does not exist');
+  });
+
+  it('rejects --drive without --recovery-file', async () => {
+    const r = await cli(['credentials', 'export', '--drive', A], {
+      keys: { [A]: generateDriveKey() },
+      origins: { [A]: 'https://x.test' },
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.err).toContain(
+      '--drive only works with --recovery-file. To back up all credentials, run the command without --drive.',
+    );
+  });
+});
+
+describe('check backup gate', () => {
+  const whoami =
+    (driveIds: string[] | null, scopes = ['read']) =>
+    (path: string) =>
+      path === 'whoami'
+        ? { accountId: 'a', agentId: 'g', keyId: 'k', scopes, driveIds }
+        : { items: [], nextCursor: null };
+
+  it.each([undefined, 'generated' as DriveKeySource])(
+    'fails with exactly one next step for a locally generated unbacked key (source=%s)',
+    async (source) => {
+      const r = await cli(
+        ['check'],
+        {
+          keys: { [A]: generateDriveKey() },
+          origins: { [A]: 'https://x.test' },
+          backup: false,
+          ...(source ? { sources: { [A]: source } } : {}),
+        },
+        whoami([A]),
+      );
+      expect(r.exitCode).toBe(1);
+      expect(r.err).toContain(`drive key not backed up: ${A}`);
+      expect(r.err).toContain(
+        'run `agent-drive credentials export --to <a file outside the sandbox>`',
+      );
+      expect(r.err).not.toMatch(/--to clipboard|--stdout|--to 1password/u);
+    },
+  );
+
+  it.each([
+    ['recovery-file' as DriveKeySource, 'a recovery file'],
+    ['bundle' as DriveKeySource, 'a credentials bundle'],
+    ['grant' as DriveKeySource, 'the approval (another agent or the browser sent it)'],
+  ])('passes the backup gate for a key that came from %s, and notes it', async (source, label) => {
+    const r = await cli(
+      ['check'],
+      {
+        keys: { [A]: generateDriveKey() },
+        origins: { [A]: 'https://x.test' },
+        backup: false,
+        sources: { [A]: source },
+      },
+      whoami([A]),
+    );
+    expect(r.err).toContain(
+      `The key for drive ${A} came from ${label}. Keep that copy; it is this key's backup.`,
+    );
+    expect(r.err).not.toContain('not backed up');
+    // The gate passed; the read-only check then found nothing to decrypt.
+    expect(r.err).toContain('check not verified');
+  });
+
+  it('passes the backup gate for a key supplied by AGENT_DRIVE_KEY, and notes it', async () => {
+    const r = await cli(['check'], { keys: {}, origins: {}, backup: false }, whoami([A]), {
+      AGENT_DRIVE_KEY: generateDriveKey(),
+    });
+    expect(r.err).toContain(
+      `The key for drive ${A} came from the AGENT_DRIVE_KEY environment variable. Keep that copy; it is this key's backup.`,
+    );
+    expect(r.err).not.toContain('not backed up');
+  });
+});
+
+describe('credentials status and help', () => {
+  it('status reports where an imported key came from', async () => {
+    const r = await cli(['credentials', 'status'], {
+      keys: { [A]: generateDriveKey() },
+      origins: { [A]: 'https://x.test' },
+      backup: false,
+      sources: { [A]: 'recovery-file' },
+    });
+    const parsed = JSON.parse(r.out) as { drives: Record<string, Record<string, unknown>> };
+    expect(parsed.drives[A]).toEqual({ backedUp: true, keyFrom: 'a recovery file' });
+  });
+
+  it('help names AGENT_DRIVE_KEY and the recovery file import accepts', async () => {
+    const r = await cli(['--help'], null);
+    expect(r.out).toContain('AGENT_DRIVE_KEY');
+    expect(r.out).toContain('agent-drive-<id>.key.json');
   });
 });

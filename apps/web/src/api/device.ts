@@ -717,6 +717,18 @@ async function approve(
       offerId !== null,
     ],
   );
+  // The receipt describes what was just committed, not what the page showed earlier.
+  const ids = newDriveId ? [...drives, newDriveId] : drives;
+  const named = await client.query<{ id: string; name: string }>(
+    'SELECT id, name FROM drives WHERE account_id = $1 AND id = ANY($2::uuid[]) ORDER BY name, id',
+    [accountId, ids],
+  );
+  return {
+    drives: named.rows,
+    scopes,
+    write_paths: paths,
+    created_drive: newDriveId ? (named.rows.find((d) => d.id === newDriveId)?.name ?? null) : null,
+  };
 }
 
 const CONSOLE_WINDOW = '10 minutes';
@@ -880,6 +892,16 @@ async function consoleDeviceAction(
     if (!row) throw new ApiError('not_found', 'Device request not found.');
     const known = { rows: await reconnectDrives(getPool(), accountId, row) };
     const previous = await previousPermissions(getPool(), accountId, row);
+    // For the approval warnings: an agent already registered under the requested name, and
+    // whether approving would add yet another drive to an account that already has some.
+    const named = await getPool().query(
+      'SELECT 1 FROM agents WHERE account_id = $1 AND name = $2 LIMIT 1',
+      [accountId, row.client_name],
+    );
+    const hasDrives = await getPool().query(
+      'SELECT 1 FROM drives WHERE account_id = $1 AND deleting_at IS NULL LIMIT 1',
+      [accountId],
+    );
     const offered = (
       await getPool().query(
         `SELECT o.revision, o.scopes, o.write_paths, o.drive_id, d.name AS drive_name,
@@ -891,7 +913,22 @@ async function consoleDeviceAction(
         [row.id, accountId],
       )
     ).rows[0];
+    // A recovery-file agent has no previous key to prove it, but it names the drive keys it holds.
+    // Those that are live drives of this account are shown, and the page approves them explicitly
+    // (no sealed key needed: the agent keeps its own).
+    const held =
+      known.rows.length === 0 && !offered && row.requested_drive_ids.length > 0
+        ? (
+            await getPool().query<{ id: string; name: string }>(
+              `SELECT id, name FROM drives
+                WHERE account_id = $1 AND deleting_at IS NULL AND id = ANY($2::uuid[])
+                ORDER BY name, id`,
+              [accountId, row.requested_drive_ids],
+            )
+          ).rows
+        : [];
     return reply({
+      held_drives: held,
       offer: offered
         ? {
             agentName: offered.agent_name,
@@ -904,6 +941,8 @@ async function consoleDeviceAction(
       offerRevision: offered?.revision ?? 0,
       drives: known.rows.map(({ id, name }) => ({ id, name })),
       creates_drive: known.rows.length === 0,
+      existing_agent_name: named.rows.length > 0,
+      account_has_drives: hasDrives.rows.length > 0,
       scopes: previous?.scopes.filter((scope) => scope !== 'delegate') ?? null,
       write_paths: previous?.write_paths ?? null,
       user_code: row.user_code,
@@ -916,8 +955,8 @@ async function consoleDeviceAction(
   }
   if (parts.length === 3 && parts[2] === 'approve' && request.method === 'POST') {
     const input = approvalInput(await jsonBody(request));
-    await withTransaction((client) => approve(client, accountId, code, input));
-    return reply({ status: 'approved' });
+    const receipt = await withTransaction((client) => approve(client, accountId, code, input));
+    return reply({ status: 'approved', ...receipt });
   }
   if (parts.length === 3 && parts[2] === 'deny' && request.method === 'POST') {
     const denied = await getPool().query(

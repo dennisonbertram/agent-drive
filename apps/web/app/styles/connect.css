@@ -7,7 +7,7 @@
 .connect-shell .panel.connect-card {
   margin-top: 24px;
   overflow: visible; /* .panel clips, which breaks the sticky Approve bar */
-  padding: 22px 24px 24px;
+  padding: 18px 24px 20px;
   border: 1px solid var(--line-strong, #111);
   border-radius: 14px;
   background: var(--panel, #fff);
@@ -15,7 +15,7 @@
   box-shadow: 0 3px 0 var(--line-strong, #111);
 }
 .connect-shell h1 {
-  margin: 14px 0 12px;
+  margin: 10px 0 10px;
   font: 500 1.75rem/1.15 var(--sans, 'Inter Tight', system-ui, sans-serif);
   letter-spacing: -0.01em;
 }
@@ -28,6 +28,10 @@
   font-family: var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   font-size: 0.92em;
   white-space: nowrap;
+}
+.connect-cmd.connect-cmd-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .connect-tag {
   display: flex;
@@ -119,8 +123,8 @@
 /* the typed verification code: the terminal is the independent channel */
 .connect-shell label.connect-verify {
   display: grid;
-  gap: 6px;
-  margin: 0 0 8px;
+  gap: 4px;
+  margin: 0 0 12px;
   font: 500 12px/1.2 var(--mono, 'JetBrains Mono', ui-monospace, Menlo, monospace);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -189,10 +193,33 @@
   border-color: var(--line-strong, #111);
   border-left: 4px solid var(--sig, #ff4a1c);
 }
+.connect-shell .banner.warn {
+  border-color: var(--line-strong, #111);
+  border-left: 4px solid var(--sig, #ff4a1c);
+}
 
-/* one primary action */
+/* who is approving, under the title */
+.connect-shell p.connect-account {
+  margin: -10px 0 6px;
+  font-size: 0.8125rem;
+  color: var(--muted, #6b6963);
+}
+
+/* the deciding facts stay visible outside Details */
+.connect-shell dl.connect-rows {
+  margin: 0 0 6px;
+  border-top: 0;
+}
+.connect-shell dl.connect-rows .connect-fact {
+  padding: 1px 0;
+}
+
+/* one primary action; Deny is secondary */
 .connect-actions {
   display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: stretch;
 }
 .connect-shell .button.primary {
   width: 100%;
@@ -209,6 +236,23 @@
   box-shadow: 0 1px 0 var(--line-strong, #111);
 }
 .connect-shell .button.primary:disabled {
+  opacity: 0.6;
+}
+.connect-shell .connect-deny {
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--line, rgba(17, 17, 17, 0.16));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #6b6963);
+  font: 500 0.875rem var(--sans, 'Inter Tight', system-ui, sans-serif);
+  cursor: pointer;
+}
+.connect-shell .connect-deny:hover:not(:disabled) {
+  border-color: var(--line-strong, #111);
+  color: var(--ink, #111);
+}
+.connect-shell .connect-deny:disabled {
   opacity: 0.6;
 }
 .connect-shell :focus-visible {
@@ -472,6 +516,12 @@
     grid-area: 5 / 2;
     margin: 0 0 8px;
   }
+  /* held drives show only read-only and the write folder, side by side */
+  .connect-held .cf-check,
+  .connect-held .cf-folder,
+  .connect-held .cf-folder-error {
+    grid-area: auto;
+  }
 }
 
 /* one-line summary; the key/value table sits in a closed <details> */
@@ -510,4 +560,10 @@
   color: var(--ink-2, #3b3a37);
   text-decoration: underline;
   cursor: pointer;
+}
+
+.connect-shell p.connect-grant {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  color: var(--ink-2, #3b3a37);
 }

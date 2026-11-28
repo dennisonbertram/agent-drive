@@ -3,6 +3,8 @@
 import { useEffect, useRef } from 'react';
 import { MenuButton } from './menu-button';
 import type { VaultStatus } from '@/src/console/vault';
+import { CopyButton } from '../copy-button';
+import { FingerprintBox, sealCommand } from './vault-forms';
 
 /** The one place that shows whether this tab has the drive key and whether the key is backed up. */
 export function KeyChip({
@@ -18,6 +20,7 @@ export function KeyChip({
   vault,
   fingerprint,
   agentOnly,
+  inAccount,
   passkey,
   vaultActions,
 }: {
@@ -34,6 +37,8 @@ export function KeyChip({
   vault: VaultStatus;
   fingerprint: string;
   agentOnly?: boolean;
+  /** The selected drive's key is saved under the account key, so the passphrase opens it. */
+  inAccount?: boolean;
   /** 'use' = a passkey exists and this browser can run it; 'add' = it could enroll one. */
   passkey?: 'use' | 'add' | undefined;
   vaultActions: {
@@ -107,9 +112,28 @@ export function KeyChip({
               ? 'Unlocked. This drive’s key is loaded in this tab.'
               : agentOnly
                 ? 'Unlocked. This drive is agent-only — only its recovery file opens it.'
-                : 'Unlocked. Drives you added to your account open when you use them.'}{' '}
-          <small data-testid="vault-fingerprint">Fingerprint {fingerprint}</small>
+                : inAccount
+                  ? 'Unlocked. Drives you added to your account open when you use them.'
+                  : 'Unlocked, but this drive is not in your account yet. Load its recovery file once; after that your passphrase opens it.'}{' '}
         </p>
+      )}
+      {hasVault && fingerprint && (
+        <div className="key-fingerprint">
+          <small>Account key fingerprint</small>
+          <FingerprintBox fingerprint={fingerprint} />
+          <span className="key-fingerprint-copy">
+            <CopyButton
+              text={sealCommand(fingerprint)}
+              caption="Copy seal command"
+              label="Copy account seal command"
+            />
+            <CopyButton
+              text={sealCommand(fingerprint, undefined, true)}
+              caption="Copy re-pin command"
+              label="Copy account re-pin command"
+            />
+          </span>
+        </div>
       )}
       {!hasVault && (
         <p>
@@ -210,32 +234,7 @@ export function KeyChip({
             vaultActions.onLock();
           }}
         >
-          Lock
-        </button>
-      )}
-      {vault === 'unlocked' && (
-        <button
-          type="button"
-          className="button secondary"
-          data-testid="lock-browser"
-          onClick={(event) => {
-            closeMenu(event);
-            vaultActions.onLockBrowser();
-          }}
-        >
-          Lock this browser
-        </button>
-      )}
-      {vault === 'unlocked' && passkey === 'add' && vaultActions.onAddPasskey && (
-        <button
-          type="button"
-          className="button secondary"
-          onClick={(event) => {
-            closeMenu(event);
-            vaultActions.onAddPasskey?.();
-          }}
-        >
-          Add a passkey
+          Lock this tab
         </button>
       )}
       {vault === 'unlocked' && (
@@ -243,26 +242,58 @@ export function KeyChip({
           <button
             type="button"
             className="button secondary"
+            data-testid="lock-browser"
             onClick={(event) => {
               closeMenu(event);
-              vaultActions.onChange();
+              vaultActions.onLockBrowser();
             }}
           >
-            Change passphrase
+            Lock this browser
           </button>
+          <small className="key-menu-help">
+            Lock this tab clears the key here; a reload can unlock again if this browser remembers
+            it. Lock this browser forgets it.
+          </small>
         </>
       )}
       {hasVault && (
-        <button
-          type="button"
-          className="button secondary"
-          onClick={(event) => {
-            closeMenu(event);
-            vaultActions.onReset();
-          }}
-        >
-          Forgot or exposed passphrase?
-        </button>
+        <>
+          <hr className="key-menu-rule" />
+          {vault === 'unlocked' && passkey === 'add' && vaultActions.onAddPasskey && (
+            <button
+              type="button"
+              className="button secondary"
+              onClick={(event) => {
+                closeMenu(event);
+                vaultActions.onAddPasskey?.();
+              }}
+            >
+              Add a passkey
+            </button>
+          )}
+          {vault === 'unlocked' && (
+            <button
+              type="button"
+              className="button secondary"
+              onClick={(event) => {
+                closeMenu(event);
+                vaultActions.onChange();
+              }}
+            >
+              Change passphrase
+            </button>
+          )}
+          <button
+            type="button"
+            className="button secondary"
+            onClick={(event) => {
+              closeMenu(event);
+              vaultActions.onReset();
+            }}
+          >
+            Forgot or exposed passphrase?
+          </button>
+        </>
       )}
     </MenuButton>
   );

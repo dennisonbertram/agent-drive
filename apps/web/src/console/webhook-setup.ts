@@ -14,9 +14,20 @@ export type WebhookToken = { id: string; token: string; url: string; createdAt: 
 export const isDriveBoundSource = (source: Source) =>
   source === 'trusted' || source === 'recovery-file' || source === 'bundle';
 
+/** Shown when a key is loaded for trace capture and does not belong to the selected drive. */
+export const WRONG_KEY = 'That key is not for this drive.';
 export const MISMATCH = 'This key does not open this drive’s files.';
 export const EMPTY_DRIVE =
   'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.';
+
+/** Throws WRONG_KEY when the drive's files or trace inbox show this key does not belong to it. */
+export async function assertKeyForDrive(
+  verify: (driveId: string, key: string) => Promise<Verdict>,
+  driveId: string,
+  key: string,
+) {
+  if ((await verify(driveId, key)) === 'mismatch') throw new Error(WRONG_KEY);
+}
 
 /** The tab's own generated key is trusted only while it is still the key in use. */
 export const keySourceFor = (
@@ -26,6 +37,11 @@ export const keySourceFor = (
 ): Source => (generatedKey === key ? 'trusted' : (recorded ?? 'pasted'));
 
 const conflict = (reason: unknown) => (reason as { status?: number } | null)?.status === 409;
+
+/** The server's answer when the active token is not the one the page last saw. */
+export const TAB_CHANGED = 'This changed in another tab.';
+export const changedInAnotherTab = (reason: unknown) =>
+  conflict(reason) && (reason as Error).message === TAB_CHANGED;
 
 /**
  * Creates the trace inbox (if the drive has none) and a new webhook token, after proving the key
@@ -38,6 +54,8 @@ export async function setUpWebhook(args: {
   key: string;
   source: Source;
   verify: (driveId: string, key: string) => Promise<Verdict>;
+  /** The active token id the page last saw (null: none). Omitted when unknown. */
+  expectedTokenId?: string | null;
   /** Test seam; production opens the challenge using the exact locally unwrapped inbox key. */
   answerChallenge?: typeof answerTraceInboxChallenge;
 }): Promise<WebhookToken> {
@@ -121,21 +139,25 @@ export async function setUpWebhook(args: {
     }
   }
 
+  const expected =
+    args.expectedTokenId === undefined ? {} : { expectedTokenId: args.expectedTokenId };
   let record = await ensureInbox();
   try {
     const proof = await requestProof('issue-token', record);
     return await strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
       ...proof,
+      ...expected,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,
     });
   } catch (reason) {
-    if (!conflict(reason)) throw reason;
+    if (!conflict(reason) || changedInAnotherTab(reason)) throw reason;
     record = await ensureInbox();
     const proof = await requestProof('issue-token', record);
     return strictRequest<WebhookToken>(`drives/${driveId}/webhook-token`, 'POST', {
       ...proof,
+      ...expected,
       keyId: record.keyId,
       publicKey: record.publicKey,
       wrappedPrivateKey: record.wrappedPrivateKey,

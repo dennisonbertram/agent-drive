@@ -324,6 +324,8 @@ describe('sealDrivesToAccount', () => {
     expect(expectedAccountFingerprint(undefined)).toBeUndefined();
     expect(expectedAccountFingerprint('  A1B2-C3D4.E5F6 7890 ')).toBe('a1b2 c3d4 e5f6 7890');
     expect(expectedAccountFingerprint('not a fingerprint')).toBeUndefined();
+    expect(expectedAccountFingerprint(' a1b2 c3d4 e5f6 7890, ')).toBe('a1b2 c3d4 e5f6 7890');
+    expect(expectedAccountFingerprint('a1b2 c3d4 e5f6 7890.;:')).toBe('a1b2 c3d4 e5f6 7890');
   });
 
   it('pins the fingerprint on first use and refuses a changed account key', async () => {
@@ -752,7 +754,7 @@ describe('account sealing at the command level', () => {
     const { respond } = await api({ noAccountKey: true });
     const r = await cli(['drive', 'create', '--name', 'fresh'], { keys: {}, origins: {} }, respond);
     expect(r.out).toContain(B);
-    await vi.waitFor(() => expect(r.err).toContain('your account has no passphrase yet'), {
+    await vi.waitFor(() => expect(r.err).toContain('Optional: set a passphrase in the console'), {
       timeout: 3000,
     });
     expect(r.paths.some((p) => p.includes('account-key-slot'))).toBe(false);

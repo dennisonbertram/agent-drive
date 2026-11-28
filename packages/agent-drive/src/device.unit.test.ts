@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { importCredentials } from './credentials.js';
 import { deviceLogin, defaultAgentName, grantLogin } from './device.js';
 import { AgentDriveApiError, AgentDriveClient } from './client.js';
 import { unsealDriveKey } from './seal.js';
@@ -24,6 +25,7 @@ const b64 = (bytes: ArrayBuffer | Uint8Array) =>
 const dirs: string[] = [];
 const K1 = Buffer.alloc(32, 1).toString('base64url');
 const K2 = Buffer.alloc(32, 2).toString('base64url');
+const UID = '11111111-1111-4111-8111-111111111111';
 const K9 = Buffer.alloc(32, 9).toString('base64url');
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -180,6 +182,7 @@ describe('deviceLogin', () => {
       apiKey: string;
       driveKeys: Record<string, string>;
       driveKeyOrigins: Record<string, string>;
+      driveKeySources: Record<string, string>;
     };
     expect(saved.apiUrl).toBe('https://x.test/api');
     expect(saved.apiKey).toBe('adk_SECRETTOKEN');
@@ -187,6 +190,8 @@ describe('deviceLogin', () => {
     expect(saved.driveKeys.d2).toBeUndefined();
     expect(saved.driveKeys.d3).toBeTruthy();
     expect(saved.driveKeyOrigins).toEqual({ d1: 'https://x.test', d3: 'https://x.test' });
+    // The sealed key came from another agent; the new drive's key was generated here.
+    expect(saved.driveKeySources).toEqual({ d1: 'grant', d3: 'generated' });
     const printed = r.out.join('\n');
     expect(printed).toContain('BCDF-GHJK');
     expect(printed).toContain('https://x.test/connect?code=BCDF-GHJK');
@@ -244,7 +249,21 @@ describe('deviceLogin', () => {
   it('reports a denied request', async () => {
     await setup();
     const r = run(() => json(400, { error: 'access_denied' }));
-    await expect(r.promise).rejects.toThrow(/denied/iu);
+    await expect(r.promise).rejects.toThrow(
+      'The request was denied in the browser. No access was granted. ' +
+        'Run the same login command again if that was a mistake.',
+    );
+  });
+
+  it('reports the server denial reason when one is sent', async () => {
+    await setup();
+    const r = run(() =>
+      json(400, {
+        error: 'access_denied',
+        error_description: 'The offer was withdrawn; run agent-drive login again.',
+      }),
+    );
+    await expect(r.promise).rejects.toThrow(/offer was withdrawn/u);
   });
 
   it('escapes control characters in authorization error text', async () => {
@@ -336,6 +355,29 @@ describe('deviceLogin', () => {
     });
     await other.promise;
     expect(other.calls[0]?.body.known_drive_ids).toBeUndefined();
+  });
+
+  it('sends known_drive_ids for a key imported from a recovery file', async () => {
+    const path = await setup();
+    await writeFile(path, JSON.stringify({ apiUrl: 'https://x.test/api', apiKey: 'k' }));
+    await importCredentials(
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: UID, key: K1 }),
+      'file',
+    );
+    const r = run(() => json(200, { access_token: 't', drive_ids: [UID] }));
+    await r.promise;
+    expect(r.calls[0]?.body.known_drive_ids).toEqual([UID]);
+  });
+
+  it('sends known_drive_ids by per-key origin when no apiUrl or apiKey is saved', async () => {
+    const path = await setup();
+    await writeFile(
+      path,
+      JSON.stringify({ driveKeys: { a: K1 }, driveKeyOrigins: { a: 'https://x.test' } }),
+    );
+    const r = run(() => json(200, { access_token: 't', drive_ids: ['a'] }));
+    await r.promise;
+    expect(r.calls[0]?.body.known_drive_ids).toEqual(['a']);
   });
 
   it('migrates legacy keys without origins to the saved apiUrl origin', async () => {
@@ -643,10 +685,10 @@ describe('check and key helpers', () => {
       apiErrorLines(new AgentDriveApiError('permission_denied', 403, message));
     expect(lines('The API key needs the delegate scope.')).toEqual([
       'The API key needs the delegate scope.',
-      'Run `agent-drive login` again; on the approval page, tick "Let this agent add other agents to its drives" (under "Optional") before approving.',
+      'Run `agent-drive login --name <name>` again with this agent\'s name; on the approval page, open Details and tick "Let this agent add other agents to its drives" before approving.',
     ]);
     expect(lines('The API key lacks the "delegate" scope.')[1]).toMatch(
-      /^Run `agent-drive login` again; on the approval page, tick/u,
+      /^Run `agent-drive login --name <name>` again/u,
     );
     expect(lines('The API key needs the write scope.')[1]).toBe(SCOPE_HINT);
   });
@@ -809,6 +851,40 @@ describe('grantLogin', () => {
 
   it('refuses a malformed --verify before the request is even fetched', async () => {
     await expect(grant({ verify: 'not-a-code' })).rejects.toThrow(/Pass --verify/);
+  });
+
+  it('names the pairing code when no pending login exists for it', async () => {
+    const client = new AgentDriveClient({
+      apiUrl: 'https://x.test/api',
+      apiKey: GRANTER_TOKEN,
+      fetch: (async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url).endsWith('/whoami'))
+          return json(200, {
+            accountId: 'a',
+            agentId: 'g',
+            keyId: 'k',
+            scopes: ['read', 'write', 'delegate'],
+            writePaths: [],
+            driveIds: ['d1'],
+          });
+        if (String(url).endsWith('/device/BCDF-GHJK'))
+          return json(404, {
+            error: { code: 'not_found', message: 'Device request not found.' },
+          });
+        return json(404, { error: { code: 'not_found', message: 'not found' } });
+      }) as typeof fetch,
+    });
+    await expect(
+      grantLogin({
+        code: 'BCDF-GHJK',
+        verify: 'a1b2 c3d4 e5f6 7890',
+        client,
+        config: { driveKeys: { d1: K1 }, driveKeyOrigins: { d1: 'https://x.test' } },
+        log: () => undefined,
+      }),
+    ).rejects.toThrow(
+      'No pending login with pairing code BCDF-GHJK. Check the code the other agent printed, or ask it to run login again.',
+    );
   });
 
   it('summarizes the offer from scopes and paths', async () => {

@@ -454,6 +454,8 @@ dialog > .dialog-heading + * {
   border-radius: 13px 13px 0 0;
 }
 .dialog-heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -463,6 +465,7 @@ dialog > .dialog-heading + * {
   color: var(--muted, #6b6963);
 }
 .dialog-heading .icon-button {
+  flex: none;
   color: var(--muted, #6b6963);
   font-size: 22px;
   line-height: 1;
@@ -742,6 +745,42 @@ dialog .check-label input {
   font: 600 16px var(--mono, ui-monospace, Menlo, monospace);
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
+}
+/* account-key fingerprint: a monospace box with Copy, in the key menu */
+.fingerprint-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong, #111);
+  border-radius: 8px;
+  background: var(--paper-2, #f6f5f2);
+}
+.fingerprint-box code {
+  font: 600 13px var(--mono, ui-monospace, Menlo, monospace);
+  overflow-wrap: anywhere;
+}
+.key-fingerprint {
+  display: grid;
+  gap: 6px;
+}
+.key-fingerprint-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.key-menu-rule {
+  width: 100%;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--line, #ddd);
+}
+.key-menu-help {
+  color: var(--muted, #6b6963);
+  font-size: 12px;
+  line-height: 1.4;
 }
 @media (max-width: 760px) {
   .unlock {

@@ -245,7 +245,7 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     await expect(fileRow.getByRole('button', { name: 'Download', exact: true })).toBeEnabled();
     await expectNoStoredSecrets(page, driveKey, ['agent-drive:last-drive']);
     await fileRow.getByRole('button', { name: 'Download', exact: true }).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     const wrongDriveKey = randomBytes(32).toString('base64url');
     await page.getByLabel(/^Drive key or credentials bundle/).fill(wrongDriveKey);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
@@ -255,7 +255,7 @@ test('ux round 04: new human workspace → encrypted CLI upload → browser down
     await expect(page.getByRole('dialog')).toContainText(
       'After the key loads, artifact.bin downloads.',
     );
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(driveKey);
     const pendingDownload = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
@@ -659,6 +659,11 @@ test('console unlock on demand: Download opens the key prompt and continues afte
     const dialog = page.getByRole('dialog', { name: 'Load the key for Unlock drive' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel(/^Drive key or credentials bundle/)).toBeHidden();
+    // The file route leads; other routes and CLI flags stay collapsed until "Other ways" opens.
+    await expect(dialog.getByText('Choose recovery file').first()).toBeVisible();
+    await expect(dialog.getByText('--fingerprint')).toBeHidden();
+    await expect(dialog.getByText('unverified')).toBeHidden();
+    await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeInViewport();
     // A slow read that finishes after the dialog closed must not load the key or download.
     let downloads = 0;
     page.on('download', () => (downloads += 1));

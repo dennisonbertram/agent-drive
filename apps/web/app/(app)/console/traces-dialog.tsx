@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Request } from '@/src/console/share-link';
 import { versionWhen } from '@/src/console/when';
 import {
+  changedInAnotherTab,
   setUpWebhook,
+  TAB_CHANGED,
   type Source,
   type Verdict,
   type WebhookToken,
@@ -13,7 +15,13 @@ import { CopyButton } from '../copy-button';
 import { RevokeControl } from './share-dialog';
 
 type Active = { id: string; createdAt: string; status: 'active' | 'stale' };
-export type TracesKey = { key: string; source: Source };
+/** `driveId` is the drive the key was verified for; `seen` the token id the dialog saw before unlocking. */
+export type TracesKey = {
+  key: string;
+  source: Source;
+  driveId?: string;
+  seen?: string | null | undefined;
+};
 
 /**
  * Body of the "Set up trace capture" dialog. The drive key is passed in only for the moment a token is
@@ -35,8 +43,11 @@ export function TracesDialog({
   /** Enrollment and token issuance are strict routes: this wraps the Clerk reverification. */
   strictRequest: Request;
   verify: (driveId: string, key: string) => Promise<Verdict>;
-  /** The key this tab already has, or undefined after opening the unlock dialog for it. */
-  getKey: () => Promise<TracesKey | undefined>;
+  /**
+   * The key this tab already has, or undefined after opening the unlock dialog for it. `seen` is
+   * the token id this dialog has observed, carried through the unlock dialog.
+   */
+  getKey: (seen: string | null | undefined) => Promise<TracesKey | undefined>;
   /** A key the unlock dialog just loaded for this action. */
   resumeWith?: TracesKey | undefined;
   /** The inbox now exists and `key` is verified: seal it into the account. */
@@ -50,6 +61,9 @@ export function TracesDialog({
   const [error, setError] = useState('');
   const [revoking, setRevoking] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [notice, setNotice] = useState('');
+  // The token id this tab last saw (null: none). undefined until the first load finishes.
+  const seen = useRef<string | null | undefined>(undefined);
   const addButton = useRef<HTMLButtonElement>(null);
   const focusAdd = useRef(false);
   const working = busy || revoking;
@@ -72,10 +86,20 @@ export function TracesDialog({
     };
   }, []);
 
+  // Bumped by every token load and every successful change; a load only applies if no later
+  // one started or changed the token while it was in flight.
+  const latest = useRef(0);
   const fetchToken = useCallback(() => {
+    const mine = ++latest.current;
     request<{ token: Active | null }>(`drives/${driveId}/webhook-token`).then(
-      (result) => alive.current && setActive(result.token),
-      () => alive.current && setActive('error'),
+      (result) => {
+        if (!alive.current || mine !== latest.current) return;
+        seen.current = result.token?.id ?? null;
+        // A one-time token display must not outlive the state it described.
+        setCreated((shown) => (shown && shown.id === seen.current ? shown : null));
+        setActive(result.token);
+      },
+      () => alive.current && mine === latest.current && setActive('error'),
     );
   }, [request, driveId]);
   useEffect(fetchToken, [fetchToken]);
@@ -88,8 +112,9 @@ export function TracesDialog({
     if (busy) return;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
-      const found = have ?? (await getKey());
+      const found = have ?? (await getKey(seen.current));
       if (!found) return; // The unlock dialog took over; it comes back with resumeWith.
       const token = await setUpWebhook({
         request,
@@ -98,14 +123,22 @@ export function TracesDialog({
         key: found.key,
         source: found.source,
         verify,
+        ...(seen.current === undefined ? {} : { expectedTokenId: seen.current }),
       });
       if (!alive.current) return;
+      latest.current++;
+      seen.current = token.id;
       setCreated(token);
       setConfirmReplace(false);
       setActive({ id: token.id, createdAt: token.createdAt, status: 'active' });
       onReady(found.key, found.source);
     } catch (reason) {
-      if (alive.current)
+      if (alive.current && changedInAnotherTab(reason)) {
+        // Show what the other tab left, and let the user decide again.
+        setConfirmReplace(false);
+        setNotice(`${TAB_CHANGED} Showing the current setup.`);
+        fetchToken();
+      } else if (alive.current)
         setError(reason instanceof Error ? reason.message : 'Could not set up the webhook.');
     } finally {
       if (alive.current) setBusy(false);
@@ -114,8 +147,10 @@ export function TracesDialog({
   // Once, with the key the unlock dialog loaded.
   const resumed = useRef(false);
   useEffect(() => {
-    if (resumeWith && !resumed.current) {
+    if (resumeWith && !resumed.current && (resumeWith.driveId ?? driveId) === driveId) {
       resumed.current = true;
+      // Carry the token id observed before the unlock dialog opened.
+      seen.current = resumeWith.seen;
       void add(resumeWith);
     }
     // add reads only state that is current on this first run.
@@ -130,7 +165,9 @@ export function TracesDialog({
       if (alive.current) setRevoking(false);
     }
     if (!alive.current) return;
+    latest.current++;
     focusAdd.current = true;
+    seen.current = null;
     setCreated(null);
     setConfirmReplace(false);
     setActive(null);
@@ -195,6 +232,11 @@ export function TracesDialog({
       )}
       {active !== 'loading' && active !== 'error' && (
         <>
+          {notice && (
+            <div className="banner info" role="status">
+              {notice}
+            </div>
+          )}
           {active ? (
             <div className="trace-token" data-testid="webhook-token-row">
               <span className="share-when">Created {versionWhen(active.createdAt)}</span>
@@ -249,6 +291,10 @@ export function TracesDialog({
             </div>
           ) : (
             <div>
+              <p className="share-help">
+                This creates an agent named openrouter that can only write traces to{' '}
+                <code>/traces/openrouter</code>.
+              </p>
               <button
                 ref={addButton}
                 type="button"

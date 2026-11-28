@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { validateUrl, type AgentDriveClient } from './client.js';
+import { AgentDriveApiError, validateUrl, type AgentDriveClient } from './client.js';
 import {
   type AgentDriveConfig,
   configPath,
@@ -123,7 +123,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
   // The saved API key and drive keys are only trusted for the origin they were saved for.
   const origin = new URL(base).origin;
   const saved = await readConfig();
-  const savedKeys = sameOrigin(saved.apiUrl, base) ? keysForOrigin(saved, origin) : {};
+  // Drive keys are selected by their own recorded origin (a recovery-file import on a fresh
+  // machine has no saved apiUrl); only the API credential needs the saved apiUrl to match.
+  const savedKeys = keysForOrigin(saved, origin);
   const previousKey = sameOrigin(saved.apiUrl, base) ? saved.apiKey : undefined;
   const knownDriveIds = Object.keys(savedKeys).slice(0, 20);
   const { privateKey, publicKey } = await generateDeviceKeyPair();
@@ -208,7 +210,12 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     if (code === 'authorization_pending') continue;
     if (code === 'slow_down') interval += 5;
     else if (code === 'access_denied')
-      throw new Error('Approval was denied. No access was granted.');
+      throw new Error(
+        typeof result.data.error_description === 'string'
+          ? safeTerminalText(result.data.error_description)
+          : 'The request was denied in the browser. No access was granted. ' +
+            'Run the same login command again if that was a mistake.',
+      );
     else if (code === 'expired_token') throw expired();
     else
       throw new Error(
@@ -250,11 +257,18 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     apiKey: token.access_token,
     driveKeys,
     driveKeyOrigins: Object.fromEntries(Object.keys(driveKeys).map((id) => [id, origin])),
+    // The new drive's key was made here; every sealed key arrived from another agent.
+    driveKeySources: Object.fromEntries(
+      Object.keys(driveKeys).map((id) => [
+        id,
+        id === token.new_drive_id ? ('generated' as const) : ('grant' as const),
+      ]),
+    ),
   });
 
   if (backupsCleared)
     options.log(
-      'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.',
+      'Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.',
     );
   const usable = [
     ...new Set(
@@ -339,7 +353,17 @@ export async function grantLogin(options: {
     throw new Error(
       'Pass --verify with the verification code the new agent printed, exactly as shown ("a1b2 c3d4 e5f6 7890").',
     );
-  const request = await client.deviceRequest(code);
+  let request;
+  try {
+    request = await client.deviceRequest(code);
+  } catch (error) {
+    if (error instanceof AgentDriveApiError && error.status === 404)
+      throw new Error(
+        `No pending login with pairing code ${code}. Check the code the other agent printed, ` +
+          'or ask it to run login again.',
+      );
+    throw error;
+  }
   options.log(
     `Request from ${safeTerminalText(request.client_name)}${request.machine ? ` on ${safeTerminalText(request.machine)}` : ''}, made ${safeTerminalText(request.created_at)}.`,
   );

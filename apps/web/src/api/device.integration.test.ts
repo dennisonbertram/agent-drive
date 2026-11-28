@@ -178,7 +178,7 @@ describe('device authorization', () => {
       sealedDriveKeys: sealed,
     });
     expect(approve.status).toBe(200);
-    expect(await json(approve)).toEqual({ status: 'approved' });
+    expect(await json(approve)).toMatchObject({ status: 'approved' });
 
     await allowPoll(started.device_code);
     const issued = await poll(started.device_code);
@@ -275,6 +275,34 @@ describe('device authorization', () => {
     expect(await json(denied)).toEqual({ status: 'denied' });
     await allowPoll(started.device_code);
     expect((await json(await poll(started.device_code))).error).toBe('access_denied');
+  });
+
+  it('reports existing_agent_name and account_has_drives for the approval warnings', async () => {
+    const freshUser = `device_fresh_${randomUUID()}`;
+    const freshAccount = (await json(await consoleCall(freshUser, '/session'))).account.id;
+    accountIds.push(freshAccount);
+    const name = `flag-${suffix}`;
+    // No drives, no agent under the name: both flags false.
+    const first = await start({ client_name: name });
+    const bare = await json(await consoleCall(freshUser, `/device/${first.user_code}`));
+    expect(bare).toMatchObject({
+      creates_drive: true,
+      existing_agent_name: false,
+      account_has_drives: false,
+    });
+    // A drive and a same-named agent: both flags true.
+    await pool.query('INSERT INTO drives (account_id,name) VALUES ($1,$2)', [
+      freshAccount,
+      'flag-drive',
+    ]);
+    await pool.query('INSERT INTO agents (account_id,name) VALUES ($1,$2)', [freshAccount, name]);
+    const second = await start({ client_name: name });
+    const flagged = await json(await consoleCall(freshUser, `/device/${second.user_code}`));
+    expect(flagged).toMatchObject({
+      creates_drive: true,
+      existing_agent_name: true,
+      account_has_drives: true,
+    });
   });
 
   it('reports expired_token and refuses to approve expired requests', async () => {
@@ -704,6 +732,60 @@ describe('one-click connect (contract v2)', () => {
       [started.user_code],
     );
     expect(stored.rows[0].previous_api_key_id).toBeNull();
+  });
+
+  it('lists held drives for an agent with no previous key, and approves them without sealing', async () => {
+    const held = (await login({ client_name: `holder-${suffix}` })).token.drive_ids[0];
+    const unknown = randomUUID();
+    // A recovery-file agent: it names the drive keys it holds but has no API key to prove them.
+    const started = await start({
+      client_name: `restored-${suffix}`,
+      known_drive_ids: [held, unknown],
+    });
+    const info = await json(await consoleCall(user, `/device/${started.user_code}`));
+    expect(info).toMatchObject({
+      drives: [],
+      creates_drive: true,
+      held_drives: [{ id: held, name: `holder-${suffix}` }],
+    });
+    const approved = await consoleCall(user, `/device/${started.user_code}/approve`, 'POST', {
+      driveIds: [held],
+      scopes: ['read', 'write', 'delete', 'share'],
+      writePaths: [],
+      offerRevision: 0,
+    });
+    expect(approved.status).toBe(200);
+    // The receipt describes what was committed.
+    expect(await json(approved)).toEqual({
+      status: 'approved',
+      drives: [{ id: held, name: `holder-${suffix}` }],
+      scopes: ['read', 'write', 'delete', 'share'],
+      write_paths: [],
+      created_drive: null,
+    });
+    await allowPoll(started.device_code);
+    const token = await json(await poll(started.device_code));
+    expect(token).toMatchObject({ drive_ids: [held], new_drive_id: null, sealed_drive_keys: {} });
+    const count = await pool.query('SELECT count(*)::int AS n FROM drives WHERE account_id = $1', [
+      account,
+    ]);
+    expect(count.rows[0].n).toBe(2);
+  });
+
+  it('reports no held drives when the previous key reconnects them, and names a created drive in the receipt', async () => {
+    const name = `receipt-${suffix}`;
+    const first = (await login({ client_name: name })).token;
+    const again = await start(
+      { client_name: name, known_drive_ids: [first.drive_ids[0]] },
+      nextIp(),
+      first.access_token,
+    );
+    const info = await json(await consoleCall(user, `/device/${again.user_code}`));
+    expect(info.held_drives).toEqual([]);
+    const fresh = await start({ client_name: `fresh-${suffix}` });
+    const receipt = await json(await approveEmpty(fresh.user_code));
+    expect(receipt.created_drive).toBe(`fresh-${suffix}`);
+    expect(receipt.drives).toHaveLength(1);
   });
 
   it('ignores invalid and revoked bearers, and keys of another agent or account', async () => {

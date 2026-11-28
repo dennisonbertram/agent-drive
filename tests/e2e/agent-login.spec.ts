@@ -270,6 +270,7 @@ test.describe('agent device login', () => {
     apiKey: string;
     driveKeys: Record<string, string>;
     driveKeyOrigins?: Record<string, string>;
+    driveKeySources?: Record<string, string>;
   };
   const readConfig = async (env: NodeJS.ProcessEnv) =>
     JSON.parse(await readFile(env.AGENT_DRIVE_CONFIG!, 'utf8')) as Config;
@@ -290,6 +291,11 @@ test.describe('agent device login', () => {
     const unbacked = await cli(['check'], env);
     expect(unbacked.status).toBe(1);
     expect(unbacked.stderr).toContain('drive key not backed up');
+    // A key made on this machine fails with exactly one next step: the default backup command.
+    expect(unbacked.stderr).toContain(
+      'agent-drive credentials export --to <a file outside the sandbox>',
+    );
+    expect(unbacked.stderr).not.toMatch(/--to clipboard|--stdout|--to 1password/);
     const exported = await cli(['credentials', 'export', '--to', join(root, 'bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);
     expect(exported.stdout + exported.stderr).not.toMatch(/adk_|adcred1/);
@@ -310,6 +316,14 @@ test.describe('agent device login', () => {
     const get = await cli(['get', '/notes/hello.bin', '--drive', driveId, '--output', back], env);
     expect(get.status, get.stderr).toBe(0);
     expect((await readFile(back)).equals(original)).toBe(true);
+    // A second positional is the local output path.
+    const positional = join(root, 'hello.positional');
+    const get2 = await cli(['get', '/notes/hello.bin', positional, '--drive', driveId], env);
+    expect(get2.status, get2.stderr).toBe(0);
+    expect((await readFile(positional)).equals(original)).toBe(true);
+    const relative = await cli(['put', local, 'notes.md', '--drive', driveId], env);
+    expect(relative.status).not.toBe(0);
+    expect(relative.stderr).toContain('Remote paths start with /, for example /notes.md.');
 
     // backup
     const source = join(root, 'source');
@@ -363,6 +377,9 @@ test.describe('agent device login', () => {
     const env = cliEnv(baseURL!, root, 'delegate', machine);
     const { login, code, path, verify } = await startLogin(env, 'delegate-bot');
     await approve(page, path, 'delegate-bot', code, verify, true);
+    // The receipt names the delegate grant.
+    await expect(page.getByRole('status')).toContainText('Delegate');
+    await expect(page.getByRole('status')).toContainText('Can add other agents');
     const result = await login.done;
     expect(result.status, result.stderr).toBe(0);
     const who = await cli(['whoami'], env);
@@ -601,8 +618,13 @@ test.describe('agent device login', () => {
     const exported = await cli(['credentials', 'export', '--to', join(root, 'reader-bundle')], env);
     expect(exported.status, exported.stderr).toBe(0);
 
+    // Scoped to this drive: other tests run in parallel and write their own events.
     const events = async () =>
-      (await database.query('SELECT count(*)::int AS n FROM file_events')).rows[0].n as number;
+      (
+        await database.query('SELECT count(*)::int AS n FROM file_events WHERE drive_id = $1', [
+          driveId,
+        ])
+      ).rows[0].n as number;
     const before = await events();
     const check = await cli(['check'], env);
     expect(check.status, check.stderr).toBe(0);
@@ -695,11 +717,47 @@ test.describe('agent device login', () => {
     expect(output(denied)).toMatch(/403|only write under/);
     const allowed = await cli(['put', seed, '/inbox/b/hello.md', '--drive', driveId], envB);
     expect(allowed.status, allowed.stderr).toBe(0);
+    // The key the owner sealed to this login counts as a copy elsewhere: check passes before
+    // any local export and notes where the key came from.
+    const granted = await cli(['check'], envB);
+    expect(granted.status, granted.stderr).toBe(0);
+    expect(granted.stderr).toContain(
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it). Keep that copy; it is this key's backup.`,
+    );
     const exported = await cli(['credentials', 'export', '--to', join(root, 'b-bundle')], envB);
     expect(exported.status, exported.stderr).toBe(0);
     const check = await cli(['check'], envB);
     expect(check.status, check.stderr).toBe(0);
-    for (const r of [get, denied, allowed, exported, check]) noSecrets(output(r));
+    for (const r of [get, denied, allowed, granted, exported, check]) noSecrets(output(r));
+
+    // A fresh CLI home takes the same recovery file: import, log in with the API key, and the
+    // imported copy means check passes without a new export.
+    const envC = {
+      ...cliEnv(baseURL!, root, 'recovery-agent', 'm-recovery'),
+      AGENT_DRIVE_API_KEY: configB.apiKey,
+    };
+    const imported = await cli(['credentials', 'import', '--from', recovery], envC);
+    expect(imported.status, imported.stderr).toBe(0);
+    expect(imported.stdout).toContain(`Saved the drive key for drive ${driveId}`);
+    expect((await cli(['login'], envC)).status).toBe(0);
+    const checkC = await cli(['check'], envC);
+    expect(checkC.status, checkC.stderr).toBe(0);
+    expect(checkC.stdout).toContain(`check ok drive=${driveId}`);
+    expect(checkC.stderr).toContain(
+      `The key for drive ${driveId} came from a recovery file. Keep that copy; it is this key's backup.`,
+    );
+    for (const r of [imported, checkC]) noSecrets(output(r));
+
+    // A recovery file for a drive this account cannot see still saves but says so plainly.
+    const other = join(root, 'other.json');
+    await writeFile(
+      other,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId: randomUUID(), key: driveKey }),
+    );
+    const wrongDrive = await cli(['credentials', 'import', '--from', other], envC);
+    expect(wrongDrive.status).toBe(0);
+    expect(wrongDrive.stderr).toContain('has no access to drive');
+    expect(output(wrongDrive)).not.toContain(driveKey);
 
     const rows = await database.query(
       'SELECT row_to_json(d)::text AS t FROM device_authorizations d WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
@@ -934,11 +992,72 @@ test.describe('agent device login', () => {
     await expect(page.getByRole('heading', { name: 'Connect lost-bot?' })).toBeVisible();
     await expect(page.getByText(/keeps its previous permissions/)).toBeVisible();
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('New encrypted drive');
-    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(
+      'New encrypted drive',
+    );
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     await expect(page.getByText('reconnects to the drive it used before')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     again.login.child.kill();
+  });
+
+  test('same-name agent and new empty drive warn', async ({ page, context, baseURL }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'dupe-a', 'm-dupe-a');
+    const a = await startLogin(envA, 'dupe-bot');
+    await approve(page, a.path, 'dupe-bot', a.code, a.verify);
+    expect((await a.login.done).status).toBe(0);
+
+    // A second agent asking for the same name, on an account that already has a drive.
+    const envB = cliEnv(baseURL!, root, 'dupe-b', 'm-dupe-b');
+    const b = await startLogin(envB, 'dupe-bot');
+    await page.goto(b.path);
+    await expect(
+      page.getByText(/You already have an agent named dupe-bot\. Approving signs this one in as/),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
+    // The existing-drive choice is visible without opening Details, and Approve fits at 1280x800.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const banner = page.locator('.banner.warn', { hasText: 'Approving creates a new, empty' });
+    await expect(
+      banner.getByRole('button', { name: /Use one of my drives instead/ }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Approve agent' })).toBeInViewport({ ratio: 1 });
+    // The rare grant route lives in Details.
+    await expect(page.locator('.connect-cmd-wrap')).toBeHidden();
+    await openDetails(page);
+    const grantLine = page.locator('.connect-cmd-wrap');
+    await expect(grantLine).toHaveText(
+      `agent-drive grant ${b.code} --verify <code from the new agent’s terminal>`,
+    );
+    for (const [width, height] of [
+      [1280, 900],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      const card = await page.locator('.connect-card').boundingBox();
+      const code = await grantLine.boundingBox();
+      expect(code!.x + code!.width).toBeLessThanOrEqual(card!.x + card!.width + 1);
+    }
+    await approve(page, b.path, 'dupe-bot', b.code, b.verify);
+    expect((await b.login.done).status).toBe(0);
+
+    const envC = cliEnv(baseURL!, root, 'dupe-c', 'm-dupe-c');
+    const c = await startLogin(envC, 'dupe-bot');
+    await page.goto(c.path);
+    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
+    await chooseExistingDrive(page);
+    // Choosing an existing drive clears the new-drive warning, but the same-name warning stays:
+    // the approval still signs in as the agent that already has that name.
+    await expect(page.getByText(/You already have an agent named dupe-bot\./)).toBeVisible();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
+    c.login.child.kill();
   });
 
   test('grant: the first agent seals the key for a second login and the human approves the offer it saw', async ({
@@ -1015,9 +1134,9 @@ test.describe('agent device login', () => {
       `writes only in /inbox/b · offered by ${granter}`,
     );
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('Offered by');
-    await expect(page.locator('.connect-facts')).toContainText(granter);
-    await expect(page.locator('.connect-facts')).toContainText('/inbox/b');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(granter);
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('/inbox/b');
     await expect(page.getByRole('button', { name: /Use one of my drives instead/ })).toHaveCount(0);
     await mkdir('docs/design/shots/spec-connect-share', { recursive: true });
     for (const [width, height] of [
@@ -1067,7 +1186,15 @@ test.describe('agent device login', () => {
     expect(stored.rows[0]!.row).not.toContain(driveKey);
     const configB = await readConfig(envB);
     expect(configB.driveKeys[driveId]).toBe(driveKey);
+    expect(configB.driveKeySources?.[driveId]).toBe('grant');
     expect(resultB.stdout + resultB.stderr).not.toContain(configB.apiKey);
+
+    // The granted key already exists off this machine, so check passes without a local export.
+    const grantedCheck = await cli(['check'], envB);
+    expect(grantedCheck.status, grantedCheck.stderr).toBe(0);
+    expect(grantedCheck.stderr).toContain(
+      `The key for drive ${driveId} came from the approval (another agent or the browser sent it). Keep that copy; it is this key's backup.`,
+    );
   });
 
   test('grant: a page loaded before the offer gets a 409 notice, reloads, and approves the offer', async ({
@@ -1086,7 +1213,9 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'grantee2', 'm-grantee2');
     const b = await startLogin(envB, 'grantee2-bot');
     await page.goto(b.path);
-    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     const granted = await cli(['grant', b.code, '--read-only', '--verify', b.verify], envA);
     expect(granted.status, granted.stderr).toBe(0);
     await page.locator('#connect-verify').fill(b.verify);
@@ -1096,8 +1225,8 @@ test.describe('agent device login', () => {
       / · read only · offered by granter2-bot$/,
     );
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('granter2-bot');
-    await expect(page.locator('.connect-facts')).toContainText('No writes');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('granter2-bot');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('No writes');
     await page.locator('#connect-verify').fill(b.verify);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByRole('status')).toContainText('Approval saved');
@@ -1116,24 +1245,145 @@ test.describe('agent device login', () => {
     expect(who.driveIds).toEqual([driveId]);
   });
 
-  test('no Deny button; the deny API still stops the agent', async ({ page, context, baseURL }) => {
+  test('Deny refuses the request and ends the agent wait without a verification code', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     test.setTimeout(120_000);
     await newUser(context);
     const env = cliEnv(baseURL!, root, 'denied', 'deny-box');
-    const { login, path, code } = await startLogin(env, 'denied-bot');
+    const { login, path } = await startLogin(env, 'denied-bot');
     await page.goto(path);
-    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.getByRole('heading', { name: 'Connect denied-bot?' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Approve agent' })).toBeVisible();
-    // The server-side deny endpoint still works for other clients.
-    const denied = await page.request.post(`/api/console/device/${encodeURIComponent(code)}/deny`, {
-      data: {},
-      headers: { Origin: new URL(baseURL!).origin },
-    });
-    expect(denied.status(), await denied.text()).toBe(200);
+    // No verification code typed: refusing is always safe, so it never needs one.
+    await expect(page.locator('#connect-verify')).toHaveValue('');
+    await page.getByRole('button', { name: 'Deny' }).click();
+    const status = page.getByRole('status');
+    await expect(status).toContainText('Request denied');
+    await expect(status).toContainText('The agent got no access. You can close this page.');
     const result = await login.done;
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toMatch(/denied/i);
+    expect(result.stderr).toContain('The request was denied in the browser');
+    expect(result.stderr).toContain('No access was granted');
     await expect(readFile(env.AGENT_DRIVE_CONFIG!)).rejects.toThrow();
+  });
+
+  test('Deny on a request that is no longer pending does not claim the agent got no access', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(120_000);
+    await newUser(context);
+    const env = cliEnv(baseURL!, root, 'deny-gone', 'deny-gone-box');
+    const { login, code, path } = await startLogin(env, 'deny-gone-bot');
+    await page.goto(path);
+    await expect(page.getByRole('heading', { name: 'Connect deny-gone-bot?' })).toBeVisible();
+    // The request expires (or is decided elsewhere) while the page is open.
+    await database.query(
+      "UPDATE device_authorizations SET expires_at = now() - interval '1 second' WHERE user_code = $1",
+      [code],
+    );
+    await page.getByRole('button', { name: 'Deny' }).click();
+    await expect(page.locator('.banner.error')).toContainText(
+      'This request is no longer pending, so it may already have been approved or expired. Check Agents in the console.',
+    );
+    await expect(page.getByText('The agent got no access')).toHaveCount(0);
+    login.child.kill();
+  });
+
+  test('an agent that holds a drive key but has no API key is connected to that drive, not a new one', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'held-a', 'm-held-a');
+    const first = await startLogin(envA, 'held-a-bot');
+    await approve(page, first.path, 'held-a-bot', first.code, first.verify);
+    expect((await first.login.done).status).toBe(0);
+    const [driveId, driveKey] = Object.entries((await readConfig(envA)).driveKeys)[0]!;
+
+    // A fresh machine that restored only the drive key (a recovery file): no API key to prove it.
+    const envB = cliEnv(baseURL!, root, 'held-b', 'm-held-b');
+    const recoveryFile = join(root, 'held-recovery.key.json');
+    await writeFile(
+      recoveryFile,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key: driveKey }),
+      { mode: 0o600 },
+    );
+    const imported = await cli(['credentials', 'import', '--from', recoveryFile], envB);
+    expect(imported.status, imported.stderr).toBe(0);
+    const second = await startLogin(envB, 'held-b-bot');
+    await page.goto(second.path);
+    await expect(
+      page.getByText(
+        "This agent says it has the key for your drive held-a-bot. Approve only if you gave it that drive's recovery file or key.",
+      ),
+    ).toBeVisible();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toHaveCount(0);
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.locator('#connect-verify').fill(second.verify);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = JSON.parse((await approveRequest).postData() ?? '{}') as Record<string, unknown>;
+    expect(sent.driveIds).toEqual([driveId]);
+    expect(sent).not.toHaveProperty('sealedDriveKeys');
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    await expect(page.getByRole('status')).toContainText('held-a-bot');
+
+    const result = await second.login.done;
+    expect(result.status, result.stderr).toBe(0);
+    const configB = await readConfig(envB);
+    expect(Object.keys(configB.driveKeys)).toEqual([driveId]);
+    expect(configB.driveKeys[driveId]).toBe(driveKey);
+    const count = await database.query<{ n: string }>(
+      'SELECT count(*) AS n FROM drives WHERE account_id = (SELECT account_id FROM drives WHERE id=$1)',
+      [driveId],
+    );
+    expect(Number(count.rows[0]!.n)).toBe(1);
+  });
+
+  test('choosing a new drive after opening the existing-drive picker creates a new drive for an agent that holds a key', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    test.setTimeout(240_000);
+    await newUser(context);
+    const envA = cliEnv(baseURL!, root, 'held-n-a', 'm-held-n-a');
+    const first = await startLogin(envA, 'held-n-a-bot');
+    await approve(page, first.path, 'held-n-a-bot', first.code, first.verify);
+    expect((await first.login.done).status).toBe(0);
+    const [driveId, driveKey] = Object.entries((await readConfig(envA)).driveKeys)[0]!;
+    const envB = cliEnv(baseURL!, root, 'held-n-b', 'm-held-n-b');
+    const recoveryFile = join(root, 'held-n-recovery.key.json');
+    await writeFile(
+      recoveryFile,
+      JSON.stringify({ format: 'agent-drive-key-v1', driveId, key: driveKey }),
+      { mode: 0o600 },
+    );
+    expect((await cli(['credentials', 'import', '--from', recoveryFile], envB)).status).toBe(0);
+    const second = await startLogin(envB, 'held-n-b-bot');
+    await page.goto(second.path);
+    await expect(page.getByText(/This agent says it has the key for your drive/)).toBeVisible();
+    await openDetails(page);
+    await page.getByRole('button', { name: /Use one of my drives instead/ }).click();
+    await page.getByRole('button', { name: 'Use a new drive instead' }).click();
+    await expect(page.getByText(/Approving creates a new, empty drive/)).toBeVisible();
+    const approveRequest = page.waitForRequest(
+      (r) => r.method() === 'POST' && /\/api\/console\/device\/[^/]+\/approve$/.test(r.url()),
+    );
+    await page.locator('#connect-verify').fill(second.verify);
+    await page.getByRole('button', { name: 'Approve agent' }).click();
+    const sent = JSON.parse((await approveRequest).postData() ?? '{}') as Record<string, unknown>;
+    expect(sent).not.toHaveProperty('driveIds');
+    await expect(page.getByRole('status')).toContainText('Approval saved');
+    second.login.child.kill();
   });
 
   test('connect card presentation: banner, note, account, login command', async ({
@@ -1154,10 +1404,16 @@ test.describe('agent device login', () => {
     await page.goto(path);
     await expect(page.locator('.connect-explain')).toHaveCSS('font-size', '13px');
     await expect(page.locator('.connect-note')).toHaveCSS('margin-top', '10px');
-    await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Deny' })).toBeVisible();
+    await expect(page.getByText('Signed in as Local test session')).toBeVisible();
+    await expect(page.locator('.connect-rows')).toContainText('style-bot');
     await openDetails(page);
-    await expect(page.locator('.connect-facts dt', { hasText: 'Account' })).toBeVisible();
-    await expect(page.locator('.connect-facts')).toContainText('Local test session');
+    await expect(
+      page.locator('.connect-details .connect-facts dt', { hasText: 'Drive' }),
+    ).toBeVisible();
+    await expect(page.locator('.connect-details .connect-facts')).toContainText(
+      'New encrypted drive',
+    );
     // Nothing approves it, so the request stays pending; stop the CLI.
     cliLogin.child.kill();
   });
@@ -1187,18 +1443,21 @@ test.describe('agent device login', () => {
         page.locator(selector).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
       expect(await size('h1')).toBeGreaterThan(await size('.connect-code'));
       await expect(page.locator('.connect-code-line + .connect-actions')).toHaveCount(1);
-      await expect(page.getByRole('button', { name: 'Deny' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Deny' })).toBeVisible();
       await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeHidden();
       await expect(page.locator('.connect-summary')).toHaveText(
         'New encrypted drive · full access',
       );
       await expect(page.locator('.connect-details')).not.toHaveAttribute('open', '');
-      await expect(page.getByText('Machine', { exact: true })).toBeHidden();
-      await expect(page.getByText('Account', { exact: true })).toBeHidden();
+      // The deciding facts are visible without opening Details.
+      await expect(page.getByText('Signed in as Local test session')).toBeVisible();
+      await expect(page.locator('.connect-rows')).toContainText('vp-bot');
+      await expect(page.locator('.connect-rows')).toContainText('vp-box');
+      await expect(page.getByText('Requested', { exact: true })).toBeHidden();
     }
     await page.locator('.connect-details > summary').click();
-    await expect(page.getByText('Machine', { exact: true })).toBeVisible();
-    await expect(page.getByText('Account', { exact: true })).toBeVisible();
+    await expect(page.getByText('Requested', { exact: true })).toBeVisible();
+    await expect(page.getByText('Drive', { exact: true })).toBeVisible();
     await openDetails(page);
     await expect(page.getByLabel('Let this agent add other agents to its drives')).toBeVisible();
     login.child.kill();
@@ -1221,10 +1480,12 @@ test.describe('agent device login', () => {
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(second.path);
-    await openDetails(page);
     const branch = page.getByRole('button', { name: /Use one of my drives instead/ });
     expect((await branch.boundingBox())!.height).toBeGreaterThanOrEqual(40);
     await branch.click();
+    // The access to be granted shows in the summary, and the key field says where a file comes from.
+    await expect(page.locator('.connect-summary')).toContainText('full access');
+    await expect(page.getByText(/No recovery file\? Have an agent/)).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     const card = await page.locator('.connect-card').boundingBox();
     expect(card!.height).toBeLessThanOrEqual(850);
@@ -1249,13 +1510,25 @@ test.describe('agent device login', () => {
     second.login.child.kill();
   });
 
-  test('approved state links to the console', async ({ page, context, baseURL }) => {
+  test('approved state lists the grants and links to the console', async ({
+    page,
+    context,
+    baseURL,
+  }) => {
     test.setTimeout(120_000);
     await newUser(context);
     const env = cliEnv(baseURL!, root, 'done-state', 'm-done');
     const { login, path, code, verify } = await startLogin(env, 'done-bot');
     await approve(page, path, 'done-bot', code, verify);
+    const status = page.getByRole('status');
     await expect(page.getByRole('heading', { name: 'Access approved for done-bot' })).toBeVisible();
+    // The receipt names what was granted.
+    await expect(status).toContainText('Drive');
+    await expect(status).toContainText('New encrypted drive');
+    await expect(status).toContainText('Access');
+    await expect(status).toContainText('read, write, delete and share');
+    await expect(status).toContainText('Local test session');
+    await expect(status.getByText('Delegate', { exact: true })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Open console' })).toHaveAttribute(
       'href',
       '/console',
@@ -1280,14 +1553,16 @@ test.describe('agent device login', () => {
     const envB = cliEnv(baseURL!, root, 'focus-b', 'm-focus-b');
     const b = await startLogin(envB, 'focus-b-bot');
     await page.goto(b.path);
-    await expect(page.getByText('This agent gets its own encrypted drive')).toBeVisible();
+    await expect(
+      page.getByText(/Approving creates a new, empty drive for this agent\./),
+    ).toBeVisible();
     const granted = await cli(['grant', b.code, '--read-only', '--verify', b.verify], envA);
     expect(granted.status, granted.stderr).toBe(0);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(page.getByText('offered a drive for this login')).toBeVisible();
     await openDetails(page);
-    await expect(page.locator('.connect-facts')).toContainText('Offered by');
-    await expect(page.locator('.connect-facts')).toContainText('focus-a-bot');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('Offered by');
+    await expect(page.locator('.connect-details .connect-facts')).toContainText('focus-a-bot');
     await page.locator('#connect-verify').fill(b.verify);
     await page.getByRole('button', { name: 'Approve agent' }).click();
     await expect(page.getByRole('status')).toContainText('Approval saved');

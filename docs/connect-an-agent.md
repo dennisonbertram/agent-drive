@@ -57,7 +57,7 @@ The CLI keeps its settings in `~/.config/agent-drive/config.json` (mode 600) unl
 
 Run `agent-drive login` again on the same machine, with the same `--name` and API origin. The CLI sends its saved API key as proof. If that key is still valid, the approval reconnects the agent to the drives it used before, and keeps its previous permissions. The drive keys already on the machine stay in place.
 
-Login issues a new API key, so credential backups made earlier are out of date. The CLI says so and clears the backup records. Run `agent-drive credentials export` again (see [Back up and recover your drive key](backup-and-recovery.md)).
+Login issues a new API key, so a credentials bundle exported earlier holds the old API key. Its drive keys stay backed up. The CLI says so; run `agent-drive credentials export` again (see [Back up and recover your drive key](backup-and-recovery.md)).
 
 ## Add another agent
 

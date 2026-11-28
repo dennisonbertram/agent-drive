@@ -7,22 +7,23 @@ import { AgentDriveClient, AgentDriveApiError, publicOutput } from './client.js'
 import { decodeDriveKey, generateDriveKey } from './crypto.js';
 import {
   apiErrorLines,
+  backupState,
   createdDriveNote,
+  keySourceLabel,
   localKeyMap,
   notBackedUpMessage,
   pickCheckDrive,
   runCheck,
-  backupCandidates,
 } from './check.js';
 import {
   BACKUP_HINT,
   confirmCredentials,
   exportCredentials,
+  exportRecoveryFile,
   importCredentials,
   issueCredentials,
   loadConfig,
   reportEnvBackups,
-  unbackedUp,
   reportKeyBackup,
 } from './credentials.js';
 import { installSkill, packagedSkillPath } from './skill.js';
@@ -107,6 +108,7 @@ function parse(raw: string[]) {
       gitignore: { type: 'boolean' },
       yes: { type: 'boolean' },
       to: { type: 'string' },
+      'recovery-file': { type: 'string' },
       from: { type: 'string' },
       force: { type: 'boolean' },
       vault: { type: 'string' },
@@ -136,7 +138,7 @@ function output(value: unknown) {
 }
 
 const STALE_BACKUP_NOTE =
-  'The API key changed, so earlier credential backups are out of date. Run `agent-drive credentials export` again.\n';
+  'Your saved credentials backup has the old API key; run `agent-drive credentials export` again when convenient.\n';
 
 /** Resolves once stdout has accepted the text; rejects on EPIPE or any write error. */
 function writeStdout(text: string) {
@@ -591,6 +593,15 @@ async function run(command: string, raw: string[]) {
     if (args.values['if-version'] !== undefined && !args.values['if-version'].trim())
       throw new Error('--if-version must not be empty.');
   }
+  // Remote paths are absolute; say so before any request (the server's message is cryptic).
+  const remoteArgument = command === 'put' ? args.positionals[1] : args.positionals[0];
+  if ((command === 'put' || command === 'get') && remoteArgument && !remoteArgument.startsWith('/'))
+    throw new Error('Remote paths start with /, for example /notes.md.');
+  if (command === 'get') {
+    if (args.positionals.length > 2) throw new Error('Usage: get REMOTE [LOCAL] [--output PATH|-]');
+    if (args.positionals[1] && args.values.output)
+      throw new Error('Give the local file either as LOCAL or with --output, not both.');
+  }
   if (command === 'get' && args.values.version !== undefined && !args.values.version.trim())
     throw new Error('--version must not be empty.');
   // `mount --name NAME` mounts a registry entry: its recorded drive, API context,
@@ -739,6 +750,28 @@ async function run(command: string, raw: string[]) {
   }
   if (command === 'credentials') {
     const sub = args.positionals[0];
+    if (sub === 'export' && args.values.drive?.length && !args.values['recovery-file'])
+      throw new Error(
+        '--drive only works with --recovery-file. To back up all credentials, run the command without --drive.',
+      );
+    if (sub === 'export' && args.values['recovery-file']) {
+      const drive = args.values.drive?.[0];
+      if (!drive || args.values.to || args.values.stdout)
+        throw new Error(
+          '--recovery-file needs --drive <id> and cannot be combined with --to or --stdout.',
+        );
+      const path = args.values['recovery-file'];
+      await exportRecoveryFile({
+        drive,
+        to: path,
+        ...(args.values.force ? { force: true } : {}),
+        ...(args.values.api ? { apiUrl: args.values.api } : {}),
+      });
+      process.stdout.write(
+        `Wrote the recovery file for drive ${drive} to ${path}. Give it to the person who needs it; they choose it in the console's Load key dialog.\n`,
+      );
+      return;
+    }
     if (sub === 'export') {
       const result = await exportCredentials(
         {
@@ -821,8 +854,43 @@ async function run(command: string, raw: string[]) {
     }
     if (sub === 'import') {
       const text = args.values.from ? await readFile(args.values.from, 'utf8') : await stdinText();
-      const ids = await importCredentials(text, args.values.from ? 'file' : 'stdout');
-      process.stdout.write(`imported ${ids.length} drive key(s) into ${configPath()}\n`);
+      const result = await importCredentials(
+        text,
+        args.values.from ? 'file' : 'stdout',
+        await resolveLoginApiUrl(args.values.api),
+      );
+      if (result.kind === 'bundle') {
+        process.stdout.write(
+          `imported ${result.driveIds.length} drive key(s) into ${configPath()}\n`,
+        );
+        await sealSavedConnectionAfterKeyChange();
+        return;
+      }
+      const id = result.driveIds[0]!;
+      // loadConfig covers env keys and a usable env bundle; fall back to the file alone so a
+      // malformed AGENT_DRIVE_CREDENTIALS cannot fail an import that already saved the key.
+      const saved = await loadConfig().catch(() => readConfig());
+      if (!saved.apiKey && !process.env.AGENT_DRIVE_API_KEY) {
+        process.stdout.write(
+          `Saved the drive key for drive ${id}. Next: run \`agent-drive login\` to connect this machine to your account.\n`,
+        );
+        return;
+      }
+      process.stdout.write(`Saved the drive key for drive ${id} into ${configPath()}.\n`);
+      // Say plainly when the account on this machine cannot see the imported drive.
+      const who = await resolveConnection(result.apiUrl)
+        .then((connection) =>
+          new AgentDriveClient({
+            apiUrl: connection.apiUrl,
+            apiKey: connection.apiKey,
+            machine: machineName(),
+          }).whoami(),
+        )
+        .catch(() => undefined);
+      if (who?.driveIds && !who.driveIds.includes(id))
+        process.stderr.write(
+          `Warning: the API key on this machine has no access to drive ${id}. The key is saved, but this account cannot use it.\n`,
+        );
       await sealSavedConnectionAfterKeyChange();
       return;
     }
@@ -830,17 +898,22 @@ async function run(command: string, raw: string[]) {
       const config = await loadConfig();
       return output({
         drives: Object.fromEntries(
-          Object.keys(config.driveKeys ?? {}).map((id) => [
-            id,
-            config.keyBackup?.[id]
-              ? { backedUp: true, ...config.keyBackup[id] }
-              : { backedUp: false },
-          ]),
+          Object.keys(config.driveKeys ?? {}).map((id) => {
+            const keyFrom = keySourceLabel(id, { config, checkedDriveId: id });
+            return [
+              id,
+              config.keyBackup?.[id]
+                ? { backedUp: true, ...config.keyBackup[id], ...(keyFrom ? { keyFrom } : {}) }
+                : keyFrom
+                  ? { backedUp: true, keyFrom }
+                  : { backedUp: false },
+            ];
+          }),
         ),
       });
     }
     throw new Error(
-      'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
+      'Usage: credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout | --drive ID --recovery-file PATH [--force]) | issue --name NAME (--to PATH [--force] | --stdout) | confirm [--method stdout] | import [--from PATH] | status',
     );
   }
   if (command === 'connect') {
@@ -1344,11 +1417,17 @@ async function run(command: string, raw: string[]) {
       resolveDriveKey(id, connection.apiUrl, args.values['key-file'], connection.config),
     );
     const driveId = pickCheckDrive(explicit, candidates, keys);
-    const unbacked = unbackedUp(
+    const { missing, notes } = backupState(
+      keys,
+      driveId,
       connection.config,
-      backupCandidates(keys, driveId, args.values['key-file']),
+      args.values['key-file'],
     );
-    if (unbacked.length) throw new Error(notBackedUpMessage(unbacked));
+    if (missing.length) throw new Error(notBackedUpMessage(missing));
+    for (const note of notes)
+      process.stderr.write(
+        `The key for drive ${note.driveId} came from ${note.label}. Keep that copy; it is this key's backup.\n`,
+      );
     const key = await resolveDriveKey(
       driveId,
       connection.apiUrl,
@@ -1392,6 +1471,7 @@ async function run(command: string, raw: string[]) {
       await writeConfig({
         driveKeys: { [drive.id]: key },
         driveKeyOrigins: { [drive.id]: origin },
+        driveKeySources: { [drive.id]: 'generated' },
       });
       output(drive);
       process.stderr.write(`${createdDriveNote(configPath())}\n${BACKUP_HINT}\n`);
@@ -1588,17 +1668,19 @@ async function run(command: string, raw: string[]) {
   if (command === 'get') {
     const remote = args.positionals[0];
     if (!remote) throw new Error('get requires REMOTE.');
-    if (args.values.output) {
-      if (args.values.output === '-') {
+    const outputPath = args.values.output ?? args.positionals[1];
+    if (outputPath) {
+      if (outputPath === '-') {
         await getPipe(client, requiredDrive(args), remote, process.stdout, {
           ...(args.values.version ? { versionId: args.values.version } : {}),
         });
         return;
       }
       return output(
-        await getFile(client, requiredDrive(args), remote, args.values.output, {
+        await getFile(client, requiredDrive(args), remote, outputPath, {
           ...(args.values.version ? { versionId: args.values.version } : {}),
-          overwrite: true,
+          // --output has always replaced the file; a bare LOCAL never overwrites silently.
+          overwrite: Boolean(args.values.output),
         }),
       );
     }
@@ -1773,10 +1855,12 @@ Commands:
                                         Check the new agent's printed verification code before sealing; the owner then approves on /connect
   credentials export (--to 1password [--vault NAME] | --to clipboard [--keep-clipboard] | --to PATH [--force] | --stdout)
                                         Back up the API key and drive keys (bundle "adcred1.…"). Offer 1Password first, then the clipboard (for Apple Passwords or another manager), then a file outside the repo
+  credentials export --drive ID --recovery-file PATH [--force]
+                                        Write one drive's key as a console recovery file (agent-drive-<id>.key.json); load it in the console's Load key dialog. Not an account backup
   credentials issue --name NAME [--drive ID] [--scope S]... [--write-path P]... [--label L] (--to PATH [--force] | --stdout)
                                         Mint a new agent's key (needs the delegate scope) and print its AGENT_DRIVE_CREDENTIALS line
   credentials confirm [--method stdout]   Record a --stdout export as stored (export --stdout | STORE && credentials confirm)
-  credentials import [--from PATH]      Merge a bundle (file or stdin) into the config
+  credentials import [--from PATH]      Merge a credentials bundle or a console recovery file (agent-drive-<id>.key.json) into the config
   credentials status                    Which drive keys are backed up, when, and how
   account seal [--drive ID] [--fingerprint CODE] [--repin]
                                         Verify the console's account-key fingerprint before sealing or repinning
@@ -1787,8 +1871,9 @@ Commands:
 Without installing: npx -y @dennisonbertram/agent-drive@latest <command>
 
 Global configuration: AGENT_DRIVE_CONFIG, AGENT_DRIVE_API_URL,
-AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, and AGENT_DRIVE_CREDENTIALS (a bundle merged in
-memory, never written to disk; its drives count as backed up).
+AGENT_DRIVE_API_KEY, AGENT_DRIVE_MACHINE, AGENT_DRIVE_CREDENTIALS (a bundle merged in
+memory, never written to disk; its drives count as backed up), and AGENT_DRIVE_KEY or
+AGENT_DRIVE_KEY_<DRIVE_ID> (a drive key supplied by the environment).
 `;
 const skillHelp = `Usage: agent-drive skill install [--target claude|codex|DIR]
 

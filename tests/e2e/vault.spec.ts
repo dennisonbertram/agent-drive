@@ -438,6 +438,13 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
         { exact: true },
       ),
     ).toBeVisible();
+    // The fallback asks for this drive's key only, never the agent's API key or other drives.
+    await expect(
+      page.getByText(
+        `agent-drive credentials export --drive ${seeded.b.id} --recovery-file agent-drive-${seeded.b.id}.key.json`,
+        { exact: true },
+      ),
+    ).toBeVisible();
     await page.getByLabel('Choose recovery file').setInputFiles(recoveryFile(seeded.b));
     await expect(page.getByRole('dialog', { name: 'other.txt' })).toContainText(
       `OTHER ${seeded.sentinel}`,
@@ -523,7 +530,9 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
       await page.unroute(verificationRoute);
     }
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await (await openMenu(page))
+      .getByRole('button', { name: 'Lock this tab', exact: true })
+      .click();
     await expect(chip(page)).toContainText('Locked');
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
@@ -576,7 +585,9 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
     );
     await expect(notice).toBeVisible();
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await (await openMenu(page))
+      .getByRole('button', { name: 'Lock this tab', exact: true })
+      .click();
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
@@ -684,11 +695,15 @@ test('change passphrase: the old one stops working, the new one works; reset rem
     await (await openMenu(page))
       .getByRole('button', { name: 'Forgot or exposed passphrase?' })
       .click();
-    const reset = page.getByRole('button', { name: 'Reset and remove all drives' });
+    const reset = page.getByRole('button', { name: 'Reset passphrase' });
     await expect(reset).toBeDisabled();
     await page.getByLabel('Type RESET to continue').fill('RESET');
     await reset.click();
     await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toContainText(
+      'Drives from before the reset need their recovery file once (or an agent re-pins them); after that this passphrase opens them.',
+    );
+    await expect(page.getByText(/Passphrase set up\. /)).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.reload();
     await expect(chip(page)).toContainText('Key needed');
@@ -853,7 +868,7 @@ test('setup seals only keys that open a real file, and closing cancels it', asyn
     await page.goto(`/console?drive=${seeded.a.id}`);
     // A recovery key that is wrong for the drive.
     await nameButton(page, 'note.txt').click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -891,7 +906,7 @@ test('setup skips a loaded key that fails its file', async ({ page, context, bas
   await withSeed(context, baseURL!, async (seeded) => {
     await page.goto(`/console?drive=${seeded.a.id}`);
     await nameButton(page, 'note.txt').click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -922,7 +937,7 @@ test('a key loaded from a recovery file while locked shows Key loaded, and Lock 
     await expect(chip(page)).toContainText('Key loaded');
     const menu = await openMenu(page);
     await expect(menu.getByRole('button', { name: 'Forget key' })).toBeVisible();
-    await menu.getByRole('button', { name: 'Lock', exact: true }).click();
+    await menu.getByRole('button', { name: 'Lock this tab', exact: true }).click();
     await expect(chip(page)).toContainText('Locked');
   });
 });
@@ -1054,6 +1069,7 @@ test('a fresh recovery file downloads from the key menu — account slot and loc
     ).toBeVisible();
     expect(wrongDownloads).toBe(0);
     // The recovery dialog includes the scoped command for the agent that holds this drive.
+    await page.getByText('Other ways').click();
     await expect(page.getByText('agent-drive account seal')).toBeVisible();
     await page.keyboard.press('Escape');
 
@@ -1086,6 +1102,7 @@ test('no passphrase yet: the key prompt offers the automatic account handoff', a
     await expect(dialog).toBeVisible();
     // The handoff is offered before any file: an agent can seal this drive to the account,
     // and passphrase setup is one click inside the same prompt.
+    await dialog.getByText('Other ways').click();
     await expect(dialog.getByText('agent-drive account seal')).toBeVisible();
     await dialog.getByRole('button', { name: 'Set up passphrase unlock' }).click();
     await expect(page.getByTestId('generated-passphrase')).toBeVisible();
@@ -1145,7 +1162,7 @@ test('screenshots of setup, unlock, unlocked chip, change and reset', async ({
         .click();
       await page.screenshot({ path: join(folder, `${label}-reset.png`) });
       await page.getByLabel('Type RESET to continue').fill('RESET');
-      await page.getByRole('button', { name: 'Reset and remove all drives' }).click();
+      await page.getByRole('button', { name: 'Reset passphrase' }).click();
       await expect(page.getByRole('dialog', { name: 'Set up passphrase unlock' })).toBeVisible();
       await page.getByRole('button', { name: 'Close dialog' }).click();
     }

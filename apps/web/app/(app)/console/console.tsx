@@ -38,7 +38,12 @@ import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
-import { isDriveBoundSource, keySourceFor, type Source } from '@/src/console/webhook-setup';
+import {
+  assertKeyForDrive,
+  isDriveBoundSource,
+  keySourceFor,
+  type Source,
+} from '@/src/console/webhook-setup';
 import {
   BROWSER_KEY_DELETE_FAILED,
   Vault,
@@ -735,6 +740,8 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // The key the unlock dialog just loaded for the webhook dialog, handed over once as it opens.
   const [tracesBusy, setTracesBusy] = useState(false);
   const [tracesResume, setTracesResume] = useState<TracesKey | undefined>();
+  const webhookSeen = useRef<string | null | undefined>(undefined);
+  const webhookAttempt = useRef(0);
   // The open preview. The decrypted bytes live only here; closing sets it to null.
   const [preview, setPreview] = useState<{ file: FileEntry; view: PreviewView } | null>(null);
   const previewRequest = useRef(0);
@@ -1771,11 +1778,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
 
   // The drive key for the webhook dialog, which needs no file: the tab's copy, else the account's
   // slot. With neither, asks for it (the dialog comes back through keyLoaded or the passphrase).
-  async function webhookKey(): Promise<TracesKey | undefined> {
+  async function webhookKey(seen?: string | null): Promise<TracesKey | undefined> {
     const driveId = selected;
+    // The dialog closes while the unlock dialog is open; the token id it saw rides along.
+    if (seen !== undefined) webhookSeen.current = seen;
     const cached = driveKeys[driveId];
     if (cached)
       return {
+        driveId,
+        seen: webhookSeen.current,
         key: cached,
         source: keySourceFor(
           trustedDrives.current.get(driveId),
@@ -1795,7 +1806,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
       if (key) {
         setDriveKeys((current) => ({ ...current, [driveId]: key }));
         keySources.current.set(driveId, 'vault');
-        return { key, source: 'vault' };
+        return { key, source: 'vault', driveId, seen: webhookSeen.current };
       }
       // The slot exists but could not be opened with the account key: a recovery file repairs it.
       invalid = true;
@@ -2065,13 +2076,15 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
     toastsNow.current = toasts;
   }, [toasts]);
   const selectedNow = useRef(selected);
+  const pendingNow = useRef(pendingAction);
   const tabNow = useRef(tab);
   const folderNow = useRef(folder);
   useEffect(() => {
     selectedNow.current = selected;
+    pendingNow.current = pendingAction;
     tabNow.current = tab;
     folderNow.current = folder;
-  }, [selected, tab, folder]);
+  }, [selected, pendingAction, tab, folder]);
   function unhide(driveId: string, path: string, exactKey?: string) {
     setHiddenRows((current) => {
       const next = new Map(
@@ -2395,13 +2408,44 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
 
   function keyLoaded(key: string, source: Exclude<Source, 'trusted'>) {
     const pending = pendingAction;
-    setPendingAction(null);
-    setModal(null);
     // The webhook dialog caches the key only after it has proven the key belongs to this drive.
+    // A key that does not match is refused here, with the unlock dialog still open.
     if (pending?.kind === 'webhook') {
-      if (pending.driveId === selected) openTraces({ key, source });
+      // The key is verified for pending.driveId only. Once the check returns, the action must be
+      // the same one, on the same drive, with no Lock or newer action in between.
+      const mark = actionEpoch.current;
+      const epoch = vault.epochNow;
+      // A second file chosen while this one verifies supersedes it, on success and on failure.
+      const attempt = ++webhookAttempt.current;
+      assertKeyForDrive((id, k) => vault.verifyKey(id, k), pending.driveId, key).then(
+        () => {
+          if (
+            attempt !== webhookAttempt.current ||
+            mark !== actionEpoch.current ||
+            epoch !== vault.epochNow ||
+            pendingNow.current !== pending ||
+            selectedNow.current !== pending.driveId
+          )
+            return;
+          setPendingAction(null);
+          setModal(null);
+          openTraces({ key, source, driveId: pending.driveId, seen: webhookSeen.current });
+        },
+        (reason: unknown) => {
+          if (
+            attempt !== webhookAttempt.current ||
+            mark !== actionEpoch.current ||
+            epoch !== vault.epochNow ||
+            pendingNow.current !== pending
+          )
+            return;
+          setRecoveryNote(reason instanceof Error ? reason.message : 'That key could not be used.');
+        },
+      );
       return;
     }
+    setPendingAction(null);
+    setModal(null);
     // Recovery keys must not enter the cache or account until the recovery export verifies them.
     if (pending?.kind === 'recovery') {
       if (pending.driveId === selected) void act(() => downloadRecovery(key, source));
@@ -2512,6 +2556,9 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   async function resetPassphrase() {
     try {
       await vault.reset();
+      // The earlier "Passphrase set up" notice no longer describes the account.
+      setNotice('');
+      setPasskeyOffer(null);
       setUnlockMode('setup');
       return '';
     } catch (reason) {
@@ -3103,6 +3150,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                               vault={vault.status}
                               fingerprint={vault.fingerprint}
                               agentOnly={drive?.agentOnly === true}
+                              inAccount={vault.hasSlot(selected)}
                               passkey={
                                 hasPasskey && passkeyCapable
                                   ? 'use'
@@ -3585,6 +3633,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           <>
                             <h3>Ready for your first file.</h3>
                             <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
+                            <p>
+                              On a Mac?{' '}
+                              <Link href="/docs/cli#mount-in-finder-on-macos">
+                                Mount your drive in Finder
+                              </Link>
+                              .
+                            </p>
                           </>
                         ) : (
                           <>
@@ -4328,6 +4383,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       : undefined
               }
               onKey={keyLoaded}
+              onClose={close}
               mode={unlockMode}
               onMode={(mode) => {
                 setRecoveryNote('');
@@ -4338,6 +4394,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               vault={{
                 email: identity.email,
                 status: vault.status,
+                fingerprint: vault.fingerprint,
                 onRetry: retryVault,
                 hasVault: vault.status === 'locked' && drive?.agentOnly !== true,
                 hasPasskey: hasPasskey && passkeyCapable && drive?.agentOnly !== true,
@@ -4411,7 +4468,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               request={api}
               strictRequest={strictApi}
               verify={(id, key) => vault.verifyKey(id, key)}
-              getKey={webhookKey}
+              getKey={(seen) => webhookKey(seen)}
               onBusy={setTracesBusy}
               resumeWith={tracesResume}
               onReady={(key, source) => {
