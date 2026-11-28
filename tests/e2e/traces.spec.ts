@@ -119,7 +119,7 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
       'Connect to Agent Drive and load this drive’s key on your agent’s machine first. Run Claude Code or Codex through capture to save encrypted traces under /traces. Check terminal output: capture may be disabled, uploads may be queued, or calls may not be captured.',
     );
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -128,7 +128,7 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
 
     // The bundle names the drive, so it is accepted. URL and headers are shown once.
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     const url = (await page.getByTestId('webhook-url').innerText()).trim();
@@ -177,6 +177,21 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
     // Management works with files present. Replace revokes the old bearer.
     await page.getByTestId('capture-link').click();
     await expect(page.getByTestId('webhook-token-row')).toBeVisible();
+    // Another tab revokes the token while this dialog is open: Replace must not act on stale state.
+    const gone = await context.request.delete(`/api/console/drives/${driveId}/webhook-token`, {
+      headers: { Origin: baseURL! },
+    });
+    expect(gone.ok()).toBe(true);
+    await page.getByRole('button', { name: 'Replace' }).click();
+    await page.getByRole('button', { name: 'Replace token' }).click();
+    await expect(
+      page.getByText('This changed in another tab. Showing the current setup.'),
+    ).toBeVisible();
+    await expect(addWebhook(page)).toBeVisible();
+    await expect(page.getByTestId('webhook-created')).toHaveCount(0);
+    // Add a token again so the rest of the test (replace, revoke) still has one to manage.
+    await addWebhook(page).click();
+    await expect(page.getByTestId('webhook-created')).toBeVisible();
     await page.getByRole('button', { name: 'Replace' }).click();
     await expect(page.getByText('The old token stops working immediately.')).toBeVisible();
     await page.getByRole('button', { name: 'Replace token' }).click();
@@ -238,7 +253,7 @@ test('traces: the dialog cannot be closed while a token is being created, and re
     await page.goto(`/console?drive=${driveId}`);
     await page.getByTestId('capture-link').click();
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     await expect(dialog(page).getByText('Setting up…')).toBeVisible();
@@ -306,7 +321,7 @@ test('traces: a Clerk response marker suspends the native dialog without issuing
     await page.goto(`/console?drive=${driveId}`);
     await page.getByTestId('capture-link').click();
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
 

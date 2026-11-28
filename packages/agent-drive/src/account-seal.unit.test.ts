@@ -324,6 +324,8 @@ describe('sealDrivesToAccount', () => {
     expect(expectedAccountFingerprint(undefined)).toBeUndefined();
     expect(expectedAccountFingerprint('  A1B2-C3D4.E5F6 7890 ')).toBe('a1b2 c3d4 e5f6 7890');
     expect(expectedAccountFingerprint('not a fingerprint')).toBeUndefined();
+    expect(expectedAccountFingerprint(' a1b2 c3d4 e5f6 7890, ')).toBe('a1b2 c3d4 e5f6 7890');
+    expect(expectedAccountFingerprint('a1b2 c3d4 e5f6 7890.;:')).toBe('a1b2 c3d4 e5f6 7890');
   });
 
   it('pins the fingerprint on first use and refuses a changed account key', async () => {

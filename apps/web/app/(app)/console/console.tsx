@@ -38,7 +38,12 @@ import { startIdleLock } from '@/src/console/idle-lock';
 import { KeyChip } from './key-chip';
 import { UnlockDialog, type UnlockMode } from './unlock-dialog';
 import { TracesDialog, type TracesKey } from './traces-dialog';
-import { isDriveBoundSource, keySourceFor, type Source } from '@/src/console/webhook-setup';
+import {
+  assertKeyForDrive,
+  isDriveBoundSource,
+  keySourceFor,
+  type Source,
+} from '@/src/console/webhook-setup';
 import {
   BROWSER_KEY_DELETE_FAILED,
   Vault,
@@ -2395,13 +2400,22 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
 
   function keyLoaded(key: string, source: Exclude<Source, 'trusted'>) {
     const pending = pendingAction;
-    setPendingAction(null);
-    setModal(null);
     // The webhook dialog caches the key only after it has proven the key belongs to this drive.
+    // A key that does not match is refused here, with the unlock dialog still open.
     if (pending?.kind === 'webhook') {
-      if (pending.driveId === selected) openTraces({ key, source });
+      assertKeyForDrive((id, k) => vault.verifyKey(id, k), pending.driveId, key).then(
+        () => {
+          setPendingAction(null);
+          setModal(null);
+          if (pending.driveId === selected) openTraces({ key, source });
+        },
+        (reason: unknown) =>
+          setRecoveryNote(reason instanceof Error ? reason.message : 'That key could not be used.'),
+      );
       return;
     }
+    setPendingAction(null);
+    setModal(null);
     // Recovery keys must not enter the cache or account until the recovery export verifies them.
     if (pending?.kind === 'recovery') {
       if (pending.driveId === selected) void act(() => downloadRecovery(key, source));
@@ -3585,6 +3599,13 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                           <>
                             <h3>Ready for your first file.</h3>
                             <p>Connect an agent with the CLI or MCP to upload encrypted files.</p>
+                            <p>
+                              On a Mac?{' '}
+                              <a href="/docs/cli#mount-in-finder-on-macos">
+                                Mount your drive in Finder
+                              </a>
+                              .
+                            </p>
                           </>
                         ) : (
                           <>
@@ -4328,6 +4349,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       : undefined
               }
               onKey={keyLoaded}
+              onClose={close}
               mode={unlockMode}
               onMode={(mode) => {
                 setRecoveryNote('');
@@ -4338,6 +4360,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               vault={{
                 email: identity.email,
                 status: vault.status,
+                fingerprint: vault.fingerprint,
                 onRetry: retryVault,
                 hasVault: vault.status === 'locked' && drive?.agentOnly !== true,
                 hasPasskey: hasPasskey && passkeyCapable && drive?.agentOnly !== true,

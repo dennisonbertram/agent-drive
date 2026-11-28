@@ -50,6 +50,9 @@ export function TracesDialog({
   const [error, setError] = useState('');
   const [revoking, setRevoking] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [notice, setNotice] = useState('');
+  // The token id this tab last saw (null: none). undefined until the first load finishes.
+  const seen = useRef<string | null | undefined>(undefined);
   const addButton = useRef<HTMLButtonElement>(null);
   const focusAdd = useRef(false);
   const working = busy || revoking;
@@ -74,7 +77,11 @@ export function TracesDialog({
 
   const fetchToken = useCallback(() => {
     request<{ token: Active | null }>(`drives/${driveId}/webhook-token`).then(
-      (result) => alive.current && setActive(result.token),
+      (result) => {
+        if (!alive.current) return;
+        seen.current = result.token?.id ?? null;
+        setActive(result.token);
+      },
       () => alive.current && setActive('error'),
     );
   }, [request, driveId]);
@@ -88,7 +95,21 @@ export function TracesDialog({
     if (busy) return;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
+      // Another tab may have added, replaced or revoked the token since this dialog loaded.
+      // Replacing then would revoke a token this tab never saw, so show the current state instead.
+      if (seen.current !== undefined) {
+        const { token } = await request<{ token: Active | null }>(`drives/${driveId}/webhook-token`);
+        if (!alive.current) return;
+        if ((token?.id ?? null) !== seen.current) {
+          seen.current = token?.id ?? null;
+          setActive(token);
+          setConfirmReplace(false);
+          setNotice('This changed in another tab. Showing the current setup.');
+          return;
+        }
+      }
       const found = have ?? (await getKey());
       if (!found) return; // The unlock dialog took over; it comes back with resumeWith.
       const token = await setUpWebhook({
@@ -100,6 +121,7 @@ export function TracesDialog({
         verify,
       });
       if (!alive.current) return;
+      seen.current = token.id;
       setCreated(token);
       setConfirmReplace(false);
       setActive({ id: token.id, createdAt: token.createdAt, status: 'active' });
@@ -131,6 +153,7 @@ export function TracesDialog({
     }
     if (!alive.current) return;
     focusAdd.current = true;
+    seen.current = null;
     setCreated(null);
     setConfirmReplace(false);
     setActive(null);
@@ -249,6 +272,10 @@ export function TracesDialog({
             </div>
           ) : (
             <div>
+              <p className="share-help">
+                This creates an agent named openrouter that can only write traces to{' '}
+                <code>/traces/openrouter</code>.
+              </p>
               <button
                 ref={addButton}
                 type="button"
@@ -259,6 +286,11 @@ export function TracesDialog({
                 Add webhook
               </button>
             </div>
+          )}
+          {notice && (
+            <p className="share-help" role="status">
+              {notice}
+            </p>
           )}
           {busy && <p className="muted">Setting up…</p>}
           {error && (

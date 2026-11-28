@@ -106,7 +106,10 @@ export class AccountSealPinRequired extends Error {
  * which fails closed rather than silently pinning whatever the API returns.
  */
 export function expectedAccountFingerprint(value: string | undefined): string | undefined {
-  return value === undefined ? undefined : normalizeVerificationCode(value);
+  // A fingerprint copied from a sentence often carries trailing punctuation ("... 7890,").
+  return value === undefined
+    ? undefined
+    : normalizeVerificationCode(value.trim().replace(/[\s,.;:]+$/u, ''));
 }
 
 type SealState = {

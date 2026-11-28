@@ -9,7 +9,12 @@ import {
 import type { Source } from '@/src/console/webhook-setup';
 import type { VaultStatus } from '@/src/console/vault';
 import { CopyButton } from '../copy-button';
-import { NewPassphraseForm, PassphraseForm, ResetForm } from './vault-forms';
+import {
+  NewPassphraseForm,
+  PassphraseForm,
+  ResetForm,
+  sealCommand,
+} from './vault-forms';
 
 export type UnlockMode =
   | 'passphrase'
@@ -23,6 +28,8 @@ export type VaultActions = {
   email: string;
   status: VaultStatus;
   onRetry: () => void;
+  /** Account-key fingerprint ('' until known); copied seal commands carry it. */
+  fingerprint?: string;
   /** True when a passphrase exists for this account, so recovery mode can offer it. */
   hasVault: boolean;
   /** True when the account record carries a passkey wrap this browser may open. */
@@ -47,6 +54,7 @@ export function UnlockDialog({
   vault,
   recoveryNote,
   agentOnly,
+  onClose,
 }: {
   driveId: string;
   pendingMessage?: string | undefined;
@@ -57,7 +65,10 @@ export function UnlockDialog({
   recoveryNote?: string | undefined;
   /** Agent-only drives have no account copy: the file-or-key path is the only honest one. */
   agentOnly?: boolean | undefined;
+  /** Closes the whole dialog (the passkey step's Cancel button). */
+  onClose?: (() => void) | undefined;
 }) {
+  const [afterReset, setAfterReset] = useState(false);
   const [error, setError] = useState('');
   const [pasted, setPasted] = useState('');
   const root = useRef<HTMLDivElement>(null);
@@ -105,6 +116,7 @@ export function UnlockDialog({
           email={vault.email}
           onUnlock={vault.onUnlock}
           onRecovery={() => onMode('recovery')}
+          onForgot={() => onMode('reset')}
           note={pendingMessage}
         />
         {vault.hasPasskey && vault.onPasskeyUnlock && (
@@ -124,6 +136,7 @@ export function UnlockDialog({
           note={pendingMessage}
           onUnlock={vault.onPasskeyUnlock ?? (async () => 'Passkey unlock is unavailable.')}
           onPassphrase={() => onMode('passphrase')}
+          onCancel={onClose}
         />
       </div>
     );
@@ -133,12 +146,20 @@ export function UnlockDialog({
         <PasskeyEnrollForm
           email={vault.email}
           onAdd={vault.onAddPasskey ?? (async () => 'Passkey setup is unavailable.')}
+          onCancel={onClose}
         />
       </div>
     );
   if (mode === 'setup')
     return (
       <div className="unlock" ref={root}>
+        {afterReset && (
+          <p className="unlock-help" role="status">
+            Your old account key is gone. After you set a new passphrase, each agent must pin the
+            new key. The key menu on Files then shows the exact <code>account seal --repin</code>{' '}
+            command to copy and run on each agent&rsquo;s machine.
+          </p>
+        )}
         <NewPassphraseForm
           email={vault.email}
           submitLabel="Create"
@@ -162,7 +183,13 @@ export function UnlockDialog({
   if (mode === 'reset')
     return (
       <div className="unlock" ref={root}>
-        <ResetForm onReset={vault.onReset} />
+        <ResetForm
+          onReset={async () => {
+            const message = await vault.onReset();
+            if (!message) setAfterReset(true);
+            return message;
+          }}
+        />
       </div>
     );
 
@@ -192,7 +219,7 @@ export function UnlockDialog({
       </p>
       {pendingMessage && <p>{pendingMessage}</p>}
       <div className="drop-box">
-        <span className="button secondary">Choose recovery file</span>
+        <span className="button primary">Choose recovery file</span>
         <small>or drop it here</small>
         <input
           type="file"
@@ -207,8 +234,19 @@ export function UnlockDialog({
       <p className="field-error" role="alert">
         {error}
       </p>
+      <p className="unlock-help">
+        {agentOnly
+          ? 'No recovery file? Ask the agent that created this drive to run '
+          : 'No recovery file? Ask an agent that has this drive to run '}
+        <code>agent-drive credentials export --to agent-drive-credentials.txt</code> and send you
+        that file, then choose it above.{' '}
+        <CopyButton
+          text="agent-drive credentials export --to agent-drive-credentials.txt"
+          label="Copy credentials export command"
+        />
+      </p>
       <details>
-        <summary>Paste a key instead</summary>
+        <summary>Other ways</summary>
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -233,39 +271,32 @@ export function UnlockDialog({
           </label>
           <button className="button primary">Load key</button>
         </form>
+        {!agentOnly && (
+          <p className="unlock-help">
+            Or have an agent add this drive to your account: run{' '}
+            <code>{sealCommand(vault.fingerprint ?? '', driveId)}</code> on its machine.{' '}
+            <CopyButton
+              text={sealCommand(vault.fingerprint ?? '', driveId)}
+              label="Copy account seal command"
+            />{' '}
+            {vault.fingerprint
+              ? ''
+              : 'Add --fingerprint with the value from the key menu on Files, or it stays unverified. '}
+            {vault.status === 'none'
+              ? 'Set up a passphrase first — sealing needs your account key.'
+              : vault.status === 'unlocked'
+                ? 'After it runs, close this dialog and try again.'
+                : 'Your passphrase then opens this drive — no file needed.'}
+          </p>
+        )}
+        {vault.status === 'none' && !agentOnly && (
+          <p>
+            <button type="button" className="button secondary" onClick={() => onMode('setup')}>
+              Set up passphrase unlock
+            </button>
+          </p>
+        )}
       </details>
-      {!agentOnly && (
-        <p className="unlock-help">
-          No recovery file? An agent that has this drive’s key can add it to your account: run{' '}
-          <code>agent-drive account seal --drive {driveId}</code> on its machine — it also happens
-          automatically on the agent’s regular runs. If it reports <code>unverified</code>, re-run
-          it with <code>--fingerprint</code> set to the account-key fingerprint shown in the key
-          menu on Files (the key button in the toolbar).{' '}
-          <CopyButton
-            text={`agent-drive account seal --drive ${driveId}`}
-            label="Copy account seal command"
-          />{' '}
-          {vault.status === 'none'
-            ? 'Set up a passphrase below first — sealing needs your account key.'
-            : vault.status === 'unlocked'
-              ? 'After it runs, close this dialog and try the file again.'
-              : 'Your passphrase then opens this drive — no file needed.'}
-        </p>
-      )}
-      {vault.status === 'none' && !agentOnly && (
-        <p>
-          <button type="button" className="button secondary" onClick={() => onMode('setup')}>
-            Set up passphrase unlock
-          </button>
-        </p>
-      )}
-      <p className="unlock-help">
-        {agentOnly
-          ? 'No recovery file? Ask the agent that created this drive to run '
-          : 'Or ask the agent to run '}
-        <code>agent-drive credentials export</code>, then choose or paste what it gives you.{' '}
-        <CopyButton text="agent-drive credentials export" label="Copy credentials export command" />
-      </p>
       {vault.hasVault && (
         <p>
           <button type="button" className="button secondary" onClick={() => onMode('passphrase')}>
@@ -285,10 +316,12 @@ function PasskeyUnlockForm({
   note,
   onUnlock,
   onPassphrase,
+  onCancel,
 }: {
   note?: string | undefined;
   onUnlock: (keepUnlocked: boolean) => Promise<string>;
   onPassphrase: () => void;
+  onCancel?: (() => void) | undefined;
 }) {
   const [keepUnlocked, setKeepUnlocked] = useState(true);
   const [error, setError] = useState('');
@@ -328,6 +361,11 @@ function PasskeyUnlockForm({
         <button type="button" className="button secondary" disabled={busy} onClick={onPassphrase}>
           Use your passphrase instead
         </button>
+        {onCancel && (
+          <button type="button" className="button secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );
@@ -340,9 +378,11 @@ function PasskeyUnlockForm({
 function PasskeyEnrollForm({
   email,
   onAdd,
+  onCancel,
 }: {
   email: string;
   onAdd: (passphrase: string) => Promise<string>;
+  onCancel?: (() => void) | undefined;
 }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
@@ -393,6 +433,11 @@ function PasskeyEnrollForm({
         <button className="button primary" disabled={busy || !value}>
           {busy ? 'Adding passkey…' : 'Add a passkey'}
         </button>
+        {onCancel && (
+          <button type="button" className="button secondary" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );

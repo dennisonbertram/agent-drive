@@ -14,9 +14,20 @@ export type WebhookToken = { id: string; token: string; url: string; createdAt: 
 export const isDriveBoundSource = (source: Source) =>
   source === 'trusted' || source === 'recovery-file' || source === 'bundle';
 
+/** Shown when a key is loaded for trace capture and does not belong to the selected drive. */
+export const WRONG_KEY = 'That key is not for this drive.';
 export const MISMATCH = 'This key does not open this drive’s files.';
 export const EMPTY_DRIVE =
   'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.';
+
+/** Throws WRONG_KEY when the drive's files or trace inbox show this key does not belong to it. */
+export async function assertKeyForDrive(
+  verify: (driveId: string, key: string) => Promise<Verdict>,
+  driveId: string,
+  key: string,
+) {
+  if ((await verify(driveId, key)) === 'mismatch') throw new Error(WRONG_KEY);
+}
 
 /** The tab's own generated key is trusted only while it is still the key in use. */
 export const keySourceFor = (
