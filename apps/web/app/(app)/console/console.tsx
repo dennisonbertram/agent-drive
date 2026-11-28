@@ -1516,7 +1516,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
   // once per drive per unlock; until it answers the key chip does not claim "Key needed".
   const [slotChecked, setSlotChecked] = useState<string[]>([]);
   const slotPending =
-    vaultOpen && drive?.agentOnly !== true && !vault.hasSlot(selected) && !slotChecked.includes(selected);
+    vaultOpen &&
+    drive?.agentOnly !== true &&
+    !vault.hasSlot(selected) &&
+    !slotChecked.includes(selected);
   useEffect(() => {
     if (!vaultOpen) setSlotChecked((list) => (list.length ? [] : list));
     else if (slotPending) {
