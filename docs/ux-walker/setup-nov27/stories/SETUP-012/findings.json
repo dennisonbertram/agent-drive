@@ -1,0 +1,46 @@
+[
+  {
+    "id": "F-012-1",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "No time limit is shown anywhere before the request expires: the terminal prints 'Waiting for approval...' and the page says 'the request expires on its own'. Users do not know they have 10 minutes.",
+    "expected": "'This code works for 10 minutes' on the CLI and page.",
+    "actual": "Silent until expiry.",
+    "evidence": "screenshots/step-4.png; CLI out.log lines",
+    "suggested_fix": "Print 'Expires in 10 minutes' in the login output and on the card."
+  },
+  {
+    "id": "F-012-2",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "A stale pairing card (opened before expiry) still shows Approve after expiry; clicking it gives an inline error but the card keeps looking actionable, and the error text shows literal backticks around `agent-drive login`, unlike the code-styled version on the No pairing card.",
+    "expected": "Card flips to the 'No pairing/expired' state, or Approve is disabled; consistent code styling.",
+    "actual": "Inline alert 'This request expired or was already used. Run `agent-drive login` in your agent to get a new code.'",
+    "evidence": "screenshots/step-5.png",
+    "suggested_fix": "Render the command as code and replace the card state on a 404/410 response."
+  },
+  {
+    "id": "F-012-3",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Manual code entry rejects a well-formed-looking code (ABCD-EFGH) with 'Enter the code in the form XXXX-XXXX.' without saying codes use only certain letters.",
+    "expected": "Tell the user to copy the code exactly as printed.",
+    "actual": "Format message for a code that already has the XXXX-XXXX shape.",
+    "evidence": "screenshots/step-1.png",
+    "suggested_fix": "Reword: 'That is not a valid code. Copy it from your terminal.'"
+  },
+  {
+    "id": "F-012-4",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "One message ('wrong, expired, or already used') covers three distinct states, so a user who approved the right code earlier cannot tell that it succeeded.",
+    "expected": "If already approved: 'This code was already approved.'",
+    "actual": "Same text for approved MHZL-CQMP and unknown BCDF-GHJK.",
+    "evidence": "screenshots/step-2.png, step-3.png",
+    "suggested_fix": "Distinguish used vs expired vs unknown."
+  }
+]

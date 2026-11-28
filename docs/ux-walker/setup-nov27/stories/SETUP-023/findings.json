@@ -1,0 +1,54 @@
+[
+  {
+    "id": "F-SETUP-023-01",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Secondary features",
+    "score": "warn",
+    "description": "The delegate option is inside collapsed Details. A user whose agent needs it (an orchestrator) sees nothing on the main card; llms.txt tells agents the other options are optional. If it is missed, the later `grant` fails and the agent has to be reconnected.",
+    "expected": "Agent can ask for delegate in its login so the page shows it, or the main card hints at it.",
+    "actual": "Hidden checkbox.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-2.png",
+    "suggested_fix": "Let `agent-drive login --delegate` pre-request it.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-023-02",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Success feedback",
+    "score": "warn",
+    "description": "The summary line says 'can add other agents' but the done card says only 'read, write, delete and share its new drive'; the permission just granted is not confirmed.",
+    "expected": "Done card repeats delegate status.",
+    "actual": "Not mentioned.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-4.png",
+    "suggested_fix": "Append 'and add other agents'.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-023-03",
+    "severity": "low",
+    "category": "hierarchy",
+    "criterion": "Information stated once",
+    "score": "warn",
+    "description": "On the worker request the summary reads 'ravi-lead · can read and write · offered by ravi-lead' because the drive and the offering agent share a name; it repeats the same word and does not name the worker's drive clearly.",
+    "expected": "'Drive ravi-lead (offered by agent ravi-lead)'.",
+    "actual": "Repeated word.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-5.png",
+    "suggested_fix": "Label the parts.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-023-04",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Responsive",
+    "score": "warn",
+    "description": "At 390 px the verification input is 168 px wide (label beside it); see SETUP-017-01.",
+    "expected": "Full-width field.",
+    "actual": "168 px.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-3.png",
+    "suggested_fix": "Stack label.",
+    "files_likely_involved": []
+  }
+]

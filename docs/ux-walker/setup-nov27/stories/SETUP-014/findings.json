@@ -1,0 +1,46 @@
+[
+  {
+    "id": "F-014-1",
+    "story": "SETUP-014",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Served quickstart (docs/quickstart.md) tells the human only to 'check that the code matches ... and click Approve', while /llms.txt and /docs/connect-an-agent.md require typing a 16-hex verification code the page never shows.",
+    "expected": "Same instruction on every surface.",
+    "actual": "quickstart omits the verification code.",
+    "evidence": "GET /docs/quickstart.md section '3. Log in and approve' vs /llms.txt step 2",
+    "suggested_fix": "Add the verification-code sentence to quickstart."
+  },
+  {
+    "id": "F-014-2",
+    "story": "SETUP-014",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The human-facing part of llms.txt (what the agent will do) starts at line 63 under a long index of doc links; no anchor or hint near the top says where it is beyond 'The setup guide follows the lists.'",
+    "expected": "Setup section first, or a jump hint.",
+    "actual": "~925 px of scrolling at 1280 wide.",
+    "evidence": "screenshots/step-1.png and step-2.png",
+    "suggested_fix": "Put the setup guide before the doc index, or state its line/heading name."
+  },
+  {
+    "id": "F-014-3",
+    "story": "SETUP-014",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "llms.txt step 2 says 'Other options on the page are optional; the defaults are right.' with no reference to which options (Details, 'Use one of my drives', delegate checkbox) a human would see.",
+    "expected": "Name the options or drop the sentence for human readers.",
+    "actual": "Vague sentence.",
+    "evidence": "screenshots/step-2.png",
+    "suggested_fix": "Rewrite as 'Leave Details closed unless you want to limit access.'"
+  },
+  {
+    "id": "F-014-4",
+    "story": "SETUP-014",
+    "severity": "suggestion",
+    "category": "flow",
+    "description": "Header has no link to the setup guide; llms.txt is reachable only through the docs page, hero text and console panels.",
+    "expected": "Optional.",
+    "actual": "Header: Pricing, Docs, Sign in, Sign up free.",
+    "evidence": "screenshots/step-3.png",
+    "suggested_fix": "Fine as is; mention in Docs nav."
+  }
+]

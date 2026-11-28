@@ -1,0 +1,50 @@
+[
+  {
+    "id": "F-SETUP-041-01",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Form validation",
+    "score": "warn",
+    "description": "The famous passphrase 'correct horse battery staple 2026' is accepted without any warning, while the dialog claims the check catches obvious patterns.",
+    "expected": "Known phrases flagged or the copy softened.",
+    "actual": "Accepted; banner 'Passphrase set up.'",
+    "screenshot": "screenshots/step-3.png",
+    "suggested_fix": "Add a small known-phrase list or reword the hint."
+  },
+  {
+    "id": "F-SETUP-041-02",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Validation order",
+    "score": "warn",
+    "description": "Mismatched confirmation is reported before a weak-passphrase message, so the user can fix the mismatch and then hit a second error.",
+    "expected": "Show all problems at once or check strength first.",
+    "actual": "Only 'The passphrases don't match.' shown for mismatched weak input.",
+    "screenshot": "screenshots/step-2b-short.png",
+    "suggested_fix": "Run both checks on submit."
+  },
+  {
+    "id": "F-SETUP-041-03",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Component consistency / hierarchy",
+    "score": "warn",
+    "description": "Passphrase inputs render as solid black boxes with no placeholder (look like decorative bars when empty); the disabled Create button is paler than the adjacent secondary button.",
+    "expected": "Visible input affordance and an evident primary.",
+    "actual": "See screenshot.",
+    "screenshot": "screenshots/step-2.png",
+    "suggested_fix": "White input with border, placeholder, clearer disabled style."
+  },
+  {
+    "id": "F-SETUP-041-04",
+    "severity": "low",
+    "category": "disclosure",
+    "criterion": "Help text",
+    "score": "warn",
+    "description": "The setup dialog never says what the passphrase does or that the agent needs the fingerprint afterwards; the success notice says only 'Your agent can now add its drives'.",
+    "expected": "One line: what unlocks, and that the agent must run account seal with the fingerprint.",
+    "actual": "As described.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Add the explanation and a 'Next: pin the fingerprint on your agent' hint."
+  }
+]

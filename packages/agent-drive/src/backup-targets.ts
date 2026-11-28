@@ -46,7 +46,7 @@ export async function exportTo1Password(
 ) {
   const setup = (why: string) =>
     new Error(
-      `${why} Nothing was exported. Install the 1Password CLI (https://developer.1password.com/docs/cli/get-started/), turn on its desktop-app integration or run \`eval $(op signin)\`, check that \`op whoami\` succeeds, then run this again.`,
+      `${why} Nothing was exported. Install the 1Password CLI (https://developer.1password.com/docs/cli/get-started/), turn on its desktop-app integration or run \`eval $(op signin)\`, check that \`op whoami\` succeeds, then run this again. Or skip 1Password: \`agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm\`.`,
     );
   try {
     if ((await deps.run('op', ['whoami'])).code !== 0)
@@ -102,7 +102,7 @@ export async function copyToClipboard(bundle: string, keep: boolean, deps: Targe
   const found = tool(deps.platform);
   if (!found)
     throw new Error(
-      'The clipboard target works on macOS and Windows only. Use `--to 1password` or `--to <a file outside the repo>` instead.',
+      'The clipboard target works on macOS and Windows only. Use `--to 1password`, `--to <a file outside the repo>`, or `--stdout | <your secret store> && agent-drive credentials confirm` instead.',
     );
   try {
     if ((await deps.run(found.copy[0], found.copy[1], bundle)).code !== 0) throw new Error();

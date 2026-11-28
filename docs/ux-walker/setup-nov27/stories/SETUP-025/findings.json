@@ -1,0 +1,28 @@
+[
+  {
+    "id": "F-SETUP-025-01",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Confirmations / wrong target",
+    "score": "warn",
+    "description": "The approval page never names the signed-in account outside collapsed Details, and the header shows no account menu or sign-out. A user with two accounts can approve into the wrong one in three steps without any cue; the done card does not name the account either. (Email text itself not verifiable here: test session shows 'Local test session'.)",
+    "expected": "Account email visible on the card (e.g. 'Approving as elena@...') with a 'Not you? Sign out' link.",
+    "actual": "Account appears only in Details > Account; no account switcher on the page.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-025/screenshots/step-1.png",
+    "suggested_fix": "Show the account under the title and on the done card.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-025-02",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Recovery",
+    "score": "warn",
+    "description": "After a wrong-account approval the done card offers only Open console (same account); there is no pointer on how to revoke and redo. The footer 'revoke access any time in Console, Agents' is plain text, not a link.",
+    "expected": "Link to Agents and a hint to rerun login for the other account.",
+    "actual": "Open console only.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-025/screenshots/step-4.png",
+    "suggested_fix": "Link the footer text to Agents.",
+    "files_likely_involved": []
+  }
+]

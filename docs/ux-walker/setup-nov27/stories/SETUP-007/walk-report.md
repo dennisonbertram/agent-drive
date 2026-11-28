@@ -1,0 +1,3 @@
+# SETUP-007 walk report (pass with findings)
+
+Landing full page (step-1-landing-full.png), FAQ opened (step-2-faq.png), docs index (step-3-docs.png), mobile (mobile-check.png). llms.txt and quickstart.md read as text. FAQ says recovery file is saved at drive creation but agent-first path never creates one in browser. quickstart.md step 1 is sign-up; llms.txt/landing never mention sign-up. Flow Log: ideal 6, needed 6.

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "F-013-1",
+    "story": "SETUP-013",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "There is no way to refuse a pairing request in the UI. The page says 'If it does not, close this page; the request expires on its own.' although a deny route exists, so a security-minded user cannot actively reject a suspicious request and the request stays valid up to 10 minutes.",
+    "expected": "A secondary `Deny` button.",
+    "actual": "Only Approve agent.",
+    "evidence": "screenshots/step-1.png (no Deny); snapshot lists Approve only",
+    "suggested_fix": "Add a Deny link next to the card title or under Approve that calls the existing deny route."
+  },
+  {
+    "id": "F-013-2",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The Account row, which shows which signed-in account will own the drive, is only inside the collapsed Details; users with two accounts could approve under the wrong one.",
+    "expected": "Show the account name outside Details or in the header.",
+    "actual": "Collapsed by default.",
+    "evidence": "screenshots/step-1.png, step-2.png",
+    "suggested_fix": "Show 'Signed in as <email>' under the title."
+  },
+  {
+    "id": "F-013-3",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "consistency",
+    "description": "The card's question 'Does this code match your terminal?' puts the 8-letter code first, while the check that matters is the 16-hex verification code.",
+    "expected": "Label the two codes by purpose ('Pairing code' vs 'Verification code').",
+    "actual": "Two codes, one phrase.",
+    "evidence": "screenshots/step-1.png",
+    "suggested_fix": "Rename to 'Pairing code (check it matches)' and explain the second field."
+  },
+  {
+    "id": "F-013-4",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "An incomplete code (12 hex digits without spaces) gets 'as four groups like a1b2 c3d4 e5f6 7890', implying spaces are required although `2B1A4C4B82B6953F` is accepted.",
+    "expected": "'Enter all 16 characters' wording.",
+    "actual": "Shape message about groups.",
+    "evidence": "alert text after fill '2b1a4c4b82b6'",
+    "suggested_fix": "Reword to '16 characters; spaces optional'."
+  },
+  {
+    "id": "F-013-5",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "layout",
+    "description": "With Details expanded at 1280x800 the Approve button is below the fold.",
+    "expected": "Primary action visible without scrolling.",
+    "actual": "Button starts at about y=800.",
+    "evidence": "screenshots/step-2.png",
+    "suggested_fix": "Make Details compact or keep the action row sticky."
+  }
+]

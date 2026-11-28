@@ -1,0 +1,6 @@
+{
+  "story": "SETUP-052",
+  "status": "not-walkable",
+  "note": "Needs the Finder app, File Provider extension and System Settings; none exist here. Docs-only: the banner fix is documented in docs/cli; the CLI diagnostics could not be triggered.",
+  "findings": []
+}

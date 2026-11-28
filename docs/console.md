@@ -71,7 +71,7 @@ The dialog lists the links for the file with their state: Active, Expired, Revok
 
 ## Traces
 
-On Files, the Traces button opens the `/traces` folder in the Recent view. Capture… opens the setup dialog:
+On Files, View traces opens the `/traces` folder in the Recent view. Set up trace capture opens the setup dialog:
 
 - Local agents: shows the install command and the `agent-drive capture --drive <drive id> -- claude` command. See [Capture traces](trace-capture.md).
 - OpenRouter webhook: Add webhook shows a webhook URL and a headers JSON once. Copy both into an OpenRouter Webhook destination, and leave Privacy Mode off for it, or traces will contain no prompts or replies. Replace makes a new token. Revoke webhook stops it.

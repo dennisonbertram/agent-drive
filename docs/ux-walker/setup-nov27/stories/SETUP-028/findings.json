@@ -1,0 +1,38 @@
+[
+  {
+    "id": "SETUP-028-F1",
+    "story": "SETUP-028",
+    "severity": "medium",
+    "category": "flow",
+    "description": "When 1Password CLI is missing, the error only says how to install it. A user with the 1Password app but no `op` gets no hint that clipboard-and-confirm or a file also work.",
+    "expected": "Error ends with: or run `agent-drive credentials export --to clipboard` (paste into 1Password) or `--to <path>`",
+    "actual": "The 1Password CLI (`op`) is not installed. Nothing was exported. Install the 1Password CLI (...) then run this again.",
+    "evidence": "CLI output, exit 1",
+    "suggested_fix": "Append the clipboard and file alternatives to the op-not-installed / not-signed-in errors.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-028-F2",
+    "story": "SETUP-028",
+    "severity": "low",
+    "category": "copy",
+    "description": "File backup success line does not say where the file was written or that it must stay out of repos and synced folders.",
+    "expected": "Backed up credentials for 1 drive(s) to <absolute path> (file)",
+    "actual": "Backed up credentials for 1 drive(s) (file).",
+    "evidence": "CLI output",
+    "suggested_fix": "Print the absolute path and one safety sentence.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-028-F3",
+    "story": "SETUP-028",
+    "severity": "low",
+    "category": "copy",
+    "description": "Wording of the third backup route differs by surface: help says 'outside the repo', hint/docs say 'outside the sandbox'.",
+    "expected": "One phrase",
+    "actual": "help: 'a file outside the repo'; BACKUP_HINT: 'a file outside the sandbox, on a path that survives it'",
+    "evidence": "CLI help vs login hint vs clipboard error",
+    "suggested_fix": "Unify.",
+    "surface": "CLI"
+  }
+]

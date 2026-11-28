@@ -1,0 +1,8 @@
+[
+  {
+    "id": "F-SETUP-008-1",
+    "severity": "low",
+    "title": "dead-end",
+    "description": "Not-configured panels have no next step"
+  }
+]

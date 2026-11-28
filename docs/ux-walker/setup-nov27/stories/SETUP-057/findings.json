@@ -1,0 +1,20 @@
+{
+  "story": "SETUP-057",
+  "status": "partial",
+  "note": "wake on/off fails without Instabox, contradicting the docs. Finder behaviour and wake errors not-walkable.",
+  "findings": [
+    {
+      "id": "F-SETUP-057-01",
+      "story": "SETUP-057",
+      "severity": "medium",
+      "category": "consistency",
+      "criterion": "mounts wake and mounts service status need Instabox",
+      "description": "Run `mounts wake coordinator off` and `mounts service status coordinator` with no Instabox installed.",
+      "expected": "Docs say changing wake 'does not call Instabox' and only updates local metadata; a status check is read-only.",
+      "actual": "Both fail with \"Could not find an executable Instabox CLI in PATH or ~/.local/bin.\" A user cannot turn wake off or check the service without Instabox. Copy contradicts docs/cli.",
+      "evidence": "CLI output",
+      "suggested_fix": "Make wake and status work offline, or fix the docs sentence.",
+      "surface": "CLI, docs"
+    }
+  ]
+}

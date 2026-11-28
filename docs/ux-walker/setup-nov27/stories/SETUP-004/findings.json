@@ -1,0 +1,8 @@
+[
+  {
+    "id": "F-SETUP-004-1",
+    "severity": "high",
+    "title": "invisible-copy",
+    "description": "Copy button in Connect an agent dialog invisible (dark on dark)"
+  }
+]

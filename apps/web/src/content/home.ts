@@ -5,7 +5,7 @@ import { egressNotMetered } from './pricing';
 export const HERO = {
   title: 'Agent files that outlive the sandbox.',
   lede: 'Agents get a cloud drive to save work that outlives a session or sandbox.',
-  next: 'Free to start. Your agent shows a pairing code, and you approve it in your account.',
+  next: 'Free to start. Your agent prints a link and a verification code. Open the link, sign up or sign in, type the code, and click Approve agent.',
 };
 
 /** The public origin shown in copyable setup instructions. Never a local host. */

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "SETUP-032-F1",
+    "story": "SETUP-032",
+    "severity": "low",
+    "category": "flow",
+    "description": "Brand-new console shows the passphrase banner ('Set a passphrase and agents will add every drive's key... Set up') above the 'Give your first agent a home' card, before any agent or drive exists; two competing calls to action and no mention of the credentials backup that check requires.",
+    "expected": "One next step (connect agent), passphrase prompt later",
+    "actual": "Header banner with Set up button plus the connect card",
+    "evidence": "screenshots/step-0-console-new-user.png",
+    "suggested_fix": "Hide the passphrase banner until a drive exists; mention backup after approval.",
+    "surface": "web console"
+  },
+  {
+    "id": "SETUP-032-F2",
+    "story": "SETUP-032",
+    "severity": "info",
+    "category": "env",
+    "description": "Console chip and unlock steps not walkable: shared cookie jar across walkers overwrote the test session; device login rate limit blocked a second login; browser download blocked by local object store host.",
+    "expected": "-",
+    "actual": "-",
+    "evidence": "console showed drive 'priya-agents' and an unrelated Capture dialog for my session",
+    "suggested_fix": "Re-walk in isolation.",
+    "surface": "env"
+  }
+]

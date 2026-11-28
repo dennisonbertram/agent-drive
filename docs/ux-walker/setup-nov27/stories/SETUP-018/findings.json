@@ -1,0 +1,54 @@
+[
+  {
+    "id": "F-SETUP-018-01",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Labels/copy agree across surfaces",
+    "score": "warn",
+    "description": "The served quickstart (docs/quickstart.md line 35), the console Agents panel ('open it and click Approve') and the home page ('shows a pairing code') never mention the verification code that the approval page blocks on. Only llms.txt and connect-an-agent.md do.",
+    "expected": "Every surface that describes approval says 'type the verification code'.",
+    "actual": "Three surfaces omit it; the page then requires the code.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-3.png",
+    "suggested_fix": "Add 'and type the verification code the agent printed' to those three texts.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-018-02",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Navigation",
+    "score": "warn",
+    "description": "The signed-out sign-in page gives no indication that an agent approval is waiting or that the link will return the user to it, and the 10-minute code lifetime is not mentioned.",
+    "expected": "A short note such as 'Sign in to approve your agent' (not verifiable with real Clerk here).",
+    "actual": "Plain sign-in card.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-018/screenshots/step-1.png",
+    "suggested_fix": "Show context text when redirect_url is /connect.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-018-03",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Scroll necessity",
+    "score": "warn",
+    "description": "With Details open the Approve agent button sits below the 800 px fold, so a user who opens Details must scroll to find the primary action.",
+    "expected": "Primary action visible or Details content compact.",
+    "actual": "Approve button cut at bottom edge in step-4 (y>=795).",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-018/screenshots/step-4.png",
+    "suggested_fix": "Make Details two-column or collapse the delegate hint.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-018-04",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Date format",
+    "score": "warn",
+    "description": "Details > Requested shows '11/27/2026, 6:04:28 PM' with no timezone and no relative age or expiry time.",
+    "expected": "Local time with timezone, or 'expires in 10 min'.",
+    "actual": "Bare locale string.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-018/screenshots/step-4.png",
+    "suggested_fix": "Show relative expiry.",
+    "files_likely_involved": []
+  }
+]

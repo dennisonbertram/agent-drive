@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-PROD-01-2",
+    "story": "PROD-01",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Hero and quickstart describe the pairing step differently from llms.txt and Connect an agent. Hero says 'Your agent shows a pairing code, and you approve it'; quickstart step 3 says 'check that the code matches ... and click Approve'. llms.txt and /docs/connect-an-agent require typing a separate 'Verification code' into the page.",
+    "expected": "Every surface mentions the verification code the human must type.",
+    "actual": "A human who reads only the hero or quickstart is told about one code, then meets a required second field on /connect.",
+    "evidence": "Hero text in /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png; quickstart text 'The CLI prints a link and a code. Open the link while signed in, check that the code matches the one in the terminal, and click Approve.'; connect-an-agent text 'types the verification code into the page'",
+    "suggested_fix": "Add 'and type the verification code the agent prints' to the hero hint and quickstart step 3.",
+    "surface": "/, /docs/quickstart"
+  },
+  {
+    "id": "F-PROD-01-6",
+    "story": "PROD-01",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "The hero terminal option shows `npm install -g @dennisonbertram/agent-drive` with no Node 24 requirement and no next command (`agent-drive login`). Node 24 is stated only in quickstart, llms.txt and the CLI docs.",
+    "expected": "Hero tells a terminal user the Node requirement and what to run next.",
+    "actual": "A user on Node 20 runs the copied command and gets an unexplained engine failure; the npm package declares engines >=24.0.0.",
+    "evidence": "npm view output 'engines = { node: >=24.0.0 }'; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png",
+    "suggested_fix": "Add 'Node 24+' and a link to the quickstart next to the hero command.",
+    "surface": "/"
+  },
+  {
+    "id": "F-PROD-01-7",
+    "story": "PROD-01",
+    "severity": "low",
+    "category": "consistency",
+    "description": "The two hero copy controls look unrelated: 'Copy prompt' is a sentence-case white outlined button inside the dark panel, 'COPY COMMAND' is a small uppercase monospace outlined box beside the command.",
+    "expected": "Same control, same style.",
+    "actual": "Different type, case and border.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png",
+    "suggested_fix": "Use one copy button style.",
+    "surface": "/"
+  }
+]

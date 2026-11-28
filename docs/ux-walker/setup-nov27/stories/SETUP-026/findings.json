@@ -1,0 +1,74 @@
+[
+  {
+    "id": "SETUP-026-F1",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "Bare `credentials export` error lists only --to <path> or --stdout, hiding 1password and clipboard that help and llms.txt lead with.",
+    "expected": "Error lists all four targets",
+    "actual": "Pass exactly one of --to <path> or --stdout.",
+    "evidence": "CLI: agent-drive credentials export -> 'Pass exactly one of --to <path> or --stdout.' exit 1",
+    "suggested_fix": "Mention --to 1password, --to clipboard in the error or print the usage line.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-026-F2",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "Clipboard backup is recorded and reported with method 'stdout', so a clipboard/Apple Passwords user sees a method they never used.",
+    "expected": "Method reads clipboard or manual",
+    "actual": "Recorded the credential backup for 1 drive(s) (stdout).",
+    "evidence": "CLI confirm output; credentials status method:stdout",
+    "suggested_fix": "Record method clipboard when the pending export came from --to clipboard.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-026-F3",
+    "story": "SETUP-026",
+    "severity": "medium",
+    "category": "flow",
+    "description": "After login the terminal prints the backup hint and then a second, different instruction (set a passphrase in console under Settings). A first-timer sees two competing next steps and the backup one is the blocker for check.",
+    "expected": "One clear next step",
+    "actual": "'Back up this agent's credentials...' followed by 'Your account has no account key yet... Set a passphrase in the console under Settings'",
+    "evidence": "login out.log",
+    "suggested_fix": "Print the backup step first as numbered step 1 and mark the passphrase as optional/later.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-026-F4",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "Approved page says to return to the agent to finish setup but does not say a credentials backup is still required before check passes.",
+    "expected": "Mention backup",
+    "actual": "Return to your agent to finish setup and confirm it is ready.",
+    "evidence": "screenshots/step-2-approved.png",
+    "suggested_fix": "Add: your agent will ask you where to store its key backup.",
+    "surface": "web /connect"
+  },
+  {
+    "id": "SETUP-026-F5",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "Clipboard failure error offers 1password or a file but not the --stdout | STORE && confirm route; instruction text does not say the failure is only because no clipboard is available.",
+    "expected": "Include the third route",
+    "actual": "Could not copy to the clipboard with pbcopy. Nothing was exported. Use `--to 1password` or `--to <a file outside the repo>` instead.",
+    "evidence": "CLI output",
+    "suggested_fix": "Add the --stdout route.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-026-F6",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "env",
+    "description": "AGENT_DRIVE_API_URL without the /api suffix yields an unhelpful 404 on login, and with /api the CLI prints 'Ignored a different API URL returned by the server.' (test-environment artefact).",
+    "expected": "Clear hint",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "login out.log",
+    "suggested_fix": "On 404, hint that the API URL should end in /api; tolerate a bare origin.",
+    "surface": "CLI"
+  }
+]

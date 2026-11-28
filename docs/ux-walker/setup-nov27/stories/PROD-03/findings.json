@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-PROD-01-3",
+    "story": "PROD-03",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Quickstart step 4 is written to the agent, not the human reader ('Offer these choices in this order and let the person pick one'), on a page whose intro says 'This page walks you through'. Step 1 'Sign up' also conflicts with the agent path in llms.txt, where sign-up is not a step.",
+    "expected": "Instructions addressed to the reader.",
+    "actual": "Mixed audience: human checklist with agent-directed wording.",
+    "evidence": "/docs/quickstart text step 4; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-03/screenshots/step-2-quickstart.png",
+    "suggested_fix": "Reword step 4 for the human ('Choose one backup option') and note that sign-up can also happen when the approval link asks for sign-in.",
+    "surface": "/docs/quickstart"
+  },
+  {
+    "id": "F-PROD-01-10",
+    "story": "PROD-03",
+    "severity": "suggestion",
+    "category": "hierarchy",
+    "description": "'Agent setup guide' (footer, docs index 'For agents') opens /llms.txt as plain monospace text that starts with a 50-line docs index; the setup steps start further down. A human following that link to understand setup sees a link list first.",
+    "expected": "Setup steps first, or a short pointer to them.",
+    "actual": "Index first, '## Set up (local agent with a shell)' below the first screen.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-03/screenshots/step-6-llms.png",
+    "suggested_fix": "Move the setup section above the doc index, or name the link 'Agent instructions (plain text)'.",
+    "surface": "/llms.txt"
+  }
+]

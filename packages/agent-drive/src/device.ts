@@ -84,6 +84,16 @@ export function shouldOpenBrowser(noBrowser: boolean | undefined) {
   return !noBrowser && Boolean(process.stdout.isTTY) && !process.env.CI;
 }
 
+/** Origin and path only: userinfo, query and fragment may hold credentials. */
+function shownUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return safeTerminalText(`${url.origin}${url.pathname}`.replace(/\/+$/u, ''));
+  } catch {
+    return '(invalid URL)';
+  }
+}
+
 export async function deviceLogin(options: DeviceLoginOptions) {
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
   const sleep = options.sleep ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
@@ -133,6 +143,14 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     throw new Error(`Could not reach Agent Drive at ${base}. Check the network and try again.`);
   }
   if (!started.ok) {
+    if (started.data.error === 'slow_down')
+      throw new Error(
+        'Agent Drive refused the login request: this is a rate limit. Each network address can start 20 logins per hour. Try again later.',
+      );
+    if (started.status === 404)
+      throw new Error(
+        `Agent Drive refused the login request: ${shownUrl(base)}/oauth/device_authorization was not found. The API URL normally ends in /api (for example https://agentdrive.xyz/api).`,
+      );
     const description = started.data.error_description ?? started.data.error ?? started.status;
     throw new Error(`Agent Drive refused the login request: ${safeTerminalText(description)}`);
   }
@@ -223,7 +241,9 @@ export async function deviceLogin(options: DeviceLoginOptions) {
     }
   }
   if (token.api_url && token.api_url.replace(/\/+$/u, '') !== base)
-    options.log('Ignored a different API URL returned by the server.');
+    options.log(
+      `The server reported a different API URL (${shownUrl(token.api_url)}). Keeping ${shownUrl(base)}, the one you logged in with.`,
+    );
   if (token.new_drive_id) driveKeys[token.new_drive_id] = generateDriveKey();
   const { backupsCleared } = await writeConfig({
     apiUrl: base,

@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-SETUP-066-1",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Focus indicators",
+    "score": "warn",
+    "description": "Opening the confirm puts focus on the destructive 'Revoke webhook' button, so Enter confirms.",
+    "expected": "Focus on Cancel (or the confirm text).",
+    "actual": "Revoke webhook focused.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-066/screenshots/step-1.png",
+    "suggested_fix": "Focus Cancel by default."
+  },
+  {
+    "id": "F-SETUP-066-2",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Feedback",
+    "score": "warn",
+    "description": "'Stop this webhook?' does not say that OpenRouter deliveries will start failing with 401 and that stored traces stay; after revoke there is no confirmation text, only the button swap.",
+    "expected": "Say what happens; confirm after it is done.",
+    "actual": "Silent.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-066/screenshots/step-3.png",
+    "suggested_fix": "Expand the confirm copy and add a short 'Webhook revoked.' status."
+  }
+]

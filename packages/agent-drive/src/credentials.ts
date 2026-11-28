@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { lstat } from 'node:fs/promises';
+import { lstat, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { validateUrl, type AgentDriveClient } from './client.js';
 import { decodeDriveKey } from './crypto.js';
 import { writeFileSafely } from './safe-write.js';
@@ -31,7 +32,7 @@ export type Bundle = {
 };
 
 export const BACKUP_HINT =
-  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), or `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>`. Until then `agent-drive check` will not pass.";
+  "Back up this agent's credentials before this machine or sandbox goes away: `agent-drive credentials export --to 1password` (1Password), `agent-drive credentials export --to clipboard` (copy, paste it into Apple Passwords or another password manager, then run `agent-drive credentials confirm`), `agent-drive credentials export --to <a file outside the sandbox, on a path that survives it>` (the folder must already exist), or `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`. Start with `--to 1password` if you use 1Password. Until then `agent-drive check` will not pass.";
 
 export function encodeBundle(bundle: Bundle) {
   return BUNDLE_PREFIX + Buffer.from(JSON.stringify(bundle)).toString('base64url');
@@ -69,7 +70,8 @@ const isStringMap = (v: unknown): v is Record<string, string> =>
 
 export function decodeBundle(text: string): Bundle {
   const bad = () => new Error('Not a valid Agent Drive credentials bundle.');
-  const trimmed = text.trim();
+  // Accept the whole `AGENT_DRIVE_CREDENTIALS=adcred1....` line that `credentials issue` prints.
+  const trimmed = text.trim().replace(/^AGENT_DRIVE_CREDENTIALS=/u, '');
   if (!trimmed.startsWith(BUNDLE_PREFIX)) throw bad();
   let value: Partial<Bundle>;
   try {
@@ -223,6 +225,10 @@ async function writeBundleFile(path: string, bundle: string, force?: boolean) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST')
       throw new Error(`${path} already exists; pass --force to overwrite it.`);
     if (error instanceof Error && /symlink/u.test(error.message)) throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      throw new Error(
+        `Unable to write ${path}: its parent folder does not exist. Create it first, or pick another path.`,
+      );
     throw new Error(`Unable to write ${path}.`);
   }
 }
@@ -264,6 +270,18 @@ export async function issueCredentials(
     );
     if (present) throw new Error(`${options.to} already exists; pass --force to overwrite it.`);
   }
+  if (options.to) {
+    // Check before the agent and key are created, so a bad path cannot leave an orphan agent.
+    const parent = dirname(options.to);
+    const isFolder = await stat(parent).then(
+      (info) => info.isDirectory(),
+      () => false,
+    );
+    if (!isFolder)
+      throw new Error(
+        `Unable to write ${options.to}: its parent folder does not exist. Create it first, or pick another path.`,
+      );
+  }
   const config = await loadConfig(options.apiUrl);
   const apiUrl =
     options.apiUrl || process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
@@ -292,8 +310,16 @@ export async function issueCredentials(
     [drive],
   );
   const line = `AGENT_DRIVE_CREDENTIALS=${bundle}`;
-  if (options.to) await writeBundleFile(options.to, line, options.force);
-  else await io.write(`${line}\n`);
+  if (options.to) {
+    try {
+      await writeBundleFile(options.to, line, options.force);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Unable to write the file.';
+      throw new Error(
+        `${reason} The agent '${options.name}' and its API key were already created; the key was not saved. Revoke it in the console, or retry with a new --name.`,
+      );
+    }
+  } else await io.write(`${line}\n`);
   return { agentName: options.name, keyId: key.id, scopes, writePaths };
 }
 
@@ -314,7 +340,9 @@ export async function exportCredentials(
 ) {
   const target = parseTarget(options.to);
   if (Boolean(options.to) === Boolean(options.stdout))
-    throw new Error('Pass exactly one of --to <path> or --stdout.');
+    throw new Error(
+      'Pass exactly one target: --to 1password, --to clipboard, --to <path>, or --stdout (`agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`). --to 1password is the simplest if you use 1Password.',
+    );
   if (options.stdout && io.isTTY)
     throw new Error(
       'Refusing to print credentials to a terminal. Pipe them to a secret store: `agent-drive credentials export --stdout | <your secret store> && agent-drive credentials confirm`, or use --to <path>.',
@@ -324,7 +352,10 @@ export async function exportCredentials(
   if (!apiKey) throw new Error('There is no API key to back up. Run `agent-drive login` first.');
   const driveKeys = config.driveKeys ?? {};
   const ids = Object.keys(driveKeys);
-  if (!ids.length) throw new Error('There are no drive keys on this machine to back up.');
+  if (!ids.length)
+    throw new Error(
+      'No drive keys are saved on this machine to export. A key provided only through AGENT_DRIVE_KEY or AGENT_DRIVE_CREDENTIALS is not included; make sure you have a durable copy of it. Otherwise run `agent-drive login`.',
+    );
   const apiUrl = process.env.AGENT_DRIVE_API_URL || config.apiUrl || DEFAULT_API_URL;
   const bundle = buildBundle({
     apiUrl,

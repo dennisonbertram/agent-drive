@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-SETUP-060-1",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Feedback / copy",
+    "score": "warn",
+    "description": "The unlock note promises 'you can set up the webhook' but the app actually continues on its own; the user may click Add webhook again or wonder if it worked.",
+    "expected": "'After you unlock, setup continues automatically.'",
+    "actual": "Note wording implies a further step.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-060/screenshots/step-4.png",
+    "suggested_fix": "Reword: 'Setup of the OpenRouter webhook continues after you unlock.'"
+  },
+  {
+    "id": "F-SETUP-060-2",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Focus indicators / keyboard nav",
+    "score": "warn",
+    "description": "After the automatic resume, focus lands on the 'Copy' button of the npm install command, not on the new token's copy buttons.",
+    "expected": "Focus on the new token block, or the dialog title.",
+    "actual": "First Copy button focused (visible ring on the install command).",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-060/screenshots/step-6.png",
+    "suggested_fix": "Move focus to the Webhook URL copy button (or announce the token with aria-live) when the token appears."
+  },
+  {
+    "id": "F-SETUP-060-3",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "The key-status menu offers both 'Lock' and 'Lock this browser' with no explanation of the difference; also the vault stays unlocked across a page reload, which a user may not expect.",
+    "expected": "One lock action, or a one-line description of each.",
+    "actual": "Two similar items in the Unlocked menu.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-060/screenshots/step-8.png",
+    "suggested_fix": "Merge or describe the two items."
+  }
+]

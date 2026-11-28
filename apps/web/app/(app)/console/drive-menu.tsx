@@ -62,7 +62,7 @@ export function DriveMenu({
               onTraces();
             }}
           >
-            Traces
+            View traces
           </button>
         )}
         {onCapture && (
@@ -74,7 +74,7 @@ export function DriveMenu({
               onCapture();
             }}
           >
-            Capture traces…
+            Set up trace capture
           </button>
         )}
         {hasMore && onLoadMore && (

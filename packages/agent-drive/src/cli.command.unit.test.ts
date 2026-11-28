@@ -28,6 +28,17 @@ afterEach(async () => {
 type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 
 /** Runs the real CLI entry point in-process against a stubbed API. */
+// Emit stdin only once the CLI is listening, so the first (cold) module load cannot miss it.
+function feedStdin(text: string) {
+  const before = process.stdin.listenerCount('end');
+  const timer = setInterval(() => {
+    if (process.stdin.listenerCount('end') <= before) return;
+    clearInterval(timer);
+    process.stdin.emit('data', text);
+    process.stdin.emit('end');
+  }, 5);
+}
+
 async function cli(
   argv: string[],
   saved: Saved,
@@ -779,12 +790,24 @@ describe('pipe command guard validation', () => {
     }
   });
 
-  it('keeps --token-stdin available to login', async () => {
+  it('prefers the --token-stdin key over AGENT_DRIVE_API_KEY', async () => {
+    feedStdin('stdin-key-fixture\n');
     const result = await cli(
       ['login', '--api', 'https://x.test/api', '--token-stdin'],
       one,
       (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
-      { AGENT_DRIVE_API_KEY: 'login-token-fixture' },
+      { AGENT_DRIVE_API_KEY: 'env-key-fixture' },
+    );
+    const whoami = result.calls.find(({ path }) => path === 'whoami');
+    expect(whoami?.authorization).toBe('Bearer stdin-key-fixture');
+  });
+
+  it('keeps --token-stdin available to login', async () => {
+    feedStdin('login-token-fixture\n');
+    const result = await cli(
+      ['login', '--api', 'https://x.test/api', '--token-stdin'],
+      one,
+      (path) => (path === 'whoami' ? { accountId: 'a', agentId: 'g', keyId: 'k' } : {}),
     );
     expect(result.err).toContain('credential backups are out of date');
     expect(result.paths).toContain('whoami');
@@ -1050,7 +1073,7 @@ describe('automatic sealing follows the connection saved by the command', () => 
           : {},
       { AGENT_DRIVE_API_URL: 'https://staging.test/api' },
     );
-    expect(r.err).toContain('no account key yet');
+    expect(r.err).toContain('no passphrase yet');
     expect(r.origins.length).toBeGreaterThan(0);
     expect(new Set(r.origins)).toEqual(new Set(['https://production.test']));
   });

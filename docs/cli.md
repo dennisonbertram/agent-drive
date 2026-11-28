@@ -17,7 +17,16 @@ Run it without installing by putting `npx -y @dennisonbertram/agent-drive@latest
 npx -y @dennisonbertram/agent-drive@latest whoami
 ```
 
-The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. macOS 13 or later is required (tested on macOS 15.7.7), with the separate signed Agent Drive app. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip), open the ZIP to extract `Agent Drive.app`, and drag it to `/Applications`. Opening the app from Finder does not open a window; the Finder location appears when the CLI starts a mount. Complete [CLI login and drive-key setup](connect-an-agent.md) before mounting. The CLI package does not install the app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) compiles the app but does not sign, notarize, or publish it; for source builds, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
+The Linux npm package includes native mount helpers for x64 and arm64. The CLI does not install system FUSE support. If the helper is missing from a custom package, set `AGENT_DRIVE_MOUNT_HELPER` to an executable compatible helper. Native mounting is not available on Windows.
+
+### Mount in Finder on macOS
+
+Finder mounts need macOS 13 or later (tested on macOS 15.7.7) and the separate Agent Drive Finder app. The CLI package does not install the app. The released ZIP contains the signed app. The [macOS builder workflow](https://github.com/dennisonbertram/agent-drive/actions/workflows/mount-macos.yml) only checks that the app compiles; it produces no signed or published build. To build and sign the app yourself, see the [macOS build and signing instructions](https://github.com/dennisonbertram/agent-drive/blob/main/native/macos/README.md).
+
+1. Complete [CLI login and drive-key setup](connect-an-agent.md).
+2. Download [Agent Drive Finder 0.3.1](https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip) and open the ZIP to extract `Agent Drive.app`.
+3. Drag `Agent Drive.app` to `/Applications`.
+4. In Terminal, run `agent-drive mount "$HOME/AgentDrive"`. Add `--drive DRIVE_ID` if more than one drive key is configured. You do not need to open the app: opening it shows no window, and Finder adds the location when the CLI starts the mount. Finder may name it `Agent Drive` or add the first 8 characters of the drive ID; use the mountpoint you passed to identify it.
 
 The default API URL is `https://agentdrive.xyz/api`. Override it with `--api` on `login`, or with `AGENT_DRIVE_API_URL`.
 
@@ -104,7 +113,7 @@ Drive commands accept an optional `--drive ID`. If you leave it out, the CLI use
 | `version`             | Print the CLI version.                                       |                                                              |
 | `mcp`                 | Run the MCP server on stdio.                                 | [MCP server and tools](mcp-tools.md)                         |
 
-`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list. `agent-drive --version` and `agent-drive version` print the CLI version.
+`agent-drive --help`, `agent-drive help` and any command followed by `--help` print the same command list, except `skill --help`, which prints only the skill usage. `agent-drive --version` and `agent-drive version` print the CLI version.
 
 ## Mount a drive
 
@@ -136,7 +145,7 @@ not an atomic subtree operation.
 
 ## Live workspace mounts
 
-Register an exact Instabox sandbox ID and absolute folder path under a local name:
+An Instabox workspace is a sandbox machine run by Instabox, a separate service and CLI (`instabox`) that this CLI calls to read its files. `SANDBOX_ID` is that machine's ID as Instabox reports it; this CLI does not create it. Register the exact sandbox ID and absolute folder path under a local name:
 
 ```sh
 mkdir -p "$HOME/AgentWorkspaces"
@@ -666,7 +675,7 @@ The account public key is pinned per API origin in `<config path>.state/account-
 agent-drive skill install [--target claude|codex|DIR]
 ```
 
-Copies the packaged `SKILL.md` to `~/.claude/skills/agent-drive/` if `~/.claude` exists and to `~/.codex/skills/agent-drive/` if `~/.codex` exists, or to the target. It prints `wrote <path>` for each file. With none found it prints where the packaged file is. In a sandbox, in CI or on a shared machine, use `--target DIR` or skip it. See [Agent skills](skills.md).
+Copies the packaged `SKILL.md` to `~/.claude/skills/agent-drive/` if `~/.claude` exists and to `~/.codex/skills/agent-drive/` if `~/.codex` exists, or to the target. It prints `wrote <path>` for each new file and `replaced <path>` when it overwrites an existing `SKILL.md`. When neither `~/.claude` nor `~/.codex` exists and no target is given, it installs nothing, prints where the packaged file is, and exits with status 1. In a sandbox, in CI or on a shared machine, use `--target DIR` or skip it. See [Agent skills](skills.md).
 
 ## Capture
 

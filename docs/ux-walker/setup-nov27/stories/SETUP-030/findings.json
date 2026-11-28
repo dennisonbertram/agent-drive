@@ -1,0 +1,26 @@
+[
+  {
+    "id": "SETUP-030-F1",
+    "story": "SETUP-030",
+    "severity": "medium",
+    "category": "flow",
+    "description": "Read-only reviewer path depends on a delegating agent and a fresh device login; with the per-IP login limit hit, the CLI only says 'slow_down'. Not walkable here.",
+    "expected": "Explain the login limit and how long to wait",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI login output (repeated for ~35 minutes)",
+    "suggested_fix": "Same as SETUP-027-F4.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-030-F2",
+    "story": "SETUP-030",
+    "severity": "info",
+    "category": "copy",
+    "description": "Delegate-scope error is clear and gives the exact recovery steps (positive).",
+    "expected": "-",
+    "actual": "The API key needs the delegate scope. Run `agent-drive login` again; on the approval page, tick \"Let this agent add other agents to its drives\" (under \"Optional\") before approving.",
+    "evidence": "CLI key create output",
+    "suggested_fix": "none",
+    "surface": "CLI"
+  }
+]

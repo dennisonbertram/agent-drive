@@ -41,3 +41,14 @@ it('refuses to overwrite a symlink destination', async () => {
   await expect(installSkill(dir, h)).rejects.toThrow(/symlink/);
   expect(await readFile(victim, 'utf8')).toBe('keep');
 });
+
+it('reports the paths it replaced on a repeat install', async () => {
+  const h = await home();
+  const custom = join(h, 'custom');
+  const first: string[] = [];
+  await installSkill(custom, h, first);
+  expect(first).toEqual([]);
+  const second: string[] = [];
+  await installSkill(custom, h, second);
+  expect(second).toEqual([join(custom, 'SKILL.md')]);
+});

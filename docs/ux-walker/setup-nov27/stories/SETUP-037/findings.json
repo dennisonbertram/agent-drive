@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-SETUP-037-01",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Loading state / escape",
+    "score": "warn",
+    "description": "While 'Adding passkey...' is shown the dialog cannot be closed (Esc and X ignored) and nothing tells the user a device prompt is expected; when no device prompt appears (headless, blocked or unsupported WebAuthn) the dialog hangs indefinitely.",
+    "expected": "Status text ('Waiting for your device...'), a timeout or a Cancel button.",
+    "actual": "Stuck for 40+ s until a page reload.",
+    "screenshot": "screenshots/step-3-waiting.png",
+    "suggested_fix": "Allow Cancel during the device step and add a timeout error."
+  },
+  {
+    "id": "F-SETUP-037-02",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Dialog title and primary button both read 'Add a passkey'; the passphrase must be re-entered although the tab is unlocked, with no reason given.",
+    "expected": "Button 'Continue' or 'Create passkey'; one line explaining why the passphrase is needed.",
+    "actual": "See screenshot.",
+    "screenshot": "screenshots/step-1.png",
+    "suggested_fix": "Reword button; add reason text."
+  }
+]

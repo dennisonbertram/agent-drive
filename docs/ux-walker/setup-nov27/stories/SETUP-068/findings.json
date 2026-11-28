@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-SETUP-068-1",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Feedback / recovery",
+    "score": "warn",
+    "description": "A stale tab shows 'Add webhook' (or an old token block as valid) after another tab changed things. Clicking Add webhook there silently replaces the other tab's token, and the other tab keeps displaying its dead token as Active.",
+    "expected": "The stale dialog refreshes or warns 'A webhook already exists; adding a new one replaces it.'",
+    "actual": "No warning. Old tab shows the revoked token as valid with the same Created time (token A 200, token B 401 in my check).",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-068/screenshots/step-3.png",
+    "suggested_fix": "Re-read the webhook state when the dialog gets focus or before add; if one exists, switch to the Replace wording and warn."
+  },
+  {
+    "id": "F-SETUP-068-2",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Empty states",
+    "score": "warn",
+    "description": "The /traces empty state tells how to start capture but not where OpenRouter traces will appear.",
+    "expected": "Add 'OpenRouter traces appear in /traces/openrouter/<date>/.'",
+    "actual": "Only the capture hint.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-068/screenshots/step-4.png",
+    "suggested_fix": "Add the path to the empty-state text."
+  },
+  {
+    "id": "F-SETUP-068-3",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Responsive behavior",
+    "score": "warn",
+    "description": "At 390px the breadcrumb nav overflows its box by 7px (geometry script), not visible in the screenshot.",
+    "expected": "No overflow.",
+    "actual": "spillPx 7 on nav.crumbs.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-068/screenshots/step-6.png",
+    "suggested_fix": "Allow the crumbs to wrap or truncate."
+  }
+]

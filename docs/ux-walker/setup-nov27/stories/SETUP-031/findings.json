@@ -1,0 +1,62 @@
+[
+  {
+    "id": "SETUP-031-F1",
+    "story": "SETUP-031",
+    "severity": "medium",
+    "category": "flow",
+    "description": "llms.txt makes skill install required step 5 before check; quickstart lists it as optional step 7. Agents and humans following different surfaces get different setups.",
+    "expected": "One order, one optionality",
+    "actual": "llms.txt: 'Install the skill...' step 5, quickstart '7. Optional: skill and MCP'",
+    "evidence": "curl http://localhost:3811/llms.txt and /docs/quickstart.md",
+    "suggested_fix": "Make both say optional and after check.",
+    "surface": "docs"
+  },
+  {
+    "id": "SETUP-031-F2",
+    "story": "SETUP-031",
+    "severity": "medium",
+    "category": "copy",
+    "description": "--target DIR writes DIR/SKILL.md while claude/codex write skills/agent-drive/SKILL.md; --target ./.cursor/skills produces an unusable layout and help text does not say.",
+    "expected": "Help says DIR is the final skill folder",
+    "actual": "wrote .cursor/skills/SKILL.md",
+    "evidence": "CLI output",
+    "suggested_fix": "Help: '--target DIR  folder that will contain SKILL.md (use .../skills/agent-drive)'; or append agent-drive when DIR name is not agent-drive.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-031-F3",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "flow",
+    "description": "No guidance on where Cursor or other agents read skills; no-folder message only tells the user to copy by hand.",
+    "expected": "Name the common folders or point to MCP",
+    "actual": "No ~/.claude or ~/.codex directory found. ... use --target <dir>.",
+    "evidence": "CLI output; docs/skills.md",
+    "suggested_fix": "Add one line: for Cursor and others, use MCP (agent-drive mcp) or point --target at the folder your agent reads.",
+    "surface": "CLI/docs"
+  },
+  {
+    "id": "SETUP-031-F4",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "error",
+    "description": "skill install exits 0 when nothing was written, so scripts cannot detect it.",
+    "expected": "Non-zero or explicit status",
+    "actual": "exit=0",
+    "evidence": "CLI",
+    "suggested_fix": "Exit 2 or print 'nothing installed'.",
+    "surface": "CLI"
+  },
+  {
+    "id": "SETUP-031-F5",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "copy",
+    "description": "Repeat install overwrites silently with the same 'wrote' line; `skill --help` prints the entire CLI help.",
+    "expected": "'Updated' wording; skill-specific usage",
+    "actual": "wrote .../SKILL.md (twice)",
+    "evidence": "CLI",
+    "suggested_fix": "Say 'updated' when file existed.",
+    "surface": "CLI"
+  }
+]

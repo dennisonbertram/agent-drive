@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-050-01",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "The delegate error says to tick the box under 'Optional' on the approval page, but /connect hides it in a collapsed 'Details' row and no 'Optional' heading exists. Docs and llms.txt use a shorter wording of the label.",
+    "expected": "Same label and location in CLI, docs and page.",
+    "actual": "CLI: under Optional; page: inside Details; docs: shorter label",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-2.png",
+    "suggested_fix": "Change the CLI text to 'open Details and tick ...' and unify the label."
+  },
+  {
+    "id": "F-050-02",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "The delegate error tells the agent to run `agent-drive login` again but not to pass the same --name (needed to reconnect the same agent instead of creating a new one).",
+    "expected": "agent-drive login --name '<current agent name>'",
+    "actual": "Bare `agent-drive login`",
+    "screenshot": "CLI output",
+    "suggested_fix": "Print the agent's own name in the suggested command."
+  },
+  {
+    "id": "F-050-03",
+    "severity": "high",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "fail",
+    "description": "Repeated device logins end in 'Agent Drive refused the login request: slow_down' with no wait time, no explanation and no suggestion; it persisted over 20 minutes across fresh homes and names, and retrying appears to extend it. A user retrying a failed setup is locked out with an OAuth code.",
+    "expected": "Too many login requests. Wait N minutes and try again.",
+    "actual": "Raw slow_down",
+    "screenshot": "CLI output",
+    "suggested_fix": "Map slow_down to a message with the wait time."
+  }
+]

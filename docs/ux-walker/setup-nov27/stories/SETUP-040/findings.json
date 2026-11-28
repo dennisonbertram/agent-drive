@@ -1,0 +1,74 @@
+[
+  {
+    "id": "F-SETUP-040-01",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Copy wrong for the user's situation",
+    "score": "warn",
+    "description": "The Load-key dialog for an agent-only drive says 'Ask the agent that created this drive to run agent-drive credentials export', but a drive created in the browser has no creating agent.",
+    "expected": "'If you lost the recovery file, only the agent's config can recover this key.'",
+    "actual": "As quoted.",
+    "screenshot": "screenshots/step-7.png",
+    "suggested_fix": "Make the wording conditional on how the drive was created."
+  },
+  {
+    "id": "F-SETUP-040-02",
+    "severity": "medium",
+    "category": "hierarchy",
+    "criterion": "State accuracy",
+    "score": "warn",
+    "description": "For an agent-only drive after a reload the chip is the green 'Unlocked' while the menu says only the recovery file can open it; the drive menu has no agent-only marker, and 'Download recovery file again' disappears while 'Key backed up (file)' remains.",
+    "expected": "A visible 'agent-only' label on the drive and chip state 'Key needed'.",
+    "actual": "See screenshots.",
+    "screenshot": "screenshots/step-4b-after-reload.png",
+    "suggested_fix": "Badge agent-only drives; show Key needed for them."
+  },
+  {
+    "id": "F-SETUP-040-03",
+    "severity": "low",
+    "category": "disclosure",
+    "criterion": "Help text",
+    "score": "warn",
+    "description": "The Agent-only checkbox ('never add this drive to passphrase unlock') uses terms the new owner has not met and does not say the drive will always need its recovery file.",
+    "expected": "One sentence under the checkbox.",
+    "actual": "No helper text.",
+    "screenshot": "screenshots/step-2.png",
+    "suggested_fix": "Add: 'Only its recovery file can open it in the console.'"
+  },
+  {
+    "id": "F-SETUP-040-04",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Text fit / information architecture",
+    "score": "warn",
+    "description": "Drive picker truncates 'client-exports' to 'client-export...'; the drive menu mixes Traces and Capture traces items with the drive list.",
+    "expected": "Full name; drives only in the drive menu.",
+    "actual": "See screenshots.",
+    "screenshot": "screenshots/step-4c-drive-menu.png",
+    "suggested_fix": "Widen picker; move trace items."
+  },
+  {
+    "id": "F-SETUP-040-05",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Actionable error",
+    "score": "warn",
+    "description": "`agent-drive drive create --agent-only` with a key lacking the manage scope prints 'The API key lacks the \"manage\" scope. Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.' (clear) but a user who approved a scoped agent gets no earlier hint that agents cannot create drives.",
+    "expected": "n/a (message acceptable).",
+    "actual": "As quoted.",
+    "screenshot": "CLI output",
+    "suggested_fix": "None required."
+  },
+  {
+    "id": "F-SETUP-040-06",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Walkability",
+    "score": "warn",
+    "description": "Not walkable: steps 5-6 and 8 (agent login with own drive, account seal reporting agent-only, choosing the saved file) because device-flow login stayed rate limited and the file picker was unavailable.",
+    "expected": "n/a",
+    "actual": "'Agent Drive refused the login request: slow_down'",
+    "screenshot": "CLI output",
+    "suggested_fix": "Re-run when limiter allows; the CLI message could say how long to wait."
+  }
+]

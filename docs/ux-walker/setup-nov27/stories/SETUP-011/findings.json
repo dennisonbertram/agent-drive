@@ -1,0 +1,24 @@
+[
+  {
+    "id": "F-011-1",
+    "story": "SETUP-011",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "When the device-login start limit is hit, the CLI prints only 'Agent Drive refused the login request: slow_down'. The docs say the limit is 20 starts per IP per hour and that the CLI shows the server description, but nothing says how long to wait or that it is a rate limit. Agents in shared-IP sandboxes and CI will hit this and may loop.",
+    "expected": "Message such as 'Too many login attempts from this network. Try again in N minutes.' with a non-zero exit and Retry-After if available.",
+    "actual": "'Agent Drive refused the login request: slow_down' repeated on every retry for ~55 minutes.",
+    "evidence": "CLI output; retried every 30 s from 18:11 to 19:03 EST",
+    "suggested_fix": "Map 429 slow_down on the start call to a plain message with the hourly limit; include Retry-After."
+  },
+  {
+    "id": "F-011-2",
+    "story": "SETUP-011",
+    "severity": "low",
+    "category": "flow",
+    "description": "After login, the CLI's backup paragraph lists 1Password and clipboard before the file/stdout options; for a sandbox the sensible route (`credentials export --stdout` then `credentials confirm`, then AGENT_DRIVE_CREDENTIALS) is not in that paragraph.",
+    "expected": "A sandbox-oriented hint when CI is set or no TTY.",
+    "actual": "Same paragraph for all environments.",
+    "evidence": "CLI login output",
+    "suggested_fix": "Add '--stdout' to the printed options or detect non-interactive environments."
+  }
+]

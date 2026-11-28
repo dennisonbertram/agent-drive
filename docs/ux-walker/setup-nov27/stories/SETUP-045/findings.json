@@ -1,0 +1,50 @@
+[
+  {
+    "id": "F-045-01",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Feedback",
+    "score": "warn",
+    "description": "Revoke dialogs do not warn that a leaked bundle also contains the drive key, which revoking the API key does not invalidate.",
+    "expected": "A note that file contents already readable with the drive key stay readable by the holder, with guidance.",
+    "actual": "Dialog only says the API key stops working",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-2.png",
+    "suggested_fix": "Add one sentence about the drive key to the dialog or docs."
+  },
+  {
+    "id": "F-045-02",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "A revoked sandbox gets `Warning: could not report the key backup for drive <id> to Agent Drive.` before `The API key is invalid or revoked.` The lead line misdirects and no recovery step is given.",
+    "expected": "`The API key is invalid or revoked. Ask the owner for a new credentials bundle.`",
+    "actual": "Warning about key backup first",
+    "screenshot": "CLI output",
+    "suggested_fix": "Suppress the backup warning on auth failure; add recovery hint."
+  },
+  {
+    "id": "F-045-03",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Agent revoke dialog omits 'This cannot be undone.' that the key dialog has; titles are forced upper case, altering the agent name case, and the key dialog title includes the long '(issued by <machine>)' label.",
+    "expected": "Same warning in both; title shows name as typed.",
+    "actual": "Differing copy, all-caps titles",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-5.png",
+    "suggested_fix": "Unify copy; do not uppercase user-supplied names."
+  },
+  {
+    "id": "F-045-04",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "Revoked agent row stays with no remove control and the header count `3 AGENTS` keeps counting it.",
+    "expected": "Count of active agents or a way to hide revoked ones.",
+    "actual": "Revoked row persists, count unchanged",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-3.png",
+    "suggested_fix": "Show '2 active, 1 revoked'."
+  }
+]

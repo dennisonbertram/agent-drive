@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-049-01",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "A read-only bundle sandbox that tries put is told 'Run agent-drive login again to reconnect, or ask the owner for a key with that scope.' Login needs a browser and a human, which a bundle-only sandbox lacks; the correct fix is a new bundle with write scope.",
+    "expected": "Mention a new bundle from an agent with delegate or from the owner.",
+    "actual": "Generic reconnect advice",
+    "screenshot": "CLI output",
+    "suggested_fix": "Detect AGENT_DRIVE_CREDENTIALS and say to ask the owner for a new bundle."
+  },
+  {
+    "id": "F-049-02",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "CLI help for check does not mention the read-only or empty-drive 'check not verified' outcome or exit code 1, only that it prints check ok.",
+    "expected": "One help line explaining 'not verified' on an empty drive.",
+    "actual": "Help mentions only check ok",
+    "screenshot": "CLI output (agent-drive --help)",
+    "suggested_fix": "Add the sentence to help and docs."
+  }
+]

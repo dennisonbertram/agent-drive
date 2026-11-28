@@ -1,0 +1,67 @@
+[
+  {
+    "id": "F-SETUP-017-01",
+    "severity": "medium",
+    "category": "layout",
+    "criterion": "Responsive behavior / text fit",
+    "score": "warn",
+    "description": "At 390 px wide the Verification code input is 168 px wide because its label sits beside it. The 19-character code does not fit: the placeholder is cut to 'a1b2 c3d4 e5f6' and a typed code shows only its last three groups, so the user cannot check what they typed before approving.",
+    "expected": "Label above a full-width input on narrow screens.",
+    "actual": "Measured input width 168 px at left 189 px.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-9.png",
+    "suggested_fix": "Stack label above input below ~480 px.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-017-02",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Form validation",
+    "score": "warn",
+    "description": "Typing letters outside the allowed set (vowels, Y) is accepted and shown, then Continue says 'Enter the code in the form XXXX-XXXX.' The form is correct; the page never says which letters are valid. The code `JCFA-AEIO` looks as valid as the printed code.",
+    "expected": "Say 'Codes use only consonants, check for A, E, I, O, U, Y' or reject characters as typed.",
+    "actual": "Enter the code in the form XXXX-XXXX.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-3.png",
+    "suggested_fix": "Drop vowels as the user types or name the letters in the error.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-017-03",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "'This code is wrong, expired, or already used' does not tell a typo from an expired code; the user cannot decide whether to retype or rerun login.",
+    "expected": "Suggest 'check for typos first; if it is right, run agent-drive login again'.",
+    "actual": "Single combined message.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-4.png",
+    "suggested_fix": "Order advice: re-check the code, then rerun login.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-017-04",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Status tag",
+    "score": "warn",
+    "description": "The status tag reads 'NO PAIRING' after a plain input error (empty box, wrong format) when no lookup happened, which implies the lookup failed.",
+    "expected": "Keep 'AWAITING CODE' until a lookup fails.",
+    "actual": "Tag changes to NO PAIRING on empty submit.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-3.png",
+    "suggested_fix": "Only set NO PAIRING after a 404.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-017-05",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "There is no link to /connect in the header or console nav; a user with the agent on another machine must know the URL (the CLI prints it, console Agents shows only the llms.txt prompt).",
+    "expected": "A 'Connect an agent' route reachable from the console that explains typing the code.",
+    "actual": "None found.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-3.png",
+    "suggested_fix": "Link /connect from the Agents panel.",
+    "files_likely_involved": []
+  }
+]

@@ -1,0 +1,26 @@
+# SETUP-047 walk report (long): Manual Agents and API keys path from the console
+
+User e2e_second_agent_sandbox_47 (brand new, no drive). CLI home ~/uxw/second-agent-sandbox-047 on the Studio. Status: PASS with findings (the manual path works; the final CLI step needs a drive key pasted by hand).
+
+## Steps
+
+1. /console first screen (step-1): "Give your first agent a home." with a one-line prompt, Copy, and 'Prefer to set up a drive yourself? New drive'. Clear, one primary.
+2. API keys tab with no drive (step-2): `+ New API key` is greyed out (no tooltip) and the empty state says "Create a drive first." with `Create drive`. The Connect an agent panel (prompt line, llms.txt link, three MCP setups) is open above it. The story expected "Create an agent first" here; a new account needs a drive first, so the path is drive -> agent -> key (3 creation steps before the key).
+3. Create a drive dialog (step-3): name prefilled "my-drive" and selected, checkbox "Agent-only — never add this drive to passphrase unlock" (jargon: the user has no passphrase yet). Created finance-archive. Slow-ish but fine.
+4. "YOUR DRIVE. YOUR KEY." dialog (step-4..6): `Show drive key`, warning "The recovery file contains a secret in plaintext...", `Download recovery file and continue`, then "Did the recovery file save?" with `I saved it` / `Download again`. The sentence "Without it nobody, including us, can open this drive." appears twice in the same dialog (top paragraph and the confirmation block). The dialog has no close control; this is deliberate but a user who wants to inspect the page cannot.
+5. After "I saved it" the app jumps to the Files tab ("Recovery file saved. Store it in a password manager. Dismiss"); the user is no longer on API keys and must click back (step-7).
+6. API keys tab -> "Create an agent first." (step-8) -> Create agent dialog (step-9). Reserved name `__console__`: inline red box "That name is reserved for the human console." (step-10). `invoice-bot` creates the agent; header note "Agent created. Create an API key to connect it. Dismiss" and empty state "Your agent’s connection starts here." (step-11).
+7. Create API key dialog (step-12): label placeholder "Research laptop", Agent select preset to invoice-bot, Allowed drives preset with finance-archive ticked, Permissions read and write ticked (so the story's tick step is not needed). Only `manage` carries an explanation; delete and share have none. No delegate and no write-path field (the story notes this). Geometry: clean.
+8. Click Create API key (step-13, step-14, step-15): the button turns grey/disabled with the same label and no spinner; it took about 8 seconds (dev server) before the receipt appeared. During that time nothing indicates progress. Receipt: "This secret is shown only once. Store it securely and use it with `agent-drive login`. The service keeps only a hash.", key in a box, Copy, checkbox "I saved my API key securely", `Done` disabled until ticked. Clear.
+9. Done (step-16): row "invoice-bot prod", "invoice-bot · read, write", drive name, ACTIVE, Revoke. The panel under it says "Run the CLI from the repository after building it." (contradicts npm install) and prints `agent-drive login --api http://localhost:3811` with the real drive id in the put example (good).
+10. CLI, following the panel: with AGENT_DRIVE_API_KEY exported, `agent-drive login --api http://localhost:3811` works (also with /api) and prints raw JSON (accountId, keyId, scopes...) instead of a 'Logged in' sentence. whoami shows `localDriveKeys: false`. `put` without a drive key: `Missing drive key. Set AGENT_DRIVE_KEY or the per-drive key variable, or load a key file.` With AGENT_DRIVE_KEY from the recovery file the put succeeds and `check ok drive=<id>` passes (resolves the story's open question). `check` without the key: `There is no key for drive <id> on this machine.`
+11. `--token-stdin` form also works. Agents tab (step-17): one row invoice-bot, 1 ACTIVE KEY. Mobile 390x844 (step-18): fits, no overflow.
+
+Browser errors: none.
+
+## Flow Log
+
+- Story ideal 9. Needed: New drive (1) + name/create (2) + recovery file dialog (3) + back to API keys (1) + Create agent (2) + Create API key (3) + receipt (3) + server commands including pasting two secrets (5) = about 19 actions, versus 3 for the agent-first path shown on the first screen.
+- Hesitations: why a key cannot be created before an agent and a drive; slow unexplained disabled button; panel says build from repo.
+- Re-entry: drive key must be fetched from the recovery file or the console and pasted separately; drive id printed in the panel but the API key is not.
+- Duplicated info: recovery-file warning repeated; two routes (agent-first prompt vs manual) shown on the same tab, with the manual one explained as 'Connect without sharing your identity'.

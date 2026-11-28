@@ -1,0 +1,74 @@
+[
+  {
+    "id": "F-SETUP-059-1",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "One way per task / labels",
+    "score": "warn",
+    "description": "The same action has three names, and the adjacent button is a near miss.",
+    "expected": "One label, and the toolbar button next to 'Traces' clearly the setup action.",
+    "actual": "Toolbar 'Capture...', drive menu 'Capture traces...', dialog title 'Capture traces'; 'Traces' (next to it) opens the folder instead. On a 390px screen the toolbar buttons are hidden and Capture traces... exists only inside the drive-name dropdown.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-1.png",
+    "suggested_fix": "Use one label (for example 'Capture traces') in the toolbar and menu, and surface it on mobile."
+  },
+  {
+    "id": "F-SETUP-059-2",
+    "severity": "medium",
+    "category": "hierarchy",
+    "criterion": "Primary action / important info first",
+    "score": "warn",
+    "description": "The one-time token block is below Local agents and the Active/Replace/Revoke row, and the dialog is taller than an 800px window.",
+    "expected": "Token and copy buttons visible without scrolling; Replace not prominent while the one-time secret is on screen.",
+    "actual": "Dialog scrollHeight 807 vs 750 visible; header scrolls away; the large Replace button sits directly above the unsaved token.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-3.png",
+    "suggested_fix": "Put the new token block at the top of the webhook section, collapse Local agents once a token is shown, make the header sticky."
+  },
+  {
+    "id": "F-SETUP-059-3",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Information the user needs",
+    "score": "warn",
+    "description": "Setup silently creates an agent named openrouter. The Agents tab shows it with 'NO API KEYS' and a '0' avatar, with no explanation.",
+    "expected": "The dialog (or Agents row) says the agent identity is for webhook traces and needs no key.",
+    "actual": "Nothing in the dialog mentions it; Agents row looks unfinished.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-6.png",
+    "suggested_fix": "Add one sentence to the token view and a hint on the Agents row; use the first letter as avatar."
+  },
+  {
+    "id": "F-SETUP-059-4",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Sibling uniformity / text fit",
+    "score": "warn",
+    "description": "'Copied' is wider than 'Copy', so the code boxes re-wrap after a copy; four buttons all read just 'Copy'.",
+    "expected": "Fixed-width button so the code box does not shift; visible label saying what is copied.",
+    "actual": "Webhook URL breaks at a different character after copy; Headers box also shifts.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-4.png",
+    "suggested_fix": "Give the copy button a fixed min-width; label them 'Copy URL' and 'Copy headers'."
+  },
+  {
+    "id": "F-SETUP-059-5",
+    "severity": "low",
+    "category": "visual",
+    "criterion": "Text fit",
+    "score": "warn",
+    "description": "The drive-name switcher truncates 'priya-agents' to 'priya-agent...' at 1280px although there is free space beside it.",
+    "expected": "Name fits at desktop width.",
+    "actual": "Truncated with ellipsis at 1280px.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-1.png",
+    "suggested_fix": "Raise the switcher max-width."
+  },
+  {
+    "id": "F-SETUP-059-6",
+    "severity": "low",
+    "category": "disclosure",
+    "criterion": "Help text",
+    "score": "warn",
+    "description": "Privacy Mode warning is shown only after the token is created, at the bottom of a long dialog; the Local agents text says only 'Check terminal output: capture may be disabled...' without naming the messages.",
+    "expected": "Warning shown before the user goes to OpenRouter; message names given or linked.",
+    "actual": "Only after token creation; docs hold the message list.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-3.png",
+    "suggested_fix": "Show the Privacy Mode note next to the Add webhook button; link the docs page for capture messages."
+  }
+]

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "F-PROD-01-1",
+    "story": "PROD-02",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Landing plan table and /pricing disagree on downloads.",
+    "expected": "One download policy on every surface.",
+    "actual": "Landing table row 'Downloads / month' shows 5 GB / 100 GB / 1 TB; /pricing says 'Downloads not charged' on all plans and 'Extra GB downloaded: Not charged'.",
+    "evidence": "Landing snapshot rows 'Downloads / month' [cells 5 GB,100 GB,1 TB]; /pricing text 'Downloads not charged'; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-02/screenshots/step-2-full.png",
+    "suggested_fix": "Make the landing table match /pricing (or the reverse).",
+    "surface": "https://agentdrive.xyz/ and /pricing"
+  }
+]

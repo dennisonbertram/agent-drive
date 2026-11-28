@@ -1,0 +1,74 @@
+[
+  {
+    "id": "F-SETUP-038-01",
+    "severity": "high",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "fail",
+    "description": "A user who forgot the passphrase cannot find the reset from the Unlock dialog; 'Use a recovery file instead' leads to a dialog whose text says the passphrase opens the drive and offers 'Use my passphrase instead', a loop. Reset exists only as the last button in the key chip menu.",
+    "expected": "A 'Forgot your passphrase?' link in the Unlock dialog (and not a loop in the recovery dialog).",
+    "actual": "Verified: unlock dialog has only Unlock and Use a recovery file instead.",
+    "screenshot": "screenshots/step-3.png",
+    "suggested_fix": "Add a Forgot passphrase link to the unlock dialog."
+  },
+  {
+    "id": "F-SETUP-038-02",
+    "severity": "medium",
+    "category": "visual",
+    "criterion": "Disabled state",
+    "score": "fail",
+    "description": "The 'Reset and remove all drives' button is disabled until RESET is typed, but renders at full opacity in solid red, so it looks active; typing lowercase 'reset' leaves it disabled without explanation.",
+    "expected": "Disabled style (reduced opacity) and a hint on case.",
+    "actual": "disabled=true, opacity 1, bg rgb(180,35,24).",
+    "screenshot": "screenshots/step-5.png",
+    "suggested_fix": "Apply the disabled style to .danger buttons; accept case-insensitive input."
+  },
+  {
+    "id": "F-SETUP-038-03",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Feedback after destructive action",
+    "score": "warn",
+    "description": "After the reset the dialog silently becomes 'Set up passphrase unlock'; no message says the account key was deleted, and the final notice ('Your agent can now add its drives') says nothing about re-pinning agents with account seal --repin --fingerprint or the new fingerprint.",
+    "expected": "A line confirming the reset and the next step for agents, with the new fingerprint.",
+    "actual": "See screenshots step-6b and step-7.",
+    "screenshot": "screenshots/step-6b.png",
+    "suggested_fix": "Show 'Passphrase reset. Run agent-drive account seal --repin --fingerprint \"d845 ed60 45b1 0d10\" on each agent machine.'"
+  },
+  {
+    "id": "F-SETUP-038-04",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Copy",
+    "score": "warn",
+    "description": "Reset copy says 'removes every drive from it' next to 'Files are not deleted' and 'loading its recovery file', which confuses a user who has no recovery files; the recovery dialog text for a console-created drive talks about an agent that has the key.",
+    "expected": "Plain wording: 'Your files stay. Each drive will need its key added again (from a recovery file or your agent).'",
+    "actual": "As quoted.",
+    "screenshot": "screenshots/step-5.png",
+    "suggested_fix": "Rewrite and make the agent hint conditional."
+  },
+  {
+    "id": "F-SETUP-038-05",
+    "severity": "low",
+    "category": "simplicity",
+    "criterion": "Information density",
+    "score": "warn",
+    "description": "The Load-the-key dialog packs two long help paragraphs with inline code and Copy buttons under the main drop zone.",
+    "expected": "Collapsed 'Another way' section.",
+    "actual": "Dense wall of text.",
+    "screenshot": "screenshots/step-3.png",
+    "suggested_fix": "Collapse the agent instructions."
+  },
+  {
+    "id": "F-SETUP-038-06",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Walkability",
+    "score": "warn",
+    "description": "NOT WALKABLE in this run: steps 9-12 (agent pin mismatch warning, account seal --repin) because device-flow login was rate limited.",
+    "expected": "n/a",
+    "actual": "n/a",
+    "screenshot": "n/a",
+    "suggested_fix": "Re-run once the login limiter allows."
+  }
+]

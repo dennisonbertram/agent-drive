@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-048-01",
+    "severity": "high",
+    "category": "consistency",
+    "criterion": "Labels/copy",
+    "score": "fail",
+    "description": "The console's Codex MCP snippet is the bare 3-line server block with no per-tool approval blocks and no warning, while /docs/mcp-tools and /llms.txt give the approval blocks. Anyone copying from the console gets a config where `put` fails under `codex exec`.",
+    "expected": "Console snippet includes the put/download approval blocks or a link note.",
+    "actual": "Three lines only",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-048/screenshots/step-1.png",
+    "suggested_fix": "Use the same snippet as docs/llms.txt in the console panel."
+  },
+  {
+    "id": "F-048-02",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Docs and llms.txt sample approves only put and download although seven tools are refused; move, copy, delete, restore and share need hand-written blocks with no example.",
+    "expected": "Show a generic block or the full list.",
+    "actual": "Two blocks shown",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-048/screenshots/step-2.png",
+    "suggested_fix": "Add one line: repeat the block for each tool name."
+  },
+  {
+    "id": "F-048-03",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Starting `agent-drive mcp` prints an unrelated console passphrase notice (`Your account has no account key yet...`) in the launch output.",
+    "expected": "MCP launch output limited to protocol messages.",
+    "actual": "Notice printed on stderr",
+    "screenshot": "CLI output",
+    "suggested_fix": "Skip the account-key notice in mcp mode."
+  }
+]

@@ -10,7 +10,7 @@ Set up Agent Drive: https://agentdrive.xyz/llms.txt
 
 ## 1. Sign up
 
-Create your account at [/sign-up](https://agentdrive.xyz/sign-up).
+Start here. Create your free account at [/sign-up](https://agentdrive.xyz/sign-up). If you skip this step, you can also sign up when the approval link in step 3 asks you to sign in.
 
 ## 2. Install the CLI
 
@@ -32,7 +32,7 @@ npx -y @dennisonbertram/agent-drive@latest
 agent-drive login --name "<your agent name>"
 ```
 
-The CLI prints a link and a code. Open the link while signed in, check that the code matches the one in the terminal, and click Approve. The command finishes by itself. You do not copy an API key.
+The CLI prints a link, a pairing code (8 letters, such as `BCDF-GHJK`) and a verification code (16 hex characters in four groups). Open the link and sign in or sign up. Check that the pairing code on the page matches the one in the terminal. Type the verification code from the terminal into the page, which never shows it, then click **Approve agent**. The command finishes by itself. You do not copy an API key.
 
 For a self-hosted installation, pass its API URL:
 

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "F-SETUP-016-01",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Labels/copy agree across surfaces",
+    "score": "warn",
+    "description": "The CLI success text tells the user to 'Set a passphrase in the console under Settings', but the console sidebar has no Settings entry (Files, Agents, API keys, Usage, Trash, Billing & limits, Activity & deletion). The only route is a small 'Set up' link in the Files header.",
+    "expected": "CLI wording names a control the user can see.",
+    "actual": "CLI says 'Settings'; console shows 'Set up' link in the Files header and no Settings nav item.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-016/screenshots/step-4.png",
+    "suggested_fix": "Change the CLI text to 'click Set up on the Files page' or add a Settings nav item.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-016-02",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Navigation",
+    "score": "warn",
+    "description": "Footer text 'You can revoke access any time in Console, Agents.' is plain text, not a link, on both the approval form and nothing on the done card links to Agents.",
+    "expected": "A link to the Agents page.",
+    "actual": "Plain text.",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-016/screenshots/step-1.png",
+    "suggested_fix": "Link 'Console, Agents' to /console (Agents tab).",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-016-03",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "If AGENT_DRIVE_API_URL lacks the /api suffix, the CLI prints only 'Agent Drive refused the login request: 404' with no hint about the URL.",
+    "expected": "Message names the URL it called or says the API URL should end in /api.",
+    "actual": "Agent Drive refused the login request: 404",
+    "screenshot": "",
+    "suggested_fix": "Include the requested URL and a hint when the response is a 404 HTML page.",
+    "files_likely_involved": []
+  },
+  {
+    "id": "F-SETUP-016-04",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Success feedback",
+    "score": "warn",
+    "description": "The approval-saved card does not say that the CLI will finish by itself within seconds or that the request lifetime is 10 minutes; a user who sees no change in the terminal has no reference.",
+    "expected": "One line such as 'Your agent will finish in a few seconds.'",
+    "actual": "'Return to your agent to finish setup and confirm it is ready.'",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-016/screenshots/step-2.png",
+    "suggested_fix": "Add the expected wait to the done text.",
+    "files_likely_involved": []
+  }
+]

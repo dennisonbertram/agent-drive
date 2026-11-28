@@ -1,0 +1,62 @@
+[
+  {
+    "id": "F-043-01",
+    "severity": "high",
+    "category": "happy-path",
+    "criterion": "Recovery",
+    "score": "fail",
+    "description": "A plain login request (no grant yet) and a granted request use the same page; nothing warns that approving before the granting agent runs `grant` creates a new empty drive. The CLI login output also does not tell the second agent to wait for a grant.",
+    "expected": "Notice such as 'Expecting a drive from another agent? Wait for it before approving.'",
+    "actual": "`New encrypted drive \u00b7 full access` with an active Approve button",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-5.png",
+    "suggested_fix": "Add a line to the pairing page and to login output about waiting for a grant."
+  },
+  {
+    "id": "F-043-02",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Granted summary reads `priya-mbp agent \u00b7 can read and write, writes only in /codex \u00b7 offered by priya-mbp agent`: names the granter twice, omits the drive, and reads as if the granter receives access.",
+    "expected": "`Read and write the drive 'research-notes', writes only in /codex, offered by priya-mbp agent`",
+    "actual": "Granter name three times in four lines; drive shown only in Details as the agent's name",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-1.png",
+    "suggested_fix": "Rewrite summary with the drive name and the recipient."
+  },
+  {
+    "id": "F-043-03",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "Granting with an unknown pairing code gives `Pass --verify with the verification code the new agent printed, exactly as shown...` even when the verification code is right. A mistyped verification code gives a tamper warning.",
+    "expected": "Separate messages: 'No pending login with that code' vs typo help.",
+    "actual": "Misleading text for unknown pairing code; alarming text for typo",
+    "screenshot": "CLI output",
+    "suggested_fix": "Distinguish unknown pairing code; soften typo wording while keeping the warning."
+  },
+  {
+    "id": "F-043-04",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "After grant and approval the second agent's `check` fails with `drive key not backed up` and the grant/approve pages never mention backing up credentials, so the story's last step cannot succeed as written.",
+    "expected": "Approval success page or login output says to export credentials before `check`.",
+    "actual": "check exit 1",
+    "screenshot": "CLI output",
+    "suggested_fix": "Mention `credentials export` in the Logged in output for granted agents."
+  },
+  {
+    "id": "F-043-05",
+    "severity": "low",
+    "category": "layout",
+    "criterion": "Text fit",
+    "score": "warn",
+    "description": "At 390px the verification input is narrow beside its label and the placeholder is clipped (`a1b2 c3d4 e5f6`).",
+    "expected": "Label above input at phone width.",
+    "actual": "Clipped placeholder",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-6.png",
+    "suggested_fix": "Stack label and field under 480px."
+  }
+]

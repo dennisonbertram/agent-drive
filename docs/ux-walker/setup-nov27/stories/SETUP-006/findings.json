@@ -1,0 +1,14 @@
+[
+  {
+    "id": "F-SETUP-006-1",
+    "severity": "medium",
+    "title": "api-url-404",
+    "description": "API URL without /api gives bare 404 login error"
+  },
+  {
+    "id": "F-SETUP-006-2",
+    "severity": "medium",
+    "title": "signup-cue",
+    "description": "Only small New here link guides sign-up"
+  }
+]

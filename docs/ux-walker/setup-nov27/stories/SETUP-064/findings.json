@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-SETUP-064-1",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Help text / empty state",
+    "score": "warn",
+    "description": "The saved row has no explanation. A user who lost the token sees only Active / Replace / Revoke and no URL.",
+    "expected": "'The token is shown only once. To get a new one, choose Replace.' and the Webhook URL.",
+    "actual": "Nothing.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-064/screenshots/step-1.png",
+    "suggested_fix": "Add that line and show the non-secret URL."
+  },
+  {
+    "id": "F-SETUP-064-2",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Confirmations / feedback",
+    "score": "warn",
+    "description": "Replace takes effect with no confirmation and no warning that the current OpenRouter destination will start returning 401 immediately; nor that only the header needs updating.",
+    "expected": "One-line warning near Replace, and 'Only the Authorization header changes' on the new token.",
+    "actual": "Silent. Verified: old token 401 immediately.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-064/screenshots/step-2.png",
+    "suggested_fix": "Add the warning text under the Replace button or in the new-token block."
+  },
+  {
+    "id": "F-SETUP-064-3",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Interactive sizing",
+    "score": "warn",
+    "description": "Revoke is a small text link (about 50x32px at both sizes).",
+    "expected": "At least 44px touch target.",
+    "actual": "32px high.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-064/screenshots/step-3.png",
+    "suggested_fix": "Increase the hit area."
+  }
+]

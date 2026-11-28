@@ -1,0 +1,62 @@
+[
+  {
+    "id": "F-SETUP-061-1",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages / form validation",
+    "score": "warn",
+    "description": "A recovery file for the right drive with the wrong key is accepted silently by the unlock dialog. The user only learns of the problem after the Capture dialog reopens and tries setup.",
+    "expected": "Reject the file in the unlock dialog, where the user is choosing it, and keep that dialog open.",
+    "actual": "Dialog closes, Capture reopens and fails with 'This key does not open this drive's files.'; chip still says 'Key needed'.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-061/screenshots/step-2.png",
+    "suggested_fix": "Verify the key against the inbox/drive in the unlock dialog and show the error there, next to the file chooser."
+  },
+  {
+    "id": "F-SETUP-061-2",
+    "severity": "low",
+    "category": "consistency",
+    "criterion": "Same fact, one wording",
+    "score": "warn",
+    "description": "Wrong key / wrong file has different texts depending on where it is caught.",
+    "expected": "One wording.",
+    "actual": "'That recovery file is not for this drive.' (wrong drive id) versus 'This key does not open this drive's files.' (wrong key).",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-061/screenshots/step-4.png",
+    "suggested_fix": "Use one sentence that names what to do next ('Choose the recovery file saved for this drive')."
+  },
+  {
+    "id": "F-SETUP-061-3",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "The non-agent-only recovery dialog tells the user to find the account-key fingerprint 'under Settings'. There is no Settings item in the sidebar; the only fingerprint seen is in the key-status menu ('Fingerprint ec29 97f5 0636 60cd'), which does not say it is the account key.",
+    "expected": "A link or exact location for the fingerprint.",
+    "actual": "Dead-end reference.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-061/screenshots/step-1.png",
+    "suggested_fix": "Name the real location (the key-status menu) and label the fingerprint 'account key'."
+  },
+  {
+    "id": "F-SETUP-061-4",
+    "severity": "medium",
+    "category": "simplicity",
+    "criterion": "Decision complexity",
+    "score": "warn",
+    "description": "Non-agent-only recovery dialog presents recovery file, paste, account seal command, passphrase setup and credentials export together, with Copy buttons mid-sentence.",
+    "expected": "One recommended route first; the rest behind a toggle.",
+    "actual": "Four routes and two commands in one dialog; the agent-only variant is far simpler.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-061/screenshots/step-1.png",
+    "suggested_fix": "Collapse the CLI instructions behind 'No recovery file?'"
+  },
+  {
+    "id": "F-SETUP-061-5",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Recovery",
+    "score": "warn",
+    "description": "'Retry' after a key mismatch does not say it reopens the file chooser.",
+    "expected": "'Choose another file'.",
+    "actual": "Generic Retry label.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-061/screenshots/step-2.png",
+    "suggested_fix": "Rename the action for this error."
+  }
+]
