@@ -119,7 +119,7 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
       'Connect to Agent Drive and load this drive’s key on your agent’s machine first. Run Claude Code or Codex through capture to save encrypted traces under /traces. Check terminal output: capture may be disabled, uploads may be queued, or calls may not be captured.',
     );
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -128,7 +128,7 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
 
     // The bundle names the drive, so it is accepted. URL and headers are shown once.
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     const url = (await page.getByTestId('webhook-url').innerText()).trim();
@@ -238,7 +238,7 @@ test('traces: the dialog cannot be closed while a token is being created, and re
     await page.goto(`/console?drive=${driveId}`);
     await page.getByTestId('capture-link').click();
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
     await expect(dialog(page).getByText('Setting up…')).toBeVisible();
@@ -306,7 +306,7 @@ test('traces: a Clerk response marker suspends the native dialog without issuing
     await page.goto(`/console?drive=${driveId}`);
     await page.getByTestId('capture-link').click();
     await addWebhook(page).click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page.getByLabel(/^Drive key or credentials bundle/).fill(bundle);
     await page.getByRole('button', { name: 'Load key', exact: true }).click();
 

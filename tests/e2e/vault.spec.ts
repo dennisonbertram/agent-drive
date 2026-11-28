@@ -523,7 +523,7 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
       await page.unroute(verificationRoute);
     }
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await (await openMenu(page)).getByRole('button', { name: 'Lock this tab', exact: true }).click();
     await expect(chip(page)).toContainText('Locked');
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
@@ -576,7 +576,7 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
     );
     await expect(notice).toBeVisible();
 
-    await (await openMenu(page)).getByRole('button', { name: 'Lock', exact: true }).click();
+    await (await openMenu(page)).getByRole('button', { name: 'Lock this tab', exact: true }).click();
     await nameButton(page, 'other.txt').click();
     await dialogPassphrase(page).fill(raw);
     await page.getByRole('button', { name: 'Unlock', exact: true }).click();
@@ -853,7 +853,7 @@ test('setup seals only keys that open a real file, and closing cancels it', asyn
     await page.goto(`/console?drive=${seeded.a.id}`);
     // A recovery key that is wrong for the drive.
     await nameButton(page, 'note.txt').click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -891,7 +891,7 @@ test('setup skips a loaded key that fails its file', async ({ page, context, bas
   await withSeed(context, baseURL!, async (seeded) => {
     await page.goto(`/console?drive=${seeded.a.id}`);
     await nameButton(page, 'note.txt').click();
-    await page.getByText('Paste a key instead').click();
+    await page.getByText('Other ways').click();
     await page
       .getByLabel(/^Drive key or credentials bundle/)
       .fill(randomBytes(32).toString('base64url'));
@@ -922,7 +922,7 @@ test('a key loaded from a recovery file while locked shows Key loaded, and Lock 
     await expect(chip(page)).toContainText('Key loaded');
     const menu = await openMenu(page);
     await expect(menu.getByRole('button', { name: 'Forget key' })).toBeVisible();
-    await menu.getByRole('button', { name: 'Lock', exact: true }).click();
+    await menu.getByRole('button', { name: 'Lock this tab', exact: true }).click();
     await expect(chip(page)).toContainText('Locked');
   });
 });

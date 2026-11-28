@@ -4328,6 +4328,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       : undefined
               }
               onKey={keyLoaded}
+              onClose={close}
               mode={unlockMode}
               onMode={(mode) => {
                 setRecoveryNote('');
@@ -4338,6 +4339,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
               vault={{
                 email: identity.email,
                 status: vault.status,
+                fingerprint: vault.fingerprint,
                 onRetry: retryVault,
                 hasVault: vault.status === 'locked' && drive?.agentOnly !== true,
                 hasPasskey: hasPasskey && passkeyCapable && drive?.agentOnly !== true,
