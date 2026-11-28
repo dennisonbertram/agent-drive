@@ -1,0 +1,38 @@
+[
+  {
+    "id": "F-SETUP-067-1",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "`agent-drive login` with AGENT_DRIVE_API_URL set to the site origin (no /api) prints only 'Agent Drive refused the login request: 404'.",
+    "expected": "Say the URL looks wrong and show the expected form (.../api).",
+    "actual": "Bare 404.",
+    "screenshot": "CLI output quote",
+    "suggested_fix": "Detect a 404 and suggest adding /api, or accept the origin."
+  },
+  {
+    "id": "F-SETUP-067-2",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "'slow_down' is shown to a first-time user as 'Agent Drive refused the login request: slow_down' with no wait time or advice.",
+    "expected": "Tell the user to wait and retry in N seconds.",
+    "actual": "Raw code.",
+    "screenshot": "CLI output quote",
+    "suggested_fix": "Translate the code into plain words with a retry time."
+  },
+  {
+    "id": "F-SETUP-067-3",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Help text",
+    "score": "warn",
+    "description": "The Local agents text says to check terminal output for 'disabled / queued / not captured' without giving the messages or a link.",
+    "expected": "Link to the docs page that lists them.",
+    "actual": "Generic sentence.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-2.png",
+    "suggested_fix": "Link docs/trace-capture."
+  }
+]

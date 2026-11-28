@@ -1,0 +1,59 @@
+{
+ "story": "SETUP-051",
+ "status": "partial",
+ "note": "Walked: landing, console, docs/cli, device login approval, CLI mount before/after login. Finder app is not installed on the Studio, so download, drag, extension, Finder row and drop-file steps are not-walkable. Mount fails with a raw ENOENT.",
+ "findings": [
+  {
+   "id": "F-SETUP-051-01",
+   "story": "SETUP-051",
+   "severity": "high",
+   "category": "error-handling",
+   "criterion": "mount with Finder app not installed",
+   "description": "Run `agent-drive mount /Users/agent/uxw/m051/AgentDrive` on a Mac without Agent Drive.app.",
+   "expected": "A message saying the Agent Drive Finder app is not installed, with the download link and the /Applications location.",
+   "actual": "Raw system error: \"ENOENT: no such file or directory, stat '/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder'\". The same raw error comes from foreground `connect` after it already printed the saved-entry JSON, and from AGENT_DRIVE_FINDER_HELPER pointing at a missing file.",
+   "evidence": "CLI output quoted in walk-report.md step 5",
+   "suggested_fix": "Catch ENOENT on the helper path and print: 'Agent Drive Finder app not found at /Applications/Agent Drive.app. Download it from <release URL>, drag it to /Applications, or set AGENT_DRIVE_FINDER_HELPER.'",
+   "surface": "CLI mount/connect"
+  },
+  {
+   "id": "F-SETUP-051-02",
+   "story": "SETUP-051",
+   "severity": "medium",
+   "category": "happy-path",
+   "criterion": "discoverability of Finder mount",
+   "description": "Priya looks on the landing page, console and /llms.txt for 'Finder' or 'mount'.",
+   "expected": "Some pointer to the Finder mount from the console or the docs Quickstart.",
+   "actual": "Landing page, /console and /llms.txt contain no 'Finder', 'mount' or 'Instabox' text. Only /docs/cli mentions it, inside one dense paragraph of the Install section.",
+   "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-051/screenshots/step-1.png ; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-1.png ; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-051/screenshots/step-2.png",
+   "suggested_fix": "Add a short 'Mount in Finder' section to Quickstart and link it from the console; split the Finder paragraph in docs/cli into steps.",
+   "surface": "website, console, docs"
+  },
+  {
+   "id": "F-SETUP-051-03",
+   "story": "SETUP-051",
+   "severity": "low",
+   "category": "error-handling",
+   "criterion": "login with AGENT_DRIVE_API_URL missing /api",
+   "description": "Run `login --no-browser` with AGENT_DRIVE_API_URL=http://localhost:3811 (no /api suffix, as the walk brief said).",
+   "expected": "An error that names the URL tried and suggests the /api path.",
+   "actual": "\"Agent Drive refused the login request: 404\" with no URL shown. Works with .../api. Login also prints 'Ignored a different API URL returned by the server.' without explanation.",
+   "evidence": "CLI output",
+   "suggested_fix": "Include the request URL in the 404 message and hint that the API URL normally ends in /api.",
+   "surface": "CLI login"
+  },
+  {
+   "id": "F-SETUP-051-04",
+   "story": "SETUP-051",
+   "severity": "low",
+   "category": "consistency",
+   "criterion": "help lists commands twice",
+   "description": "Run `agent-drive --help`.",
+   "expected": "Each command listed once.",
+   "actual": "`mounts list | status [NAME]` appears, then `mounts list` and `mounts status [NAME]` again later; mount, mounts add and mounts service lines are interleaved. Help never says what an Instabox sandbox ID is.",
+   "evidence": "CLI --help output",
+   "suggested_fix": "Dedupe the mounts lines and group drive mounts and live workspaces separately.",
+   "surface": "CLI help"
+  }
+ ]
+}

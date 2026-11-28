@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-PROD-01-4",
+    "story": "PROD-05",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The macOS Finder app is not discoverable. Landing, footer, docs index, sidebar and llms.txt never mention it. /desktop, /download, /finder, /mac, /docs/mount, /docs/desktop, /docs/finder all return 404. The only download link (GitHub release zip 'Agent Drive Finder 0.3.1') is inside two paragraphs of the 48 KB CLI reference.",
+    "expected": "A visitor who wants Finder access finds a page and a download from the nav or docs index.",
+    "actual": "Only reachable by reading the CLI reference 'Install and configuration' and 'macOS requirements and unmounting' sections.",
+    "evidence": "curl status 404 for the listed paths; href https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-05/screenshots/step-1-cli-macos.png",
+    "suggested_fix": "Add a docs page 'Finder and mounts' to the docs index and link it from the landing page.",
+    "surface": "/docs/cli, /docs"
+  },
+  {
+    "id": "F-PROD-01-5",
+    "story": "PROD-05",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The CLI reference contradicts itself on whether the Finder app is signed. One sentence says 'the separate signed Agent Drive app' and 'signed Agent Drive.app'; the next says the macOS builder workflow 'compiles the app but does not sign, notarize, or publish it'. A new user cannot tell whether macOS will warn about an unidentified developer.",
+    "expected": "One clear statement of signing and notarization state, with what the user will see on first open.",
+    "actual": "Both claims appear within the same paragraph.",
+    "evidence": "/docs/cli paragraph beginning 'The Linux npm package includes native mount helpers'; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-05/screenshots/step-1-cli-macos.png",
+    "suggested_fix": "State whether Agent Drive-Finder-0.3.1.zip is signed and notarized; separate that from the source-build workflow.",
+    "surface": "/docs/cli"
+  }
+]

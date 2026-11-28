@@ -1,0 +1,14 @@
+[
+  {
+    "id": "F-SETUP-063-1",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "Error rows use two different looks and wordings: grey 'Could not load the webhook.' with a red link, and red text for setup errors; 'A same-origin request is required.' does not tell the user what to do.",
+    "expected": "Every error says what happened and what to do; one style.",
+    "actual": "Inconsistent style; the same-origin text is technical.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-063/screenshots/step-1.png",
+    "suggested_fix": "Map the server's same-origin error to 'Reload the page and try again.'"
+  }
+]

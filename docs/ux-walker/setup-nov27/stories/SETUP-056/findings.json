@@ -1,0 +1,33 @@
+{
+ "story": "SETUP-056",
+ "status": "partial",
+ "note": "Reproduced the exact missing-Instabox error; the message gives no recovery and the failed attempt leaves a registration.",
+ "findings": [
+  {
+   "id": "F-SETUP-056-01",
+   "story": "SETUP-056",
+   "severity": "medium",
+   "category": "error-handling",
+   "criterion": "connect --persist with Instabox missing leaves a saved entry",
+   "description": "Run `connect coordinator <mp> --sandbox m_7f3a1234 --root /workspace/project --persist` with no instabox, then run it again.",
+   "expected": "First failure rolls back, or says the definition was saved and what to do; rerun works or points to `mounts forget`.",
+   "actual": "First run: \"Could not find an executable Instabox CLI in PATH or ~/.local/bin.\" `mounts list` then shows the entry registered. Rerun: \"A mount named 'coordinator' is already registered.\" with no hint to run `mounts forget coordinator`. Foreground connect failure (no Finder app) does roll back, so behavior is inconsistent.",
+   "evidence": "CLI output in walk-report.md",
+   "suggested_fix": "Roll back the registration when the service cannot start, or append 'Run agent-drive mounts forget coordinator to retry.'",
+   "surface": "CLI connect --persist"
+  },
+  {
+   "id": "F-SETUP-056-02",
+   "story": "SETUP-056",
+   "severity": "medium",
+   "category": "happy-path",
+   "criterion": "Instabox is never explained",
+   "description": "Search docs and CLI help for what Instabox is and how to install it.",
+   "expected": "The missing-Instabox error says what it is and where to get it.",
+   "actual": "The error has no install hint or link; docs/cli and --help use the word without defining it; the message names only PATH and ~/.local/bin.",
+   "evidence": "CLI output; docs search",
+   "suggested_fix": "Add an install link to the message and one docs sentence.",
+   "surface": "CLI error, docs"
+  }
+ ]
+}

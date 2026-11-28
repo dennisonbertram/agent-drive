@@ -1,0 +1,159 @@
+[
+  {
+    "id": "Q1",
+    "title": "Make dialog Copy buttons, focus ring and password inputs visible (C2)",
+    "fix": "In console-panels.css give `dialog .copy-button` and details Copy buttons a visible light-on-dark or orange style at rest (current rule sets color var(--ink) on transparent over a #111 block, ratio 1); add a visible focus ring on the onboarding Copy; style dialog password inputs like other inputs; make a disabled primary visibly weaker than the adjacent secondary.",
+    "files": [
+      "apps/web/app/styles/console-panels.css"
+    ],
+    "acceptance": [
+      "layout-audit lowContrast reports no .copy-button on Connect dialog and the three MCP setup Copy buttons at 1440 and 375",
+      "Copy button contrast >= 4.5:1 at rest; focus ring contrast >= 3:1 on onboarding Copy",
+      "Passphrase dialog inputs are not solid black; disabled Create is visibly weaker than Use my own passphrase"
+    ]
+  },
+  {
+    "id": "Q2",
+    "title": "One approval sentence on home, quickstart, llms.txt; hero sign-up cue; downloads wording (C1, C22)",
+    "fix": "Replace every 'shows a pairing code, you approve it' / 'click Approve' sentence with: agent shows a pairing code; open the link, type the verification code from your terminal, click Approve agent. Define pairing code (8 letters), verification code (16 hex) and account key fingerprint once. Add that sign-in is needed to the hero line, Node 24 and `agent-drive login` to the hero terminal option, and 'start here' on Quickstart. Make the landing plan-table downloads text agree with /pricing. Regenerate docs.generated.json with the repo's docs generator; do not hand-edit it.",
+    "files": [
+      "apps/web/src/content/home.ts",
+      "apps/web/src/content/pricing.ts",
+      "docs/quickstart.md",
+      "apps/web/app/llms.txt/route.ts"
+    ],
+    "acceptance": [
+      "git grep for 'approve it once' and 'click Approve' finds no sentence without 'verification code' in home.ts, quickstart.md, llms.txt route",
+      "Landing plan table and /pricing state the same downloads policy",
+      "Hero text says sign-in is needed",
+      "llms.txt line about the account-key fingerprint no longer says 'under Settings'"
+    ]
+  },
+  {
+    "id": "Q3",
+    "title": "/connect layout and message fixes (C3, C4)",
+    "fix": "Stack the verification-code label above its input at all widths; keep Approve visible with Details open at 1280x800; raise field labels to >= 12px; make 'Enter the code in the form XXXX-XXXX.' name the no-vowels rule; accept the verification code with or without spaces and say so; render `agent-drive login` as code in the expired banner; autofocus the verification input on a pending request.",
+    "files": [
+      "apps/web/app/(app)/connect/connect.tsx",
+      "apps/web/app/styles/connect.css"
+    ],
+    "acceptance": [
+      "At 375px a typed 19-character verification code has scrollWidth <= clientWidth",
+      "At 1280x800 with Details open the Approve button bottom edge <= 800",
+      "ABCD-EFGH gives a message that names the letter rule",
+      "Expired banner has no literal backticks",
+      "Field labels computed font-size >= 12px"
+    ]
+  },
+  {
+    "id": "Q4",
+    "title": "Replace 'Settings' with the real location of passphrase and fingerprint (C7)",
+    "fix": "Change the strings at account-seal.ts:31 and :86 and unlock-dialog.tsx:242 to name the real place (Files, key chip menu, Set up passphrase unlock) since the sidebar has no Settings item.",
+    "files": [
+      "packages/agent-drive/src/account-seal.ts",
+      "apps/web/app/(app)/console/unlock-dialog.tsx"
+    ],
+    "acceptance": [
+      "git grep -F 'under Settings' returns nothing in packages/agent-drive/src and apps/web/app",
+      "Each location named in the text exists in the console navigation or key menu"
+    ]
+  },
+  {
+    "id": "Q5",
+    "title": "CLI backup, export and import errors name the working routes (C10)",
+    "fix": "Make the bare export error, clipboard failure, missing 1Password CLI and check refusal list all routes including `--stdout | STORE && confirm`, with one recommended default; name the file written and warn against repo or synced folders; say `credentials import` expects only the part after `AGENT_DRIVE_CREDENTIALS=` (or strip the prefix); name AGENT_DRIVE_CREDENTIALS in the empty-bundle error; use one phrase for 'outside the repo/sandbox'; hint to create a missing parent folder.",
+    "files": [
+      "packages/agent-drive/src/credentials.ts",
+      "packages/agent-drive/src/backup-targets.ts",
+      "packages/agent-drive/src/check.ts"
+    ],
+    "acceptance": [
+      "Each listed error text contains the --stdout route or a pointer to it",
+      "Pasting the full NAME=value line imports or fails with a message naming the prefix",
+      "Backup success line names the written path",
+      "Post-login output shows one next step (backup) not two"
+    ]
+  },
+  {
+    "id": "Q6",
+    "title": "Explain device-login errors: rate limit and wrong API URL (C12)",
+    "fix": "In device.ts map a start rejected with slow_down to a message stating it is a rate limit (20 login starts per IP per hour) and to retry later; on 404 print the URL tried and that the API URL normally ends in /api; explain or drop 'Ignored a different API URL returned by the server.' Do not change the limit or its duration.",
+    "files": [
+      "packages/agent-drive/src/device.ts"
+    ],
+    "acceptance": [
+      "A rejected login start prints 'rate limit' and the stated limit",
+      "A 404 prints the URL tried and the /api hint",
+      "Unit tests in device.unit.test.ts updated to the new text"
+    ]
+  },
+  {
+    "id": "Q7",
+    "title": "Console copy and small-logic pass in console.tsx (C1 console parts, C13, C14, C15, C16, C19 toolbar, C21 line, C24)",
+    "fix": "Approval steps (lines ~323, ~2877): add the verification code. Hide the passphrase banner (~2770) until a drive exists; remove or explain the Agent-only checkbox; delete the second 'Without it nobody...' sentence (~4231 and ~4261). Failure card (~2833): Dismiss only hides the error, keep Try again, state the error once. API keys panel (~3879): replace 'Run the CLI from the repository after building it' with the npm install and `login --token-stdin` command; show why '+ New API key' is disabled (~3776); fix the notice at ~4419 so it does not contradict the tab. Codex MCP snippet: use the documented one with per-tool approvals. Rename toolbar 'Capture...' to 'Set up trace capture' and 'Traces' to 'View traces'. Add 'This cannot be undone.' to the agent revoke dialog and the sentence that a leaked bundle also holds the drive key. Add one Finder line to the empty state.",
+    "files": [
+      "apps/web/app/(app)/console/console.tsx"
+    ],
+    "acceptance": [
+      "With /api/console blocked, Dismiss then unblock leaves a card with a working Try again; the error text appears once",
+      "New account with no drive sees no passphrase banner",
+      "git grep -F 'from the repository after building' returns nothing",
+      "Receipt dialog contains the recovery sentence once",
+      "Codex snippet equals the one in docs/mcp-tools.md",
+      "Toolbar labels read 'Set up trace capture' and 'View traces'"
+    ]
+  },
+  {
+    "id": "Q8",
+    "title": "Trace capture naming consistency and Replace warning (C19)",
+    "fix": "Use one label for the capture opener in the drive menu and dialog title; add a confirmation to Replace that says the old token stops working immediately; say the one-time token cannot be shown again; explain the openrouter agent that setup creates; move the token block above the Local agents rows.",
+    "files": [
+      "apps/web/app/(app)/console/drive-menu.tsx",
+      "apps/web/app/(app)/console/traces-dialog.tsx"
+    ],
+    "acceptance": [
+      "Drive menu entry and dialog title use the same label as the toolbar from Q7",
+      "Replace asks for confirmation naming the consequence",
+      "Dialog fits at 1280x800 without internal scroll hiding the close button"
+    ]
+  },
+  {
+    "id": "Q9",
+    "title": "Missing Agent Drive.app gives an install instruction (C20)",
+    "fix": "In mount-mac.ts catch the missing-helper failure (ENOENT for /Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder) and print: Agent Drive.app is not installed; download URL; drag to /Applications and open once.",
+    "files": [
+      "packages/agent-drive/src/mount-mac.ts"
+    ],
+    "acceptance": [
+      "agent-drive mount on a Mac without the app prints the download URL and no raw system error",
+      "mount-mac.unit.test.ts covers the missing-helper case"
+    ]
+  },
+  {
+    "id": "Q10",
+    "title": "Rewrite the Finder paragraph in docs/cli.md as steps (C21)",
+    "fix": "Split the dense Finder paragraph into numbered steps (download, drag to /Applications, open once, run mount); resolve the contradiction between 'signed' and 'compiles the app but does not sign'; define 'Instabox workspace' and where the m_... ID comes from; say mount is not supported on Windows; add a Finder link in the docs index. Regenerate docs.generated.json with the repo's docs generator.",
+    "files": [
+      "docs/cli.md"
+    ],
+    "acceptance": [
+      "No sentence in docs/cli.md says both signed and not signed",
+      "Finder steps are a numbered list",
+      "Windows unsupported and Instabox definition are stated"
+    ]
+  },
+  {
+    "id": "Q11",
+    "title": "skill install exit code, target layout and help (C23)",
+    "fix": "Exit non-zero (or print an unmistakable not-installed message) when no agent directory exists and nothing was written; document or normalize the `--target DIR` layout (DIR/SKILL.md vs skills/agent-drive/SKILL.md); print 'overwrote' on repeat install; scope `skill --help` to the skill command.",
+    "files": [
+      "packages/agent-drive/src/cli.ts",
+      "packages/agent-drive/src/skill.ts"
+    ],
+    "acceptance": [
+      "skill install with no ~/.claude or ~/.codex exits non-zero",
+      "skill --help prints only skill usage",
+      "Repeat install prints that it replaced the file"
+    ]
+  }
+]

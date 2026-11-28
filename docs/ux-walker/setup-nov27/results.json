@@ -1,0 +1,2842 @@
+[
+ {
+  "slug": "land-signup",
+  "stories": [
+   {
+    "id": "SETUP-001",
+    "status": "pass",
+    "note": "Copy prompt works, shows Copied. Hero gives no sign-up cue. Clipboard contents not verified (browser blocks read)."
+   },
+   {
+    "id": "SETUP-002",
+    "status": "pass",
+    "note": "Pricing reachable in 1 click, Start with Free goes to /sign-up. Clerk form not-walkable. Banner uses self-host wording."
+   },
+   {
+    "id": "SETUP-003",
+    "status": "partial",
+    "note": "Clerk sign-up not walkable. Console loading card and onboarding panel walked with test session; copy mismatch with real approve flow."
+   },
+   {
+    "id": "SETUP-004",
+    "status": "partial",
+    "note": "Whole detour walked, recovery download not verifiable headless. Connect an agent dialog has invisible Copy button."
+   },
+   {
+    "id": "SETUP-005",
+    "status": "partial",
+    "note": "Failure card and Try again recovery work. Dismiss leaves permanent loading card. Real hotel wifi simulated by aborting /api/console."
+   },
+   {
+    "id": "SETUP-006",
+    "status": "partial",
+    "note": "Clerk sign-up not walkable. CLI login, connect page errors, approval, console, check ok all walked. Needed /api suffix on API URL."
+   },
+   {
+    "id": "SETUP-007",
+    "status": "pass",
+    "note": "Landing, FAQ, docs, llms.txt, quickstart read. Contradictions about sign-up and recovery file found."
+   },
+   {
+    "id": "SETUP-008",
+    "status": "pass",
+    "note": "Not-configured panels and signed-out /console redirect observed on this local server; dead end confirmed."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-SETUP-004-1",
+    "story": "SETUP-004",
+    "severity": "high",
+    "category": "visual",
+    "description": "The Copy button inside the Connect an agent dialog is invisible: computed color rgb(17,17,17) with transparent background on the dark (#111) code block. It is present at x816 y403 (49x28) and in the a11y tree as 'Copy agent instruction'. Also invisible at 390px.",
+    "expected": "Visible Copy button like the orange one in the onboarding panel",
+    "actual": "Dark code block with no visible control; user must select text by hand",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-004/screenshots/step-5-connect-dialog.png, finding-invisible-copy.png, mobile-check-dialog.png",
+    "suggested_fix": "Give the dialog copy button the same light/orange styling as the onboarding Copy",
+    "surface": "console Connect an agent dialog"
+   },
+   {
+    "id": "F-SETUP-005-1",
+    "story": "SETUP-005",
+    "severity": "high",
+    "category": "error-handling",
+    "description": "On the 'Workspace unavailable' state, clicking Dismiss on the red error line changes the card to 'Opening your workspace...' which never resolves and has no Try again button, even after the network recovers. Only the Refresh button or reload fixes it. Reproduced twice.",
+    "expected": "Dismiss only hides the message, or the card keeps its Try again button",
+    "actual": "Permanent loading spinner",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-005/screenshots/step-4-after-dismiss-stuck.png",
+    "suggested_fix": "Track failure state separately from the dismissible error text",
+    "surface": "/console first load"
+   },
+   {
+    "id": "F-SETUP-005-2",
+    "story": "SETUP-005",
+    "severity": "low",
+    "category": "hierarchy",
+    "description": "Failure shows the same message twice (red line next to the title and the card text) and three recovery controls: Dismiss, Refresh and Try again. Card says 'refresh to try again' while its button says Try again. On mobile the error appears as an unstyled bar flush to the screen edge.",
+    "expected": "One message, one recovery action",
+    "actual": "Duplicated message and wording mismatch",
+    "evidence": "screenshots/step-1-failure.png, mobile-check.png in SETUP-005",
+    "suggested_fix": "Drop the header error when the card is showing, reword card to 'Try again'",
+    "surface": "/console"
+   },
+   {
+    "id": "F-SETUP-001-1",
+    "story": "SETUP-001",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The landing hero, closing section and console panel never tell a new user that the approval link requires sign-up/sign-in. llms.txt tells the human 'you must be signed in' and its troubleshooting says 'they must sign in first'; only docs/quickstart.md starts with 'Sign up'. A brand-new human only finds out at /connect, where the only sign-up cue is the small 'New here? Sign up free' line.",
+    "expected": "Copy that says you will create an account on the next screen",
+    "actual": "'Free to start. Your agent shows a pairing code, and you approve it in your account.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-001/screenshots/step-1.png; /llms.txt step 2; SETUP-006 step-1.png",
+    "suggested_fix": "Add 'You will sign up when your agent shows the link' to hero and llms.txt tell-the-human line",
+    "surface": "landing, llms.txt, quickstart"
+   },
+   {
+    "id": "F-SETUP-003-1",
+    "story": "SETUP-003",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Onboarding panel, landing hero, quickstart and the Connect dialog say the human just clicks Approve / 'You approve it once'. The real page requires typing a 16-character Verification code and the button is 'Approve agent'. A first-time user is not prepared for the extra step.",
+    "expected": "Copy mentions checking the code and typing the verification code",
+    "actual": "'open it and click Approve'",
+    "evidence": "SETUP-003 screenshots/step-3-onboarding.png vs SETUP-006 screenshots/step-2.png and step-3-empty-code.png",
+    "suggested_fix": "Change to 'open it, type the verification code your agent printed, and approve'",
+    "surface": "console onboarding, landing, quickstart"
+   },
+   {
+    "id": "F-SETUP-003-2",
+    "story": "SETUP-003",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "A brand-new account with no drive sees 'Set a passphrase and agents will add every drive's key to your account...' next to the Files title and a 'Set up' link that opens a Set up passphrase unlock dialog with a generated passphrase and 'every drive must be added again' warning. This competes with the primary 'Connect your agent' action before any drive or agent exists, and uses jargon. On mobile the banner is hidden so the 'Key needed . Not backed up' chip is unexplained.",
+    "expected": "Passphrase prompt only after a drive exists",
+    "actual": "Shown immediately on first visit",
+    "evidence": "SETUP-003 screenshots/step-3-onboarding.png, step-5-passphrase-setup.png; SETUP-006 screenshots/mobile-check.png",
+    "suggested_fix": "Hide until first drive; show a short explanation on the chip on mobile",
+    "surface": "/console Files"
+   },
+   {
+    "id": "F-SETUP-006-1",
+    "story": "SETUP-006",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "With AGENT_DRIVE_API_URL=http://localhost:3811 (no /api) the CLI prints only 'Agent Drive refused the login request: 404'. It does not say which URL was tried or that the API URL should end in /api. llms.txt uses --api .../api, so it works there. After a working login the CLI also prints 'Ignored a different API URL returned by the server.' with no explanation.",
+    "expected": "Error names the URL and suggests the /api path",
+    "actual": "Bare 404",
+    "evidence": "CLI output: 'Agent Drive refused the login request: 404'; 'Ignored a different API URL returned by the server.'",
+    "suggested_fix": "Include the request URL and a hint in the 404 message; explain or drop the ignored-URL line",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-006-2",
+    "story": "SETUP-006",
+    "severity": "low",
+    "category": "flow",
+    "description": "After sign-out, /console redirects to plain /sign-in with no redirect_url, while /connect keeps it. Confirmed at runtime. Also the approval page shows the account only inside collapsed Details (here 'Local test session'), so a user already signed in to another account may approve into the wrong one.",
+    "expected": "Return path kept; account shown near Approve",
+    "actual": "Path dropped for /console; account hidden",
+    "evidence": "SETUP-006 screenshots/step-2.png and step-2b-details.png; SETUP-005 sign-out check ended at http://localhost:3811/sign-in",
+    "suggested_fix": "Pass redirect_url for console routes; show account line outside Details",
+    "surface": "/connect, /console"
+   },
+   {
+    "id": "F-SETUP-004-2",
+    "story": "SETUP-004",
+    "severity": "low",
+    "category": "consistency",
+    "description": "Receipt dialog repeats 'Without it nobody, including us, can open this drive' twice, has no close button, and the New drive dialog checkbox 'Agent-only - never add this drive to passphrase unlock' uses a term the user has not met. After 'I saved it' the drive name truncates to 'research-no...' while the Recovery file saved message occupies the toolbar. On mobile the toast is flush to the left edge. Connect dialog URL breaks mid-word ('ll/ms.txt').",
+    "expected": "Say each thing once; no truncation of a short drive name",
+    "actual": "As described",
+    "evidence": "SETUP-004 screenshots/step-3-saved-confirm.png, step-4-drive-ready.png, mobile-check-dialog.png",
+    "suggested_fix": "Remove repeat, shorten toast, allow wider drive chip",
+    "surface": "console drive dialogs"
+   },
+   {
+    "id": "F-SETUP-002-1",
+    "story": "SETUP-002",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Public pricing page shows 'Paid checkout is not enabled on this deployment. The Free plan is available when sign-in and storage are configured...' and 'Overage rates have not been published for this deployment', wording for self-hosters. Developer and Team show a disabled Coming soon with no timeline. 'stored ciphertext' is unexplained. Seen on this local host where checkout is off; production wording not checked.",
+    "expected": "Visitor-focused wording",
+    "actual": "Operator wording",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-002/screenshots/step-1-pricing.png",
+    "suggested_fix": "Show the banner only on self-hosted installs; say 'paid plans coming soon'",
+    "surface": "/pricing"
+   },
+   {
+    "id": "F-SETUP-007-1",
+    "story": "SETUP-007",
+    "severity": "low",
+    "category": "consistency",
+    "description": "FAQ 'What happens if I lose the drive key?' says to save the recovery file when you create a drive, but the agent-first path (the one the landing page promotes) never has the human create a drive. The same panel claims 'one step with no keys to paste' while the page needs a code. 'Sign up free' appears five times on the landing page, 'Copy prompt' (landing) vs 'Copy' (console) differ.",
+    "expected": "FAQ matches the agent-first path",
+    "actual": "Mismatch",
+    "evidence": "SETUP-007 screenshots/step-2-faq.png, step-1-landing-full.png",
+    "suggested_fix": "Reword to 'ask your agent to run credentials export; the CLI prints this at setup'",
+    "surface": "landing FAQ"
+   },
+   {
+    "id": "F-SETUP-008-1",
+    "story": "SETUP-008",
+    "severity": "low",
+    "category": "flow",
+    "description": "Sign-up and sign-in not-configured panels say 'Configure the Agent Drive Clerk instance to enable human access' with no link to self-host docs and no next step; header Sign up free and Sign in loop between them. The test-session user also still sees Sign in / Sign up free in the landing header (may be a test-mode artifact).",
+    "expected": "Link to setup docs",
+    "actual": "Dead end",
+    "evidence": "SETUP-008 screenshots/step-1.png, step-2.png, step-3.png",
+    "suggested_fix": "Add link to self-hosting docs",
+    "surface": "/sign-up, /sign-in"
+   },
+   {
+    "id": "F-GEO-1",
+    "story": "SETUP-001",
+    "severity": "suggestion",
+    "category": "visual",
+    "description": "geometry-audit wrappedControls flags nearly every nav link and button as wrapped though screenshots show single-line labels; treated as false positives and not logged as defects. Next.js dev badge overlaps content in screenshots; dev-only.",
+    "expected": "n/a",
+    "actual": "n/a",
+    "evidence": "SETUP-001 step-1.png",
+    "suggested_fix": "None for the app",
+    "surface": "audit tooling"
+   }
+  ]
+ },
+ {
+  "slug": "install-login",
+  "stories": [
+   {
+    "id": "SETUP-009",
+    "status": "pass",
+    "note": "Happy path worked end to end (llms.txt, login, approve, backup to file, skill install --target, check ok). Findings are copy inconsistencies, a cropped mobile input and small CLI messages. Not walkable: npm install, clipboard/1Password success, Chrome auto-open. The named session uxw-install-login was contaminated by another walker overwriting a shared scratchpad helper, so the first run is kept in screenshots/first-run-shared-session/ and login/approve/console were redone in session uxw-install-login-solo."
+   },
+   {
+    "id": "SETUP-010",
+    "status": "partial",
+    "note": "Signed-out redirect to /sign-in with redirect_url, sign-in to sign-up hop with redirect_url, manual code entry and approve walked. The Clerk sign-in/sign-up cards, email verification and whether redirect_url survives them are not-walkable (sign-in shows 'not configured on this installation')."
+   },
+   {
+    "id": "SETUP-011",
+    "status": "partial",
+    "note": "Login with --no-browser, approve, credentials export --stdout then confirm, and a fresh home with AGENT_DRIVE_CREDENTIALS (check ok) all walked. A real Docker/CI container, EACCES on global install, real npx download, Node < 24 and CI-suppressed browser open are not-walkable. Device login was rate-limited (slow_down) for about 55 minutes before this could be walked."
+   },
+   {
+    "id": "SETUP-012",
+    "status": "pass",
+    "note": "CLI printed 'The login code expired. Run `agent-drive login` again.' after 10 minutes, the stale card and the fresh No pairing card both gave recovery text, and a re-run login was approved successfully. Laptop-sleep and 5-network-failure variations not walked."
+   },
+   {
+    "id": "SETUP-013",
+    "status": "pass",
+    "note": "Wrong verification code, incomplete code and non-code input produce clear inline errors; correct code accepted case- and space-insensitively. Confirmed there is no Deny button. Account row is only inside collapsed Details."
+   },
+   {
+    "id": "SETUP-014",
+    "status": "pass",
+    "note": "/llms.txt, /llms-full.txt, markdown twins and the docs link to llms.txt all work; /cli/agent-drive.tgz is 404. Findings: quickstart omits the verification code, setup section is below ~60 lines of index."
+   },
+   {
+    "id": "SETUP-015",
+    "status": "fail",
+    "note": "Console drive creation, recovery file download, agent and API key creation all work, and login --token-stdin saves the key. But the human-first path dead-ends: credentials import rejects the console's recovery file, and check then says 'run agent-drive login again'. Only the undocumented AGENT_DRIVE_KEY env var gets check ok. Clerk reverification and Finder not walkable."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-015-1",
+    "story": "SETUP-015",
+    "severity": "high",
+    "category": "flow",
+    "description": "The CLI cannot import the recovery file that the console gives a human-first user. `credentials import --from agent-drive-<id>.key.json` fails; only adcred1 bundles are accepted and the error does not say so.",
+    "expected": "Import accepts the recovery file (format agent-drive-key-v1), or the error names the expected file and the working alternative.",
+    "actual": "Not a valid Agent Drive credentials bundle.",
+    "evidence": "CLI output 'Not a valid Agent Drive credentials bundle.'; recovery file format=agent-drive-key-v1; screenshots /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-015/screenshots/step-4.png",
+    "suggested_fix": "Accept agent-drive-key-v1 in credentials import, or point the error at AGENT_DRIVE_KEY.",
+    "surface": "CLI credentials import"
+   },
+   {
+    "id": "F-015-2",
+    "story": "SETUP-015",
+    "severity": "high",
+    "category": "error-handling",
+    "description": "After login with an API key and no local drive key, `agent-drive check` says to run login again, which cannot fix a key-based login.",
+    "expected": "Tell the user to supply the drive key (recovery file or AGENT_DRIVE_KEY).",
+    "actual": "There is no usable drive key on this machine. Run `agent-drive login` again.",
+    "evidence": "CLI output of check in ~/uxw/install-login-015 on the Studio",
+    "suggested_fix": "Branch the message when the config came from --token-stdin or an env API key.",
+    "surface": "CLI check"
+   },
+   {
+    "id": "F-015-3",
+    "story": "SETUP-015",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Console API keys page says 'Run the CLI from the repository after building it' and shows a login command and env-var reads that differ from llms.txt/docs; it never mentions --token-stdin or the recovery file. The new-key dialog says only 'use it with agent-drive login'.",
+    "expected": "Same install and login commands as the docs, including --token-stdin and how to supply the drive key.",
+    "actual": "Developer wording and a different command shape.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-015/screenshots/step-7.png and step-9.png",
+    "suggested_fix": "Rewrite the From your terminal block to match quickstart.",
+    "surface": "web console API keys"
+   },
+   {
+    "id": "F-015-4",
+    "story": "SETUP-015",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "AGENT_DRIVE_KEY and AGENT_DRIVE_KEY_<DRIVE_ID> are the only working way to give the CLI a recovery-file key, but `agent-drive --help` does not list them.",
+    "expected": "Help lists all configuration env vars.",
+    "actual": "Help lists CONFIG, API_URL, API_KEY, MACHINE, CREDENTIALS only. check ok was obtained only with AGENT_DRIVE_KEY.",
+    "evidence": "agent-drive --help bottom section",
+    "suggested_fix": "Add both variables to help and to the console snippet text.",
+    "surface": "CLI help"
+   },
+   {
+    "id": "F-015-5",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "`login --token-stdin` success prints one line of whoami JSON with no sentence, config path or next step, and no reminder that the drive key is still missing.",
+    "expected": "Human summary plus the drive-key reminder.",
+    "actual": "Raw JSON {accountId, agentId, keyId, scopes, driveIds...}.",
+    "evidence": "CLI output, exit 0",
+    "suggested_fix": "Print 'Saved API key for agent X. No drive key on this machine yet: ...'.",
+    "surface": "CLI login --token-stdin"
+   },
+   {
+    "id": "F-015-6",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The first Create a drive dialog shows 'Agent-only \u2014 never add this drive to passphrase unlock' before passphrase unlock is explained; the Files header sentence about setting a passphrase is likewise unexplained for a user with no drive.",
+    "expected": "Plain wording or hide under Advanced.",
+    "actual": "Jargon at first contact.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-015/screenshots/step-1.png and step-2.png",
+    "suggested_fix": "Move behind an Advanced disclosure.",
+    "surface": "web console"
+   },
+   {
+    "id": "F-015-7",
+    "story": "SETUP-015",
+    "severity": "low",
+    "category": "consistency",
+    "description": "Console onboarding steps say 'The agent shows a pairing code. You approve it once.' without the verification code that the approve page requires.",
+    "expected": "Mention the verification code.",
+    "actual": "Pairing code only.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-015/screenshots/step-1.png",
+    "suggested_fix": "Change step 3 to 'Type the verification code and approve it once.'",
+    "surface": "web console onboarding"
+   },
+   {
+    "id": "F-009-1",
+    "story": "SETUP-009",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Home hero says the agent 'shows a pairing code, and you approve it', the console Agents panel says 'open it and click Approve', and the served quickstart says 'check that the code matches ... and click Approve'; /llms.txt, connect-an-agent and /connect require a second never-shown 16-hex verification code.",
+    "expected": "Every surface mentions the verification code.",
+    "actual": "Website copy mentions one code; the approve page demands another.",
+    "evidence": "Hero text 'Free to start. Your agent shows a pairing code, and you approve it in your account.'; console Agents panel (SETUP-009/screenshots/step-5.png context); GET /docs/quickstart.md section 3",
+    "suggested_fix": "Add 'type the verification code your agent prints' to hero hint, console panels and quickstart.",
+    "surface": "web home, console, docs quickstart"
+   },
+   {
+    "id": "F-009-2",
+    "story": "SETUP-009",
+    "severity": "medium",
+    "category": "layout",
+    "description": "At 390px width the Verification code input is about 165px wide, so the placeholder and typed 16-character code are cut off after three groups.",
+    "expected": "Full code visible, or label stacked above the input.",
+    "actual": "Placeholder reads 'a1b2 c3d4 e5f6' and the last group is hidden.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-009/screenshots/first-run-shared-session/mobile-check.png and SETUP-013/screenshots/mobile-check.png",
+    "suggested_fix": "Stack label above input on narrow screens.",
+    "surface": "web /connect mobile"
+   },
+   {
+    "id": "F-009-3",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "`agent-drive skill install` with no ~/.claude or ~/.codex prints instructions but exits 0 although nothing was written.",
+    "expected": "Non-zero exit or explicit 'not installed'.",
+    "actual": "'No ~/.claude or ~/.codex directory found. The skill is at ...; copy it to <skills dir>/agent-drive/SKILL.md, or use --target <dir>.' with rc=0",
+    "evidence": "CLI output, rc=0",
+    "suggested_fix": "Exit non-zero so an agent following llms.txt step 5 does not report success.",
+    "surface": "CLI skill install"
+   },
+   {
+    "id": "F-009-4",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Login prints 'Ignored a different API URL returned by the server.' with no explanation (probably a local-origin artifact).",
+    "expected": "Silent, or names both URLs.",
+    "actual": "Unexplained warning before 'Logged in as agent ...'.",
+    "evidence": "out.log of ~/uxw/install-login-009b",
+    "suggested_fix": "Name the URLs or drop the line when harmless.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-009-5",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "AGENT_DRIVE_API_URL set to the site origin (no /api) fails with a bare status and no URL or hint; the console snippet shows the origin-only form for --api.",
+    "expected": "Message naming the URL tried and the /api suffix.",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "CLI output",
+    "suggested_fix": "Include the URL and hint.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-009-6",
+    "story": "SETUP-009",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Right after a successful agent connection, console Files says 'Ready for your first file. Connect an agent with the CLI or MCP to upload encrypted files.' with a 'Key needed \u00b7 Not backed up' chip, as if no agent were connected.",
+    "expected": "Acknowledge the connected agent and explain the chip.",
+    "actual": "Generic empty state.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-009/screenshots/step-5.png",
+    "suggested_fix": "Say 'billing-api agent is connected; its first file will appear here.'",
+    "surface": "web console Files"
+   },
+   {
+    "id": "F-010-1",
+    "story": "SETUP-010",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "A signed-out visitor following an agent's approval link lands on a plain 'Sign in' screen with no mention that an agent pairing is waiting; new users must notice the orange header button or the small 'New here? Sign up free' line.",
+    "expected": "Context line plus equal sign-in/sign-up choices.",
+    "actual": "Generic Sign in heading (Clerk card not renderable here).",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-010/screenshots/step-1.png; URL /sign-in?redirect_url=%2Fconnect%3Fcode%3DKHSP-BDBQ",
+    "suggested_fix": "Show pending-agent context and both choices on the redirect page.",
+    "surface": "web /sign-in"
+   },
+   {
+    "id": "F-010-2",
+    "story": "SETUP-010",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "/connect for an unknown code sends a signed-out user to sign-in first; the wrong-code message appears only after signing in.",
+    "expected": "Mention the 10-minute lifetime on the sign-in page.",
+    "actual": "/connect?code=ZZZZ-ZZZZ redirects to /sign-in?redirect_url=%2Fconnect%3Fcode%3DZZZZ-ZZZZ",
+    "evidence": "agent-browser get url",
+    "suggested_fix": "Low priority.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-010-3",
+    "story": "SETUP-010",
+    "severity": "low",
+    "category": "flow",
+    "description": "After entering a code manually, the URL stays /connect, so a reload loses the pairing request.",
+    "expected": "URL updates to /connect?code=XXXX-XXXX.",
+    "actual": "URL remains http://localhost:3811/connect",
+    "evidence": "agent-browser get url after Continue; SETUP-010/screenshots/step-4.png",
+    "suggested_fix": "replaceState with the code.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-010-4",
+    "story": "SETUP-010",
+    "severity": "suggestion",
+    "category": "consistency",
+    "description": "quickstart.md starts with 'Sign up' while /llms.txt, the surface an agent reads, has no sign-up step; the order differs.",
+    "expected": "One order.",
+    "actual": "quickstart step 1 'Create your account at /sign-up'; llms.txt only says the approval link asks the human to sign in.",
+    "evidence": "GET /docs/quickstart.md and /llms.txt",
+    "suggested_fix": "Add 'No account yet? The link lets you create one.' to llms.txt.",
+    "surface": "docs and llms.txt"
+   },
+   {
+    "id": "F-011-1",
+    "story": "SETUP-011",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "When the device-login start limit (20 per IP per hour) is hit, the CLI prints only 'slow_down'. Nothing says it is a rate limit or how long to wait; shared-IP sandboxes and CI will hit this and may loop. Observed for about 55 minutes of retries.",
+    "expected": "A plain message with the wait time and a non-zero exit.",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI output repeated on every retry 18:11 to 19:03 EST",
+    "suggested_fix": "Map 429 slow_down on the start call to 'Too many login attempts from this network; try again in N minutes' and use Retry-After.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-011-2",
+    "story": "SETUP-011",
+    "severity": "low",
+    "category": "flow",
+    "description": "The post-login backup paragraph lists 1Password and clipboard first; for a sandbox the sensible route (export --stdout, confirm, AGENT_DRIVE_CREDENTIALS) is not in the paragraph.",
+    "expected": "Sandbox hint when non-interactive.",
+    "actual": "Same paragraph for all environments.",
+    "evidence": "CLI login output",
+    "suggested_fix": "Add --stdout to the printed options or detect non-interactive environments.",
+    "surface": "CLI login output"
+   },
+   {
+    "id": "F-012-1",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "No time limit is shown before the request expires; the terminal prints only 'Waiting for approval...' and the page says 'the request expires on its own'.",
+    "expected": "'This code works for 10 minutes'.",
+    "actual": "Silent until expiry.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-012/screenshots/step-4.png; CLI log",
+    "suggested_fix": "Print 'Expires in 10 minutes' in the CLI and on the card.",
+    "surface": "CLI login and web /connect"
+   },
+   {
+    "id": "F-012-2",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "A stale pairing card still shows an active Approve after expiry; clicking it shows an inline error with literal backticks around `agent-drive login`, unlike the code-styled text on the No pairing card.",
+    "expected": "Card flips to the expired state; consistent code styling.",
+    "actual": "This request expired or was already used. Run `agent-drive login` in your agent to get a new code.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-012/screenshots/step-5.png",
+    "suggested_fix": "Render the command as code and replace the card state on 404/410.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-012-3",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Manual entry rejects ABCD-EFGH with 'Enter the code in the form XXXX-XXXX.' although it already has that shape (codes use only some letters).",
+    "expected": "Tell the user to copy the code as printed.",
+    "actual": "Format message for a well-shaped code.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-012/screenshots/step-1.png",
+    "suggested_fix": "Reword to 'That is not a valid code. Copy it from your terminal.'",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-012-4",
+    "story": "SETUP-012",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "One message ('wrong, expired, or already used') covers an unknown code and an already approved code, so a user who already approved cannot tell it succeeded.",
+    "expected": "Distinguish used, expired and unknown.",
+    "actual": "Same text for approved MHZL-CQMP and unknown BCDF-GHJK.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-012/screenshots/step-2.png and step-3.png",
+    "suggested_fix": "Separate the three states.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-013-1",
+    "story": "SETUP-013",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "There is no way to refuse a pairing request in the UI. The page says 'If it does not, close this page; the request expires on its own.' so a security-minded user cannot actively reject a suspicious request and it stays valid up to 10 minutes.",
+    "expected": "A secondary Deny button (the deny route exists).",
+    "actual": "Only Approve agent.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-013/screenshots/step-1.png; interactive elements: Details, checkbox, input, Approve only",
+    "suggested_fix": "Add Deny that calls the existing deny route.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-013-2",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The Account row (which account will own the drive) is only inside the collapsed Details, so a user with two accounts could approve under the wrong one.",
+    "expected": "Show the account outside Details.",
+    "actual": "Collapsed by default.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-013/screenshots/step-1.png and step-2.png",
+    "suggested_fix": "Show 'Signed in as <email>' under the title.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-013-3",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "consistency",
+    "description": "'Does this code match your terminal?' puts the 8-letter code first although the check that matters is the 16-hex verification code.",
+    "expected": "Label the two codes by purpose.",
+    "actual": "Two codes, one phrase.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-013/screenshots/step-1.png",
+    "suggested_fix": "Rename to 'Pairing code' and 'Verification code' with one-line purposes.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-013-4",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "An incomplete code (12 hex digits, no spaces) gets 'as four groups like a1b2 c3d4 e5f6 7890', implying spaces are required, although 2B1A4C4B82B6953F is accepted.",
+    "expected": "Say 16 characters, spaces optional.",
+    "actual": "Shape message about groups.",
+    "evidence": "alert text after typing 2b1a4c4b82b6",
+    "suggested_fix": "Reword.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-013-5",
+    "story": "SETUP-013",
+    "severity": "low",
+    "category": "layout",
+    "description": "With Details expanded at 1280x800 the Approve button falls below the fold.",
+    "expected": "Primary action visible without scrolling.",
+    "actual": "Button starts at about y=800.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-013/screenshots/step-2.png",
+    "suggested_fix": "Make Details compact or keep the action row sticky.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-014-1",
+    "story": "SETUP-014",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Served quickstart tells the human only to 'check that the code matches ... and click Approve', while /llms.txt and connect-an-agent require typing a 16-hex verification code that the page never shows.",
+    "expected": "Same instruction on every surface.",
+    "actual": "quickstart omits the verification code.",
+    "evidence": "GET /docs/quickstart.md section '3. Log in and approve' vs /llms.txt step 2",
+    "suggested_fix": "Add the verification-code sentence to quickstart.",
+    "surface": "docs quickstart"
+   },
+   {
+    "id": "F-014-2",
+    "story": "SETUP-014",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "The human-facing setup guide in /llms.txt starts at line 63, about 925px down, under a long doc index; only 'The setup guide follows the lists.' points to it.",
+    "expected": "Setup first or a jump hint.",
+    "actual": "Needs a screen of scrolling at 1280 wide.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-014/screenshots/step-1.png and step-2.png",
+    "suggested_fix": "Put the setup guide before the doc index.",
+    "surface": "/llms.txt"
+   },
+   {
+    "id": "F-014-3",
+    "story": "SETUP-014",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "llms.txt step 2 says 'Other options on the page are optional; the defaults are right.' with no reference to which options a human would see.",
+    "expected": "Name the options or drop the sentence.",
+    "actual": "Vague sentence.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-014/screenshots/step-2.png",
+    "suggested_fix": "Rewrite as 'Leave Details closed unless you want to limit access.'",
+    "surface": "/llms.txt"
+   },
+   {
+    "id": "F-014-4",
+    "story": "SETUP-014",
+    "severity": "suggestion",
+    "category": "flow",
+    "description": "The header has no link to the setup guide; llms.txt is reachable only via docs, hero text and console panels.",
+    "expected": "Optional.",
+    "actual": "Header shows Pricing, Docs, Sign in, Sign up free.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-014/screenshots/step-3.png",
+    "suggested_fix": "Fine as is; mention in Docs nav.",
+    "surface": "web header"
+   }
+  ]
+ },
+ {
+  "slug": "approve-connect",
+  "stories": [
+   {
+    "id": "SETUP-016",
+    "status": "pass",
+    "note": "Happy path works: approval card clear, one dominant Approve, CLI finished in about 6s. Low findings: CLI says console 'Settings' but nav has none; footer 'Console, Agents' is not a link. Brief's API URL needed the /api suffix."
+   },
+   {
+    "id": "SETUP-017",
+    "status": "pass",
+    "note": "Bare /connect flow works (empty, vowel, wrong, correct code). Findings: at 390px the Verification code input is 168px wide so the typed code scrolls and the placeholder is cut; vowel error says 'form XXXX-XXXX' without naming letters; 'NO PAIRING' tag on plain input errors; no UI link to /connect."
+   },
+   {
+    "id": "SETUP-018",
+    "status": "partial",
+    "note": "Clerk sign-up/sign-in forms not walkable. Verified: signed-out redirect to /sign-in?redirect_url=..., the redirect survives the sign-in/sign-up switch (hrefs and URL), then approval as a new test user works. Quickstart, console Agents copy and home page omit the verification code."
+   },
+   {
+    "id": "SETUP-019",
+    "status": "pass",
+    "note": "Empty, non-hex, pasted-with-label, wrong-last-digit and hyphenated codes all behave; mismatch message is clear. Low findings: pasted 'Verification code: ...' line rejected with generic message; non-hex char not named; orphan word in error."
+   },
+   {
+    "id": "SETUP-020",
+    "status": "pass",
+    "note": "No Deny/Cancel control confirmed (only Approve, Details, delegate checkbox); closing the tab leaves the request pending and still approvable (I approved it later). Agents page lists no pending requests. Footer 'Console, Agents' is plain text."
+   },
+   {
+    "id": "SETUP-021",
+    "status": "partial",
+    "note": "Real reconnect (config still present) works with 'It reconnects to the drive it used before' and a clear 'API key changed' CLI message. But the story's persona (lost config, same name) silently creates a second same-named drive and a second key under one agent (high finding). Hit CLI 'slow_down' rate limit (20 starts/IP/hour) with no explanation; waited about 1 hour."
+   },
+   {
+    "id": "SETUP-022",
+    "status": "pass",
+    "note": "Existing-drive path walked with an adcred1 bundle pasted in Drive key (file chooser and console recovery-file download not exercised). Errors for garbage key and bad folder are clear. Findings: Read only + write folder accepted (CLI then prints 'Scopes: read' and 'Writes limited to: /papers'); two drives with identical names in the select; link hidden in Details and says 'recovery file'; mixed-order two-column grid; sticky Approve covers hint on mobile."
+   },
+   {
+    "id": "SETUP-023",
+    "status": "pass",
+    "note": "Delegate checkbox inside Details updates the summary line; ravi-lead got scope delegate; grant to worker-1 printed the approval URL; worker page shows 'offered by ravi-lead' and approval succeeded. Findings: delegate hidden in Details, done card does not confirm delegate, repeated names. 'Forgot checkbox' failure and focus re-fetch banner not walked."
+   },
+   {
+    "id": "SETUP-024",
+    "status": "pass",
+    "note": "Walked a real 10-minute expiry and an already-used code. Both recover with a clear command; double-click posts one approval. Low findings: literal backticks in the expired banner vs styled command on entry card; no expiry time or countdown; generic 'wrong, expired, or already used'. On-page rate-limit message and session-expiry redirect not walked."
+   },
+   {
+    "id": "SETUP-025",
+    "status": "partial",
+    "note": "Wrong-account detection by email not walkable (test session shows 'Local test session' for every user; no real Clerk). Confirmed no account name or sign-out control on the /connect header and the account only appears in collapsed Details; approval completes in three steps with no account confirmation."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-SETUP-021-01",
+    "story": "SETUP-021",
+    "severity": "high",
+    "category": "flow",
+    "description": "Logging in again with the same agent name but no saved key (the story's lost-config persona) shows 'New encrypted drive' with no notice that an agent with this name exists. After approval the account has a second drive with the same name and the one agent shows '2 ACTIVE KEYS'. The old drive is not reconnected and its key is not recovered.",
+    "expected": "Tell the user an agent with this name already exists and offer reconnect (with backup) or a new drive.",
+    "actual": "Silent duplicate drive and key.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-021/screenshots/step-1.png, step-2.png (Agents page '2 ACTIVE KEYS')",
+    "suggested_fix": "Show a notice on the page when the agent name already exists in the account.",
+    "surface": "web /connect and CLI login"
+   },
+   {
+    "id": "F-SETUP-021-02",
+    "story": "SETUP-021",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "After about 20 login starts from one IP, the CLI prints only a bare rate-limit code with no wait time or explanation. The docs say 20 starts per IP per hour. 'slow_down' is also the polling term, so the message is misleading. The block lasted about one hour in this run.",
+    "expected": "A message naming the limit and when to retry.",
+    "actual": "CLI output: 'Agent Drive refused the login request: slow_down'",
+    "evidence": "CLI output quote above; docs/api-device-login.md line 54 'at most 20 starts per IP address per hour'",
+    "suggested_fix": "Map 429 on device_authorization to a human message with the wait.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-016-01",
+    "story": "SETUP-016",
+    "severity": "medium",
+    "category": "flow",
+    "description": "CLI success text says 'Set a passphrase in the console under Settings' but the console sidebar has no Settings item; the only route is a small 'Set up' link in the Files header.",
+    "expected": "CLI names a control the user can see.",
+    "actual": "Mismatch between CLI wording and console UI.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-016/screenshots/step-4.png; CLI line 'Set a passphrase in the console under Settings; agents will add the drive then.'",
+    "suggested_fix": "Change CLI text to 'click Set up on the Files page' or add a Settings entry.",
+    "surface": "CLI and console"
+   },
+   {
+    "id": "F-SETUP-018-01",
+    "story": "SETUP-018",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The served quickstart (docs/quickstart.md line 35), the console Agents panel ('open it and click Approve') and the home page ('shows a pairing code') omit the verification code that the approval page requires. Only llms.txt and connect-an-agent.md mention it.",
+    "expected": "Every surface describing approval says to type the verification code.",
+    "actual": "Three surfaces omit it.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-3.png; curl of /docs/quickstart.md and /index.md",
+    "suggested_fix": "Add 'and type the verification code your agent printed' to those texts.",
+    "surface": "docs, home, console Agents"
+   },
+   {
+    "id": "F-SETUP-020-01",
+    "story": "SETUP-020",
+    "severity": "medium",
+    "category": "flow",
+    "description": "There is no Deny or Cancel control on the approval page. A user who does not recognise the request can only close the tab; the CLI keeps 'Waiting for approval...' and the request stays approvable until it expires (I approved a closed-tab request later to confirm).",
+    "expected": "A visible Deny button using the existing deny route.",
+    "actual": "Only Approve; small grey text says to close the page.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-1.png",
+    "suggested_fix": "Add a secondary Deny button.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-020-02",
+    "story": "SETUP-020",
+    "severity": "low",
+    "category": "flow",
+    "description": "Console Agents page lists no pending pairing requests ('0 AGENTS / Create your first agent') while one is outstanding, so a request cannot be reviewed or cancelled there.",
+    "expected": "Pending requests with a cancel action.",
+    "actual": "Not shown.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-3.png",
+    "suggested_fix": "List pending requests.",
+    "surface": "console Agents"
+   },
+   {
+    "id": "F-SETUP-025-01",
+    "story": "SETUP-025",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The /connect header has no account name or sign-out control, and the account appears only in the collapsed Details row. A user with two accounts can approve into the wrong one in three steps; the done card does not name the account. Email text could not be checked: the test session shows 'Local test session' for every user.",
+    "expected": "Show 'Approving as <email>' with a 'Not you?' link on the card and the done card.",
+    "actual": "No account cue outside Details.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-025/screenshots/step-1.png, step-4.png",
+    "suggested_fix": "Show the account under the title and on the done card.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-022-01",
+    "story": "SETUP-022",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Read only plus 'Only allow writes under /papers' is accepted; the agent then logs in with 'Scopes: read' and 'Writes limited to: /papers', and the done card does not mention the folder.",
+    "expected": "Folder field disabled or explained when Read only is ticked.",
+    "actual": "Contradictory scope output.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-022/screenshots/step-5.png; CLI output 'Scopes: read' / 'Writes limited to: /papers'",
+    "suggested_fix": "Disable the folder field when Read only is checked.",
+    "surface": "web /connect and CLI"
+   },
+   {
+    "id": "F-SETUP-022-02",
+    "story": "SETUP-022",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Drive select lists two drives with the same name ('luis-claude' and 'luis-claude (Dennisons-Mac-Studio.local)') with no id or date, so the wrong drive's key could be handed over.",
+    "expected": "Distinguishing detail such as short id.",
+    "actual": "Identical names.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-022/screenshots/step-2.png",
+    "suggested_fix": "Append short id or created date.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-022-03",
+    "story": "SETUP-022",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "'Use one of my drives instead (needs its recovery file)' is a small link inside collapsed Details and says 'recovery file' although a pasted key or adcred1 bundle also works.",
+    "expected": "Visible entry with wording that matches what is accepted.",
+    "actual": "Hidden small link.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-022/screenshots/step-1.png",
+    "suggested_fix": "Reword to 'Use one of my existing drives'.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-022-04",
+    "story": "SETUP-022",
+    "severity": "low",
+    "category": "layout",
+    "description": "In the existing-drive form 'Or choose a file' sits under the folder field in the right column while the Drive key is in the left column; the Drive key placeholder is clipped ('Paste the drive key or a'). Clicking Approve on an empty form shows only the verification code error, not the missing key.",
+    "expected": "Key and file chooser adjacent, placeholder readable, all missing fields flagged.",
+    "actual": "Mixed ordering, one error at a time.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-022/screenshots/step-2.png, step-3.png",
+    "suggested_fix": "Group key and file; validate together.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-017-01",
+    "story": "SETUP-017",
+    "severity": "medium",
+    "category": "layout",
+    "description": "At 390px wide the Verification code input is 168px wide because its label sits beside it. The placeholder is cut to 'a1b2 c3d4 e5f6' and a typed code shows only its last three groups, so the user cannot check the typed value. Same layout on SETUP-023 and SETUP-025.",
+    "expected": "Label above a full-width input on narrow screens.",
+    "actual": "Measured input width 168px at left 189px.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-9.png",
+    "suggested_fix": "Stack the label above the input below about 480px.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-017-02",
+    "story": "SETUP-017",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Vowels typed in the pairing code field are accepted and shown, then Continue says 'Enter the code in the form XXXX-XXXX.' The form is right; the allowed letters are never named. The tag also changes to 'NO PAIRING' on plain input errors, and the wrong/expired/used message cannot tell a typo from an expired code.",
+    "expected": "Drop invalid letters or name them; keep AWAITING CODE until a lookup fails.",
+    "actual": "Misleading message and tag.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-017/screenshots/step-3.png, step-4.png",
+    "suggested_fix": "Validate letters on input and advise 're-check the code, then rerun login'.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-017-05",
+    "story": "SETUP-017",
+    "severity": "low",
+    "category": "flow",
+    "description": "No link to /connect exists in the header or console nav; a user with the agent on another machine must know the URL.",
+    "expected": "Route reachable from the console Agents panel.",
+    "actual": "None found.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-020/screenshots/step-3.png",
+    "suggested_fix": "Link /connect from the Agents panel.",
+    "surface": "console"
+   },
+   {
+    "id": "F-SETUP-019-01",
+    "story": "SETUP-019",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "A pasted 'Verification code: 9fb7 99bc 8b49 1723' line, or a code with a non-hex character (l or o), gets the generic 'four groups' message that names neither the label nor the allowed characters. The error also wraps with an orphan '7890.'.",
+    "expected": "Accept the pasted line or say 'use only 0-9 and a-f'.",
+    "actual": "Enter the verification code your agent printed, as four groups like a1b2 c3d4 e5f6 7890.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-019/screenshots/step-2.png",
+    "suggested_fix": "Strip a leading label and name the allowed characters.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-023-01",
+    "story": "SETUP-023",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "The delegate option is inside collapsed Details. An orchestrator user sees nothing on the main card. The done card does not confirm 'can add other agents' even though the summary line did.",
+    "expected": "Visible or pre-requestable option; done card confirms delegate.",
+    "actual": "Hidden option, unconfirmed result.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-2.png, step-4.png",
+    "suggested_fix": "Let login request delegate; repeat it on the done card.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-023-03",
+    "story": "SETUP-023",
+    "severity": "low",
+    "category": "hierarchy",
+    "description": "The worker request summary reads 'ravi-lead \u00b7 can read and write \u00b7 offered by ravi-lead' because drive and agent share a name; the same word appears three times.",
+    "expected": "Labelled parts, e.g. Drive and Offered by.",
+    "actual": "Repeated word.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-023/screenshots/step-5.png",
+    "suggested_fix": "Label the parts.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-024-01",
+    "story": "SETUP-024",
+    "severity": "low",
+    "category": "consistency",
+    "description": "The expired banner shows literal backticks around agent-drive login, while the entry-card message styles it as code. The open page after expiry keeps a live-looking form with no expiry time or countdown; the entry card message lumps wrong, expired and already used.",
+    "expected": "One wording and styling; an expiry time on the page.",
+    "actual": "Two wordings; user learns of expiry only after typing the code.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-024/screenshots/step-2.png, step-1.png",
+    "suggested_fix": "Render the command as code, show a countdown, add an 'already approved' state.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-018-03",
+    "story": "SETUP-018",
+    "severity": "low",
+    "category": "layout",
+    "description": "With Details open the Approve agent button falls below the 800px fold (the delegate hint and rows push it down); Requested shows a bare US-locale timestamp with no timezone. The signed-out sign-in page gives no context about the waiting approval.",
+    "expected": "Primary action visible; time with timezone.",
+    "actual": "Approve cut off at y>=795.",
+    "evidence": "docs/ux-walker/setup-nov27/stories/SETUP-018/screenshots/step-4.png, step-1.png",
+    "suggested_fix": "Compact Details rows; show relative expiry.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-SETUP-016-03",
+    "story": "SETUP-016",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "If AGENT_DRIVE_API_URL lacks the /api suffix (as the walk brief had it), the CLI prints only 'Agent Drive refused the login request: 404' with no hint. The brief's URL had to be changed to http://localhost:3811/api. Also the footer 'Console, Agents' text on the approval card is not a link.",
+    "expected": "Message names the URL called or says the URL should end in /api.",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "CLI output quote above",
+    "suggested_fix": "Include the URL and a hint on 404.",
+    "surface": "CLI login"
+   }
+  ]
+ },
+ {
+  "slug": "backup-first-file",
+  "stories": [
+   {
+    "id": "SETUP-026",
+    "status": "partial",
+    "note": "CLI steps pass (check refusal, confirm, status, check ok). Clipboard copy and Apple Passwords paste not walkable: headless Studio, pbcopy fails. Stood in with export --stdout then confirm."
+   },
+   {
+    "id": "SETUP-027",
+    "status": "pass",
+    "note": "check refusal, file export and check ok all work. Run on the SETUP-026 agent, because a second device login was rate-limited. ~/Documents export fails with no reason when the folder is missing."
+   },
+   {
+    "id": "SETUP-028",
+    "status": "partial",
+    "note": "op-not-installed error and file fallback walked. op install, signed-out and vault-locked states, and the 1Password app paste are not walkable. The home already had a stdout backup recorded."
+   },
+   {
+    "id": "SETUP-029",
+    "status": "partial",
+    "note": "put, get, cmp, share, share list, revoke and the error cases all pass in the CLI. Share page, revoked page and missing-key page walked. The browser download failed because the page fetches from 127.0.0.1:9811, which is unreachable from my browser. Console folderUrl and share dialog not walked."
+   },
+   {
+    "id": "SETUP-030",
+    "status": "not-walkable",
+    "note": "A read-only agent needs a delegate-scope device login. Login was rate-limited for the whole session: slow_down, 20 starts per IP per hour across all walkers. The delegate-scope error text was observed and is clear."
+   },
+   {
+    "id": "SETUP-031",
+    "status": "pass",
+    "note": "skill install walked with no ~/.claude or ~/.codex, plus --target variants. Findings on DIR layout, llms.txt vs quickstart order, no Cursor guidance, exit 0 when nothing is written."
+   },
+   {
+    "id": "SETUP-032",
+    "status": "partial",
+    "note": "CLI parts covered via the sibling stories. Console chip, unlock dialog and passphrase steps not walked: shared browser cookie overwritten by other walkers, second login rate-limited, download host unreachable. New-user console empty state walked at 1280 and 390."
+   },
+   {
+    "id": "SETUP-033",
+    "status": "pass",
+    "note": "export --stdout piped, confirm, then three fresh homes using only AGENT_DRIVE_CREDENTIALS. whoami, check ok, put and ls all work. Bundle supplies the API URL. Secret store and CI secret UI not walkable. TTY refusal observed with ssh -tt."
+   }
+  ],
+  "findings": [
+   {
+    "id": "SETUP-027-F4",
+    "story": "SETUP-027",
+    "severity": "medium",
+    "category": "flow",
+    "description": "Device login start is limited to 20 per IP per hour. The CLI reports only 'slow_down', with no explanation or wait time. A team behind one NAT or a CI fleet gets stuck at the first step. This blocked SETUP-030 and SETUP-032 here.",
+    "expected": "A sentence explaining the limit and when to retry",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI login output repeated for about 35 minutes; docs/api-device-login.md says 20 starts per IP per hour",
+    "suggested_fix": "Map slow_down on device_authorization to plain text with the wait time.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-026-F6",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "env",
+    "description": "With AGENT_DRIVE_API_URL set to the bare origin (as instructed), login fails with an unhelpful 404. Adding /api works but prints 'Ignored a different API URL returned by the server.' The instruction supplied for this run was wrong; the CLI error does not hint at it.",
+    "expected": "Hint that the URL should end in /api, or tolerate a bare origin",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "login out.log",
+    "suggested_fix": "On 404 suggest the /api suffix.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-026-F3",
+    "story": "SETUP-026",
+    "severity": "medium",
+    "category": "flow",
+    "description": "After login the terminal prints the backup hint and then a second instruction: set a passphrase in the console under Settings. A first-timer sees two next steps, and the backup is the one that blocks check.",
+    "expected": "One clear next step",
+    "actual": "'Back up this agent's credentials...' followed by 'Your account has no account key yet... Set a passphrase in the console under Settings'",
+    "evidence": "login out.log",
+    "suggested_fix": "Number the backup as step 1 and mark the passphrase optional or later.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-026-F4",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "The approved page tells the user to return to the agent but never says a credentials backup is still required before check passes.",
+    "expected": "Mention the backup",
+    "actual": "Return to your agent to finish setup and confirm it is ready.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-026/screenshots/step-2-approved.png",
+    "suggested_fix": "Add that the agent will ask where to store the key backup.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "SETUP-026-F2",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "A clipboard backup confirmed with `credentials confirm` is recorded and reported as method stdout. The user never used stdout.",
+    "expected": "Method says clipboard or manual",
+    "actual": "Recorded the credential backup for 1 drive(s) (stdout).",
+    "evidence": "CLI confirm output; credentials status method:stdout",
+    "suggested_fix": "Record clipboard when the pending export came from --to clipboard.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-026-F1",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "A bare `credentials export` error lists only --to <path> or --stdout, hiding the 1password and clipboard targets that help and llms.txt lead with.",
+    "expected": "The error lists all targets",
+    "actual": "Pass exactly one of --to <path> or --stdout.",
+    "evidence": "CLI: agent-drive credentials export, exit 1",
+    "suggested_fix": "Print the usage line or name all four targets.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-026-F5",
+    "story": "SETUP-026",
+    "severity": "low",
+    "category": "copy",
+    "description": "The clipboard failure error offers 1password or a file but not the --stdout | STORE && confirm route.",
+    "expected": "Include the stdout route",
+    "actual": "Could not copy to the clipboard with pbcopy. Nothing was exported. Use `--to 1password` or `--to <a file outside the repo>` instead.",
+    "evidence": "CLI output",
+    "suggested_fix": "Add the stdout route.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-027-F1",
+    "story": "SETUP-027",
+    "severity": "medium",
+    "category": "error",
+    "description": "Exporting to ~/Documents/... when the Documents folder does not exist fails with no reason or recovery step. The story's own example path hits this on Linux and containers.",
+    "expected": "Say the folder does not exist and how to fix it, or create parent folders",
+    "actual": "Unable to write /Users/agent/uxw/backup-first-file-027/Documents/agent-drive-credentials.txt.",
+    "evidence": "CLI exit 1",
+    "suggested_fix": "Create parent directories, or report the cause.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-027-F2",
+    "story": "SETUP-027",
+    "severity": "low",
+    "category": "copy",
+    "description": "The check refusal lists three backup routes with no recommended default for a user who wants to finish quickly.",
+    "expected": "One suggested next command",
+    "actual": "Three options in one sentence",
+    "evidence": "check failure text",
+    "suggested_fix": "Lead with one command, then the alternatives.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-027-F3",
+    "story": "SETUP-027",
+    "severity": "low",
+    "category": "error",
+    "description": "check --drive <unknown> says no key exists on this machine and does not point to whoami or login.",
+    "expected": "A recovery hint",
+    "actual": "There is no key for drive 00000000-0000-0000-0000-000000000000 on this machine.",
+    "evidence": "CLI",
+    "suggested_fix": "Append: run agent-drive whoami to see usable drives.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-028-F1",
+    "story": "SETUP-028",
+    "severity": "medium",
+    "category": "flow",
+    "description": "When the 1Password CLI is missing, the error only says how to install it. It does not say that clipboard-and-confirm or a file also work, which is the hesitation in the story.",
+    "expected": "The error ends with the clipboard and file alternatives",
+    "actual": "The 1Password CLI (`op`) is not installed. Nothing was exported. Install the 1Password CLI (https://developer.1password.com/docs/cli/get-started/), turn on its desktop-app integration ... then run this again.",
+    "evidence": "CLI exit 1",
+    "suggested_fix": "Append the clipboard and file alternatives to the op errors.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-028-F2",
+    "story": "SETUP-028",
+    "severity": "low",
+    "category": "copy",
+    "description": "The file backup success line does not name the file written or warn against repo and synced folders.",
+    "expected": "Backed up credentials for 1 drive(s) to <absolute path> (file)",
+    "actual": "Backed up credentials for 1 drive(s) (file).",
+    "evidence": "CLI output",
+    "suggested_fix": "Print the absolute path and a one-line safety note.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-028-F3",
+    "story": "SETUP-028",
+    "severity": "low",
+    "category": "copy",
+    "description": "The third backup route is worded differently by surface: help says 'outside the repo', the login hint and docs say 'outside the sandbox'.",
+    "expected": "One phrase",
+    "actual": "help: 'a file outside the repo'; BACKUP_HINT: 'a file outside the sandbox, on a path that survives it'",
+    "evidence": "CLI help vs login hint vs clipboard error",
+    "suggested_fix": "Unify the wording.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-029-F1",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "layout",
+    "description": "On the 'Share unavailable' card the Try again button and the Go to Agent Drive link touch, with no gap, at desktop and mobile.",
+    "expected": "A 12-16px gap",
+    "actual": "Button right edge and link left edge are both at x=500",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-029/screenshots/step-4b-after-download.png and step-4c-mobile.png",
+    "suggested_fix": "Add a gap to the action row.",
+    "surface": "web /s/[id]"
+   },
+   {
+    "id": "SETUP-029-F2",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "copy",
+    "description": "The --expires-in error for 90s does not give the min or max or say seconds are unsupported. The story text expected a 'between 2m and 30d' message.",
+    "expected": "The range in the message",
+    "actual": "--expires-in must use a duration such as 30m, 24h, or 7d.",
+    "evidence": "CLI output for 90s and for 24",
+    "suggested_fix": "State the units (m, h, d) and the range.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-029-F3",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "copy",
+    "description": "Re-put to an existing path suggests merging and --if-version and never mentions --overwrite, which is what a user replacing a file wants.",
+    "expected": "Mention --overwrite",
+    "actual": "The file already exists. Current version: <id>. Read the file again, merge your change, then retry with --if-version <id>.",
+    "evidence": "CLI exit 1",
+    "suggested_fix": "Add: or pass --overwrite to replace it.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-029-F4",
+    "story": "SETUP-029",
+    "severity": "low",
+    "category": "visual",
+    "description": "The share download card keeps an empty status area under the Download button, which leaves about 50px of dead space in the card.",
+    "expected": "A tight card",
+    "actual": "Empty space under the button",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-029/screenshots/step-4-share-page.png",
+    "suggested_fix": "Collapse the empty status region.",
+    "surface": "web /s/[id]"
+   },
+   {
+    "id": "SETUP-029-F5",
+    "story": "SETUP-029",
+    "severity": "suggestion",
+    "category": "env",
+    "description": "Browser download was not walkable. The page fetched the ciphertext from 127.0.0.1:9811 (local object store), unreachable from the browser. The user sees 'The file could not be downloaded. Check your connection and try again.'",
+    "expected": "The download starts",
+    "actual": "Share unavailable",
+    "evidence": "Network request GET http://127.0.0.1:9811/agent-drive-local/objects/...; screenshots/step-4b-after-download.png",
+    "suggested_fix": "Test-environment only; verify on staging.",
+    "surface": "web /s/[id]"
+   },
+   {
+    "id": "SETUP-030-F1",
+    "story": "SETUP-030",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The read-only reviewer path needs a delegating agent and a fresh device login. With the per-IP login limit hit, the CLI says only slow_down. The story could not be walked.",
+    "expected": "Explain the login limit",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI login output",
+    "suggested_fix": "See SETUP-027-F4.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-031-F1",
+    "story": "SETUP-031",
+    "severity": "medium",
+    "category": "flow",
+    "description": "llms.txt makes skill install a required step 5 before check. The quickstart lists it as 'Optional' step 7 after check. An agent and a human following different surfaces get different setups.",
+    "expected": "One order and one optionality",
+    "actual": "llms.txt: '5. Install the skill...' before '6. Check that it worked'; quickstart: '## 7. Optional: skill and MCP'",
+    "evidence": "curl http://localhost:3811/llms.txt and /docs/quickstart.md",
+    "suggested_fix": "Make both say optional and after check.",
+    "surface": "docs"
+   },
+   {
+    "id": "SETUP-031-F2",
+    "story": "SETUP-031",
+    "severity": "medium",
+    "category": "copy",
+    "description": "--target DIR writes DIR/SKILL.md, while claude and codex write skills/agent-drive/SKILL.md. --target ./.cursor/skills produces a layout agents will not find, and the CLI help does not say so.",
+    "expected": "Help says DIR is the final skill folder",
+    "actual": "wrote .cursor/skills/SKILL.md",
+    "evidence": "CLI output",
+    "suggested_fix": "Say in help that DIR is the folder that will contain SKILL.md, or append agent-drive.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-031-F3",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "flow",
+    "description": "Nothing says where Cursor or other agents read skills. The no-folder message only tells the user to copy the file by hand.",
+    "expected": "Name common folders or point to MCP",
+    "actual": "No ~/.claude or ~/.codex directory found. ... use --target <dir>.",
+    "evidence": "CLI output; docs/skills.md",
+    "suggested_fix": "Add one line pointing to MCP or to the folder the agent reads.",
+    "surface": "CLI/docs"
+   },
+   {
+    "id": "SETUP-031-F4",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "error",
+    "description": "skill install exits 0 when nothing was written, so scripts cannot detect the miss.",
+    "expected": "A non-zero exit or an explicit status",
+    "actual": "exit=0",
+    "evidence": "CLI",
+    "suggested_fix": "Exit non-zero or print 'nothing installed'.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-031-F5",
+    "story": "SETUP-031",
+    "severity": "low",
+    "category": "copy",
+    "description": "A repeat skill install overwrites silently with the same 'wrote' line, and `skill --help` prints the entire CLI help.",
+    "expected": "'Updated' wording and skill-specific usage",
+    "actual": "wrote .../SKILL.md (twice)",
+    "evidence": "CLI",
+    "suggested_fix": "Say 'updated' when the file existed.",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-032-F1",
+    "story": "SETUP-032",
+    "severity": "low",
+    "category": "flow",
+    "description": "A brand-new console shows the passphrase banner ('Set a passphrase and agents will add every drive's key... Set up') above the 'Give your first agent a home' card, before any agent or drive exists. Two calls to action compete, and nothing mentions the credentials backup that check requires.",
+    "expected": "One next step (connect an agent)",
+    "actual": "Header banner with a Set up button plus the connect card",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-032/screenshots/step-0-console-new-user.png",
+    "suggested_fix": "Hide the passphrase banner until a drive exists.",
+    "surface": "web console"
+   },
+   {
+    "id": "SETUP-032-F2",
+    "story": "SETUP-032",
+    "severity": "suggestion",
+    "category": "env",
+    "description": "Console chip and unlock steps were not walkable. Other walkers overwrote the shared test-session cookie, so the console showed another persona's drive and an unrelated Capture dialog. A second device login was rate-limited, and the download host was unreachable.",
+    "expected": "An isolated run",
+    "actual": "Console showed drive 'priya-agents'",
+    "evidence": "Console snapshot during the SETUP-026 walk",
+    "suggested_fix": "Re-walk in isolation.",
+    "surface": "env"
+   },
+   {
+    "id": "SETUP-033-F1",
+    "story": "SETUP-033",
+    "severity": "medium",
+    "category": "security-copy",
+    "description": "The docs and the TTY refusal imply --stdout is safe, but an agent's shell is not a terminal. An unpiped `credentials export --stdout` prints the bundle into the agent transcript with no warning.",
+    "expected": "The docs warn agents to always pipe, or the CLI guards the unpiped case",
+    "actual": "A non-TTY run printed the 417-byte bundle",
+    "evidence": "CLI: export --stdout | wc -c gave 417; docs/sandboxes.md says '--stdout prints the bundle only when stdout is not a terminal'; ssh -tt run was refused",
+    "suggested_fix": "State plainly: always pipe to a store, never run it bare in an agent shell.",
+    "surface": "CLI/docs"
+   },
+   {
+    "id": "SETUP-033-F2",
+    "story": "SETUP-033",
+    "severity": "low",
+    "category": "error",
+    "description": "Invalid and empty bundle errors give no recovery step. The empty case does not name AGENT_DRIVE_CREDENTIALS.",
+    "expected": "A recovery hint",
+    "actual": "'AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.' and, for an empty value, 'API configuration is missing. Run `agent-drive login` ...'",
+    "evidence": "CLI output",
+    "suggested_fix": "Add: copy the full line from your secret store (it starts adcred1.).",
+    "surface": "CLI"
+   },
+   {
+    "id": "SETUP-033-F3",
+    "story": "SETUP-033",
+    "severity": "low",
+    "category": "copy",
+    "description": "The clipboard failure in a sandbox says 'outside the repo', where sandbox docs say 'outside the sandbox'. It does not mention the --stdout route.",
+    "expected": "Consistent wording plus the stdout route",
+    "actual": "Use `--to 1password` or `--to <a file outside the repo>` instead.",
+    "evidence": "CLI output",
+    "suggested_fix": "Unify the wording.",
+    "surface": "CLI"
+   }
+  ]
+ },
+ {
+  "slug": "owner-keys",
+  "stories": [
+   {
+    "id": "SETUP-034",
+    "status": "partial",
+    "note": "Walked console create-drive, receipt, recovery download, chip menu, mobile, CLI login and /connect approval with own drive (pasted key; file picker unavailable). Works end to end. Findings: connect path hidden in Details, drive name truncation, CLI still says 'not backed up' and 'set a passphrase under Settings' after approval, key-box styling, no close on receipt. Earlier attempts disturbed by dev-server reloads that wiped the in-tab key (harness)."
+   },
+   {
+    "id": "SETUP-035",
+    "status": "partial",
+    "note": "Walked passphrase setup, chip menu, Load-key dialog, CLI seal unverified, wrong-code error, seal success, Settings count. Used an equivalent agent (device login rate-limited). Not walkable: Clerk prompt, final file render (storage URL 127.0.0.1:9811 unreachable from laptop browser). Key issues: CLI sends user to 'Settings' that does not exist by that name; dialog does not include the fingerprint; chip says Unlocked before any drive is added."
+   },
+   {
+    "id": "SETUP-036",
+    "status": "pass",
+    "note": "Fingerprint is plain prose with trailing comma and no copy button; CLI rejects the comma with a generic message but accepts hyphens, capitals and no spaces. Env var and wrong-command errors are clear. Medium findings on error wording and 'Settings' naming."
+   },
+   {
+    "id": "SETUP-037",
+    "status": "not-walkable",
+    "note": "Passkey device prompt, Clerk reverification and second laptop cannot run headless. Walked dialog, wrong-passphrase error, and found that the 'Adding passkey...' state hangs with no Esc/X/cancel until reload."
+   },
+   {
+    "id": "SETUP-038",
+    "status": "partial",
+    "note": "Walked wrong-passphrase, recovery-file loop, key menu Forgot link, reset dialog, silent switch to new setup, new fingerprint and 0 drives. Not walkable: Clerk prompt and the agent re-pin steps (login rate-limited). Findings: no Forgot link in the unlock dialog, disabled danger button rendered at full opacity, no message after reset."
+   },
+   {
+    "id": "SETUP-039",
+    "status": "partial",
+    "note": "Walked Key needed chip, Load key dialog (no passphrase), wrong-file and wrong-drive bundle errors, CLI credentials export (mode 600, check ok). Success path with a matching exported file not walkable (no agent with a console drive key; login rate-limited). Slower seal route presented before the fast export route."
+   },
+   {
+    "id": "SETUP-040",
+    "status": "partial",
+    "note": "Walked agent-only drive creation, receipt, chip text after reload, drive menu, Load key dialog. Not walkable: agent login/approve with own drive, account seal 'agent-only', choosing saved file (login rate-limited, no manage scope for CLI drive create). Wrong copy 'ask the agent that created this drive'; chip stays green Unlocked; no agent-only marker."
+   },
+   {
+    "id": "SETUP-041",
+    "status": "partial",
+    "note": "Walked generated and own-passphrase forms, length and mismatch validation, success notice. Clerk reverification cancel/retry steps not walkable with the test session. 'correct horse battery staple 2026' accepted; black password inputs; disabled Create weaker than adjacent secondary."
+   },
+   {
+    "id": "SETUP-042",
+    "status": "pass",
+    "note": "Walked default-ticked 'Keep this browser unlocked', Lock vs Lock this browser, reload behaviour. Confirmed: Lock then reload silently restores Unlocked; Lock this browser persists; unticked unlock stays locked after reload; setup stores key without asking. Idle 30 min lock not walked."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-SETUP-042-01",
+    "story": "SETUP-042",
+    "severity": "high",
+    "category": "happy-path",
+    "description": "'Lock' only locks the tab; after reload the chip is Unlocked again with no prompt. 'Lock' and 'Lock this browser' are adjacent with no explanation.",
+    "expected": "Difference explained, or Lock clears the stored key.",
+    "actual": "Lock, reload, Unlocked (verified).",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-042/screenshots/step-4b-after-reload-following-Lock.png",
+    "suggested_fix": "Rename buttons ('Lock for now' / 'Lock and forget on this browser') or make Lock clear the stored key.",
+    "surface": "console key chip menu"
+   },
+   {
+    "id": "F-SETUP-042-02",
+    "story": "SETUP-042",
+    "severity": "high",
+    "category": "disclosure",
+    "description": "'Keep this browser unlocked' is ticked by default with no consequence text; passphrase setup stores the key in the browser with no checkbox at all.",
+    "expected": "Shared-computer warning or default off; same question in setup.",
+    "actual": "Reload after setup shows Unlocked; dialog says 'The keys stay in this browser only.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-042/screenshots/step-2.png",
+    "suggested_fix": "Add 'Leave unticked on a shared computer' and show the box in setup.",
+    "surface": "console unlock dialog and passphrase setup"
+   },
+   {
+    "id": "F-SETUP-035-01",
+    "story": "SETUP-035",
+    "severity": "high",
+    "category": "flow",
+    "description": "CLI says set the passphrase 'in the console under Settings' but /console/settings is titled 'Activity & deletion' and only shows 'Not set up. Manage in Files'; the word Settings appears nowhere.",
+    "expected": "CLI/dialogs point to Files > Set up, or Settings holds the form.",
+    "actual": "User is sent to a page that sends them back to Files.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-035/screenshots/step-2.png; CLI: 'Set a passphrase in the console under Settings; agents will add the drive then.'",
+    "suggested_fix": "Reword CLI and dialog copy and/or rename the page.",
+    "surface": "CLI login output, console Settings page"
+   },
+   {
+    "id": "F-SETUP-038-01",
+    "story": "SETUP-038",
+    "severity": "high",
+    "category": "flow",
+    "description": "No path to reset from the Unlock dialog; 'Use a recovery file instead' leads to a dialog that says the passphrase opens the drive and offers 'Use my passphrase instead' (loop). Reset exists only as the last item in the chip menu.",
+    "expected": "'Forgot your passphrase?' link in the Unlock dialog.",
+    "actual": "Unlock dialog has only Unlock and Use a recovery file instead.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-038/screenshots/step-3.png",
+    "suggested_fix": "Add the link; make the agent hint conditional.",
+    "surface": "console unlock and load-key dialogs"
+   },
+   {
+    "id": "F-SETUP-038-02",
+    "story": "SETUP-038",
+    "severity": "medium",
+    "category": "visual",
+    "description": "'Reset and remove all drives' is disabled until RESET is typed but renders at full opacity solid red; lowercase 'reset' keeps it disabled with no message.",
+    "expected": "Disabled style and a case hint.",
+    "actual": "disabled=true, opacity 1, bg rgb(180,35,24).",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-038/screenshots/step-5.png",
+    "suggested_fix": "Apply disabled style to danger buttons; accept any case.",
+    "surface": "console reset dialog"
+   },
+   {
+    "id": "F-SETUP-038-03",
+    "story": "SETUP-038",
+    "severity": "medium",
+    "category": "flow",
+    "description": "After reset the dialog silently becomes 'Set up passphrase unlock'; no message confirms the reset or says agents must re-pin the new fingerprint with account seal --repin.",
+    "expected": "Confirmation plus next step with the new fingerprint.",
+    "actual": "Notice only says 'Passphrase set up. Your agent can now add its drives to your account.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-038/screenshots/step-6b.png",
+    "suggested_fix": "Show reset confirmation and repin command.",
+    "surface": "console reset flow"
+   },
+   {
+    "id": "F-SETUP-038-04",
+    "story": "SETUP-038",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "Reset copy ('removes every drive from it' next to 'Files are not deleted', 'loading its recovery file') confuses users with no recovery file.",
+    "expected": "Plain wording about what stays and what must be re-added.",
+    "actual": "As quoted.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-038/screenshots/step-5.png",
+    "suggested_fix": "Rewrite copy.",
+    "surface": "console reset dialog"
+   },
+   {
+    "id": "F-SETUP-034-01",
+    "story": "SETUP-034",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "After saving the console recovery file and approving the agent with that drive, the CLI still says the drive key is not backed up and 'Set a passphrase in the console under Settings'.",
+    "expected": "Backup records agree or the difference is explained.",
+    "actual": "agent-drive check: 'drive key not backed up: da137623-dc1b-4ef2-8623-e3fa0e17455a' plus export hint.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-10d.png; CLI output",
+    "suggested_fix": "Record console backup when the agent receives the key or explain separate records.",
+    "surface": "CLI login/check, /connect result page"
+   },
+   {
+    "id": "F-SETUP-034-02",
+    "story": "SETUP-034",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "'Use one of my drives instead (needs its recovery file)' is hidden inside collapsed Details as a small underlined link; label says recovery file while the form also accepts a pasted key.",
+    "expected": "Visible choice for owners who created a drive themselves.",
+    "actual": "Details must be opened first.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-10a.png",
+    "suggested_fix": "Surface outside Details; say 'recovery file or key'.",
+    "surface": "/connect page"
+   },
+   {
+    "id": "F-SETUP-034-03",
+    "story": "SETUP-034",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "If the tab reloads before the receipt is finished, the drive stays as an empty shell with chip 'Key needed - Not backed up' and no message that the key is lost.",
+    "expected": "Warning or recovery guidance.",
+    "actual": "Silent 'Key needed' state (observed after an unplanned dev-server reload).",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-5b-after-lost-tab.png",
+    "suggested_fix": "Warn on unload while receipt is open; notice on never-backed-up drives without a key.",
+    "surface": "console receipt dialog and chip"
+   },
+   {
+    "id": "F-SETUP-035-02",
+    "story": "SETUP-035",
+    "severity": "medium",
+    "category": "flow",
+    "description": "Load-key dialog tells the owner to copy the fingerprint from Settings by hand though the console knows it; the copied seal command lacks --fingerprint so the first seal ends 'unverified'.",
+    "expected": "Copied command includes the fingerprint.",
+    "actual": "'<id>: unverified' with exit 1, then a second command is needed.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-035/screenshots/step-8.png; CLI: 'The account key has not been verified on this machine...'",
+    "suggested_fix": "Embed the fingerprint in the copied command.",
+    "surface": "console load-key dialog, CLI account seal"
+   },
+   {
+    "id": "F-SETUP-035-03",
+    "story": "SETUP-035",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "Using the login 'Verification code' as the fingerprint gives 'does not match the account key the service returned (799c c0f8 98db 81e2)... the API may be answering with a different account key', which echoes the real value and blames the API.",
+    "expected": "Say it looks like the login code; do not print the service value.",
+    "actual": "As quoted.",
+    "evidence": "CLI: The supplied fingerprint (442c 93ea debb 6aa5) does not match the account key the service returned (799c c0f8 98db 81e2).",
+    "suggested_fix": "Reword.",
+    "surface": "CLI account seal"
+   },
+   {
+    "id": "F-SETUP-035-04",
+    "story": "SETUP-035",
+    "severity": "medium",
+    "category": "hierarchy",
+    "description": "After setup the chip says green 'Unlocked' and 'Drives you added to your account open when you use them' although no drive has been added; first file click opens a Load-key dialog.",
+    "expected": "Chip reflects passphrase ready, 0 drives added.",
+    "actual": "Green Unlocked.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-035/screenshots/step-7.png",
+    "suggested_fix": "Show added-drive state.",
+    "surface": "console key chip"
+   },
+   {
+    "id": "F-SETUP-036-01",
+    "story": "SETUP-036",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "A fingerprint with a trailing comma is rejected with a generic message that does not name the comma, though the console sentence puts a comma after the fingerprint.",
+    "expected": "Trim punctuation or name the comma.",
+    "actual": "--fingerprint must look like \"a1b2 c3d4 e5f6 7890\", exactly as the console shows it.",
+    "evidence": "CLI: agent-drive account seal --fingerprint \"377c 2967 79bd 5e29,\"",
+    "suggested_fix": "Strip surrounding non-hex punctuation.",
+    "surface": "CLI account seal"
+   },
+   {
+    "id": "F-SETUP-036-02",
+    "story": "SETUP-036",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "CLI and dialogs name 'Settings' but the page is titled 'Activity & deletion' and the passphrase card sits under the activity table.",
+    "expected": "Consistent naming.",
+    "actual": "Settings is not a visible label.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-036/screenshots/step-1.png",
+    "suggested_fix": "Rename page or reword messages.",
+    "surface": "console Settings page, CLI"
+   },
+   {
+    "id": "F-SETUP-036-03",
+    "story": "SETUP-036",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Fingerprint is small grey prose with no Copy button and wraps mid-value on a phone.",
+    "expected": "Mono block with Copy.",
+    "actual": "Text selection only.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-036/screenshots/mobile-check.png",
+    "suggested_fix": "Add copyable block.",
+    "surface": "console Settings page"
+   },
+   {
+    "id": "F-SETUP-036-04",
+    "story": "SETUP-036",
+    "severity": "low",
+    "category": "layout",
+    "description": "Activity table header cells WHEN and WHO spill 20px and 12px at 390px width.",
+    "expected": "No spill.",
+    "actual": "overflowSpills th When 20px, th Who 12px.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-036/screenshots/mobile-check.png",
+    "suggested_fix": "Allow wrapping or scroll container.",
+    "surface": "console Settings page"
+   },
+   {
+    "id": "F-SETUP-037-01",
+    "story": "SETUP-037",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "'Adding passkey...' state cannot be closed (Esc and X ignored), shows no device-prompt hint and hung 40+ seconds when no prompt appeared.",
+    "expected": "Status text, timeout or Cancel.",
+    "actual": "Stuck until reload.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-037/screenshots/step-3-waiting.png",
+    "suggested_fix": "Allow cancel during device step; add timeout.",
+    "surface": "console Add a passkey dialog"
+   },
+   {
+    "id": "F-SETUP-037-02",
+    "story": "SETUP-037",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Dialog title and button both read 'Add a passkey'; passphrase re-entry is required with no reason given.",
+    "expected": "Distinct button label and reason.",
+    "actual": "As described.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-037/screenshots/step-1.png",
+    "suggested_fix": "Reword.",
+    "surface": "console Add a passkey dialog"
+   },
+   {
+    "id": "F-SETUP-039-01",
+    "story": "SETUP-039",
+    "severity": "medium",
+    "category": "flow",
+    "description": "With no passphrase, the Load-key dialog lists the slower account-seal route first and the quick 'credentials export then choose the file' route last.",
+    "expected": "Fast path first.",
+    "actual": "Seal paragraph, Set up passphrase button, then export.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-039/screenshots/step-1.png",
+    "suggested_fix": "Lead with export; collapse seal route.",
+    "surface": "console load-key dialog"
+   },
+   {
+    "id": "F-SETUP-039-02",
+    "story": "SETUP-039",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "Dialog never says that without any copy of the key the files can never be decrypted.",
+    "expected": "One-line warning.",
+    "actual": "Absent.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-039/screenshots/step-1.png",
+    "suggested_fix": "Add warning.",
+    "surface": "console load-key dialog"
+   },
+   {
+    "id": "F-SETUP-039-03",
+    "story": "SETUP-039",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Wrong-file error is longer than docs quote; 'Choose recovery file' label does not say a credentials export is accepted.",
+    "expected": "Label and docs match.",
+    "actual": "'That is not a recovery file. Choose the agent-drive-....key.json file you downloaded.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-039/screenshots/step-4a-wrong-file.png",
+    "suggested_fix": "Update label and docs.",
+    "surface": "console load-key dialog, docs"
+   },
+   {
+    "id": "F-SETUP-040-01",
+    "story": "SETUP-040",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Agent-only Load-key dialog says 'Ask the agent that created this drive to run agent-drive credentials export' but the drive was created in the browser.",
+    "expected": "Wording that fits browser-created drives.",
+    "actual": "As quoted.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-040/screenshots/step-7.png",
+    "suggested_fix": "Make conditional.",
+    "surface": "console load-key dialog"
+   },
+   {
+    "id": "F-SETUP-040-02",
+    "story": "SETUP-040",
+    "severity": "medium",
+    "category": "hierarchy",
+    "description": "After reload an agent-only drive shows green 'Unlocked' while the menu says only the recovery file opens it; the drive menu has no agent-only marker; 'Download recovery file again' vanishes while 'Key backed up (file)' remains.",
+    "expected": "Visible agent-only label; chip state Key needed.",
+    "actual": "See screenshots.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-040/screenshots/step-4b-after-reload.png; step-4c-drive-menu.png",
+    "suggested_fix": "Badge agent-only drives.",
+    "surface": "console key chip, drive menu"
+   },
+   {
+    "id": "F-SETUP-040-03",
+    "story": "SETUP-040",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "Agent-only checkbox uses unexplained terms and does not say the drive will always need its recovery file.",
+    "expected": "Helper text.",
+    "actual": "None.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-040/screenshots/step-2.png",
+    "suggested_fix": "Add sentence.",
+    "surface": "console create-drive dialog"
+   },
+   {
+    "id": "F-SETUP-041-01",
+    "story": "SETUP-041",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "'correct horse battery staple 2026' is accepted without warning while the dialog claims it catches obvious patterns; mismatch is reported before strength so errors arrive one at a time.",
+    "expected": "Known phrases flagged; all problems shown together.",
+    "actual": "Banner 'Passphrase set up.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-041/screenshots/step-3.png",
+    "suggested_fix": "Add known-phrase check; run both checks.",
+    "surface": "console passphrase setup"
+   },
+   {
+    "id": "F-SETUP-041-03",
+    "story": "SETUP-041",
+    "severity": "low",
+    "category": "visual",
+    "description": "Passphrase inputs are solid black boxes with no placeholder; disabled Create is paler than the adjacent secondary button.",
+    "expected": "Visible input affordance and clear primary.",
+    "actual": "See screenshot.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-041/screenshots/step-2.png",
+    "suggested_fix": "Border/placeholder, clearer disabled style.",
+    "surface": "console passphrase dialogs"
+   },
+   {
+    "id": "F-SETUP-041-04",
+    "story": "SETUP-041",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "Setup dialog and success notice never say what the passphrase does or that the agent needs the fingerprint next; notice assumes an agent exists.",
+    "expected": "Explain and give next step.",
+    "actual": "'Passphrase set up. Your agent can now add its drives to your account.'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-041/screenshots/step-1.png",
+    "suggested_fix": "Add explanation and next step.",
+    "surface": "console passphrase setup"
+   },
+   {
+    "id": "F-SETUP-034-04",
+    "story": "SETUP-034",
+    "severity": "low",
+    "category": "layout",
+    "description": "Drive picker truncates names (research-notes -> 'research-no...', second-drive, client-exports) at 1280px with spare toolbar room; seen in 034, 035, 040.",
+    "expected": "Full name.",
+    "actual": "Button 109.7px wide vs 124px content.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-6.png",
+    "suggested_fix": "Give picker more width before the search box.",
+    "surface": "console Files toolbar"
+   },
+   {
+    "id": "F-SETUP-034-05",
+    "story": "SETUP-034",
+    "severity": "low",
+    "category": "visual",
+    "description": "Revealed drive key sits in a 76px black box for one line; Copy button is about 2px below it.",
+    "expected": "Sized box and normal gap.",
+    "actual": "See screenshot.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-5.png",
+    "suggested_fix": "Auto-size textarea; add margin.",
+    "surface": "console key receipt"
+   },
+   {
+    "id": "F-SETUP-034-06",
+    "story": "SETUP-034",
+    "severity": "low",
+    "category": "layout",
+    "description": "/connect existing-drive form interleaves columns: write-path field beside Drive select, Drive key beside Choose a file; label wraps two lines; Drive key placeholder clipped.",
+    "expected": "Clear single-column order.",
+    "actual": "See screenshot.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-10b.png",
+    "suggested_fix": "Single column, optional field last.",
+    "surface": "/connect page"
+   },
+   {
+    "id": "F-SETUP-034-07",
+    "story": "SETUP-034",
+    "severity": "low",
+    "category": "disclosure",
+    "description": "Agent-only checkbox has no explanation; receipt dialog has no close and Esc does nothing; Copy drive key has no plaintext-clipboard warning.",
+    "expected": "Helper text and a cancel path.",
+    "actual": "Verified Esc ignored.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-034/screenshots/step-2.png",
+    "suggested_fix": "Add helper text.",
+    "surface": "console create-drive and receipt dialogs"
+   },
+   {
+    "id": "F-SETUP-034-08",
+    "story": "SETUP-034",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "CLI login against an API URL missing /api prints only 'Agent Drive refused the login request: 404'.",
+    "expected": "Hint about the URL.",
+    "actual": "As quoted.",
+    "evidence": "CLI: Agent Drive refused the login request: 404",
+    "suggested_fix": "Include URL and expected form.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-035-05",
+    "story": "SETUP-035",
+    "severity": "low",
+    "category": "simplicity",
+    "description": "Key chip menu stacks seven same-weight buttons.",
+    "expected": "Group rare actions.",
+    "actual": "See screenshot.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-035/screenshots/step-7.png",
+    "suggested_fix": "Submenu.",
+    "surface": "console key chip menu"
+   },
+   {
+    "id": "F-SETUP-035-07",
+    "story": "SETUP-035",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "'agent-drive put notes.md notes.md' fails with only 'path must be a canonical absolute POSIX path.'",
+    "expected": "Suggest '/notes.md'.",
+    "actual": "As quoted.",
+    "evidence": "CLI output",
+    "suggested_fix": "Include corrected path.",
+    "surface": "CLI put"
+   },
+   {
+    "id": "F-SETUP-035-08",
+    "story": "SETUP-035",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "Device-flow login repeatedly failed with 'Agent Drive refused the login request: slow_down' for 25+ minutes (shared limiter, likely many walkers); message does not say how long to wait. This also made SETUP-038/039/040 agent steps not walkable.",
+    "expected": "Tell the user to wait N seconds and retry.",
+    "actual": "'Agent Drive refused the login request: slow_down'",
+    "evidence": "CLI output on Mac Studio",
+    "suggested_fix": "Map slow_down to a plain retry message.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-042-03",
+    "story": "SETUP-042",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Neither Lock nor Lock this browser shows any confirmation.",
+    "expected": "A short notice.",
+    "actual": "Only the chip label changes.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-042/screenshots/step-4c-lock-this-browser.png",
+    "suggested_fix": "Show notice.",
+    "surface": "console key chip"
+   },
+   {
+    "id": "F-SETUP-042-04",
+    "story": "SETUP-042",
+    "severity": "low",
+    "category": "visual",
+    "description": "Passphrase inputs are solid black while other inputs are white; disabled Unlock is weaker than the secondary button beside it.",
+    "expected": "Consistent inputs, clear primary.",
+    "actual": "See screenshot.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-042/screenshots/step-2.png",
+    "suggested_fix": "Align styles.",
+    "surface": "console unlock dialog"
+   }
+  ]
+ },
+ {
+  "slug": "second-agent-sandbox",
+  "stories": [
+   {
+    "id": "SETUP-043",
+    "status": "pass",
+    "note": "grant --verify flow works end to end and codex-desktop is limited to /codex. Findings: no warning that approving before the grant creates a new empty drive, confusing summary wording on /connect, misleading CLI error for unknown pairing code, granted agent cannot pass check until it backs up credentials."
+   },
+   {
+    "id": "SETUP-044",
+    "status": "pass",
+    "note": "Laptop approval with delegate, credentials issue (TTY refusal, --to, duplicate name, bad path), sandbox bundle (whoami, check ok, write-path enforced), Agents and API keys tabs, and mobile all walked. Findings: whole-line paste error gives no hint, web says key backed up (env) while CLI says not backed up, panel says build from repository, inconsistent issuer wording, origin-only API URL returns 404 on device login locally."
+   },
+   {
+    "id": "SETUP-045",
+    "status": "pass",
+    "note": "Revoke takes 3 actions via the Agents tab and works. Revoked sandbox gets a misleading key-backup warning before 'The API key is invalid or revoked.' Dialog copy differs between agent and key revoke, and neither mentions the drive key in a leaked bundle. ci-file stood in for ci-nightly."
+   },
+   {
+    "id": "SETUP-046",
+    "status": "not-walkable",
+    "note": "Skipped: catalog marks it Duplicate of SETUP-022 (recovery file on /connect)."
+   },
+   {
+    "id": "SETUP-047",
+    "status": "pass",
+    "note": "Manual path drive, agent, API key, receipt and CLI login/put/check all work (check passes with AGENT_DRIVE_KEY). About 19 actions. Findings: no progress indicator for roughly 8 seconds on Create API key, recovery dialog throws user to Files tab, repository-build copy, jargon checkbox, raw JSON login output."
+   },
+   {
+    "id": "SETUP-048",
+    "status": "partial",
+    "note": "Console Codex snippet, docs and llms.txt compared; real MCP server lists 13 tools (7 mutating, 6 read-only) matching the docs. Console snippet lacks the approval blocks. The codex exec failure and fix were not walkable (no Codex)."
+   },
+   {
+    "id": "SETUP-049",
+    "status": "partial",
+    "note": "Read-only bundle issued and check ok (read-only) verified on a drive with files; put gives a login-again hint that does not fit bundle sandboxes. The empty-drive check not verified case was not walkable (no empty drive obtainable: login rate-limited, drive create needs manage)."
+   },
+   {
+    "id": "SETUP-050",
+    "status": "partial",
+    "note": "Only step 1 walked: the delegate error names the fix but mislabels the checkbox location as Optional and omits the --name. Reconnect, delegate tick on reconnect, changed-key message and re-export were not walkable because device login returned slow_down for over 20 minutes."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-043-01",
+    "story": "SETUP-043",
+    "severity": "high",
+    "category": "happy-path",
+    "description": "A login request with no grant yet looks identical to a granted one. Nothing warns that approving before the granting agent runs grant creates a new empty drive, and the CLI login output does not tell the new agent to wait for a grant.",
+    "expected": "A notice such as: expecting a drive from another agent? Wait for it before approving.",
+    "actual": "'New encrypted drive \u00b7 full access' with an active Approve agent button",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-5.png",
+    "suggested_fix": "Add a line to the pairing page and the login output about waiting for a grant.",
+    "surface": "web /connect, CLI login"
+   },
+   {
+    "id": "F-050-03",
+    "story": "SETUP-050",
+    "severity": "high",
+    "category": "error-handling",
+    "description": "Repeated device logins end in a raw 'slow_down' with no wait time or explanation. It lasted over 20 minutes across fresh homes and names (about ten logins earlier), and retries seemed to extend it.",
+    "expected": "Too many login requests. Wait N minutes and try again.",
+    "actual": "Agent Drive refused the login request: slow_down",
+    "evidence": "CLI output: 'Agent Drive refused the login request: slow_down'",
+    "suggested_fix": "Map slow_down to a message that states the wait time.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-048-01",
+    "story": "SETUP-048",
+    "severity": "high",
+    "category": "consistency",
+    "description": "The console Codex MCP snippet is the bare 3-line server block with no per-tool approval blocks and no warning. /docs/mcp-tools and /llms.txt include them. Copying from the console gives a config where put fails under codex exec.",
+    "expected": "Console snippet includes the put and download approval blocks or a link note.",
+    "actual": "[mcp_servers.agent-drive] command = \"agent-drive\" args = [\"mcp\"] only",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-048/screenshots/step-1.png",
+    "suggested_fix": "Use the same snippet as docs and llms.txt in the console panel.",
+    "surface": "web console Agents tab"
+   },
+   {
+    "id": "F-043-02",
+    "story": "SETUP-043",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Granted summary reads 'priya-mbp agent \u00b7 can read and write, writes only in /codex \u00b7 offered by priya-mbp agent'. It names the granter three times in four lines, omits the drive, and reads as if the granter receives access.",
+    "expected": "Read and write the drive 'research-notes', writes only in /codex, offered by priya-mbp agent",
+    "actual": "Granter name repeated; drive shown only in Details as the agent's name",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-1.png",
+    "suggested_fix": "Rewrite the summary with the drive name and the recipient.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-043-03",
+    "story": "SETUP-043",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "grant with an unknown pairing code gives the verification-code-format message even when the verification code is right. A mistyped verification code gives a tamper warning.",
+    "expected": "Separate messages for an unknown pairing code and for a typo.",
+    "actual": "Pass --verify with the verification code the new agent printed, exactly as shown (\"a1b2 c3d4 e5f6 7890\"). / The verification code does not match this request... the request may have been tampered with.",
+    "evidence": "CLI output",
+    "suggested_fix": "Distinguish an unknown pairing code and soften the typo wording.",
+    "surface": "CLI grant"
+   },
+   {
+    "id": "F-043-04",
+    "story": "SETUP-043",
+    "severity": "medium",
+    "category": "flow",
+    "description": "After grant and approval the second agent's check fails with 'drive key not backed up'. The grant and approval pages never mention exporting credentials, so the story's last step cannot succeed as written.",
+    "expected": "Login output or the success page says to export credentials before check.",
+    "actual": "check exit 1 with a long backup hint",
+    "evidence": "CLI output: 'drive key not backed up: 150e97a0-...'",
+    "suggested_fix": "Mention credentials export in the Logged in output for granted agents.",
+    "surface": "CLI check, web /connect"
+   },
+   {
+    "id": "F-044-03",
+    "story": "SETUP-044",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "The delegate checkbox needed for credentials issue and grant is only inside collapsed Details on /connect. The summary does not mention it and the success page does not say delegate was granted.",
+    "expected": "Visible hint, or the CLI telling the owner to tick it.",
+    "actual": "Hidden inside Details",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-2.png",
+    "suggested_fix": "Show delegate state on the approval summary and success page.",
+    "surface": "web /connect"
+   },
+   {
+    "id": "F-044-04",
+    "story": "SETUP-044",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "Pasting the printed line with its AGENT_DRIVE_CREDENTIALS= prefix gives a generic invalid-bundle error. Docs say to paste only the part after =, but the error never says so.",
+    "expected": "The error names the prefix mistake, or the CLI accepts the prefix.",
+    "actual": "AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.",
+    "evidence": "CLI output: 'AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.'",
+    "suggested_fix": "Strip a leading AGENT_DRIVE_CREDENTIALS= or mention it in the error.",
+    "surface": "CLI whoami and check in a sandbox"
+   },
+   {
+    "id": "F-044-05",
+    "story": "SETUP-044",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The web Files popover says 'Key backed up 11/27/2026 (env)' while the laptop CLI says 'drive key not backed up' and credentials status reports backedUp:false. The sandbox bundle (method env) marked the drive backed up server-side. 'env' is jargon.",
+    "expected": "One consistent backup state, without 'env'.",
+    "actual": "Web: backed up. CLI: not backed up.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-9.png and CLI 'drive key not backed up: 422d5be0-...'",
+    "suggested_fix": "Track backup per machine or key, or word the web state as 'a sandbox holds a copy'.",
+    "surface": "web Files, CLI check"
+   },
+   {
+    "id": "F-044-01",
+    "story": "SETUP-044",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "Device login with AGENT_DRIVE_API_URL set to the bare origin (the form the console panel shows) fails with a bare 404. Adding /api works. The origin-only form does work for API-key login. Possibly a local-dev routing difference.",
+    "expected": "The origin works, or the error says to use the /api URL.",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "CLI output: 'Agent Drive refused the login request: 404'",
+    "suggested_fix": "Print the URL that returned 404 and hint at the /api form.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-044-06",
+    "story": "SETUP-044",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The API keys panel says 'Run the CLI from the repository after building it.' and shows an origin-only --api, contradicting the npm install instructions in docs and llms.txt. The same panel appears in SETUP-047.",
+    "expected": "npm install wording matching the docs.",
+    "actual": "Repository-build instruction",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-7.png",
+    "suggested_fix": "Replace it with npm install -g @dennisonbertram/agent-drive wording.",
+    "surface": "web console API keys panel"
+   },
+   {
+    "id": "F-045-01",
+    "story": "SETUP-045",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Revoke dialogs do not warn that a leaked bundle also contains the drive key, which revoking the API key does not invalidate.",
+    "expected": "A note about the drive key and what to do.",
+    "actual": "The dialog says only that the API key stops working.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-2.png",
+    "suggested_fix": "Add one sentence about the drive key to the dialog or docs.",
+    "surface": "web console revoke dialog"
+   },
+   {
+    "id": "F-045-02",
+    "story": "SETUP-045",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "A revoked sandbox gets a key-backup warning before the real error and no recovery instruction.",
+    "expected": "The API key is invalid or revoked. Ask the owner for a new credentials bundle.",
+    "actual": "Warning: could not report the key backup for drive <id> to Agent Drive. / The API key is invalid or revoked.",
+    "evidence": "CLI output",
+    "suggested_fix": "Suppress the backup warning on auth failure and add a recovery hint.",
+    "surface": "CLI in a revoked sandbox"
+   },
+   {
+    "id": "F-047-01",
+    "story": "SETUP-047",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "After Create API key the button goes grey and disabled with the same label and no spinner for about 8 seconds on this dev server. The dialog looks frozen.",
+    "expected": "A Creating... label or spinner.",
+    "actual": "Disabled grey button only",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-14.png",
+    "suggested_fix": "Show progress text on submit buttons.",
+    "surface": "web console Create API key dialog"
+   },
+   {
+    "id": "F-047-02",
+    "story": "SETUP-047",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The manual path takes about 19 actions. Finishing the recovery-file dialog moves the user from API keys to the Files tab, and they must navigate back.",
+    "expected": "Return to the tab the user was on after drive creation.",
+    "actual": "Lands on Files with a 'Recovery file saved' banner",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-7.png",
+    "suggested_fix": "Keep the user on API keys after the recovery dialog.",
+    "surface": "web console"
+   },
+   {
+    "id": "F-050-01",
+    "story": "SETUP-050",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The delegate error says to tick the box under 'Optional' on the approval page. /connect hides it in a collapsed 'Details' row with no 'Optional' heading. Docs and llms.txt use a shorter label wording.",
+    "expected": "The same label and location in CLI, docs and page.",
+    "actual": "CLI: under Optional. Page: inside Details. Docs: shorter label.",
+    "evidence": "CLI output: 'tick \"Let this agent add other agents to its drives\" (under \"Optional\")' and SETUP-044 step-2.png",
+    "suggested_fix": "Change the CLI text to 'open Details and tick ...' and unify the label.",
+    "surface": "CLI error, web /connect, docs"
+   },
+   {
+    "id": "F-050-02",
+    "story": "SETUP-050",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "The delegate error tells the agent to run agent-drive login again but not to pass the same --name, which is needed to reconnect the existing agent.",
+    "expected": "agent-drive login --name '<current agent name>'",
+    "actual": "Run `agent-drive login` again",
+    "evidence": "CLI output: 'The API key needs the delegate scope. Run `agent-drive login` again; ...'",
+    "suggested_fix": "Print the agent's own name in the suggested command.",
+    "surface": "CLI credentials issue"
+   },
+   {
+    "id": "F-044-02",
+    "story": "SETUP-044",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "CLI login prints 'Ignored a different API URL returned by the server.' with no explanation.",
+    "expected": "Silent, or one line saying which URL is used.",
+    "actual": "Bare warning after approval",
+    "evidence": "CLI output",
+    "suggested_fix": "Explain or drop the line.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-044-07",
+    "story": "SETUP-044",
+    "severity": "low",
+    "category": "hierarchy",
+    "description": "API keys rows repeat the agent name three times. The key label says 'issued by <machine>' while the Agents tab says 'issued by <agent name>'. No drive is named on the key row.",
+    "expected": "One issuer wording and the drive shown.",
+    "actual": "Mixed issuer wording and repeated names",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-6.png",
+    "suggested_fix": "Use the agent name as issuer in labels, drop the third repeat, add the drive name.",
+    "surface": "web console API keys and Agents tabs"
+   },
+   {
+    "id": "F-044-08",
+    "story": "SETUP-044",
+    "severity": "low",
+    "category": "flow",
+    "description": "Agent rows show no scopes, delegate status or write paths. The laptop agent's Revoke access button looks the same as the CI rows.",
+    "expected": "A can-add-agents badge and write paths.",
+    "actual": "Only name, UUID and active key count",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-5.png",
+    "suggested_fix": "Add a scope or delegate summary and write paths to agent rows.",
+    "surface": "web console Agents tab"
+   },
+   {
+    "id": "F-044-09",
+    "story": "SETUP-044",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "--write-path ci/nightly fails with an API-field-name, jargon message and no example.",
+    "expected": "--write-path must start with /, for example /ci/nightly",
+    "actual": "writePaths must be a canonical absolute POSIX path.",
+    "evidence": "CLI output",
+    "suggested_fix": "Reword with the flag name and an example.",
+    "surface": "CLI credentials issue"
+   },
+   {
+    "id": "F-045-03",
+    "story": "SETUP-045",
+    "severity": "low",
+    "category": "consistency",
+    "description": "The agent revoke dialog omits 'This cannot be undone.' that the key dialog has. Titles are forced upper case, altering the agent name, and the key dialog title includes the long '(issued by <machine>)' label.",
+    "expected": "The same warning in both dialogs and titles that show the name as typed.",
+    "actual": "Differing copy and all-caps titles",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-5.png",
+    "suggested_fix": "Unify the copy and do not uppercase user-supplied names.",
+    "surface": "web console revoke dialogs"
+   },
+   {
+    "id": "F-045-04",
+    "story": "SETUP-045",
+    "severity": "low",
+    "category": "flow",
+    "description": "A revoked agent row stays with no remove control, and the header badge '3 AGENTS' still counts it.",
+    "expected": "A count of active agents or a way to hide revoked ones.",
+    "actual": "Revoked row persists and the count is unchanged",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-045/screenshots/step-3.png",
+    "suggested_fix": "Show '2 active, 1 revoked'.",
+    "surface": "web console Agents tab"
+   },
+   {
+    "id": "F-043-05",
+    "story": "SETUP-043",
+    "severity": "low",
+    "category": "layout",
+    "description": "At 390px the verification code input is narrow beside its label and the placeholder is clipped.",
+    "expected": "Label above the input at phone width.",
+    "actual": "Placeholder shows 'a1b2 c3d4 e5f6'",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-043/screenshots/step-6.png",
+    "suggested_fix": "Stack label and field under 480px.",
+    "surface": "web /connect mobile"
+   },
+   {
+    "id": "F-047-03",
+    "story": "SETUP-047",
+    "severity": "low",
+    "category": "hierarchy",
+    "description": "The recovery-file dialog repeats 'Without it nobody, including us, can open this drive.' twice and has no close control.",
+    "expected": "Say it once.",
+    "actual": "Duplicate sentence",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-5.png",
+    "suggested_fix": "Drop one of the two sentences.",
+    "surface": "web console recovery dialog"
+   },
+   {
+    "id": "F-047-05",
+    "story": "SETUP-047",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "The Create drive checkbox 'Agent-only \u2014 never add this drive to passphrase unlock' is meaningless to a user with no passphrase. + New API key is greyed out with no explanation until a drive and agent exist.",
+    "expected": "Plain wording and a reason for the disabled button.",
+    "actual": "Jargon and a silent disabled button",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-3.png",
+    "suggested_fix": "Reword and add title text to the disabled button.",
+    "surface": "web console"
+   },
+   {
+    "id": "F-047-06",
+    "story": "SETUP-047",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "agent-drive login with AGENT_DRIVE_API_KEY prints a raw JSON blob instead of a 'Logged in' line. whoami then shows localDriveKeys false with no hint that a drive key is still needed.",
+    "expected": "A sentence plus 'Set AGENT_DRIVE_KEY to read or write drive <id>'.",
+    "actual": "JSON only",
+    "evidence": "CLI output: {\"accountId\":...,\"keyId\":...,\"scopes\":[\"read\",\"write\"],...}",
+    "suggested_fix": "Add a summary line after or instead of the JSON.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-047-07",
+    "story": "SETUP-047",
+    "severity": "low",
+    "category": "a11y",
+    "description": "Permission checkboxes delete and share have no explanation while manage does.",
+    "expected": "A one-line hint per permission.",
+    "actual": "Only manage is explained",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-12.png",
+    "suggested_fix": "Add short descriptions.",
+    "surface": "web console Create API key dialog"
+   },
+   {
+    "id": "F-048-02",
+    "story": "SETUP-048",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Docs and llms.txt sample approves only put and download though seven tools are refused. Users must hand-write blocks for move, copy, delete, restore and share.",
+    "expected": "A generic block or the full list.",
+    "actual": "Two blocks shown",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-048/screenshots/step-2.png",
+    "suggested_fix": "Add one line: repeat the block for each tool name.",
+    "surface": "docs /docs/mcp-tools, /llms.txt"
+   },
+   {
+    "id": "F-048-03",
+    "story": "SETUP-048",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Starting agent-drive mcp prints an unrelated passphrase notice in the launch output.",
+    "expected": "Only protocol messages in MCP launch output.",
+    "actual": "Your account has no account key yet, so the console cannot open this drive. Set a passphrase in the console under Settings; agents will add the drive then.",
+    "evidence": "CLI output from agent-drive mcp",
+    "suggested_fix": "Skip the account-key notice in mcp mode.",
+    "surface": "CLI mcp"
+   },
+   {
+    "id": "F-049-01",
+    "story": "SETUP-049",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "A read-only bundle sandbox that tries put is told to run agent-drive login again. Login needs a browser and a human, which a bundle-only sandbox lacks. The fix is a new bundle with write scope.",
+    "expected": "Mention a new bundle from an agent with delegate or from the owner.",
+    "actual": "The API key lacks the \"write\" scope. Run `agent-drive login` again to reconnect, or ask the owner for a key with that scope.",
+    "evidence": "CLI output",
+    "suggested_fix": "Detect AGENT_DRIVE_CREDENTIALS and say to ask the owner for a new bundle.",
+    "surface": "CLI put in a bundle sandbox"
+   },
+   {
+    "id": "F-049-02",
+    "story": "SETUP-049",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "CLI help for check does not mention the read-only or empty-drive 'check not verified' outcome or exit code 1.",
+    "expected": "A help line explaining 'not verified' on an empty drive.",
+    "actual": "Help says only: ... prints \"check ok\"",
+    "evidence": "CLI output of agent-drive --help",
+    "suggested_fix": "Add the sentence to help and docs.",
+    "surface": "CLI help"
+   }
+  ]
+ },
+ {
+  "slug": "desktop-mounts",
+  "stories": [
+   {
+    "id": "SETUP-051",
+    "status": "partial",
+    "note": "Walked landing, console, docs/cli, device login approval, CLI mount. Finder app not installed on the Studio, so download, extension, Finder row and drop-file steps are not-walkable. Mount fails with a raw ENOENT."
+   },
+   {
+    "id": "SETUP-052",
+    "status": "not-walkable",
+    "note": "Needs Finder app, File Provider extension and System Settings; none available. Docs-only check done."
+   },
+   {
+    "id": "SETUP-053",
+    "status": "not-walkable",
+    "note": "Studio is macOS arm64; Linux FUSE cannot be exercised. Docs requirements read; missing-fusermount error unverified."
+   },
+   {
+    "id": "SETUP-054",
+    "status": "not-walkable",
+    "note": "Host is macOS; Windows error cannot be produced. Docs and llms.txt never say mount is unsupported on Windows (finding)."
+   },
+   {
+    "id": "SETUP-055",
+    "status": "partial",
+    "note": "Walked connect validation, parent/mountpoint/name/alias errors, mounts list/status, docs and mobile docs. Persist success, Finder row, file drop, reboot restore not-walkable (no Instabox, no Finder app). Output in docs/ux-walker/setup-nov27/stories/SETUP-055/."
+   },
+   {
+    "id": "SETUP-056",
+    "status": "partial",
+    "note": "Reproduced exact missing-Instabox error; message gives no recovery and a failed --persist leaves a registration that blocks rerun."
+   },
+   {
+    "id": "SETUP-057",
+    "status": "partial",
+    "note": "mounts wake and mounts service status fail without Instabox, contradicting docs. Finder behaviour and wake errors not-walkable."
+   },
+   {
+    "id": "SETUP-058",
+    "status": "partial",
+    "note": "forget success, unknown-name and usage errors pass. Refusal while a service/mountpoint exists not reproducible without Instabox/Finder app."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-SETUP-051-01",
+    "story": "SETUP-051",
+    "severity": "high",
+    "category": "error-handling",
+    "description": "mount (and foreground connect) on a Mac without Agent Drive.app prints a raw system error and gives no install instruction.",
+    "expected": "Message that the Finder app is not installed, with download link and /Applications location.",
+    "actual": "ENOENT: no such file or directory, stat '/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder' (connect prints the saved-entry JSON first, then this).",
+    "evidence": "CLI output: mount /Users/agent/uxw/m051/AgentDrive; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-051/walk-report.md step 5",
+    "suggested_fix": "Catch ENOENT on the helper path and print a download/enable hint mentioning AGENT_DRIVE_FINDER_HELPER.",
+    "surface": "CLI mount/connect"
+   },
+   {
+    "id": "F-SETUP-051-02",
+    "story": "SETUP-051",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Landing page, console and llms.txt never mention Finder, mount or Instabox; only one dense paragraph in /docs/cli does.",
+    "expected": "A pointer to the Finder mount from the console or Quickstart.",
+    "actual": "No matches for finder/mount/instabox on landing, console, or llms.txt.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-051/screenshots/step-1.png, step-2.png; SETUP-055/screenshots/step-1.png",
+    "suggested_fix": "Add a short 'Mount in Finder' section to Quickstart, link from console, split the docs/cli paragraph into steps.",
+    "surface": "website, console, docs"
+   },
+   {
+    "id": "F-SETUP-051-03",
+    "story": "SETUP-051",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "login with AGENT_DRIVE_API_URL lacking the /api suffix gives an unhelpful 404 message.",
+    "expected": "Message names the URL tried and hints the API URL ends in /api.",
+    "actual": "Agent Drive refused the login request: 404",
+    "evidence": "CLI output of login --no-browser with AGENT_DRIVE_API_URL=http://localhost:3811",
+    "suggested_fix": "Include the URL and an /api hint in the message.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-051-04",
+    "story": "SETUP-051",
+    "severity": "low",
+    "category": "consistency",
+    "description": "agent-drive --help lists mounts list and mounts status twice and interleaves mount, mounts add and mounts service lines.",
+    "expected": "Each command once, grouped.",
+    "actual": "'mounts list | status [NAME]' then 'mounts list' and 'mounts status [NAME]' again.",
+    "evidence": "CLI --help output",
+    "suggested_fix": "Dedupe and group drive mounts versus live workspaces.",
+    "surface": "CLI help"
+   },
+   {
+    "id": "F-SETUP-055-01",
+    "story": "SETUP-055",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "Help lists --sandbox on mounts add but mounts add cannot register a live workspace.",
+    "expected": "mounts add NAME MP --sandbox ID registers a live workspace, or help omits --sandbox.",
+    "actual": "\"A --drive ID is required. No drive key is configured for this API.\" and with --root: \"--root is only supported by `connect`.\"",
+    "evidence": "CLI output in SETUP-055/walk-report.md step 3",
+    "suggested_fix": "Remove --sandbox from the mounts add help line or accept --root; point to connect.",
+    "surface": "CLI help, mounts add"
+   },
+   {
+    "id": "F-SETUP-055-02",
+    "story": "SETUP-055",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "mkdir of the full mountpoint triggers an error with no recovery step; docs only mkdir the parent and never say the mountpoint must be absent (Linux docs say the opposite).",
+    "expected": "Message and docs say the mountpoint must not exist; remove the empty folder.",
+    "actual": "Finder mountpoint already exists: /Users/agent/uxw/m055/AgentWorkspaces/coordinator",
+    "evidence": "CLI output; /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
+    "suggested_fix": "Append a recovery instruction to the message and add one docs sentence.",
+    "surface": "CLI, docs"
+   },
+   {
+    "id": "F-SETUP-055-03",
+    "story": "SETUP-055",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Docs use the placeholder SANDBOX_ID and never say what an Instabox sandbox is or where the m_... ID is found.",
+    "expected": "Docs explain the m_... ID and where to see it.",
+    "actual": "CLI error 'Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias.' is clear but the source of the ID is undocumented; /docs/sandboxes has no mention of connect or Instabox.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/step-2.png",
+    "suggested_fix": "Show 'm_...' in the example and say where the ID is shown.",
+    "surface": "docs/cli"
+   },
+   {
+    "id": "F-SETUP-055-04",
+    "story": "SETUP-055",
+    "severity": "low",
+    "category": "layout",
+    "description": "On mobile the docs command index table clips its Purpose column with no scroll cue.",
+    "expected": "Table reflows or shows an overflow cue.",
+    "actual": "Text cut at right edge (\"Upload a folder (upload-c\"); pageOverflowX 0 so clipping is inside the table.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-055/screenshots/mobile-check.png",
+    "suggested_fix": "Stack rows under 600px or add an overflow hint.",
+    "surface": "docs table"
+   },
+   {
+    "id": "F-SETUP-056-01",
+    "story": "SETUP-056",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "connect --persist with Instabox missing fails but leaves the mount registered; rerunning is blocked with no hint to forget it.",
+    "expected": "Rollback on failure, or a message saying it was saved and to run mounts forget.",
+    "actual": "First: \"Could not find an executable Instabox CLI in PATH or ~/.local/bin.\" then mounts list shows the entry; rerun: \"A mount named 'coordinator' is already registered.\" Foreground connect failure rolls back, so behaviour is inconsistent.",
+    "evidence": "CLI output in /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-056/walk-report.md",
+    "suggested_fix": "Roll back on service-start failure or append 'Run agent-drive mounts forget NAME to retry.'",
+    "surface": "CLI connect --persist"
+   },
+   {
+    "id": "F-SETUP-056-02",
+    "story": "SETUP-056",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Instabox is never defined or linked; the missing-Instabox error gives no install hint and lists only PATH and ~/.local/bin.",
+    "expected": "Error says what Instabox is and where to get it.",
+    "actual": "Could not find an executable Instabox CLI in PATH or ~/.local/bin.",
+    "evidence": "CLI output; docs search of /docs/cli and /docs/sandboxes",
+    "suggested_fix": "Add an install link to the message and one docs sentence.",
+    "surface": "CLI error, docs"
+   },
+   {
+    "id": "F-SETUP-057-01",
+    "story": "SETUP-057",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "mounts wake and mounts service status require the Instabox CLI, contradicting docs that say wake changes 'do not call Instabox'.",
+    "expected": "Local-only commands work without Instabox.",
+    "actual": "Both fail with \"Could not find an executable Instabox CLI in PATH or ~/.local/bin.\"",
+    "evidence": "CLI output in /Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-057/walk-report.md",
+    "suggested_fix": "Make wake and status offline, or fix the docs sentence.",
+    "surface": "CLI, docs"
+   },
+   {
+    "id": "F-SETUP-054-01",
+    "story": "SETUP-054",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "No docs page or llms.txt says mount is unsupported on Windows; the only Windows mention is credentials clipboard export.",
+    "expected": "A platform support line with the console or get/put as alternatives.",
+    "actual": "Only 'Clipboard (macOS and Windows)' in quickstart; runtime error unobservable on this macOS host.",
+    "evidence": "grep of /docs/{cli,quickstart,sandboxes,what-is-agent-drive}.md and /llms.txt",
+    "suggested_fix": "Add a platform support line to the mount docs.",
+    "surface": "docs"
+   }
+  ]
+ },
+ {
+  "slug": "webhook-capture",
+  "stories": [
+   {
+    "id": "SETUP-059",
+    "status": "partial",
+    "note": "Add webhook on a loaded key worked in 4 clicks; Clerk reverification not walkable. Findings on label mismatch, token placement, silent openrouter agent."
+   },
+   {
+    "id": "SETUP-060",
+    "status": "partial",
+    "note": "Locked drive, unlock and automatic resume work; wrong passphrase clear. Passkey, auto-lock text and Clerk not walkable. Minor copy and focus findings."
+   },
+   {
+    "id": "SETUP-061",
+    "status": "partial",
+    "note": "Walked on non-agent-only and a real agent-only drive. Wrong key for the right drive is accepted by the unlock dialog and fails later; wrong-drive file rejected immediately. CLI credentials export not run (login rate-limited)."
+   },
+   {
+    "id": "SETUP-062",
+    "status": "partial",
+    "note": "Pasted correct key on an empty drive is rejected with a misleading error; Retry reopens the chooser; recovery file works. CLI bundle route not run."
+   },
+   {
+    "id": "SETUP-063",
+    "status": "not-walkable",
+    "note": "Needs Clerk reverification; only generic error/Retry rows observed via blocked requests."
+   },
+   {
+    "id": "SETUP-064",
+    "status": "partial",
+    "note": "Lost token then Replace works; old token 401 and new 200 verified. No guidance on the saved row and no warning on Replace."
+   },
+   {
+    "id": "SETUP-065",
+    "status": "not-walkable",
+    "note": "Stale-inbox state cannot be produced from the web or CLI here and needs Clerk."
+   },
+   {
+    "id": "SETUP-066",
+    "status": "pass",
+    "note": "Revoke, cancel, confirm, network error all behave well; token 401 after revoke verified. Only small copy and focus findings."
+   },
+   {
+    "id": "SETUP-067",
+    "status": "partial",
+    "note": "Dialog copy buttons and CLI argument errors checked. A real capture run was blocked: login gave 404 with the origin URL and slow_down with /api."
+   },
+   {
+    "id": "SETUP-068",
+    "status": "partial",
+    "note": "Two-tab race reproduced: second Add webhook silently revokes the first tab's token (200 vs 401 verified); stale tab still shows the dead token. Traces empty state and a delivered trace verified with curl, not real OpenRouter."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-SETUP-059-1",
+    "story": "SETUP-059",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Same action has three labels (toolbar 'Capture...', drive menu 'Capture traces...', dialog 'Capture traces'); the neighbouring 'Traces' button opens the folder instead. On a 390px screen the toolbar buttons are hidden and the action exists only in the drive-name dropdown.",
+    "expected": "One label, discoverable on mobile.",
+    "actual": "Three wordings; mobile only via dropdown.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-1.png and SETUP-066/screenshots/step-5.png",
+    "suggested_fix": "Use one label and surface it on mobile.",
+    "surface": "web console Files toolbar / drive menu"
+   },
+   {
+    "id": "F-SETUP-059-2",
+    "story": "SETUP-059",
+    "severity": "medium",
+    "category": "hierarchy",
+    "description": "The one-time token block sits below Local agents and the Active/Replace/Revoke row; the dialog is 807px tall in an 800px window (internal scroll), header and close X scroll away, and the large Replace button is directly above the unsaved token.",
+    "expected": "Token and copy buttons visible first; Replace not prominent.",
+    "actual": "Token at about 330px from top; dialog scrolls.",
+    "evidence": "SETUP-059/screenshots/step-3.png, step-5.png",
+    "suggested_fix": "Show the token block first, collapse Local agents, sticky header.",
+    "surface": "Capture traces dialog"
+   },
+   {
+    "id": "F-SETUP-059-3",
+    "story": "SETUP-059",
+    "severity": "medium",
+    "category": "disclosure",
+    "description": "Setup silently creates an agent named openrouter; Agents tab shows it with a '0' avatar and 'NO API KEYS' with no explanation.",
+    "expected": "Dialog or Agents row explains it.",
+    "actual": "Unexplained.",
+    "evidence": "SETUP-059/screenshots/step-6.png",
+    "suggested_fix": "Add a sentence and fix avatar.",
+    "surface": "Agents tab"
+   },
+   {
+    "id": "F-SETUP-059-4",
+    "story": "SETUP-059",
+    "severity": "low",
+    "category": "visual",
+    "description": "'Copied' is wider than 'Copy' so code boxes re-wrap; four buttons all read 'Copy'. Drive switcher truncates 'priya-agents' at 1280px.",
+    "expected": "Stable layout.",
+    "actual": "Shifts.",
+    "evidence": "SETUP-059/screenshots/step-4.png, step-1.png",
+    "suggested_fix": "Fixed width, specific labels.",
+    "surface": "Capture dialog"
+   },
+   {
+    "id": "F-SETUP-060-1",
+    "story": "SETUP-060",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Unlock note 'After you unlock, you can set up the OpenRouter webhook' implies another click though setup resumes automatically; focus after resume lands on the install-command Copy button; key menu has both 'Lock' and 'Lock this browser'.",
+    "expected": "Accurate copy, focus on token.",
+    "actual": "As described.",
+    "evidence": "SETUP-060/screenshots/step-4.png, step-6.png, step-8.png",
+    "suggested_fix": "Reword, move focus, merge lock items.",
+    "surface": "unlock dialog / key menu"
+   },
+   {
+    "id": "F-SETUP-061-1",
+    "story": "SETUP-061",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "A recovery file for the right drive with the wrong key is accepted silently by the unlock dialog; Capture dialog then fails with 'This key does not open this drive's files. Retry'. A wrong-drive file is rejected at once with 'That recovery file is not for this drive.' Two wordings.",
+    "expected": "Reject in the unlock dialog with one wording.",
+    "actual": "Late failure, different text.",
+    "evidence": "SETUP-061/screenshots/step-2.png, step-4.png, step-7.png",
+    "suggested_fix": "Verify key in the unlock dialog.",
+    "surface": "unlock dialog / Capture dialog"
+   },
+   {
+    "id": "F-SETUP-061-2",
+    "story": "SETUP-061",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Recovery dialog says to find the account-key fingerprint 'under Settings'; the sidebar has no Settings and the only fingerprint is in the key-status menu without an account-key label. The non-agent-only dialog crams four routes and two commands together; the agent-only variant is much simpler.",
+    "expected": "Real location named; simpler dialog.",
+    "actual": "Dead-end reference, dense text.",
+    "evidence": "SETUP-061/screenshots/step-1.png vs step-5.png; SETUP-060/screenshots/step-8.png",
+    "suggested_fix": "Name the key-status menu; collapse CLI instructions.",
+    "surface": "unlock dialog recovery mode"
+   },
+   {
+    "id": "F-SETUP-062-1",
+    "story": "SETUP-062",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "On an empty drive a correct pasted key is accepted by the unlock dialog, then the Capture dialog says 'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.' with 'Retry'. Paste is offered as a normal route.",
+    "expected": "Explain a pasted key cannot be checked on an empty drive, or hide paste.",
+    "actual": "Misleading error; Retry label hides that it reopens the chooser.",
+    "evidence": "SETUP-062/screenshots/step-2.png",
+    "suggested_fix": "Reword and rename Retry.",
+    "surface": "Capture dialog"
+   },
+   {
+    "id": "F-SETUP-063-1",
+    "story": "SETUP-063",
+    "severity": "low",
+    "category": "error-handling",
+    "description": "Error rows are inconsistent in style, and 'A same-origin request is required. Retry' is cryptic (seen only because of a test host name).",
+    "expected": "Plain next step.",
+    "actual": "Technical text.",
+    "evidence": "SETUP-063/screenshots/step-1.png; exact quote 'A same-origin request is required.'",
+    "suggested_fix": "Map to 'Reload the page and try again.'",
+    "surface": "Capture dialog"
+   },
+   {
+    "id": "F-SETUP-064-1",
+    "story": "SETUP-064",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Saved row shows only Created/Active/Replace/Revoke: no text that the token cannot be shown again, no URL. Replace has no confirmation and no warning that the old token dies at once (verified: old 401 'The webhook token is not valid.', new 200) or that only the header changes.",
+    "expected": "Guidance and a warning.",
+    "actual": "Silent.",
+    "evidence": "SETUP-064/screenshots/step-1.png, step-2.png",
+    "suggested_fix": "Add help line, show URL, warn on Replace.",
+    "surface": "Capture dialog"
+   },
+   {
+    "id": "F-SETUP-066-1",
+    "story": "SETUP-066",
+    "severity": "low",
+    "category": "a11y",
+    "description": "Revoke confirm focuses the destructive 'Revoke webhook' button; copy 'Stop this webhook?' does not say deliveries will 401 or that traces stay; no done message; Revoke link is about 32px high.",
+    "expected": "Focus Cancel, explain consequences.",
+    "actual": "As described.",
+    "evidence": "SETUP-066/screenshots/step-1.png, step-3.png",
+    "suggested_fix": "Focus Cancel, expand copy.",
+    "surface": "Capture dialog"
+   },
+   {
+    "id": "F-SETUP-067-1",
+    "story": "SETUP-067",
+    "severity": "medium",
+    "category": "error-handling",
+    "description": "`agent-drive login` with AGENT_DRIVE_API_URL=http://localhost:3811 prints only 'Agent Drive refused the login request: 404'; with /api it prints 'refused the login request: slow_down' with no wait advice. Real capture run could not be walked.",
+    "expected": "Actionable messages.",
+    "actual": "Bare codes.",
+    "evidence": "CLI output: 'Agent Drive refused the login request: 404' and '...: slow_down'",
+    "suggested_fix": "Explain the URL form and retry time.",
+    "surface": "CLI login"
+   },
+   {
+    "id": "F-SETUP-068-1",
+    "story": "SETUP-068",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "A stale second tab clicking Add webhook silently replaces the other tab's token; the other tab keeps showing its dead token as Active with the same Created time (token A 200, token B 401). /traces empty state does not say traces land in /traces/openrouter/<date>/. Breadcrumb spills 7px at 390px.",
+    "expected": "Warn or refresh stale state; name the path.",
+    "actual": "Silent replacement.",
+    "evidence": "SETUP-068/screenshots/step-2.png, step-3.png, step-4.png, step-6.png",
+    "suggested_fix": "Re-read webhook state before add; add path to empty state.",
+    "surface": "Capture dialog / traces empty state"
+   },
+   {
+    "id": "F-ENV-1",
+    "story": "ALL",
+    "severity": "low",
+    "category": "environment",
+    "description": "Walker helper scripts in /tmp (for example /tmp/ab.sh) were shared and overwritten by other walkers, so some of my early browser commands ran in other sessions and vice versa. I moved to /private/tmp/wcap-uxw and re-verified every screenshot I cite. Other walkers may have seen stray clicks or logins from me in their sessions early on.",
+    "expected": "Isolated helpers per walker.",
+    "actual": "Collision.",
+    "evidence": "cat /tmp/ab.sh showed another walker's session name",
+    "suggested_fix": "Give each walker a private helper directory.",
+    "surface": "test harness"
+   }
+  ]
+ },
+ {
+  "slug": "prod-public",
+  "stories": [
+   {
+    "id": "PROD-01",
+    "status": "partial",
+    "note": "Landing hero, Copy prompt ('Copied' feedback) and mobile work cleanly; npm name matches docs. Gaps: hero says 'pairing code' only, no Node 24 note or next command, inconsistent copy button styles. Covers SETUP-001 and the start of SETUP-009."
+   },
+   {
+    "id": "PROD-02",
+    "status": "partial",
+    "note": "/pricing is clear and clean at 1280 and 390. Start with Free goes to /sign-up. Landing plan table says downloads 5GB/100GB/1TB; /pricing says 'Downloads not charged'. Signed-out Choose Developer keeps the return path but lands on a generic sign-in. Covers SETUP-002."
+   },
+   {
+    "id": "PROD-03",
+    "status": "partial",
+    "note": "Docs, quickstart, connect-an-agent, CLI, trace capture and llms.txt render cleanly. Package name and install command match on every surface and on the npm registry (0.5.1, node >=24). Copy conflicts: quickstart omits the verification code that llms.txt and connect-an-agent require; quickstart step 4 is written to the agent. The sandboxes page screenshot timed out, so it was read as text only. Covers SETUP-007, SETUP-009, SETUP-014 reading."
+   },
+   {
+    "id": "PROD-04",
+    "status": "partial",
+    "note": "/sign-up, /sign-in and bare /connect (signed out) viewed only, no form touched; clean at both sizes. Bare /connect gives no explanation. Signed-in /connect, code entry, Approve and the return after sign-up were not walked (would need an account). Covers SETUP-006 signed-out part."
+   },
+   {
+    "id": "PROD-05",
+    "status": "partial",
+    "note": "Finder download link found only inside /docs/cli (GitHub release zip 'Agent Drive Finder 0.3.1'); nothing downloaded. No landing, footer or docs-index mention; /desktop, /download, /finder, /app, /mac, /docs/mount, /docs/desktop, /docs/finder return 404. The CLI page calls the app 'signed' and then says the build workflow does not sign or notarize."
+   }
+  ],
+  "findings": [
+   {
+    "id": "F-PROD-01-1",
+    "story": "PROD-02",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "Landing plan table and /pricing disagree on downloads.",
+    "expected": "One download policy on every surface.",
+    "actual": "Landing row 'Downloads / month' shows 5 GB / 100 GB / 1 TB; /pricing says 'Downloads not charged' on all plans and 'Extra GB downloaded: Not charged'.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-02/screenshots/step-2-full.png; landing snapshot cells 5 GB, 100 GB, 1 TB; /pricing text 'Downloads not charged'",
+    "suggested_fix": "Make the landing table match /pricing, or the reverse.",
+    "surface": "/ and /pricing"
+   },
+   {
+    "id": "F-PROD-01-2",
+    "story": "PROD-01",
+    "severity": "medium",
+    "category": "happy-path",
+    "description": "Hero and quickstart describe the approval step differently from llms.txt and Connect an agent. The hero says 'Your agent shows a pairing code, and you approve it'; quickstart step 3 says 'check that the code matches ... and click Approve'. llms.txt and /docs/connect-an-agent require typing a separate verification code.",
+    "expected": "Every surface mentions the verification code the human must type.",
+    "actual": "A human who reads only the hero or quickstart hears about one code, then meets a required second field on /connect.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png; quickstart: 'check that the code matches the one in the terminal, and click Approve'; connect-an-agent: 'types the verification code into the page'",
+    "suggested_fix": "Add 'type the verification code the agent prints' to the hero hint and quickstart step 3.",
+    "surface": "/, /docs/quickstart"
+   },
+   {
+    "id": "F-PROD-01-3",
+    "story": "PROD-03",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Quickstart step 4 is addressed to the agent ('Offer these choices in this order and let the person pick one') on a page that says 'This page walks you through'. Step 1 'Sign up' also differs from the agent path in llms.txt, where sign-up is not a step.",
+    "expected": "Instructions addressed to the reader.",
+    "actual": "Mixed audience in one checklist.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-03/screenshots/step-2-quickstart.png; /docs/quickstart step 4 text",
+    "suggested_fix": "Reword step 4 for the human reader and note that sign-up can happen when the approval link asks for sign-in.",
+    "surface": "/docs/quickstart"
+   },
+   {
+    "id": "F-PROD-01-4",
+    "story": "PROD-05",
+    "severity": "medium",
+    "category": "flow",
+    "description": "The macOS Finder app is not discoverable. Landing, footer, docs index, sidebar and llms.txt never mention it, and guessed URLs return 404. The only download link (GitHub release zip 'Agent Drive Finder 0.3.1') is inside two paragraphs of the 48 KB CLI reference.",
+    "expected": "A visitor who wants Finder access finds a page and a download from the nav or docs index.",
+    "actual": "Reachable only by reading the CLI reference sections 'Install and configuration' and 'macOS requirements and unmounting'.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-05/screenshots/step-1-cli-macos.png; HTTP 404 for /desktop /download /finder /app /mac /docs/mount /docs/desktop /docs/finder; href https://github.com/dennisonbertram/agent-drive/releases/download/finder-v0.3.1/Agent-Drive-Finder-0.3.1.zip",
+    "suggested_fix": "Add a 'Finder and mounts' docs page to the docs index and link it from the landing page.",
+    "surface": "/docs/cli, /docs"
+   },
+   {
+    "id": "F-PROD-01-5",
+    "story": "PROD-05",
+    "severity": "medium",
+    "category": "consistency",
+    "description": "The CLI reference contradicts itself on whether the Finder app is signed. It says 'the separate signed Agent Drive app', then says the macOS builder workflow 'compiles the app but does not sign, notarize, or publish it'. A new user cannot tell whether macOS will warn about an unidentified developer.",
+    "expected": "One clear statement of signing and notarization state and what the user sees on first open.",
+    "actual": "Both claims appear in the same paragraph.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-05/screenshots/step-1-cli-macos.png; /docs/cli paragraph starting 'The Linux npm package includes native mount helpers'",
+    "suggested_fix": "State whether the 0.3.1 zip is signed and notarized, and separate that from the source-build workflow.",
+    "surface": "/docs/cli"
+   },
+   {
+    "id": "F-PROD-01-6",
+    "story": "PROD-01",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "The hero terminal option shows the npm install command with no Node 24 requirement and no next command (agent-drive login). Node 24 appears only in quickstart, llms.txt and the CLI docs.",
+    "expected": "The hero tells a terminal user the Node requirement and what to run next.",
+    "actual": "A user on an older Node runs the copied command with no warning on the page; the package declares engines node >=24.0.0.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png; npm view: engines = { node: '>=24.0.0' }",
+    "suggested_fix": "Add 'Node 24+' and a link to the quickstart next to the hero command.",
+    "surface": "/"
+   },
+   {
+    "id": "F-PROD-01-7",
+    "story": "PROD-01",
+    "severity": "low",
+    "category": "consistency",
+    "description": "The two hero copy controls look unrelated: 'Copy prompt' is a sentence-case outlined button in the dark panel, 'COPY COMMAND' is a small uppercase monospace outlined box.",
+    "expected": "Same control, same style.",
+    "actual": "Different type, case and border.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-01/screenshots/step-1.png",
+    "suggested_fix": "Use one copy button style.",
+    "surface": "/"
+   },
+   {
+    "id": "F-PROD-01-8",
+    "story": "PROD-04",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Signed-out 'Choose Developer' goes to /console/billing, then to /sign-in?redirect_url=https://agentdrive.xyz/console/billing. The return path is kept, but the form says 'Welcome back! Please sign in to continue' with no mention of billing, and new visitors see 'Welcome back'.",
+    "expected": "A context line such as 'Sign in to choose a plan' and a prominent sign-up route for new visitors.",
+    "actual": "Generic sign-in; sign-up is a small link under the card.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-02/screenshots/step-4-choose-dev-signedout.png",
+    "suggested_fix": "Show context from redirect_url and offer 'New here? Create an account' prominently.",
+    "surface": "/sign-in"
+   },
+   {
+    "id": "F-PROD-01-9",
+    "story": "PROD-04",
+    "severity": "low",
+    "category": "happy-path",
+    "description": "Bare /connect while signed out shows the ordinary sign-in form with no explanation that this is the agent approval page or that the agent's code is needed next. The signed-in bare /connect was not walked.",
+    "expected": "A line such as 'Sign in to connect an agent'.",
+    "actual": "Identical to /sign-in; only the header links carry redirect_url=%2Fconnect.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-04/screenshots/connect.png",
+    "suggested_fix": "Add a context line on sign-in when redirect_url is /connect.",
+    "surface": "/connect"
+   },
+   {
+    "id": "F-PROD-01-10",
+    "story": "PROD-03",
+    "severity": "suggestion",
+    "category": "hierarchy",
+    "description": "'Agent setup guide' (footer and docs index) opens /llms.txt as plain monospace text that begins with a 50-line docs index; the setup steps start below the first screen.",
+    "expected": "Setup steps first, or a pointer to them.",
+    "actual": "Index first, '## Set up (local agent with a shell)' further down.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-03/screenshots/step-6-llms.png",
+    "suggested_fix": "Move the setup section above the doc index, or label the link 'Agent instructions (plain text)'.",
+    "surface": "/llms.txt"
+   },
+   {
+    "id": "F-PROD-01-11",
+    "story": "PROD-04",
+    "severity": "suggestion",
+    "category": "simplicity",
+    "description": "Sign-up repeats the sign-in link three times: header 'Sign in', card footer 'Already have an account? Sign in', and the line below the card.",
+    "expected": "Say once.",
+    "actual": "Three links to the same destination on one screen.",
+    "evidence": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/PROD-04/screenshots/sign-up.png",
+    "suggested_fix": "Remove the line below the card or keep only the Clerk footer.",
+    "surface": "/sign-up"
+   }
+  ]
+ }
+]

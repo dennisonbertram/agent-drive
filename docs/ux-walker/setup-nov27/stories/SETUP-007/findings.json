@@ -1,0 +1,8 @@
+[
+ {
+  "id": "F-SETUP-007-1",
+  "severity": "low",
+  "title": "faq-recovery",
+  "description": "FAQ assumes recovery file saved at drive creation"
+ }
+]

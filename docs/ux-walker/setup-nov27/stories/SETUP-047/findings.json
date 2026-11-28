@@ -1,0 +1,86 @@
+[
+  {
+    "id": "F-047-01",
+    "severity": "medium",
+    "category": "happy-path",
+    "criterion": "Feedback",
+    "score": "fail",
+    "description": "After 'Create API key' the button goes grey and disabled with unchanged label and no spinner for roughly 8 seconds on this dev server; the dialog looks frozen.",
+    "expected": "Label changes to 'Creating...' or a spinner appears.",
+    "actual": "Disabled grey button only",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-14.png",
+    "suggested_fix": "Show progress text on submit buttons."
+  },
+  {
+    "id": "F-047-02",
+    "severity": "medium",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "Manual path forces drive -> recovery-file dialog -> jump to Files tab -> back to API keys -> agent -> key: about 19 actions. Finishing the recovery-file dialog throws the user out of the API keys tab and the flow they started.",
+    "expected": "Return to the tab the user was on after drive creation.",
+    "actual": "Lands on Files with 'Recovery file saved' banner",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-7.png",
+    "suggested_fix": "Keep the user on API keys after the recovery dialog."
+  },
+  {
+    "id": "F-047-03",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Same repository-build wording on the API keys panel: 'Run the CLI from the repository after building it.' A user who installed from npm is told otherwise; panel also shows origin-only --api.",
+    "expected": "npm install wording matching docs.",
+    "actual": "Repository build instruction",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-16.png",
+    "suggested_fix": "Replace with npm install instruction."
+  },
+  {
+    "id": "F-047-04",
+    "severity": "low",
+    "category": "hierarchy",
+    "criterion": "Information stated once",
+    "score": "warn",
+    "description": "The recovery-file dialog repeats 'Without it nobody, including us, can open this drive.' twice and has no close control.",
+    "expected": "Say once.",
+    "actual": "Duplicate sentence",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-5.png",
+    "suggested_fix": "Drop one of the two sentences."
+  },
+  {
+    "id": "F-047-05",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Create drive dialog checkbox 'Agent-only \u2014 never add this drive to passphrase unlock' means nothing to a user with no passphrase; `+ New API key` is greyed out with no explanation until a drive and agent exist.",
+    "expected": "Plain wording and a reason for disabled button.",
+    "actual": "Jargon; silent disabled button",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-3.png",
+    "suggested_fix": "Reword; add title text to the disabled button."
+  },
+  {
+    "id": "F-047-06",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Feedback",
+    "score": "warn",
+    "description": "`agent-drive login` with AGENT_DRIVE_API_KEY prints a raw JSON blob (accountId, keyId, scopes...) instead of a 'Logged in' line; `whoami` then shows localDriveKeys false with no hint that a drive key is still needed.",
+    "expected": "Human sentence plus 'Set AGENT_DRIVE_KEY to read or write drive <id>'.",
+    "actual": "JSON only",
+    "screenshot": "CLI output",
+    "suggested_fix": "Add a summary line after JSON or instead of it."
+  },
+  {
+    "id": "F-047-07",
+    "severity": "low",
+    "category": "a11y",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Permission checkboxes delete and share have no explanation while manage does; the user must guess what share means.",
+    "expected": "One-line hint per permission.",
+    "actual": "Only manage explained",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-047/screenshots/step-12.png",
+    "suggested_fix": "Add short descriptions."
+  }
+]

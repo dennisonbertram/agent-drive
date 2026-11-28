@@ -1,0 +1,110 @@
+[
+  {
+    "id": "F-044-01",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "login with AGENT_DRIVE_API_URL set to the bare origin (the form the console panel shows) fails with `Agent Drive refused the login request: 404`; adding /api works. Probably a local-dev routing difference (prod serves /oauth/... at the origin) but the message gives no recovery hint.",
+    "expected": "Either the origin works or the error says to use the /api URL.",
+    "actual": "`Agent Drive refused the login request: 404`",
+    "screenshot": "CLI output",
+    "suggested_fix": "Print the URL that returned 404 and hint at the /api form."
+  },
+  {
+    "id": "F-044-02",
+    "severity": "low",
+    "category": "happy-path",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "CLI login prints `Ignored a different API URL returned by the server.` with no explanation of what was ignored or whether it matters.",
+    "expected": "Silent or one line saying which URL is used.",
+    "actual": "Bare warning after approval",
+    "screenshot": "CLI output",
+    "suggested_fix": "Explain or drop the line."
+  },
+  {
+    "id": "F-044-03",
+    "severity": "medium",
+    "category": "disclosure",
+    "criterion": "Advanced options",
+    "score": "warn",
+    "description": "The delegate checkbox needed for credentials issue/grant is only inside collapsed Details on /connect; the summary 'New encrypted drive \u00b7 full access' does not mention it, and the success page does not say delegate was granted.",
+    "expected": "Visible hint or the CLI telling the owner to tick it.",
+    "actual": "Hidden in Details",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-2.png",
+    "suggested_fix": "Show delegate state on the approval summary and success page."
+  },
+  {
+    "id": "F-044-04",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "fail",
+    "description": "Pasting the printed line with its prefix gives `AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.` The printed line includes the prefix, docs say to paste only the part after `=`, and the error never says so.",
+    "expected": "Message names the prefix mistake or the CLI accepts the prefix.",
+    "actual": "`AGENT_DRIVE_CREDENTIALS is not a valid credentials bundle.`",
+    "screenshot": "CLI output",
+    "suggested_fix": "Strip a leading `AGENT_DRIVE_CREDENTIALS=` or mention it in the error."
+  },
+  {
+    "id": "F-044-05",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Information stated once",
+    "score": "fail",
+    "description": "Web Files popover says `Key backed up 11/27/2026 (env)` while the laptop CLI says `drive key not backed up` and `credentials status` says backedUp:false. The sandbox bundle (method env) marked the drive backed up server-side, masking that the laptop has no backup.",
+    "expected": "One consistent backup state; 'env' not shown to users.",
+    "actual": "Web: backed up; CLI: not backed up",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-9.png",
+    "suggested_fix": "Track backup per machine/key or word the web state as 'a sandbox holds a copy'."
+  },
+  {
+    "id": "F-044-06",
+    "severity": "medium",
+    "category": "consistency",
+    "criterion": "Labels/copy",
+    "score": "warn",
+    "description": "Console panel says `Run the CLI from the repository after building it.` and shows origin-only `--api`, contradicting npm install instructions elsewhere.",
+    "expected": "Same install and --api guidance as docs.",
+    "actual": "Repository-build wording",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-7.png",
+    "suggested_fix": "Replace with `npm install -g @dennisonbertram/agent-drive` wording."
+  },
+  {
+    "id": "F-044-07",
+    "severity": "low",
+    "category": "hierarchy",
+    "criterion": "Information stated once",
+    "score": "warn",
+    "description": "API keys rows repeat the agent name three times and use `issued by <machine>` in the label while the Agents tab says `issued by <agent name>`. No drive is named on the key row.",
+    "expected": "One issuer wording; drive shown.",
+    "actual": "Mixed issuer wording, repeated names",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-6.png",
+    "suggested_fix": "Use agent name as issuer in labels; drop the third repeat; add drive name."
+  },
+  {
+    "id": "F-044-08",
+    "severity": "low",
+    "category": "flow",
+    "criterion": "Dead ends",
+    "score": "warn",
+    "description": "Agents rows show no scopes, delegate status or write paths and the laptop agent's Revoke access looks the same as CI rows, so a user cannot tell which identity can mint others or is the one they are using.",
+    "expected": "Badge for 'can add agents' and write paths.",
+    "actual": "Only name, UUID, active key count",
+    "screenshot": "docs/ux-walker/setup-nov27/stories/SETUP-044/screenshots/step-5.png",
+    "suggested_fix": "Add scope/delegate and write-path summary to agent rows."
+  },
+  {
+    "id": "F-044-09",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "`--write-path ci/nightly` fails with `writePaths must be a canonical absolute POSIX path.` (API field name and jargon, no example).",
+    "expected": "`--write-path must start with / ... e.g. /ci/nightly`",
+    "actual": "writePaths must be a canonical absolute POSIX path.",
+    "screenshot": "CLI output",
+    "suggested_fix": "Reword with flag name and example."
+  }
+]

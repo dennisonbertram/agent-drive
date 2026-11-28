@@ -1,0 +1,26 @@
+[
+  {
+    "id": "F-SETUP-062-1",
+    "severity": "medium",
+    "category": "error-handling",
+    "criterion": "Error messages",
+    "score": "warn",
+    "description": "On an empty drive a correct pasted key is rejected with 'This drive has no files yet. Load its recovery file or credentials bundle so the key can be matched to the drive.' It does not say the key itself may be fine, and the dialog offers 'Paste a key instead' as a normal route.",
+    "expected": "Either accept the pasted key when it is the only option, or hide paste for empty drives and say why.",
+    "actual": "Offered, accepted, then rejected one dialog later.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-062/screenshots/step-2.png",
+    "suggested_fix": "Disable or annotate 'Paste a key instead' for drives with no files, or word the error 'A pasted plain key cannot be checked on an empty drive. Use the recovery file or a credentials bundle.'"
+  },
+  {
+    "id": "F-SETUP-062-2",
+    "severity": "low",
+    "category": "error-handling",
+    "criterion": "Recovery",
+    "score": "warn",
+    "description": "'Retry' is shown for an error that retrying with the same input cannot fix; it only works because it reopens the file chooser.",
+    "expected": "Label says 'Choose recovery file'.",
+    "actual": "'Retry'.",
+    "screenshot": "/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-062/screenshots/step-2.png",
+    "suggested_fix": "Rename to the real action."
+  }
+]

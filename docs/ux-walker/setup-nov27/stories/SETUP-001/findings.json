@@ -1,0 +1,8 @@
+[
+ {
+  "id": "F-SETUP-001-1",
+  "severity": "medium",
+  "title": "high-clarity-no-signup-cue",
+  "description": "Hero never says an account is needed first; sign-up surprise at /connect"
+ }
+]
