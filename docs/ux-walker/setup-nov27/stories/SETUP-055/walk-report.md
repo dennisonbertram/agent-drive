@@ -5,9 +5,9 @@ Status: partial. No Instabox and no Finder app on the Studio.
 1. Console (screenshots/step-1.png). Fresh account Files page: empty state "Ready for your first file", "Connect an agent" button. No mention of mounts, Finder or Instabox. Geometry clean; no console errors.
 2. Docs "Live workspace mounts" (step-2.png). Readable code blocks; placeholder SANDBOX_ID; mkdir of the parent only.
 3. CLI error sequence (all exit 1, each message quoted exactly):
-   - `--sandbox my-sandbox`: "Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias." Clear, but nothing says where the ID is found.
+   - `--sandbox my-sandbox`: "Invalid Instabox sandbox ID; use its exact m\_... ID, not a name or alias." Clear, but nothing says where the ID is found.
    - `--root workspace/project`: "Invalid workspace root; use a normalized absolute sandbox path." Clear.
-   - name `bad/name`: "Invalid mount name; use 1-64 letters, digits, "-" or "_", starting with a letter or digit." Clear.
+   - name `bad/name`: "Invalid mount name; use 1-64 letters, digits, "-" or "\_", starting with a letter or digit." Clear.
    - missing parent: "Finder mountpoint parent does not exist: .../Nope". Clear.
    - mkdir of full mountpoint: "Finder mountpoint already exists: .../coordinator". No instruction.
    - valid command with --persist: "Could not find an executable Instabox CLI in PATH or ~/.local/bin." and the entry stays registered (see SETUP-056).

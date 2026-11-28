@@ -11,7 +11,7 @@ Source: worktree `/Users/dennison/develop/agent-drive-ux-setup`. Read from code 
 - Finder app is a separate download, `Agent-Drive-Finder-0.3.1.zip` from GitHub release `finder-v0.3.1`; it is not installed by the CLI (`docs/cli.md:20`, `:240`; `native/macos/README.md:9`). The CLI launches `/Applications/Agent Drive.app/Contents/MacOS/AgentDriveFinder` (`packages/agent-drive/src/mount-mac.ts:8`), override `AGENT_DRIVE_FINDER_HELPER` (must be absolute, `mount-mac.ts:408-410`).
 - No website page, console screen, or `/llms.txt` mentions Finder, `connect`, or Instabox (discovery-setup.md section 4).
 - `connect` usage line: `connect NAME MOUNTPOINT --sandbox ID --root /WORKSPACE/PATH [--read-only] [--wake-on-access | --no-wake-on-access] [--persist]` (`cli.ts:848`, help text `cli.ts:1730`).
-- Sandbox ID must be an exact `m_...` ID: "Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias." (`mount-registry.ts:199`). Docs only say `SANDBOX_ID`.
+- Sandbox ID must be an exact `m_...` ID: "Invalid Instabox sandbox ID; use its exact m\_... ID, not a name or alias." (`mount-registry.ts:199`). Docs only say `SANDBOX_ID`.
 - On macOS, `connect` rejects an existing mountpoint ("Finder mountpoint already exists: <path>", `mount-registry.ts:162`) and a missing parent ("Finder mountpoint parent does not exist: <path>", `:149`). Docs say `mkdir -p "$HOME/AgentWorkspaces"` (the parent), which is the correct step, but never say the mountpoint itself must not exist. Linux FUSE says the opposite for drives: existing mountpoint must be an empty directory (`docs/cli.md:221`).
 - Missing Instabox: "Could not find an executable Instabox CLI in PATH or ~/.local/bin." (`workspace-service.ts:159`). It is only raised when the service or wake path resolves the executable (for example `--persist`, `mounts wake` when the policy changes). No doc says what Instabox is or where to get it.
 - Wake errors (`workspace-wake.ts:240,257,261,272`): "Instabox machine is <state>; wake-on-access is disabled.", "Instabox machine is in unsupported state: <state>.", "Instabox workspace wake timed out.", "Instabox machine did not reach the running state."
@@ -154,7 +154,7 @@ Source: worktree `/Users/dennison/develop/agent-drive-ux-setup`. Read from code 
 ### Steps
 
 1. Dana reads `docs/cli.md` "Live workspace mounts" and runs `mkdir -p "$HOME/AgentWorkspaces"` → ok. She does not know the doc's `SANDBOX_ID` placeholder must be an `m_...` machine ID.
-2. She runs `agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" --sandbox "my-sandbox" --root /workspace/project --persist` → "Invalid Instabox sandbox ID; use its exact m_... ID, not a name or alias." (`mount-registry.ts:199`). Error recovery is clear but the docs never say where to find the ID.
+2. She runs `agent-drive connect coordinator "$HOME/AgentWorkspaces/coordinator" --sandbox "my-sandbox" --root /workspace/project --persist` → "Invalid Instabox sandbox ID; use its exact m\_... ID, not a name or alias." (`mount-registry.ts:199`). Error recovery is clear but the docs never say where to find the ID.
 3. She finds the ID with the Instabox tool and reruns with `--sandbox m_7f3a... --root /workspace/project --persist` → the CLI prints the saved entry as JSON, then the service runtime status (`cli.ts:870-872`), then returns (no foreground process).
 4. She opens Finder → a location row for `coordinator` (the Finder row name for live mounts was not confirmed) shows the sandbox files including hidden `.env`.
 5. She drops a new file in it → creates fine. She edits an existing file and saves → fails with a read-only error (`docs/cli.md:186-189`).
@@ -171,7 +171,7 @@ Source: worktree `/Users/dennison/develop/agent-drive-ux-setup`. Read from code 
 
 - She runs `mkdir -p "$HOME/AgentWorkspaces/coordinator"` too: "Finder mountpoint already exists: <path>" (`mount-registry.ts:162`). The docs only mkdir the parent but a natural habit is to mkdir the whole path. Hesitation and error point.
 - Parent missing: "Finder mountpoint parent does not exist: <path>".
-- Name violates the pattern: "Invalid mount name; use 1-64 letters, digits, "-" or "_", starting with a letter or digit."
+- Name violates the pattern: "Invalid mount name; use 1-64 letters, digits, "-" or "\_", starting with a letter or digit."
 - Typo in `--root` (not absolute or not normalized): "Invalid workspace root; use a normalized absolute sandbox path." (`mount-registry.ts:217`).
 - Service does not start: "Workspace service 'coordinator' did not become active." (`cli.ts:424`).
 - Naming mismatch: the feature is called a "sandbox" here but `docs/sandboxes.md` uses "sandbox" for a disposable machine running the agent; a reader landing on `/docs/sandboxes` finds nothing about `connect`.

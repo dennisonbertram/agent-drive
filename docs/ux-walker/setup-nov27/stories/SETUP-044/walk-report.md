@@ -1,6 +1,6 @@
 # SETUP-044 walk report (long): Persist an agent into a CI sandbox with credentials issue
 
-Target: local copy of 0.5.1 at http://localhost:3811, user e2e_second_agent_sandbox_44. CLI run on the Mac Studio ("agent-drive" = dist/cli.js), homes under ~/uxw/second-agent-sandbox-044-*. Clerk screens not walkable (test session).
+Target: local copy of 0.5.1 at http://localhost:3811, user e2e_second_agent_sandbox_44. CLI run on the Mac Studio ("agent-drive" = dist/cli.js), homes under ~/uxw/second-agent-sandbox-044-\*. Clerk screens not walkable (test session).
 Status: PASS with findings (flow works end to end; copy and consistency problems).
 
 ## Steps

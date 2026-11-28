@@ -23,7 +23,7 @@ Geometry audit: pageOverflowX 0; only unevenRows hit is the Refresh/Connect an a
 ### Step 3: Click Add webhook
 
 - Screenshot: `/Users/dennison/develop/agent-drive-ux-setup/docs/ux-walker/setup-nov27/stories/SETUP-059/screenshots/step-3.png`
-- What the screenshot shows: Test session has no Clerk, so there was no reverification prompt (not-walkable). Setup finished within about 3 seconds and showed 'Created today 18:04 Active Replace Revoke', then 'Copy these now. The token is shown once. In OpenRouter, add a Webhook destination.', Webhook URL, Headers (Bearer adw_...), the Privacy Mode note and the TLS note. The dialog is 807px tall in an 800px window so it scrolls inside itself; the one-time token is 330px below the top, under the Local agents block, and the prominent Replace button sits directly above it.
+- What the screenshot shows: Test session has no Clerk, so there was no reverification prompt (not-walkable). Setup finished within about 3 seconds and showed 'Created today 18:04 Active Replace Revoke', then 'Copy these now. The token is shown once. In OpenRouter, add a Webhook destination.', Webhook URL, Headers (Bearer adw\_...), the Privacy Mode note and the TLS note. The dialog is 807px tall in an 800px window so it scrolls inside itself; the one-time token is 330px below the top, under the Local agents block, and the prominent Replace button sits directly above it.
 - Geometry: dialog scrollHeight 807 vs clientHeight 750 (internal scroll)
 
 ### Step 4: Click Copy webhook URL, then Copy headers JSON
