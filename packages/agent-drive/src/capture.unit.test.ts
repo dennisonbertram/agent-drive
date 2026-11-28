@@ -548,6 +548,37 @@ describe('gzip and size rules', () => {
     expect(traces.find((t) => t.trace.truncated.includes('request.body'))).toBeTruthy();
   });
 
+  it('decodes br, zstd, and deflate responses and bounds decompression bombs', async () => {
+    const plain = { model: 'm', text: 'decoded' };
+    const encoded = [
+      { encoding: 'br', body: zlib.brotliCompressSync(Buffer.from(JSON.stringify(plain))) },
+      { encoding: 'zstd', body: zlib.zstdCompressSync(Buffer.from(JSON.stringify(plain))) },
+      { encoding: 'deflate', body: zlib.deflateSync(Buffer.from(JSON.stringify(plain))) },
+      { encoding: 'deflate', body: zlib.deflateRawSync(Buffer.from(JSON.stringify(plain))) },
+      { encoding: 'br', body: zlib.brotliCompressSync(Buffer.alloc(8 * MiB, 'a')) },
+    ];
+    let index = 0;
+    const up = await fakeUpstream((_q, res) => {
+      const next = encoded[index++]!;
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'content-encoding': next.encoding,
+      });
+      res.end(next.body);
+    });
+    const s = await setup(up.upstreams, {
+      client: { putEncrypted: async () => Promise.reject(new TypeError('offline')) },
+    });
+    for (let i = 0; i < encoded.length; i += 1) {
+      await send(s.proxy, '/anthropic/v1/messages', { body: Buffer.from('{"model":"m"}') });
+    }
+    await s.proxy.close({ taskMs: 5000, totalMs: 200 });
+    const traces = await spooled(s.dir);
+    const decodedCount = traces.filter((t) => t.trace.response.body?.text === 'decoded').length;
+    expect(decodedCount).toBe(4);
+    expect(traces.find((t) => t.trace.truncated.includes('response.body'))).toBeTruthy();
+  });
+
   it('stores 4 MiB - 1 whole and truncates 4 MiB + 1', async () => {
     const whole = await capture(jsonOf(4 * MiB - 1), { 'content-type': 'application/json' });
     expect(whole.trace.truncated).toEqual([]);

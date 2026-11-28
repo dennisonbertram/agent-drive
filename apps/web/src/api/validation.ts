@@ -20,11 +20,15 @@ export function objectBody(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export async function jsonBody(request: Request): Promise<Record<string, unknown>> {
+export async function readBoundedBodyBytes(
+  request: Request,
+  tooLargeMessage = 'The JSON body is too large.',
+  readErrorMessage = 'The JSON body could not be read.',
+): Promise<Uint8Array> {
   const contentLength = Number(request.headers.get('content-length') ?? 0);
   if (contentLength > MAX_BODY_BYTES) {
     await request.body?.cancel().catch(() => undefined);
-    throw new ApiError('validation_error', 'The JSON body is too large.');
+    throw new ApiError('validation_error', tooLargeMessage);
   }
   const reader = request.body?.getReader();
   const chunks: Uint8Array[] = [];
@@ -36,15 +40,15 @@ export async function jsonBody(request: Request): Promise<Record<string, unknown
       length += value.byteLength;
       if (length > MAX_BODY_BYTES) {
         await reader.cancel();
-        throw new ApiError('validation_error', 'The JSON body is too large.');
+        throw new ApiError('validation_error', tooLargeMessage);
       }
       chunks.push(value);
     }
   } catch {
     if (reader && length > MAX_BODY_BYTES) {
-      throw new ApiError('validation_error', 'The JSON body is too large.');
+      throw new ApiError('validation_error', tooLargeMessage);
     }
-    throw new ApiError('validation_error', 'The JSON body could not be read.');
+    throw new ApiError('validation_error', readErrorMessage);
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
@@ -52,6 +56,11 @@ export async function jsonBody(request: Request): Promise<Record<string, unknown
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  return bytes;
+}
+
+export async function jsonBody(request: Request): Promise<Record<string, unknown>> {
+  const bytes = await readBoundedBodyBytes(request);
   try {
     return objectBody(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
   } catch {

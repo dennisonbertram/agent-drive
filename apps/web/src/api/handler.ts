@@ -68,6 +68,7 @@ import {
   enforceConsoleRateLimit,
   enforceKeyRateLimit,
   enforceOperationBudget,
+  enforceShareRateLimit,
   enforceWriteBudget,
   lockBillingAccount,
   queueBillingDeliveries,
@@ -575,6 +576,9 @@ async function reserveOperation(context: RequestContext) {
   const accountId = context.auth?.accountId ?? context.accountId;
   if (!accountId) throw new Error('An account is required to reserve an operation.');
   context.auditId = await withTransaction(async (client) => {
+    if (context.action === 'share.access') {
+      await enforceShareRateLimit(client, accountId);
+    }
     await enforceOperationBudget(client, accountId);
     return audit(context, client, true);
   });
@@ -3730,7 +3734,7 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
     if (row.deleted_at)
       throw new ApiError('share_unavailable', 'This file is no longer available.');
     // Record attempts against an active share, including operation-budget failures. Unknown,
-    // revoked, expired and unavailable links are public failures and must not create unbounded
+    // revoked, expired, unavailable and rate-limited links must not create unbounded
     // per-request audit rows.
     auditEligible = true;
     await reserveOperation(context);
@@ -3761,6 +3765,7 @@ export async function handlePublicShareRequest(shareId: string, metadataOnly = f
     context.status = output.status;
   } catch (error) {
     const mapped = error instanceof ApiError ? error : errorFromDatabase(error);
+    if (mapped.code === 'rate_limited' && !context.auditId) auditEligible = false;
     output = responseForError(mapped);
     context.status = mapped.status;
     context.errorCode = mapped.code;
