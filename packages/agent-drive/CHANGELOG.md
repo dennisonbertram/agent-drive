@@ -3,6 +3,7 @@
 ## 0.6.0 (2026-11-28)
 
 - `credentials export --drive ID --recovery-file PATH` writes one drive's key as a console recovery file. `credentials import` now accepts that file as well as a credentials bundle.
+- `login` tells the approval page which drive keys this machine already holds (for example after importing a recovery file), so the page can connect that drive instead of creating a new, empty one.
 - `credentials status` shows `keyFrom` for a drive key that came from a recovery file, a bundle, an approval or the environment.
 - A login that changes the API key keeps backup records for drive keys that did not change. The CLI prints a one-line note that the saved bundle has the old API key.
 - `check` fails only for drive keys made on this machine with no backup. For keys that came from elsewhere it prints a note that the other copy is the backup.
@@ -10,6 +11,7 @@
 - `skill install` replaces an existing SKILL.md, reports it as `replaced`, and has its own `--help`.
 - `login` gives clearer errors for rate limits, a wrong API URL, a denied request and an unknown pairing code. `--token-stdin` is no longer overridden by `AGENT_DRIVE_API_KEY`.
 - `AGENT_DRIVE_KEY` and `AGENT_DRIVE_KEY_<DRIVE_ID>` are listed in the help.
+- `mount` on macOS without the Finder app prints where to download it.
 - Setup error messages now say what to do next.
 
 ### Upgrading from 0.5.1
