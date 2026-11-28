@@ -3903,10 +3903,10 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       <code>npm install -g @dennisonbertram/agent-drive</code>. Save an existing API
                       key with <code>agent-drive login --api URL --token-stdin</code>, which reads
                       the key from stdin. In Bash, read both keys without putting them in shell
-                      history:
+                      history; the commands after login run only if it succeeds:
                     </p>
                     <pre>
-                      {`read -rs -p "API key: " K; printf '%s' "$K" | agent-drive login --api ${origin}/api --token-stdin; unset K\nread -rs -p "Drive key: " AGENT_DRIVE_KEY; export AGENT_DRIVE_KEY\nagent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}\nagent-drive mcp`}
+                      {`unset AGENT_DRIVE_API_KEY\nread -rs -p "API key: " K; printf '%s' "$K" | agent-drive login --api ${origin}/api --token-stdin; ok=$?; unset K\n[ "$ok" = 0 ] && read -rs -p "Drive key: " AGENT_DRIVE_KEY && export AGENT_DRIVE_KEY &&\n  agent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}`}
                     </pre>
                     <p>
                       To rotate access, create a replacement API key, update the agent, then revoke
