@@ -9,7 +9,7 @@ export function GET(request: Request) {
   const body = `${llmsIndex(origin)}# Agent Drive
 
 Agent Drive is encrypted file storage for agents. Files are encrypted on your machine before
-upload, so the service never sees file contents or drive keys. A human approves your access once.
+upload, so the service never sees file contents or drive keys. A human approves your access once, in the browser.
 
 Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
 
@@ -30,8 +30,9 @@ Instruction a human gives you: Set up Agent Drive: ${origin}/llms.txt
    agent-drive login --name "<your agent name>"${api}
 
    It prints a link, a code and a "Verification code:" line. Tell the human: "Open this link (you
-   must be signed in to Agent Drive), check that the code matches the one I printed, type the
-   verification code into the page — it never shows it — and click Approve." Other options
+   must be signed in to Agent Drive), check that the pairing code (8 letters) matches the one I printed, type the
+   verification code (16 hex characters) from my terminal into the page — it never shows it — and click
+   Approve agent. If you have no account yet, sign up on that page first." Other options
    on the page are optional; the defaults are right. Wait; the command finishes by itself after approval.
 
 3. The human approves (step 2). Wait for the command to finish.
@@ -76,7 +77,7 @@ tell the human. Do not try to work around it.
   \`agent-drive drive create\`.
 - An error that the API key may only write under some folders is not a login problem: write
   under those folders instead.
-- The approval link asks the human to sign in: they must sign in first, then click Approve.
+- The approval link asks the human to sign in: they must sign in or sign up first, then type the verification code and click Approve agent.
 
 ## Sandboxes
 
@@ -97,7 +98,7 @@ agent run \`agent-drive login${api}\` and show you its code and verification cod
 \`agent-drive grant <its code> --verify <its verification code> --write-path <its folder>\`
 (add \`--read-only\` for read only). The human relays the verification code; you check it against
 the login's public key before sealing, so a tampered request never receives the drive key. You
-seal the drive key to that login; the human clicks Approve once on the page, which shows
+seal the drive key to that login; the human clicks Approve agent once on the page, which shows
 "Offered by <you>" with the drive and permissions. Nothing secret is printed or sent in the clear.
 
 Which handoff when: the new agent has a shell and a human is present, use \`grant\` if you hold
@@ -157,7 +158,7 @@ Once they set a passphrase in the console (the key menu's "Set up passphrase unl
 Sealing also happens automatically, so this only adds a drive that was missed; \`no account key\`
 means the passphrase is not set up yet, and \`agent-only\` means the drive is kept out by design.
 \`unverified\` means this machine has not pinned your account key yet — re-run with
-\`--fingerprint\` set to the value the human copies from the console under Settings.
+\`--fingerprint\` set to the account key fingerprint the human copies from the key menu on the console Files page (the key chip).
 The human can open files or download a fresh recovery file using the account passphrase or an enrolled passkey.
 Never paste a credentials bundle or drive key into chat — if a file is needed, run
 \`agent-drive credentials export --to <path>\` on their machine and tell them to choose that file

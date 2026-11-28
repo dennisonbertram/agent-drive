@@ -110,6 +110,26 @@ async function seal(publicKey: string, driveId: string, secret: string) {
   return { epk: b64(await subtle.exportKey('raw', eph.publicKey)), iv: b64(iv), ct: b64(ct) };
 }
 
+describe('device login start failures', () => {
+  it('explains the login-start rate limit', async () => {
+    await setup();
+    const r = run(() => json(400, {}), { startedStatus: 429, started: { error: 'slow_down' } });
+    await expect(r.promise).rejects.toThrow(/rate limit.*20 logins per hour.*later/u);
+  });
+
+  it('names the URL tried and the /api hint on a 404', async () => {
+    await setup();
+    const r = run(() => json(400, {}), {
+      apiUrl: 'https://x.test',
+      startedStatus: 404,
+      started: { error: 'not_found' },
+    });
+    await expect(r.promise).rejects.toThrow(
+      /https:\/\/x\.test\/oauth\/device_authorization.*normally ends in \/api/u,
+    );
+  });
+});
+
 describe('deviceLogin', () => {
   it('polls through pending and slow_down, saves config, never prints secrets', async () => {
     const path = await setup();

@@ -27,8 +27,8 @@ export const SEAL_THROTTLE_MS = 24 * 60 * 60 * 1000;
 export const SEAL_DEADLINE_MS = 5_000;
 const ACCOUNT_SEAL_SALT = 'agent-drive-account-v1';
 const NO_ACCOUNT_KEY_WARNING =
-  'Your account has no account key yet, so the console cannot open this drive. ' +
-  'Set a passphrase in the console under Settings; agents will add the drive then.';
+  'Optional, after the backup: your account has no passphrase yet, so the console cannot open this drive. ' +
+  'Set a passphrase in the console (Files, key menu, "Set up passphrase unlock"); agents will add the drive then.';
 const UNREADABLE_PIN_FILE =
   'The account-key pin file is unreadable, so sealing is refused. Confirm the account key ' +
   'fingerprint in the console, then repair the file with `agent-drive account seal --repin --fingerprint <fingerprint>`.';
@@ -36,10 +36,10 @@ export const UNKNOWN_TYPE_HINT =
   "unknown drive type: run 'agent-drive account seal --drive ID' with a key that can read drives";
 export const UNVERIFIED_HINT =
   'The account key has not been verified on this machine. Copy its fingerprint from the console ' +
-  '(Settings) and run `agent-drive account seal --fingerprint "<the fingerprint>"`.' +
+  '(Files, key menu) and run `agent-drive account seal --fingerprint "<the fingerprint>"`.' +
   ' Sealing stays off until then.';
 export const PIN_REQUIRED_HINT =
-  'Copy the account-key fingerprint shown in the console (Settings) and pass --fingerprint.';
+  'Copy the account-key fingerprint from the console (Files, key menu) and pass --fingerprint.';
 
 export type SealStatus =
   | 'sealed'
@@ -52,7 +52,7 @@ export type SealStatus =
   | 'unverified';
 export type SealTarget = { driveId: string; driveKey: string; agentOnly?: boolean };
 
-/** The same fingerprint the console prints on Settings: SHA-256(raw key), first 8 bytes, grouped. */
+/** The same fingerprint the console shows in the key menu on Files and on Activity & deletion: SHA-256(raw key), first 8 bytes, grouped. */
 export function accountKeyFingerprint(publicKey: string): string {
   const hex = createHash('sha256')
     .update(Buffer.from(publicKey, 'base64url'))
@@ -65,7 +65,7 @@ export class AccountKeyPinMismatch extends Error {
   constructor(expected: string, actual: string) {
     super(
       `The account public key changed (pinned fingerprint ${expected}, server returned ${actual}). ` +
-        'If the owner reset the passphrase in the console, verify its Settings fingerprint and run `agent-drive account seal --repin --fingerprint <fingerprint>` to pin the new key.',
+        'If the owner reset the passphrase in the console, verify its fingerprint (Files, key menu) and run `agent-drive account seal --repin --fingerprint <fingerprint>` to pin the new key.',
     );
     this.name = 'AccountKeyPinMismatch';
   }
@@ -83,7 +83,7 @@ export class AccountKeyFingerprintMismatch extends Error {
   constructor(expected: string, actual: string) {
     super(
       `The supplied fingerprint (${expected}) does not match the account key the service returned (${actual}). ` +
-        'Check the fingerprint in the console under Settings; if it is right, the API may be answering with a different account key.',
+        'Check the fingerprint in the console (Files, key menu); if it is right, the API may be answering with a different account key.',
     );
     this.name = 'AccountKeyFingerprintMismatch';
   }

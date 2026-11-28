@@ -49,6 +49,18 @@ const hold = setInterval(() => {}, 1000);
 `;
 
 describe('macOS Finder mount bridge', () => {
+  it('says the helper override was not found', async () => {
+    const directory = await fixture();
+    vi.stubEnv('AGENT_DRIVE_FINDER_HELPER', join(directory, 'missing-helper'));
+    await expect(
+      startMacMount({
+        driveId: 'synthetic-drive',
+        requestedMountpoint: join(directory, 'requested-mount'),
+        dispatch: async () => ({}),
+      }),
+    ).rejects.toThrow(/AGENT_DRIVE_FINDER_HELPER was not found/u);
+  });
+
   it('explains the allowlisted disabled File Provider startup diagnostic', async () => {
     const directory = await fixture();
     const helper = await writeHelper(

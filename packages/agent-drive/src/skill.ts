@@ -18,6 +18,8 @@ const isDir = async (p: string) => (await stat(p).catch(() => undefined))?.isDir
 export async function installSkill(
   target: string | undefined,
   home = process.env.HOME ?? homedir(),
+  /** Receives the paths that already had a SKILL.md, which this install replaced. */
+  replaced: string[] = [],
 ) {
   const dirs: string[] = [];
   const claude = join(home, '.claude/skills/agent-drive');
@@ -32,6 +34,7 @@ export async function installSkill(
   const written: string[] = [];
   for (const dir of dirs) {
     await mkdir(dir, { recursive: true });
+    if (existsSync(join(dir, 'SKILL.md'))) replaced.push(join(dir, 'SKILL.md'));
     await writeFileSafely(join(dir, 'SKILL.md'), await readFile(packagedSkillPath(), 'utf8'), {
       mode: 0o644,
       overwrite: true,

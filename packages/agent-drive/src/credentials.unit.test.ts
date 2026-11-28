@@ -67,6 +67,7 @@ describe('bundle', () => {
     const text = encodeBundle(b);
     expect(text.startsWith('adcred1.')).toBe(true);
     expect(decodeBundle(`${text}\n`)).toEqual(b);
+    expect(decodeBundle(`AGENT_DRIVE_CREDENTIALS=${text}\n`)).toEqual(b);
     expect(() => decodeBundle('nope')).toThrow(/bundle/);
   });
 });

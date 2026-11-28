@@ -34,7 +34,7 @@ test.describe('landing page', () => {
       page
         .locator('.l-hero')
         .getByText(
-          'Free to start. Your agent shows a pairing code, and you approve it in your account.',
+          'Free to start. Your agent prints a link and a verification code. Open the link, sign up or sign in, type the code, and click Approve agent.',
           { exact: true },
         ),
     ).toBeVisible();

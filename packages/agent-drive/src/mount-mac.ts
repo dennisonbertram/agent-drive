@@ -409,7 +409,14 @@ async function readHelperPath(): Promise<string> {
   const helper = configured ?? DEFAULT_HELPER;
   if (!isAbsolute(helper)) throw new Error('Finder helper override must be an absolute path');
   const normalized = resolve(helper);
-  const metadata = await stat(normalized);
+  const metadata = await stat(normalized).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    throw new Error(
+      configured
+        ? `The Finder helper set in AGENT_DRIVE_FINDER_HELPER was not found: ${normalized}.`
+        : 'Agent Drive.app is not installed in /Applications. Download Agent Drive Finder (steps: https://agentdrive.xyz/docs/cli#mount-in-finder-on-macos), drag Agent Drive.app to /Applications, then run `agent-drive mount` again.',
+    );
+  });
   if (!metadata.isFile()) throw new Error('Finder helper is not a regular file');
   await access(normalized, constants.X_OK);
   return normalized;

@@ -77,7 +77,7 @@ const fixture = (model: string, start: string, prompt: string, reply: string) =>
 });
 
 const addWebhook = (page: Page) => page.getByRole('button', { name: 'Add webhook' });
-const dialog = (page: Page) => page.getByRole('dialog', { name: 'Capture traces' });
+const dialog = (page: Page) => page.getByRole('dialog', { name: 'Set up trace capture' });
 
 test('ux round 05: traces capture guidance preserves its commands and webhook safeguards', async ({
   page,
@@ -178,6 +178,8 @@ test('ux round 05: traces capture guidance preserves its commands and webhook sa
     await page.getByTestId('capture-link').click();
     await expect(page.getByTestId('webhook-token-row')).toBeVisible();
     await page.getByRole('button', { name: 'Replace' }).click();
+    await expect(page.getByText('The old token stops working immediately.')).toBeVisible();
+    await page.getByRole('button', { name: 'Replace token' }).click();
     await expect(page.getByTestId('webhook-created')).toBeVisible();
     const next = (
       JSON.parse((await page.getByTestId('webhook-headers').innerText()).trim()) as {
@@ -392,13 +394,13 @@ test('traces: on a phone the header buttons give way to the drive menu', async (
     await expect(page.getByTestId('capture-link')).toBeHidden();
 
     await page.getByTestId('drive-menu-button').click();
-    await expect(page.getByRole('button', { name: 'Traces', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Traces', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'View traces', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'View traces', exact: true }).click();
     await expect(page).toHaveURL(/path=%2Ftraces/);
     await expect(page).toHaveURL(/view=recent/);
 
     await page.getByTestId('drive-menu-button').click();
-    await page.getByRole('button', { name: 'Capture traces…' }).click();
+    await page.getByRole('button', { name: 'Set up trace capture' }).click();
     await expect(dialog(page)).toBeVisible();
   } finally {
     await cleanupUser(userId);
