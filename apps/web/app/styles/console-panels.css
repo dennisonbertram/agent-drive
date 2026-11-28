@@ -260,7 +260,7 @@ dialog .banner.info {
   font-weight: 500;
 }
 .agent-panel pre {
-  margin: 10px 0 0;
+  margin: 10px 0 8px;
   padding: 12px;
   background: var(--code-bg, #111);
   color: var(--code-ink, #fff);
@@ -522,7 +522,8 @@ dialog input[data-testid='drive-key'] {
 dialog textarea {
   resize: none;
 }
-dialog .copy-button {
+dialog .copy-button,
+.agent-panel details > .copy-button {
   align-self: flex-start;
   justify-self: start;
   width: auto;
@@ -531,10 +532,12 @@ dialog .copy-button {
   background: var(--panel, #fff);
   color: var(--ink, #111);
 }
-dialog .copy-button:hover {
+dialog .copy-button:hover,
+.agent-panel details > .copy-button:hover {
   background: var(--paper-2, #f6f5f2);
 }
 dialog .copy-button:focus-visible,
+.agent-panel details > .copy-button:focus-visible,
 .onboarding-command .button:focus-visible {
   outline: 2px solid var(--sig, #ff4a1c);
   outline-offset: 2px;
