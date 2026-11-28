@@ -429,6 +429,7 @@ test('a drive without a slot: load its recovery file once, then the passphrase o
     // Drive B is not in the account yet; the vault is already unlocked, so the dialog goes
     // straight to the recovery file.
     await page.goto(`/console?drive=${seeded.b.id}`);
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
@@ -473,6 +474,7 @@ test('ux round 08: closing the preview does not cancel recovery-key persistence'
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
@@ -563,6 +565,7 @@ test('ux round 08: failed slot save still opens preview and reports uncertainty 
       });
     });
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
@@ -606,6 +609,7 @@ test('ux round 08: late slot-save completion after a drive switch stays silent',
     await page.reload();
     await page.goto(`/console?drive=${seeded.b.id}`);
     // The vault is already unlocked; the missing slot goes straight to the recovery file.
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'other.txt').click();
     await expect(page.getByLabel('Choose recovery file')).toBeVisible();
@@ -706,6 +710,7 @@ test('change passphrase: the old one stops working, the new one works; reset rem
     await expect(page.getByText(/Passphrase set up\. /)).toHaveCount(0);
     await page.getByRole('button', { name: 'Close dialog' }).click();
     await page.reload();
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
   });
 });

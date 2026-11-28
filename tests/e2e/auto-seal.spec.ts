@@ -292,6 +292,7 @@ test('an agent-only drive is never sealed and asks for a recovery file in the co
 
     // The console opens the unlocked vault but still demands the recovery file for this drive.
     await page.goto(`/console?drive=${c.id}`);
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'secret.txt').click();
     const dialog = page.getByRole('dialog', { name: 'Load the key for Agent-only drive' });
@@ -310,6 +311,7 @@ test('an agent-only drive is never sealed and asks for a recovery file in the co
 
     // Loading the recovery file must not create an account-key slot for an agent-only drive.
     await page.reload();
+    await page.getByTestId('lock-browser').waitFor({ state: 'attached' });
     await expect(chip(page)).toContainText('Key needed');
     await nameButton(page, 'secret.txt').click();
     await expect(
