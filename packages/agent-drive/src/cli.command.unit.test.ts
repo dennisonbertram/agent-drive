@@ -28,6 +28,17 @@ afterEach(async () => {
 type Saved = { keys: Record<string, string>; origins: Record<string, string> };
 
 /** Runs the real CLI entry point in-process against a stubbed API. */
+// Emit stdin only once the CLI is listening, so the first (cold) module load cannot miss it.
+function feedStdin(text: string) {
+  const before = process.stdin.listenerCount('end');
+  const timer = setInterval(() => {
+    if (process.stdin.listenerCount('end') <= before) return;
+    clearInterval(timer);
+    process.stdin.emit('data', text);
+    process.stdin.emit('end');
+  }, 5);
+}
+
 async function cli(
   argv: string[],
   saved: Saved,
@@ -780,10 +791,7 @@ describe('pipe command guard validation', () => {
   });
 
   it('prefers the --token-stdin key over AGENT_DRIVE_API_KEY', async () => {
-    setTimeout(() => {
-      process.stdin.emit('data', 'stdin-key-fixture\n');
-      process.stdin.emit('end');
-    }, 20);
+    feedStdin('stdin-key-fixture\n');
     const result = await cli(
       ['login', '--api', 'https://x.test/api', '--token-stdin'],
       one,
@@ -795,10 +803,7 @@ describe('pipe command guard validation', () => {
   });
 
   it('keeps --token-stdin available to login', async () => {
-    setTimeout(() => {
-      process.stdin.emit('data', 'login-token-fixture\n');
-      process.stdin.emit('end');
-    }, 20);
+    feedStdin('login-token-fixture\n');
     const result = await cli(
       ['login', '--api', 'https://x.test/api', '--token-stdin'],
       one,
