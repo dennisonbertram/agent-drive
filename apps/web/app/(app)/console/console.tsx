@@ -3906,7 +3906,7 @@ export default function Console({ clerkEnabled }: { clerkEnabled: boolean }) {
                       history; the commands after login run only if it succeeds:
                     </p>
                     <pre>
-                      {`unset AGENT_DRIVE_API_KEY\nread -rs -p "API key: " K; printf '%s' "$K" | agent-drive login --api ${origin}/api --token-stdin; ok=$?; unset K\n[ "$ok" = 0 ] && read -rs -p "Drive key: " AGENT_DRIVE_KEY && export AGENT_DRIVE_KEY &&\n  agent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}`}
+                      {`read -rs -p "API key: " K; printf '%s' "$K" | env -u AGENT_DRIVE_API_KEY agent-drive login --api ${origin}/api --token-stdin; ok=$?; unset K\n[ "$ok" = 0 ] && read -rs -p "Drive key: " AGENT_DRIVE_KEY && export AGENT_DRIVE_KEY &&\n  env -u AGENT_DRIVE_API_KEY agent-drive put ./handoff.md /memory/handoff.md --drive ${selected || '<drive-id>'}`}
                     </pre>
                     <p>
                       To rotate access, create a replacement API key, update the agent, then revoke
