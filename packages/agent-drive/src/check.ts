@@ -168,7 +168,7 @@ export function keySourceLabel(
   context: {
     config: AgentDriveConfig;
     checkedDriveId: string;
-    keyFile?: string;
+    keyFile?: string | undefined;
     env?: NodeJS.ProcessEnv;
   },
 ): string | undefined {

@@ -1761,7 +1761,7 @@ describe('check backup gate', () => {
       expect(r.exitCode).toBe(1);
       expect(r.err).toContain(`drive key not backed up: ${A}`);
       expect(r.err).toContain('run `agent-drive credentials export --to <a file outside the sandbox>`');
-      expect(r.err).not.toMatch(/--to clipboard|--stdout|secret store|--to <a file/u);
+      expect(r.err).not.toMatch(/--to clipboard|--stdout|--to 1password/u);
     },
   );
 

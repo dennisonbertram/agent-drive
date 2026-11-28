@@ -577,7 +577,7 @@ describe('review fixes', () => {
       keySourceLabel(D1, {
         config,
         checkedDriveId: D1,
-        env: { AGENT_DRIVE_KEY: 'k' } as NodeJS.ProcessEnv,
+        env: { AGENT_DRIVE_KEY: 'k' } as unknown as NodeJS.ProcessEnv,
       }),
     ).toBe('the AGENT_DRIVE_KEY environment variable');
     expect(
