@@ -225,7 +225,7 @@ describe('live workspace embedded helper', () => {
     const root = await mkdtemp(join(tmpdir(), 'agent-drive-live-pages-'));
     roots.push(root);
     await Promise.all(
-      Array.from({ length: 500 }, (_, index) =>
+      Array.from({ length: 600 }, (_, index) =>
         writeFile(join(root, `file-${String(index).padStart(4, '0')}`), 'x'),
       ),
     );
@@ -244,8 +244,8 @@ describe('live workspace embedded helper', () => {
         cursor = page.nextCursor as string | null;
         expect(requestId).toBeLessThan(8);
       }
-      expect(entries).toHaveLength(500);
-      expect(new Set(entries.map(({ name }) => name)).size).toBe(500);
+      expect(entries).toHaveLength(600);
+      expect(new Set(entries.map(({ name }) => name)).size).toBe(600);
     } finally {
       await helper.stop();
     }

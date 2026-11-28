@@ -173,39 +173,91 @@ describe('live workspace helper', () => {
     }
   });
 
-  it('marks existing files read-only and rejects writes before creating staging state', async () => {
+  it('overwrites existing files atomically with optimistic version checks and rejects stale bases', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agent-drive-live-'));
     roots.push(root);
     const file = join(root, 'settings.env');
-    await writeFile(file, 'BASE=one\n');
+    await writeFile(file, 'BASE=one\n', { mode: 0o600 });
     const { child, send } = await startHelper(root);
     try {
       const listing = await send({ id: 1, op: 'list', path: '/' });
-      expect(listing.entries).toMatchObject([
-        { name: 'settings.env', kind: 'file', readOnly: true },
-      ]);
+      expect(listing.entries).toMatchObject([{ name: 'settings.env', kind: 'file' }]);
+      expect((listing.entries as Array<Record<string, unknown>>)[0]).not.toHaveProperty('readOnly');
       const current = await send({ id: 2, op: 'stat', path: '/settings.env' });
-      expect(current.entry).toMatchObject({ kind: 'file', readOnly: true });
-      expect(
-        await send({
-          id: 3,
-          op: 'openWrite',
-          path: '/settings.env',
-          baseVersionId: (current.entry as { versionId: string }).versionId,
-        }),
-      ).toMatchObject({ ok: false, errno: 'EROFS' });
+      expect(current.entry).toMatchObject({ kind: 'file' });
+      expect(current.entry).not.toHaveProperty('readOnly');
+      const initialVersion = (current.entry as { versionId: string }).versionId;
+
+      // Overwriting with the current version succeeds, preserves mode, and updates contents.
+      const edit = await send({
+        id: 3,
+        op: 'openWrite',
+        path: '/settings.env',
+        baseVersionId: initialVersion,
+      });
+      expect(edit.ok).toBe(true);
+      expect(edit.size).toBe('BASE=one\n'.length);
+      await send({
+        id: 31,
+        op: 'truncate',
+        handleId: edit.handleId,
+        size: 0,
+      });
+      await send({
+        id: 32,
+        op: 'write',
+        handleId: edit.handleId,
+        offset: 0,
+        data: Buffer.from('BASE=two\n').toString('base64'),
+      });
+      const committed = await send({
+        id: 33,
+        op: 'finalizeWrite',
+        handleId: edit.handleId,
+        operationId: 'overwrite-1',
+      });
+      expect(committed.ok).toBe(true);
+      expect(await readFile(file, 'utf8')).toBe('BASE=two\n');
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
       expect(await readdir(root)).toEqual(['settings.env']);
 
-      await writeFile(file, 'BASE=changed\n');
+      // Opening with a stale version fails before creating any staging state.
       expect(
         await send({
           id: 4,
           op: 'openWrite',
           path: '/settings.env',
-          baseVersionId: (current.entry as { versionId: string }).versionId,
+          baseVersionId: initialVersion,
         }),
       ).toMatchObject({ ok: false, errno: 'ESTALE' });
       expect(await readdir(root)).toEqual(['settings.env']);
+
+      // A concurrent remote edit between openWrite and finalizeWrite fails with ESTALE and keeps
+      // both the remote change and the staged recovery file intact.
+      const afterEdit = await send({ id: 41, op: 'stat', path: '/settings.env' });
+      const secondOpen = await send({
+        id: 42,
+        op: 'openWrite',
+        path: '/settings.env',
+        baseVersionId: (afterEdit.entry as { versionId: string }).versionId,
+      });
+      expect(secondOpen.ok).toBe(true);
+      await send({
+        id: 43,
+        op: 'write',
+        handleId: secondOpen.handleId,
+        offset: 0,
+        data: Buffer.from('LOCAL=edit\n').toString('base64'),
+      });
+      await writeFile(file, 'BASE=changed\n');
+      const conflict = await send({
+        id: 44,
+        op: 'finalizeWrite',
+        handleId: secondOpen.handleId,
+        operationId: 'overwrite-conflict',
+      });
+      expect(conflict).toMatchObject({ ok: false, errno: 'ESTALE' });
+      expect(typeof conflict.recoveryPath).toBe('string');
       expect(await readFile(file, 'utf8')).toBe('BASE=changed\n');
 
       await mkdir(join(root, 'nested'));
